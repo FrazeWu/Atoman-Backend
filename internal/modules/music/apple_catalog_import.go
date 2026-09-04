@@ -257,6 +257,9 @@ func appleCollections(items []appleLookupItem, limit int) []appleLookupItem {
 		if item.CollectionID == 0 || strings.TrimSpace(item.CollectionName) == "" {
 			continue
 		}
+		if appleAlbumType(item.CollectionName, item.TrackCount) != "album" {
+			continue
+		}
 		if _, exists := seen[item.CollectionID]; exists {
 			continue
 		}
@@ -512,13 +515,19 @@ func (importer *AppleCatalogImporter) findOrCreateAppleAlbum(tx *gorm.DB, storef
 			if !releaseDate.IsZero() {
 				releaseYear = releaseDate.Year()
 			}
-			album = model.Album{Title: item.CollectionName, ReleaseDate: releaseDate, ReleaseYear: releaseYear, Year: releaseYear, ReleaseDatePrecision: appleDatePrecision(releaseDate), Status: "open", AlbumType: appleAlbumType(item.CollectionName, item.TrackCount), EntryStatus: "open", LifecycleStatus: model.MusicLifecycleActive, EditStatus: model.MusicEditDevelopment, UploadedBy: &importer.ownerID, SourcesJSON: appleSourceJSON("", appleCollectionURL(item.CollectionViewURL))}
+			album = model.Album{Title: item.CollectionName, ReleaseDate: releaseDate, ReleaseYear: releaseYear, Year: releaseYear, ReleaseDatePrecision: appleDatePrecision(releaseDate), CoverURL: appleArtworkURL(item.ArtworkURL100), CoverSource: "apple_music", Status: "open", AlbumType: appleAlbumType(item.CollectionName, item.TrackCount), EntryStatus: "open", LifecycleStatus: model.MusicLifecycleActive, EditStatus: model.MusicEditDevelopment, UploadedBy: &importer.ownerID, SourcesJSON: appleSourceJSON("", appleCollectionURL(item.CollectionViewURL))}
 			if err := tx.Create(&album).Error; err != nil {
 				return album, err
 			}
 		} else if err := addAppleSource(tx, &album, appleCollectionURL(item.CollectionViewURL)); err != nil {
 			return album, err
 		}
+	}
+	if coverURL := appleArtworkURL(item.ArtworkURL100); coverURL != "" && album.CoverURL != coverURL {
+		if err := tx.Model(&album).Updates(map[string]any{"cover_url": coverURL, "cover_source": "apple_music"}).Error; err != nil {
+			return album, err
+		}
+		album.CoverURL = coverURL
 	}
 	credit := model.AlbumArtist{AlbumID: album.ID, ArtistID: artist.ID, Role: "primary", Position: 1}
 	if err := tx.Where("album_id = ? AND artist_id = ? AND role = ? AND custom_role = ?", album.ID, artist.ID, credit.Role, "").FirstOrCreate(&credit).Error; err != nil {
@@ -638,6 +647,10 @@ func appleCollectionURL(value string) string {
 	query.Del("i")
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func appleArtworkURL(value string) string {
+	return strings.ReplaceAll(strings.TrimSpace(value), "100x100bb", "1200x1200bb")
 }
 
 func appleDatePrecision(value time.Time) string {
