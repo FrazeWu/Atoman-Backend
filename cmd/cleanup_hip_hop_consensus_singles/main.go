@@ -27,7 +27,8 @@ type cleanupSummary struct {
 func main() {
 	envFile := flag.String("env", ".env.dev", "environment file")
 	userID := flag.String("user-id", "", "UUID of the catalog owner")
-	apply := flag.Bool("apply", false, "remove matching single and EP catalog records")
+	all := flag.Bool("all", false, "remove every matching hip-hop consensus catalog record")
+	apply := flag.Bool("apply", false, "remove matching single, EP, and misattributed catalog records")
 	flag.Parse()
 
 	if err := godotenv.Load(*envFile); err != nil {
@@ -42,7 +43,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	summary, err := cleanup(context.Background(), db, ownerID, *apply)
+	summary, err := cleanup(context.Background(), db, ownerID, *all, *apply)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func main() {
 	}
 }
 
-func cleanup(ctx context.Context, db *gorm.DB, ownerID uuid.UUID, apply bool) (cleanupSummary, error) {
+func cleanup(ctx context.Context, db *gorm.DB, ownerID uuid.UUID, all bool, apply bool) (cleanupSummary, error) {
 	var albums []model.Album
 	query := db.WithContext(ctx).Distinct().
 		Table(`"Albums"`).
@@ -61,8 +62,11 @@ func cleanup(ctx context.Context, db *gorm.DB, ownerID uuid.UUID, apply bool) (c
 		Joins("JOIN music_catalog_links album_links ON album_links.entity_id = \"Albums\".id").
 		Where("artist_links.provider = ? AND artist_links.entity_type = ? AND artist_links.metadata_json ? 'editorial_sources'", appleCatalogProvider, "artist").
 		Where("album_links.provider = ? AND album_links.entity_type = ?", appleCatalogProvider, "album").
-		Where(`"Albums".uploaded_by = ? AND "Albums".album_type IN ?`, ownerID, []string{"single", "ep"}).
-		Find(&albums)
+		Where(`"Albums".uploaded_by = ?`, ownerID)
+	if !all {
+		query = query.Where(`"Albums".album_type IN ? OR COALESCE(album_links.metadata_json->>'artistId', '') <> artist_links.external_id`, []string{"single", "ep"})
+	}
+	query = query.Find(&albums)
 	if query.Error != nil {
 		return cleanupSummary{}, query.Error
 	}
