@@ -48,6 +48,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicPlaybackProgress{},
 		&model.MusicSearchInteraction{},
 		&model.MusicRecommendationEvent{},
+		&model.MusicCatalogLink{},
 		&model.AlbumImportSession{},
 		&model.MusicAssetUploadSession{},
 		&model.AlbumImportFile{},
@@ -72,6 +73,105 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 	}
 
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
+}
+
+func TestAppleSongPreviewLooksUpTransientPreviewWithoutCaching(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Preview Song", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	link := model.MusicCatalogLink{
+		Provider: "apple_music", EntityType: "song", ExternalID: "12345", EntityID: song.ID,
+		Storefront: "cn", URL: "https://music.apple.com/cn/song/preview-song/12345", MetadataJSON: `{}`,
+	}
+	if err := db.Create(&link).Error; err != nil {
+		t.Fatalf("create Apple catalog link: %v", err)
+	}
+
+	lookup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("id") != "12345" || r.URL.Query().Get("country") != "cn" || r.URL.Query().Get("entity") != "song" {
+			t.Fatalf("unexpected lookup query: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"resultCount":1,"results":[{"trackId":12345,"previewUrl":"https://audio-ssl.itunes.apple.com/preview.m4a","trackViewUrl":"https://music.apple.com/cn/song/preview-song/12345"}]}`))
+	}))
+	defer lookup.Close()
+	service.applePreviewBaseURL = lookup.URL
+	service.applePreviewHTTPClient = lookup.Client()
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/music/songs/"+song.ID.String()+"/apple-preview", nil)
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" {
+		t.Fatalf("expected no-cache headers, got %#v", response.Header())
+	}
+	var payload struct {
+		Data struct {
+			PreviewURL         string `json:"preview_url"`
+			StoreURL           string `json:"store_url"`
+			Attribution        string `json:"attribution"`
+			MaxDurationSeconds int    `json:"max_duration_seconds"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode preview response: %v", err)
+	}
+	if payload.Data.PreviewURL != "https://audio-ssl.itunes.apple.com/preview.m4a" || payload.Data.StoreURL != link.URL {
+		t.Fatalf("unexpected preview response: %#v", payload.Data)
+	}
+	if payload.Data.Attribution != "试听由 iTunes 提供" || payload.Data.MaxDurationSeconds != 30 {
+		t.Fatalf("unexpected preview terms: %#v", payload.Data)
+	}
+
+	var stored model.MusicCatalogLink
+	if err := db.First(&stored, "id = ?", link.ID).Error; err != nil {
+		t.Fatalf("reload Apple catalog link: %v", err)
+	}
+	if strings.Contains(stored.MetadataJSON, "previewUrl") || strings.Contains(stored.MetadataJSON, "preview_url") {
+		t.Fatalf("preview URL must not be persisted: %s", stored.MetadataJSON)
+	}
+}
+
+func TestAppleSongPreviewKeepsStoreLinkWhenPreviewIsUnavailable(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Store Only Song", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	link := model.MusicCatalogLink{
+		Provider: "apple_music", EntityType: "song", ExternalID: "67890", EntityID: song.ID,
+		Storefront: "cn", URL: "https://music.apple.com/cn/song/store-only/67890", MetadataJSON: `{}`,
+	}
+	if err := db.Create(&link).Error; err != nil {
+		t.Fatalf("create Apple catalog link: %v", err)
+	}
+	lookup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"resultCount":1,"results":[{"trackId":67890}]}`))
+	}))
+	defer lookup.Close()
+	service.applePreviewBaseURL = lookup.URL
+	service.applePreviewHTTPClient = lookup.Client()
+
+	response := httptest.NewRecorder()
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/music/songs/"+song.ID.String()+"/apple-preview", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"store_url":"`+link.URL+`"`) {
+		t.Fatalf("expected store-only response, got %d: %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "preview_url") {
+		t.Fatalf("unavailable preview URL should be omitted: %s", response.Body.String())
+	}
+}
+
+func TestAppleSongPreviewReturnsNotFoundWithoutCatalogLink(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	response := httptest.NewRecorder()
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/music/songs/"+uuid.NewString()+"/apple-preview", nil))
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.apple_preview_not_found")
 }
 
 func TestRegisterRoutesAlbumDetailReturnsArtistCredits(t *testing.T) {

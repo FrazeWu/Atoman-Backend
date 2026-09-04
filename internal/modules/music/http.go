@@ -68,6 +68,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/songs", h.listSongs)
 	group.GET("/albums/:albumId", h.getAlbum)
 	group.GET("/songs/:songId", h.getSongDetail)
+	group.GET("/songs/:songId/apple-preview", h.getAppleSongPreview)
 	group.PUT("/albums/:albumId/rating", h.setAlbumRating)
 	group.DELETE("/albums/:albumId/rating", h.deleteAlbumRating)
 	group.PUT("/songs/:songId/rating", h.setSongRating)

@@ -323,7 +323,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.SongAudioReplacement{}, &model.MusicEntryStateRequest{}, &model.MusicEntryStateEvent{},
 		&model.ArtistCorrection{}, &model.ArtistAlias{}, &model.ArtistMerge{},
 		&model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{},
-		&model.AlbumImportSession{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicAssetUploadSession{}, &model.MusicExternalImport{},
+		&model.AlbumImportSession{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicAssetUploadSession{}, &model.MusicExternalImport{}, &model.MusicCatalogLink{},
 		&model.ArtistBookmark{}, &model.AlbumBookmark{}, &model.PlaylistBookmark{},
 		&model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicPlaybackSession{}, &model.MusicPlaybackProgress{}, &model.MusicSearchInteraction{}, &model.MusicRecommendationEvent{},
 		&model.Bookmark{}, &model.BookmarkFolder{}, &model.ChannelBookmark{}, &model.SiteSetting{}, &model.SiteVisitDaily{},
