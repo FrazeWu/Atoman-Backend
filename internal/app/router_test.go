@@ -355,6 +355,7 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 		&model.ContentCollection{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.ContentBlogDraft{},
 		&model.ContentMediaAsset{},
 		&model.ContentCollectionMembership{},
