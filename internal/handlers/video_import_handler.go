@@ -124,7 +124,7 @@ func RegisterVideoImportRoutes(group *gin.RouterGroup, db *gorm.DB, s3Client *s3
 	imports.POST("/:id/parts/:partNumber", CreateVideoImportPartUpload(db, s3Client))
 	imports.POST("/:id/parts/:partNumber/complete", CompleteVideoImportPart(db))
 	imports.POST("/:id/complete", CompleteVideoImport(db, s3Client))
-	imports.POST("/:id/retry", RetryVideoImport(db))
+	imports.POST("/:id/retry", RetryVideoImport(db, s3Client))
 	imports.DELETE("/:id", CancelVideoImport(db, s3Client))
 	imports.DELETE("/:id/record", DeleteVideoImportRecord(db))
 }
@@ -538,7 +538,7 @@ func CompleteVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 }
 
 // RetryVideoImport godoc
-// @Summary 重试视频导入发布
+// @Summary 重试失败的视频导入
 // @Tags video-imports
 // @Produce json
 // @Param id path string true "导入任务 UUID"
@@ -546,14 +546,45 @@ func CompleteVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/videos/imports/{id}/retry [post]
-func RetryVideoImport(db *gorm.DB) gin.HandlerFunc {
+func RetryVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session, err := loadVideoImport(db, c)
 		if err != nil {
 			videoImportHTTPError(c, err)
 			return
 		}
-		if session.UploadCompletedAt == nil || session.PublishRequestedAt == nil {
+		if session.UploadCompletedAt == nil {
+			if session.Status != videoImportFailed {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "任务尚不能重试上传"})
+				return
+			}
+			if client == nil || strings.TrimSpace(os.Getenv("S3_BUCKET")) == "" {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "存储服务不可用"})
+				return
+			}
+			_, _ = client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
+				Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), UploadId: aws.String(session.UploadID),
+			})
+			created, err := client.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
+				Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), ContentType: aws.String(session.ContentType),
+			})
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "无法重新开始上传"})
+				return
+			}
+			updates := map[string]any{
+				"upload_id": aws.StringValue(created.UploadId), "completed_parts_json": "[]",
+				"status": videoImportUploading, "error_message": "",
+			}
+			if err := db.Model(&session).Updates(updates).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			db.First(&session, "id = ?", session.ID)
+			c.JSON(http.StatusOK, videoImportDTO(session))
+			return
+		}
+		if session.PublishRequestedAt == nil {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "任务尚不能重试发布"})
 			return
 		}
