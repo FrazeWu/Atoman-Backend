@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"atoman/internal/model"
 
@@ -70,10 +71,11 @@ type appleLookupItem struct {
 }
 
 type appleArtistCandidate struct {
-	ExternalID string
-	Name       string
-	URL        string
-	ChartRank  int
+	ExternalID       string
+	Name             string
+	URL              string
+	ChartRank        int
+	EditorialSources []string
 }
 
 type AppleCatalogImportOptions struct {
@@ -101,6 +103,7 @@ type AppleCatalogImporter struct {
 	userAgent     string
 	rssBaseURL    string
 	lookupBaseURL string
+	searchBaseURL string
 	delay         time.Duration
 	requestMu     sync.Mutex
 	lastRequest   time.Time
@@ -111,6 +114,7 @@ func NewAppleCatalogImporter(db *gorm.DB, client *http.Client, ownerID uuid.UUID
 		db: db, client: client, ownerID: ownerID, userAgent: strings.TrimSpace(userAgent),
 		rssBaseURL:    "https://rss.marketingtools.apple.com/api/v2",
 		lookupBaseURL: "https://itunes.apple.com/lookup",
+		searchBaseURL: "https://itunes.apple.com/search",
 	}
 }
 
@@ -127,16 +131,37 @@ func (importer *AppleCatalogImporter) Import(ctx context.Context, options AppleC
 		return AppleCatalogImportSummary{}, err
 	}
 	candidates := appleArtistCandidates(songChart, albumChart, options.ArtistLimit)
-	summary := AppleCatalogImportSummary{Storefront: strings.ToUpper(storefront), Candidates: len(candidates), Applied: options.Apply}
 	albumRanks := appleChartRanks(albumChart)
 	songRanks := appleChartRanks(songChart)
+	return importer.importCandidates(ctx, options, candidates, albumRanks, songRanks)
+}
+
+// ImportHipHopConsensus imports the fixed editorial-consensus rapper seed list.
+func (importer *AppleCatalogImporter) ImportHipHopConsensus(ctx context.Context, options AppleCatalogImportOptions) (AppleCatalogImportSummary, error) {
+	options = normalizeAppleCatalogOptions(options)
+	importer.delay = options.RequestDelay
+	storefront := strings.ToLower(options.Storefront)
+	seeds := HipHopConsensusArtistSeeds()
+	candidates := make([]appleArtistCandidate, 0, len(seeds))
+	for _, seed := range seeds {
+		candidate, err := importer.searchArtist(ctx, storefront, seed)
+		if err != nil {
+			return AppleCatalogImportSummary{Storefront: strings.ToUpper(storefront), Candidates: len(candidates), Applied: options.Apply}, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	return importer.importCandidates(ctx, options, candidates, nil, nil)
+}
+
+func (importer *AppleCatalogImporter) importCandidates(ctx context.Context, options AppleCatalogImportOptions, candidates []appleArtistCandidate, albumRanks, songRanks map[string]int) (AppleCatalogImportSummary, error) {
+	summary := AppleCatalogImportSummary{Storefront: strings.ToUpper(options.Storefront), Candidates: len(candidates), Applied: options.Apply}
 
 	for _, candidate := range candidates {
-		albums, err := importer.lookup(ctx, storefront, candidate.ExternalID, "album", options.AlbumLimit)
+		albums, err := importer.lookup(ctx, strings.ToLower(options.Storefront), candidate.ExternalID, "album", options.AlbumLimit)
 		if err != nil {
 			return summary, fmt.Errorf("lookup albums for %s: %w", candidate.Name, err)
 		}
-		songs, err := importer.lookup(ctx, storefront, candidate.ExternalID, "song", options.SongLimit)
+		songs, err := importer.lookup(ctx, strings.ToLower(options.Storefront), candidate.ExternalID, "song", options.SongLimit)
 		if err != nil {
 			return summary, fmt.Errorf("lookup songs for %s: %w", candidate.Name, err)
 		}
@@ -303,6 +328,58 @@ func (importer *AppleCatalogImporter) lookup(ctx context.Context, storefront, id
 	return response.Results, nil
 }
 
+func (importer *AppleCatalogImporter) searchArtist(ctx context.Context, storefront string, seed HipHopConsensusArtistSeed) (appleArtistCandidate, error) {
+	query := url.Values{}
+	query.Set("term", seed.Name)
+	query.Set("country", strings.ToUpper(storefront))
+	query.Set("media", "music")
+	query.Set("entity", "musicArtist")
+	query.Set("limit", "10")
+	var response struct {
+		Results []struct {
+			ArtistID      int64  `json:"artistId"`
+			ArtistName    string `json:"artistName"`
+			ArtistViewURL string `json:"artistViewUrl"`
+		} `json:"results"`
+	}
+	if err := importer.fetchJSON(ctx, importer.searchBaseURL+"?"+query.Encode(), &response); err != nil {
+		return appleArtistCandidate{}, fmt.Errorf("search Apple artist %s: %w", seed.Name, err)
+	}
+	for _, item := range response.Results {
+		if item.ArtistID > 0 && normalizeAppleArtistName(item.ArtistName) == normalizeAppleArtistName(seed.Name) {
+			return appleArtistCandidate{
+				ExternalID: strconv.FormatInt(item.ArtistID, 10), Name: item.ArtistName, URL: item.ArtistViewURL,
+				ChartRank: seed.Rank, EditorialSources: hipHopConsensusEditorialSources,
+			}, nil
+		}
+	}
+	return appleArtistCandidate{}, fmt.Errorf("Apple artist search did not return an exact match for %s", seed.Name)
+}
+
+func normalizeAppleArtistName(value string) string {
+	var normalized strings.Builder
+	for _, character := range strings.ToLower(strings.TrimSpace(value)) {
+		switch character {
+		case 'á', 'à', 'â', 'ä', 'å':
+			character = 'a'
+		case 'é', 'è', 'ê', 'ë':
+			character = 'e'
+		case 'í', 'ì', 'î', 'ï':
+			character = 'i'
+		case 'ó', 'ò', 'ô', 'ö', 'ø':
+			character = 'o'
+		case 'ú', 'ù', 'û', 'ü':
+			character = 'u'
+		case 'ý', 'ÿ':
+			character = 'y'
+		}
+		if unicode.IsLetter(character) || unicode.IsDigit(character) {
+			normalized.WriteRune(character)
+		}
+	}
+	return normalized.String()
+}
+
 func (importer *AppleCatalogImporter) fetchJSON(ctx context.Context, endpoint string, target any) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
@@ -407,6 +484,10 @@ func (importer *AppleCatalogImporter) findOrCreateAppleArtist(tx *gorm.DB, store
 		}
 	}
 	metadata := map[string]any{"name": candidate.Name}
+	if len(candidate.EditorialSources) > 0 {
+		metadata["editorial_sources"] = candidate.EditorialSources
+		metadata["editorial_rank"] = candidate.ChartRank
+	}
 	return artist, upsertMusicCatalogLink(tx, "artist", externalID, artist.ID, storefront, candidate.URL, candidate.ChartRank, metadata)
 }
 
