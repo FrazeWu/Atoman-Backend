@@ -30,6 +30,10 @@ type ContentFeedbackInput struct {
 	Variant string `json:"variant" enums:"rss,full_text,summary"`
 }
 
+type FeedItemRatingInput struct {
+	Score int `json:"score" binding:"required,min=1,max=10"`
+}
+
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
@@ -39,7 +43,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/recommend/articles", h.getRecommendedArticles)
 	group.GET("/recommend/channels", h.getRecommendedChannels)
 
-	group.GET("/items/:id", GetFeedItem(service.db))
+	group.GET("/items/:id", middleware.OptionalAuthMiddleware(), GetFeedItem(service.db))
 	group.GET("/media/image", proxyFeedImage)
 
 	protected := group.Group("")
@@ -56,6 +60,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/timeline/star", h.toggleStar)
 		protected.POST("/events/read", h.recordReadEvent)
 		protected.POST("/items/:id/content-feedback", h.recordContentFeedback)
+		protected.PUT("/items/:id/rating", h.setFeedItemRating)
+		protected.DELETE("/items/:id/rating", h.deleteFeedItemRating)
 		protected.GET("/reading-list", h.listReadingList)
 		protected.POST("/reading-list", h.toggleReadingList)
 		protected.DELETE("/reading-list/:target_type/:id", h.removeReadingListItem)
@@ -567,6 +573,77 @@ func (h *Handler) recordContentFeedback(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"recorded": true, "created": created})
+}
+
+// setFeedItemRating godoc
+// @Summary 设置订阅文章评分
+// @Description 为 RSS 订阅文章提交或更新 0.5 至 5 星评分，分值使用 1 至 10 的半星单位。
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param id path string true "Feed item UUID"
+// @Param input body FeedItemRatingInput true "订阅文章评分"
+// @Success 200 {object} FeedItemRatingSummary
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/items/{id}/rating [put]
+func (h *Handler) setFeedItemRating(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	itemID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed item id must be a valid uuid"))
+		return
+	}
+	var input FeedItemRatingInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "score must be between 1 and 10"))
+		return
+	}
+	summary, err := h.service.SetFeedItemRating(user, itemID, input.Score)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, summary)
+}
+
+// deleteFeedItemRating godoc
+// @Summary 清除订阅文章评分
+// @Description 清除当前用户对 RSS 订阅文章的评分。
+// @Tags feed
+// @Produce json
+// @Param id path string true "Feed item UUID"
+// @Success 200 {object} FeedItemRatingSummary
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/items/{id}/rating [delete]
+func (h *Handler) deleteFeedItemRating(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	itemID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed item id must be a valid uuid"))
+		return
+	}
+	summary, err := h.service.DeleteFeedItemRating(user, itemID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, summary)
 }
 
 // toggleReadingList godoc

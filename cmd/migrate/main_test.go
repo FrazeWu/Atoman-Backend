@@ -78,6 +78,16 @@ func TestMigrateSchemaCreatesOnboardingRecommendationTable(t *testing.T) {
 	}
 }
 
+func TestMigrateSchemaCreatesFeedItemRatingTable(t *testing.T) {
+	db := testdb.Open(t)
+	if err := migrateSchema(db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+	if !db.Migrator().HasTable(&model.FeedItemRating{}) {
+		t.Fatal("expected feed_item_ratings table")
+	}
+}
+
 func TestRunMigrationsAddsPasswordResetAuthSchema(t *testing.T) {
 	db := testdb.Open(t)
 	if err := db.AutoMigrate(&legacyEmailVerificationCode{}); err != nil {

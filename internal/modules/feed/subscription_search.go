@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -98,6 +99,18 @@ func GetFeedItem(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch feed item"})
 			return
 		}
+		var viewerID *uuid.UUID
+		if user, ok := authctx.Current(c); ok {
+			viewerID = &user.ID
+		}
+		summary, err := NewService(db).FeedItemRatingSummary(id, viewerID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch feed item rating"})
+			return
+		}
+		item.RatingScore = summary.RatingScore
+		item.RatingCount = summary.RatingCount
+		item.ViewerRating = summary.ViewerRating
 
 		c.JSON(http.StatusOK, gin.H{
 			"data": newFeedItemDetailResponse(item),

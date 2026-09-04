@@ -216,6 +216,7 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 		&model.FeedItem{},
+		&model.FeedItemRating{},
 		&model.FeedItemRead{},
 		&model.FeedItemStar{},
 		&model.ReadingListItem{},

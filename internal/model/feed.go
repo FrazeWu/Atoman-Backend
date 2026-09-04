@@ -392,6 +392,9 @@ type FeedItem struct {
 	NextFullTextAttemptAt *time.Time      `json:"next_full_text_attempt_at" gorm:"index:idx_feed_items_status_retry,priority:2"`
 	FullTextFetchedAt     *time.Time      `json:"full_text_fetched_at"`
 	FullTextWordCount     int             `json:"full_text_word_count" gorm:"not null;default:0"`
+	RatingScore           float64         `json:"rating_score" gorm:"-"`
+	RatingCount           int64           `json:"rating_count" gorm:"-"`
+	ViewerRating          *int            `json:"viewer_rating,omitempty" gorm:"-"`
 	IsDuplicate           bool            `json:"is_duplicate" gorm:"-"`
 	DuplicateCount        int             `json:"duplicate_count" gorm:"-"`
 	DuplicateOfID         *uuid.UUID      `json:"duplicate_of_id,omitempty" gorm:"-"`
@@ -400,6 +403,15 @@ type FeedItem struct {
 }
 
 func (FeedItem) TableName() string { return "feed_items" }
+
+type FeedItemRating struct {
+	Base
+	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_feed_item_ratings_user_item,priority:1,where:deleted_at IS NULL"`
+	FeedItemID uuid.UUID `json:"feed_item_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_feed_item_ratings_user_item,priority:2,where:deleted_at IS NULL"`
+	Score      int       `json:"score" gorm:"not null"`
+}
+
+func (FeedItemRating) TableName() string { return "feed_item_ratings" }
 
 type FeedItemRead struct {
 	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;primaryKey;index"`

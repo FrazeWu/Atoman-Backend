@@ -33,7 +33,7 @@ import (
 func newFeedHandlerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := testdb.Open(t)
-	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRead{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRating{}, &model.FeedItemRead{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	middleware.SetAuthDB(db)
@@ -45,7 +45,7 @@ func newFeedHandlerTestDBWithLogBuffer(t *testing.T, sink io.Writer) *gorm.DB {
 	t.Helper()
 	logger := gormlogger.New(log.New(sink, "", 0), gormlogger.Config{LogLevel: gormlogger.Info, Colorful: false})
 	db := testdb.OpenWithConfig(t, &gorm.Config{Logger: logger})
-	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRead{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRating{}, &model.FeedItemRead{}); err != nil {
 		t.Fatalf("migrate with logger: %v", err)
 	}
 	middleware.SetAuthDB(db)

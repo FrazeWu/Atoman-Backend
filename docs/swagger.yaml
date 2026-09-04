@@ -2053,6 +2053,24 @@ definitions:
       reader:
         $ref: '#/definitions/feed.FeedItemReaderResponse'
     type: object
+  feed.FeedItemRatingInput:
+    properties:
+      score:
+        maximum: 10
+        minimum: 1
+        type: integer
+    required:
+    - score
+    type: object
+  feed.FeedItemRatingSummary:
+    properties:
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      viewer_rating:
+        type: integer
+    type: object
   feed.FeedItemReaderResponse:
     properties:
       default_variant:
@@ -4907,12 +4925,18 @@ definitions:
         type: integer
       reader_version:
         type: integer
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
       summary:
         type: string
       title:
         type: string
       updated_at:
         type: string
+      viewer_rating:
+        type: integer
     type: object
   model.FeedSource:
     properties:
@@ -15650,6 +15674,81 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 反馈订阅正文质量
+      tags:
+      - feed
+  /api/v1/feed/items/{id}/rating:
+    delete:
+      description: 清除当前用户对 RSS 订阅文章的评分。
+      parameters:
+      - description: Feed item UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.FeedItemRatingSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 清除订阅文章评分
+      tags:
+      - feed
+    put:
+      consumes:
+      - application/json
+      description: 为 RSS 订阅文章提交或更新 0.5 至 5 星评分，分值使用 1 至 10 的半星单位。
+      parameters:
+      - description: Feed item UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 订阅文章评分
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.FeedItemRatingInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.FeedItemRatingSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 设置订阅文章评分
       tags:
       - feed
   /api/v1/feed/media/image:
