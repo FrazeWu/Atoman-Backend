@@ -51,13 +51,24 @@ func TestAppleAlbumType(t *testing.T) {
 
 func TestAppleCollectionsExcludeSinglesAndEPs(t *testing.T) {
 	items := []appleLookupItem{
-		{WrapperType: "collection", CollectionID: 1, CollectionName: "Album", TrackCount: 10},
-		{WrapperType: "collection", CollectionID: 2, CollectionName: "Single - Single", TrackCount: 1},
-		{WrapperType: "collection", CollectionID: 3, CollectionName: "Short Release - EP", TrackCount: 5},
+		{WrapperType: "collection", ArtistID: 1, CollectionID: 1, CollectionName: "Album", TrackCount: 10},
+		{WrapperType: "collection", ArtistID: 1, CollectionID: 2, CollectionName: "Single - Single", TrackCount: 1},
+		{WrapperType: "collection", ArtistID: 1, CollectionID: 3, CollectionName: "Short Release - EP", TrackCount: 5},
 	}
-	collections := appleCollections(items, 20)
+	collections := appleCollections(items, "1", 20)
 	if len(collections) != 1 || collections[0].CollectionID != 1 {
 		t.Fatalf("expected only the full album, got %#v", collections)
+	}
+}
+
+func TestAppleCollectionsExcludeAlbumsLedByAnotherArtist(t *testing.T) {
+	items := []appleLookupItem{
+		{WrapperType: "track", ArtistID: 42, CollectionID: 1, CollectionName: "Globalization", TrackCount: 10},
+		{WrapperType: "collection", ArtistID: 42, CollectionID: 2, CollectionName: "Stay Trippy", TrackCount: 16},
+	}
+	collections := appleCollections(items, "42", 20)
+	if len(collections) != 1 || collections[0].CollectionID != 2 {
+		t.Fatalf("expected only the requested artist's album, got %#v", collections)
 	}
 }
 

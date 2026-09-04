@@ -165,7 +165,7 @@ func (importer *AppleCatalogImporter) importCandidates(ctx context.Context, opti
 		if err != nil {
 			return summary, fmt.Errorf("lookup songs for %s: %w", candidate.Name, err)
 		}
-		collections := appleCollections(append(songs, albums...), options.AlbumLimit)
+		collections := appleCollections(albums, candidate.ExternalID, options.AlbumLimit)
 		tracks := appleTracksForCollections(songs, collections, options.SongLimit)
 		summary.Artists++
 		summary.Albums += len(collections)
@@ -247,14 +247,17 @@ func appleChartRanks(items []appleChartItem) map[string]int {
 	return result
 }
 
-func appleCollections(items []appleLookupItem, limit int) []appleLookupItem {
+func appleCollections(items []appleLookupItem, artistExternalID string, limit int) []appleLookupItem {
 	result := make([]appleLookupItem, 0, limit)
 	seen := make(map[int64]struct{}, limit)
 	for _, item := range items {
-		if item.WrapperType != "collection" && item.WrapperType != "track" {
+		if item.WrapperType != "collection" {
 			continue
 		}
 		if item.CollectionID == 0 || strings.TrimSpace(item.CollectionName) == "" {
+			continue
+		}
+		if strconv.FormatInt(item.ArtistID, 10) != strings.TrimSpace(artistExternalID) {
 			continue
 		}
 		if appleAlbumType(item.CollectionName, item.TrackCount) != "album" {
