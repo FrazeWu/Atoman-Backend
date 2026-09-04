@@ -15,7 +15,7 @@ func newBlogScopeTest(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, mo
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{},
-		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{},
+		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogTag{},
 		&model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentCollection{},
 		&model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
 		&model.ContentPublicationEvent{}, &model.ContentReference{}, &model.ContentMediaAsset{},
