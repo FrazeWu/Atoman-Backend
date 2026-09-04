@@ -543,6 +543,7 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 		&model.FeedItem{},
 		&model.FeedItemRead{},
 		&model.FeedItemStar{},
+		&model.FeedItemRating{},
 		&model.ReadingListItem{},
 		&model.Notification{},
 		&model.ForumCategory{},
