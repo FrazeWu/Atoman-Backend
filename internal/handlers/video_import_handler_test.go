@@ -185,6 +185,33 @@ func TestVideoImportIsScopedToOwner(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, response.Code)
 }
 
+func TestRetryVideoImportResetsFailedR2Upload(t *testing.T) {
+	t.Setenv("S3_BUCKET", "atoman-test")
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	owner := seedVideoUser(t, db)
+	session := model.VideoImportSession{
+		UserID: owner.UUID, Status: videoImportFailed, FileName: "clip.mp4", FileSize: 5,
+		ContentType: "video/mp4", ObjectKey: "video/imports/retry/source.mp4", UploadID: "upload-1",
+		PartSize: videoImportPartSize, CompletedPartsJSON: `[{"part_number":1,"etag":"etag-1","size":5}]`, PayloadJSON: "{}",
+		ErrorMessage: "视频文件内容无效",
+	}
+	require.NoError(t, db.Create(&session).Error)
+
+	response := performVideoImportRequest(t, videoImportTestRouter(db, fakeVideoImportS3(t), owner.UUID), http.MethodPost, "/api/v1/videos/imports/"+session.ID.String()+"/retry", nil)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var task VideoImportDTO
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &task))
+	require.Equal(t, videoImportUploading, task.Status)
+	require.Empty(t, task.CompletedParts)
+	require.Empty(t, task.ErrorMessage)
+
+	var stored model.VideoImportSession
+	require.NoError(t, db.First(&stored, "id = ?", session.ID).Error)
+	require.Equal(t, "[]", stored.CompletedPartsJSON)
+	require.Equal(t, "upload-1", stored.UploadID)
+}
+
 func TestCancelUploadedVideoImportDeletesR2Object(t *testing.T) {
 	t.Setenv("S3_BUCKET", "atoman-test")
 	gin.SetMode(gin.TestMode)
