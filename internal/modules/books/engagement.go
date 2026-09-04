@@ -3,13 +3,13 @@ package books
 import (
 	"context"
 	"errors"
-	"math"
 	"strings"
 	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	ratingpolicy "atoman/internal/rating"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -44,8 +44,8 @@ func (s *Service) SetBookRating(user authctx.CurrentUser, workID uuid.UUID, scor
 	if user.ID == uuid.Nil {
 		return BookRatingSummary{}, apperr.Unauthorized("Login required")
 	}
-	if score < 1 || score > 5 {
-		return BookRatingSummary{}, apperr.BadRequest("validation.invalid_request", "score must be between 1 and 5")
+	if !ratingpolicy.ValidScore(score) {
+		return BookRatingSummary{}, apperr.BadRequest("validation.invalid_request", ratingpolicy.ScoreRangeMessage)
 	}
 	if err := s.requirePublicWork(context.Background(), workID); err != nil {
 		return BookRatingSummary{}, err
@@ -53,11 +53,21 @@ func (s *Service) SetBookRating(user authctx.CurrentUser, workID uuid.UUID, scor
 	rating := model.BookRating{UserID: user.ID, WorkID: workID, Score: score}
 	if err := s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}, {Name: "work_id"}},
-		DoUpdates: clause.Assignments(map[string]any{"score": score, "updated_at": time.Now().UTC()}),
+		DoUpdates: clause.Assignments(map[string]any{"score": score, "updated_at": time.Now().UTC(), "deleted_at": nil}),
 	}).Create(&rating).Error; err != nil {
 		return BookRatingSummary{}, err
 	}
 	return s.BookRatingSummary(context.Background(), workID, &user.ID)
+}
+
+func (s *Service) DeleteBookRating(user authctx.CurrentUser, workID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	if err := s.requirePublicWork(context.Background(), workID); err != nil {
+		return err
+	}
+	return s.db.Where("user_id = ? AND work_id = ?", user.ID, workID).Delete(&model.BookRating{}).Error
 }
 
 func (s *Service) BookRatingSummary(ctx context.Context, workID uuid.UUID, viewerID *uuid.UUID) (BookRatingSummary, error) {
@@ -73,7 +83,7 @@ func (s *Service) BookRatingSummary(ctx context.Context, workID uuid.UUID, viewe
 		Where("work_id = ?", workID).Scan(&aggregate).Error; err != nil {
 		return BookRatingSummary{}, err
 	}
-	summary := BookRatingSummary{RatingScore: math.Round(aggregate.RatingScore*10) / 10, RatingCount: aggregate.RatingCount}
+	summary := BookRatingSummary{RatingScore: ratingpolicy.RoundAverage(aggregate.RatingScore), RatingCount: aggregate.RatingCount}
 	if viewerID != nil {
 		var rating model.BookRating
 		if err := s.db.WithContext(ctx).Where("user_id = ? AND work_id = ?", *viewerID, workID).First(&rating).Error; err == nil {

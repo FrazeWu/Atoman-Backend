@@ -45,7 +45,7 @@ func (h *Handler) listPublicBookReviews(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Param workId path string true "公共作品 UUID"
-// @Param input body bookRatingInput true "1 至 5 分"
+// @Param input body bookRatingInput true "1 至 10 分，每 1 分对应半星"
 // @Success 200 {object} BookRatingSummary
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
@@ -66,6 +66,66 @@ func (h *Handler) setBookRating(c *gin.Context) {
 		return
 	}
 	summary, err := h.service.SetBookRating(user, workID, input.Score)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, summary)
+}
+
+// getBookRating godoc
+// @Summary 获取当前用户的公共作品评分
+// @Tags books-engagement
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param workId path string true "公共作品 UUID"
+// @Success 200 {object} BookRatingSummary
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/books/catalog/works/{workId}/rating [get]
+func (h *Handler) getBookRating(c *gin.Context) {
+	user, ok := currentBookUser(c)
+	if !ok {
+		return
+	}
+	workID, ok := parseCatalogID(c, "workId")
+	if !ok {
+		return
+	}
+	summary, err := h.service.BookRatingSummary(c.Request.Context(), workID, &user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, summary)
+}
+
+// deleteBookRating godoc
+// @Summary 清除当前用户的公共作品评分
+// @Tags books-engagement
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param workId path string true "公共作品 UUID"
+// @Success 200 {object} BookRatingSummary
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/books/catalog/works/{workId}/rating [delete]
+func (h *Handler) deleteBookRating(c *gin.Context) {
+	user, ok := currentBookUser(c)
+	if !ok {
+		return
+	}
+	workID, ok := parseCatalogID(c, "workId")
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteBookRating(user, workID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	summary, err := h.service.BookRatingSummary(c.Request.Context(), workID, &user.ID)
 	if err != nil {
 		httpx.Error(c, err)
 		return

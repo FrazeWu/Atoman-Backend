@@ -2,13 +2,13 @@ package blog
 
 import (
 	"errors"
-	"math"
 	"strings"
 	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	ratingpolicy "atoman/internal/rating"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -45,8 +45,8 @@ func (s *Service) SetPostRating(user authctx.CurrentUser, postID uuid.UUID, scor
 	if user.ID == uuid.Nil {
 		return PostRatingSummary{}, apperr.Unauthorized("Login required")
 	}
-	if score < 1 || score > 10 {
-		return PostRatingSummary{}, apperr.BadRequest("validation.invalid_request", "score must be between 1 and 10")
+	if !ratingpolicy.ValidScore(score) {
+		return PostRatingSummary{}, apperr.BadRequest("validation.invalid_request", ratingpolicy.ScoreRangeMessage)
 	}
 	if err := s.ensurePostRatingAccess(user.ID, postID); err != nil {
 		return PostRatingSummary{}, err
@@ -87,7 +87,7 @@ func (s *Service) PostRatingSummary(postID uuid.UUID, viewerID *uuid.UUID) (Post
 		return PostRatingSummary{}, err
 	}
 	summary := PostRatingSummary{
-		RatingScore: math.Round(aggregate.RatingScore*10) / 10,
+		RatingScore: ratingpolicy.RoundAverage(aggregate.RatingScore),
 		RatingCount: aggregate.RatingCount,
 	}
 	if viewerID != nil {

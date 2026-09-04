@@ -2,12 +2,12 @@ package music
 
 import (
 	"errors"
-	"math"
 	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	ratingpolicy "atoman/internal/rating"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -30,8 +30,8 @@ func (s *Service) SetSongRating(user authctx.CurrentUser, songID uuid.UUID, scor
 	if user.ID == uuid.Nil {
 		return SongRatingSummary{}, apperr.Unauthorized("Login required")
 	}
-	if score < 1 || score > 5 {
-		return SongRatingSummary{}, apperr.BadRequest("validation.invalid_request", "score must be between 1 and 5")
+	if !ratingpolicy.ValidScore(score) {
+		return SongRatingSummary{}, apperr.BadRequest("validation.invalid_request", ratingpolicy.ScoreRangeMessage)
 	}
 	if err := s.ensureSongRatingAccess(user, songID); err != nil {
 		return SongRatingSummary{}, err
@@ -79,7 +79,7 @@ func (s *Service) SongRatingSummary(songID uuid.UUID, viewerID *uuid.UUID) (Song
 		return SongRatingSummary{}, err
 	}
 	summary := SongRatingSummary{
-		RatingScore: math.Round(aggregate.RatingScore*10) / 10,
+		RatingScore: ratingpolicy.RoundAverage(aggregate.RatingScore),
 		RatingCount: aggregate.RatingCount,
 	}
 	if viewerID != nil {
@@ -143,7 +143,7 @@ func (s *Service) populateSongRatings(songs []model.Song, viewerID *uuid.UUID) e
 
 	for index := range songs {
 		if aggregate, ok := aggregateBySongID[songs[index].ID]; ok {
-			songs[index].RatingScore = math.Round(aggregate.RatingScore*10) / 10
+			songs[index].RatingScore = ratingpolicy.RoundAverage(aggregate.RatingScore)
 			songs[index].RatingCount = aggregate.RatingCount
 		}
 		if score, ok := viewerRatings[songs[index].ID]; ok {
@@ -172,8 +172,8 @@ func (s *Service) SetAlbumRating(user authctx.CurrentUser, albumID uuid.UUID, sc
 	if user.ID == uuid.Nil {
 		return AlbumRatingSummary{}, apperr.Unauthorized("Login required")
 	}
-	if score < 1 || score > 5 {
-		return AlbumRatingSummary{}, apperr.BadRequest("validation.invalid_request", "score must be between 1 and 5")
+	if !ratingpolicy.ValidScore(score) {
+		return AlbumRatingSummary{}, apperr.BadRequest("validation.invalid_request", ratingpolicy.ScoreRangeMessage)
 	}
 	if err := s.ensureAlbumRatingAccess(user, albumID); err != nil {
 		return AlbumRatingSummary{}, err
@@ -208,7 +208,7 @@ func (s *Service) AlbumRatingSummary(albumID uuid.UUID, viewerID *uuid.UUID) (Al
 		return AlbumRatingSummary{}, err
 	}
 	summary := AlbumRatingSummary{
-		RatingScore: math.Round(aggregate.RatingScore*10) / 10,
+		RatingScore: ratingpolicy.RoundAverage(aggregate.RatingScore),
 		RatingCount: aggregate.RatingCount,
 	}
 	if viewerID != nil {
@@ -267,7 +267,7 @@ func (s *Service) PopulateAlbumRatings(albums []model.Album, viewerID *uuid.UUID
 	}
 	for index := range albums {
 		if aggregate, ok := aggregateByAlbumID[albums[index].ID]; ok {
-			albums[index].RatingScore = math.Round(aggregate.RatingScore*10) / 10
+			albums[index].RatingScore = ratingpolicy.RoundAverage(aggregate.RatingScore)
 			albums[index].RatingCount = aggregate.RatingCount
 		}
 		if score, ok := viewerRatings[albums[index].ID]; ok {

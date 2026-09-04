@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"errors"
-	"math"
 	"net/http"
 	"time"
 
 	"atoman/internal/model"
 	contentmodule "atoman/internal/modules/content"
+	ratingpolicy "atoman/internal/rating"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -49,6 +49,10 @@ func SetVideoRating(db *gorm.DB) gin.HandlerFunc {
 		var input videoRatingInput
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if !ratingpolicy.ValidScore(input.Score) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": ratingpolicy.ScoreRangeMessage})
 			return
 		}
 		contentID, ok := rateableVideoContentID(db, userID, videoID, c)
@@ -149,7 +153,7 @@ func videoRatingSummaryForContent(db *gorm.DB, contentID uuid.UUID, viewerID *uu
 		return videoRatingSummary{}, err
 	}
 	summary := videoRatingSummary{
-		RatingScore: math.Round(aggregate.RatingScore*10) / 10,
+		RatingScore: ratingpolicy.RoundAverage(aggregate.RatingScore),
 		RatingCount: aggregate.RatingCount,
 	}
 	if viewerID == nil {

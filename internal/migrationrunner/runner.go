@@ -36,6 +36,7 @@ func Run(db *gorm.DB) error {
 		{"debate wiki migration", migrations.RunDebateWikiMigration},
 		{"unified content partial-schema repair", migrations.RunUnifiedContentMigrationIfReady},
 		{"music standalone songs pre-schema migration", migrations.RunMusicStandaloneSongsPreSchemaMigration},
+		{"rating ten-point migration", migrations.RunRatingTenPointMigration},
 	}
 	for _, step := range steps {
 		if err := step.run(db); err != nil {

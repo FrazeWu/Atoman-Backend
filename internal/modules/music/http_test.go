@@ -637,17 +637,17 @@ func TestRegisterRoutesSongRatingsUpdateAndPopulateDetail(t *testing.T) {
 
 	path := "/api/v1/music/songs/" + song.ID.String() + "/rating"
 	userRouter := newMusicHTTPRouter(service, &user)
-	first := performMusicJSONRequest(t, userRouter, http.MethodPut, path, `{"score":4}`)
+	first := performMusicJSONRequest(t, userRouter, http.MethodPut, path, `{"score":8}`)
 	if first.Code != http.StatusOK {
 		t.Fatalf("expected first rating 200, got %d: %s", first.Code, first.Body.String())
 	}
-	updated := performMusicJSONRequest(t, userRouter, http.MethodPut, path, `{"score":5}`)
+	updated := performMusicJSONRequest(t, userRouter, http.MethodPut, path, `{"score":9}`)
 	if updated.Code != http.StatusOK {
 		t.Fatalf("expected rating update 200, got %d: %s", updated.Code, updated.Body.String())
 	}
 
 	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}
-	otherRating := performMusicJSONRequest(t, newMusicHTTPRouter(service, &otherUser), http.MethodPut, path, `{"score":1}`)
+	otherRating := performMusicJSONRequest(t, newMusicHTTPRouter(service, &otherUser), http.MethodPut, path, `{"score":3}`)
 	if otherRating.Code != http.StatusOK {
 		t.Fatalf("expected second rating 200, got %d: %s", otherRating.Code, otherRating.Body.String())
 	}
@@ -668,26 +668,26 @@ func TestRegisterRoutesSongRatingsUpdateAndPopulateDetail(t *testing.T) {
 	if err := json.Unmarshal(detail.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode song detail: %v", err)
 	}
-	if payload.Data.Song.RatingScore != 3 || payload.Data.Song.RatingCount != 2 || payload.Data.Song.ViewerRating == nil || *payload.Data.Song.ViewerRating != 5 {
+	if payload.Data.Song.RatingScore != 6 || payload.Data.Song.RatingCount != 2 || payload.Data.Song.ViewerRating == nil || *payload.Data.Song.ViewerRating != 9 {
 		t.Fatalf("unexpected rating summary: %#v", payload.Data.Song)
 	}
 
 	albumDetail := performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
-	if albumDetail.Code != http.StatusOK || !strings.Contains(albumDetail.Body.String(), `"rating_score":3`) || !strings.Contains(albumDetail.Body.String(), `"viewer_rating":5`) {
+	if albumDetail.Code != http.StatusOK || !strings.Contains(albumDetail.Body.String(), `"rating_score":6`) || !strings.Contains(albumDetail.Body.String(), `"viewer_rating":9`) {
 		t.Fatalf("expected album tracks to include rating summary, got %d: %s", albumDetail.Code, albumDetail.Body.String())
 	}
 
 	albumRatingPath := "/api/v1/music/albums/" + album.ID.String() + "/rating"
-	albumFirst := performMusicJSONRequest(t, userRouter, http.MethodPut, albumRatingPath, `{"score":4}`)
+	albumFirst := performMusicJSONRequest(t, userRouter, http.MethodPut, albumRatingPath, `{"score":9}`)
 	if albumFirst.Code != http.StatusOK {
 		t.Fatalf("expected first album rating 200, got %d: %s", albumFirst.Code, albumFirst.Body.String())
 	}
-	albumOtherRating := performMusicJSONRequest(t, newMusicHTTPRouter(service, &otherUser), http.MethodPut, albumRatingPath, `{"score":2}`)
+	albumOtherRating := performMusicJSONRequest(t, newMusicHTTPRouter(service, &otherUser), http.MethodPut, albumRatingPath, `{"score":7}`)
 	if albumOtherRating.Code != http.StatusOK {
 		t.Fatalf("expected second album rating 200, got %d: %s", albumOtherRating.Code, albumOtherRating.Body.String())
 	}
 	albumDetail = performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
-	if albumDetail.Code != http.StatusOK || !strings.Contains(albumDetail.Body.String(), `"rating_score":3`) || !strings.Contains(albumDetail.Body.String(), `"viewer_rating":4`) {
+	if albumDetail.Code != http.StatusOK || !strings.Contains(albumDetail.Body.String(), `"rating_score":8`) || !strings.Contains(albumDetail.Body.String(), `"viewer_rating":9`) {
 		t.Fatalf("expected album rating summary, got %d: %s", albumDetail.Code, albumDetail.Body.String())
 	}
 
@@ -728,13 +728,13 @@ func TestRatingUpsertsRemainSingleRowDuringConcurrentFirstSubmissions(t *testing
 		go func(score int) {
 			defer wait.Done()
 			<-start
-			_, err := service.SetSongRating(user, song.ID, (score-1)%5+1)
+			_, err := service.SetSongRating(user, song.ID, (score-1)%10+1)
 			errs <- err
 		}(score)
 		go func(score int) {
 			defer wait.Done()
 			<-start
-			_, err := service.SetAlbumRating(user, album.ID, (score-1)%5+1)
+			_, err := service.SetAlbumRating(user, album.ID, (score-1)%10+1)
 			errs <- err
 		}(score)
 	}

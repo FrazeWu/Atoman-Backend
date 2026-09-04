@@ -86,6 +86,10 @@ definitions:
         type: string
       summary:
         type: string
+      tags:
+        items:
+          type: string
+        type: array
       title:
         type: string
       updated_at:
@@ -247,6 +251,10 @@ definitions:
         type: string
       summary:
         type: string
+      tags:
+        items:
+          type: string
+        type: array
       title:
         type: string
       updated_at:
@@ -301,6 +309,10 @@ definitions:
         type: string
       summary:
         type: string
+      tags:
+        items:
+          type: string
+        type: array
       title:
         type: string
       visibility:
@@ -4217,6 +4229,7 @@ definitions:
     properties:
       channel_id:
         type: string
+      chapters: {}
       collection_id:
         type: string
       collection_ids:
@@ -4227,6 +4240,8 @@ definitions:
         type: string
       duration_sec:
         type: integer
+      subtitle_url:
+        type: string
       tags:
         items:
           type: string
@@ -4917,6 +4932,10 @@ definitions:
         type: string
       published_at:
         type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
       reader_quality_flags:
         items:
           type: string
@@ -4925,10 +4944,6 @@ definitions:
         type: integer
       reader_version:
         type: integer
-      rating_count:
-        type: integer
-      rating_score:
-        type: number
       summary:
         type: string
       title:
@@ -6056,6 +6071,7 @@ definitions:
         $ref: '#/definitions/model.Channel'
       channel_id:
         type: string
+      chapters: {}
       collection:
         $ref: '#/definitions/model.Collection'
       collection_conflict:
@@ -6102,6 +6118,8 @@ definitions:
       storage_type:
         description: 'StorageType: "local" (S3/MinIO) or "external" (YouTube, Bilibili,
           etc.)'
+        type: string
+      subtitle_url:
         type: string
       tags:
         items:
@@ -6535,6 +6553,17 @@ definitions:
         type: string
       start_offset:
         type: integer
+    type: object
+  music.AppleSongPreview:
+    properties:
+      attribution:
+        type: string
+      max_duration_seconds:
+        type: integer
+      preview_url:
+        type: string
+      store_url:
+        type: string
     type: object
   music.ArtistMemberPayload:
     properties:
@@ -11824,6 +11853,10 @@ paths:
         in: query
         name: collection_id
         type: string
+      - description: 标签
+        in: query
+        name: tag
+        type: string
       - description: 排序
         enum:
         - relevance
@@ -12447,6 +12480,62 @@ paths:
       tags:
       - books-contributions
   /api/v1/books/catalog/works/{workId}/rating:
+    delete:
+      parameters:
+      - description: 公共作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookRatingSummary'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 清除当前用户的公共作品评分
+      tags:
+      - books-engagement
+    get:
+      parameters:
+      - description: 公共作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookRatingSummary'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取当前用户的公共作品评分
+      tags:
+      - books-engagement
     put:
       consumes:
       - application/json
@@ -12456,7 +12545,7 @@ paths:
         name: workId
         required: true
         type: string
-      - description: 1 至 5 分
+      - description: 1 至 10 分，每 1 分对应半星
         in: body
         name: input
         required: true
@@ -18494,7 +18583,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 为可访问专辑设置 1 至 5 星评分；再次提交会更新原评分。
+      description: 为可访问专辑设置 0.5 至 5 星评分，分值使用 1 至 10 的半星单位；再次提交会更新原评分。
       parameters:
       - description: 专辑 ID
         in: path
@@ -20090,6 +20179,33 @@ paths:
       summary: 获取歌曲详情
       tags:
       - music
+  /api/v1/music/songs/{songId}/apple-preview:
+    get:
+      description: 实时查询 iTunes 试听地址；试听地址不缓存、不持久化。
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.AppleSongPreview'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取 Apple Music 歌曲试听
+      tags:
+      - music
   /api/v1/music/songs/{songId}/audio-replacements:
     post:
       consumes:
@@ -20550,7 +20666,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 为可访问歌曲设置 1 至 5 星评分；再次提交会更新原评分。
+      description: 为可访问歌曲设置 0.5 至 5 星评分，分值使用 1 至 10 的半星单位；再次提交会更新原评分。
       parameters:
       - description: 歌曲 ID
         in: path
@@ -25558,35 +25674,6 @@ paths:
       summary: 确认视频分片上传完成
       tags:
       - video-imports
-  /api/v1/videos/imports/{id}/parts/{partNumber}/upload:
-    put:
-      consumes:
-      - application/octet-stream
-      parameters:
-      - description: 导入任务 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 分片序号
-        in: path
-        name: partNumber
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 上传本地视频分片
-      tags:
-      - video-imports
   /api/v1/videos/imports/{id}/record:
     delete:
       parameters:
@@ -25628,7 +25715,7 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 重试视频导入发布
+      summary: 重试失败的视频导入
       tags:
       - video-imports
   /api/v1/videos/imports/{id}/submit:
@@ -25807,7 +25894,7 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: 上传视频源文件，支持本地或 S3 存储。
+      description: 上传视频源文件到 R2 兼容对象存储。
       parameters:
       - description: 视频文件
         in: formData

@@ -5127,6 +5127,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "标签",
+                        "name": "tag",
+                        "in": "query"
+                    },
+                    {
                         "enum": [
                             "relevance",
                             "recent"
@@ -6097,6 +6103,52 @@ const docTemplate = `{
             }
         },
         "/api/v1/books/catalog/works/{workId}/rating": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "books-engagement"
+                ],
+                "summary": "获取当前用户的公共作品评分",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "公共作品 UUID",
+                        "name": "workId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/books.BookRatingSummary"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "put": {
                 "security": [
                     {
@@ -6125,7 +6177,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "1 至 5 分",
+                        "description": "1 至 10 分，每 1 分对应半星",
                         "name": "input",
                         "in": "body",
                         "required": true,
@@ -6145,6 +6197,52 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "books-engagement"
+                ],
+                "summary": "清除当前用户的公共作品评分",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "公共作品 UUID",
+                        "name": "workId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/books.BookRatingSummary"
                         }
                     },
                     "401": {
@@ -15713,7 +15811,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "为可访问专辑设置 1 至 5 星评分；再次提交会更新原评分。",
+                "description": "为可访问专辑设置 0.5 至 5 星评分，分值使用 1 至 10 的半星单位；再次提交会更新原评分。",
                 "consumes": [
                     "application/json"
                 ],
@@ -18303,6 +18401,47 @@ const docTemplate = `{
                 "responses": {}
             }
         },
+        "/api/v1/music/songs/{songId}/apple-preview": {
+            "get": {
+                "description": "实时查询 iTunes 试听地址；试听地址不缓存、不持久化。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取 Apple Music 歌曲试听",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 ID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.AppleSongPreview"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/songs/{songId}/audio-replacements": {
             "post": {
                 "security": [
@@ -18985,7 +19124,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "为可访问歌曲设置 1 至 5 星评分；再次提交会更新原评分。",
+                "description": "为可访问歌曲设置 0.5 至 5 星评分，分值使用 1 至 10 的半星单位；再次提交会更新原评分。",
                 "consumes": [
                     "application/json"
                 ],
@@ -26529,53 +26668,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/videos/imports/{id}/parts/{partNumber}/upload": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/octet-stream"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "video-imports"
-                ],
-                "summary": "上传本地视频分片",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "导入任务 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "分片序号",
-                        "name": "partNumber",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/videos/imports/{id}/record": {
             "delete": {
                 "security": [
@@ -26631,7 +26723,7 @@ const docTemplate = `{
                 "tags": [
                     "video-imports"
                 ],
-                "summary": "重试视频导入发布",
+                "summary": "重试失败的视频导入",
                 "parameters": [
                     {
                         "type": "string",
@@ -26935,7 +27027,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "上传视频源文件，支持本地或 S3 存储。",
+                "description": "上传视频源文件到 R2 兼容对象存储。",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -27549,6 +27641,12 @@ const docTemplate = `{
                 "summary": {
                     "type": "string"
                 },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "title": {
                     "type": "string"
                 },
@@ -27793,6 +27891,12 @@ const docTemplate = `{
                 "summary": {
                     "type": "string"
                 },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "title": {
                     "type": "string"
                 },
@@ -27874,6 +27978,12 @@ const docTemplate = `{
                 },
                 "summary": {
                     "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "title": {
                     "type": "string"
@@ -33756,6 +33866,7 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
+                "chapters": {},
                 "collection_id": {
                     "type": "string"
                 },
@@ -33770,6 +33881,9 @@ const docTemplate = `{
                 },
                 "duration_sec": {
                     "type": "integer"
+                },
+                "subtitle_url": {
+                    "type": "string"
                 },
                 "tags": {
                     "type": "array",
@@ -34809,6 +34923,12 @@ const docTemplate = `{
                 "published_at": {
                     "type": "string"
                 },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
                 "reader_quality_flags": {
                     "type": "array",
                     "items": {
@@ -34820,12 +34940,6 @@ const docTemplate = `{
                 },
                 "reader_version": {
                     "type": "integer"
-                },
-                "rating_count": {
-                    "type": "integer"
-                },
-                "rating_score": {
-                    "type": "number"
                 },
                 "summary": {
                     "type": "string"
@@ -36520,6 +36634,7 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
+                "chapters": {},
                 "collection": {
                     "$ref": "#/definitions/model.Collection"
                 },
@@ -36586,6 +36701,9 @@ const docTemplate = `{
                 },
                 "storage_type": {
                     "description": "StorageType: \"local\" (S3/MinIO) or \"external\" (YouTube, Bilibili, etc.)",
+                    "type": "string"
+                },
+                "subtitle_url": {
                     "type": "string"
                 },
                 "tags": {
@@ -37246,6 +37364,23 @@ const docTemplate = `{
                 },
                 "start_offset": {
                     "type": "integer"
+                }
+            }
+        },
+        "music.AppleSongPreview": {
+            "type": "object",
+            "properties": {
+                "attribution": {
+                    "type": "string"
+                },
+                "max_duration_seconds": {
+                    "type": "integer"
+                },
+                "preview_url": {
+                    "type": "string"
+                },
+                "store_url": {
+                    "type": "string"
                 }
             }
         },

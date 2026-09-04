@@ -19,7 +19,7 @@ type setAlbumRatingRequest struct {
 
 // setAlbumRating godoc
 // @Summary 评分专辑
-// @Description 为可访问专辑设置 1 至 5 星评分；再次提交会更新原评分。
+// @Description 为可访问专辑设置 0.5 至 5 星评分，分值使用 1 至 10 的半星单位；再次提交会更新原评分。
 // @Tags music
 // @Accept json
 // @Produce json
@@ -90,7 +90,7 @@ func (h *Handler) deleteAlbumRating(c *gin.Context) {
 
 // setSongRating godoc
 // @Summary 评分歌曲
-// @Description 为可访问歌曲设置 1 至 5 星评分；再次提交会更新原评分。
+// @Description 为可访问歌曲设置 0.5 至 5 星评分，分值使用 1 至 10 的半星单位；再次提交会更新原评分。
 // @Tags music
 // @Accept json
 // @Produce json

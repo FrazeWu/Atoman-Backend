@@ -129,7 +129,7 @@ type AlbumRating struct {
 	Base
 	UserID  uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_album_ratings_user_album,priority:1,where:deleted_at IS NULL"`
 	AlbumID uuid.UUID `json:"album_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_album_ratings_user_album,priority:2,where:deleted_at IS NULL"`
-	Score   int       `json:"score" gorm:"not null;check:chk_album_ratings_score,score BETWEEN 1 AND 5"`
+	Score   int       `json:"score" gorm:"not null;check:chk_album_ratings_score,score BETWEEN 1 AND 10"`
 }
 
 func (AlbumRating) TableName() string { return "album_ratings" }
@@ -242,7 +242,7 @@ type SongRating struct {
 	Base
 	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_song_ratings_user_song,priority:1,where:deleted_at IS NULL"`
 	SongID uuid.UUID `json:"song_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_song_ratings_user_song,priority:2,where:deleted_at IS NULL"`
-	Score  int       `json:"score" gorm:"not null;check:chk_song_ratings_score,score BETWEEN 1 AND 5"`
+	Score  int       `json:"score" gorm:"not null;check:chk_song_ratings_score,score BETWEEN 1 AND 10"`
 }
 
 func (SongRating) TableName() string { return "song_ratings" }

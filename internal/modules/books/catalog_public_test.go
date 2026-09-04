@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
@@ -69,4 +71,47 @@ func TestPublicCatalogRoutesDoNotRequireAuthentication(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
 	require.Equal(t, int64(1), payload.Data.Total)
 	require.Equal(t, work.ID.String(), payload.Data.Items[0].ID)
+}
+
+func TestBookRatingRoutesLoadClearAndRestoreViewerRating(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookRating{})
+	work := model.BookWork{Base: model.Base{ID: uuid.New()}, Title: "Rateable Book", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	require.NoError(t, db.Create(&work).Error)
+	user := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, user)
+		c.Next()
+	})
+	RegisterRoutes(router.Group("/api/v1/books"), NewService(db))
+	path := "/api/v1/books/catalog/works/" + work.ID.String() + "/rating"
+
+	request := func(method, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	require.Equal(t, http.StatusOK, request(http.MethodPut, `{"score":9}`).Code)
+	loaded := request(http.MethodGet, "")
+	require.Equal(t, http.StatusOK, loaded.Code)
+	require.Contains(t, loaded.Body.String(), `"viewer_rating":9`)
+
+	cleared := request(http.MethodDelete, "")
+	require.Equal(t, http.StatusOK, cleared.Code)
+	require.NotContains(t, cleared.Body.String(), "viewer_rating")
+	require.Contains(t, cleared.Body.String(), `"rating_count":0`)
+
+	restored := request(http.MethodPut, `{"score":7}`)
+	require.Equal(t, http.StatusOK, restored.Code)
+	require.Contains(t, restored.Body.String(), `"viewer_rating":7`)
+	require.Contains(t, restored.Body.String(), `"rating_count":1`)
 }

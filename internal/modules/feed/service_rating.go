@@ -2,12 +2,12 @@ package feed
 
 import (
 	"errors"
-	"math"
 	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	ratingpolicy "atoman/internal/rating"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -24,8 +24,8 @@ func (s *Service) SetFeedItemRating(user authctx.CurrentUser, itemID uuid.UUID, 
 	if user.ID == uuid.Nil {
 		return FeedItemRatingSummary{}, apperr.Unauthorized("Login required")
 	}
-	if score < 1 || score > 10 {
-		return FeedItemRatingSummary{}, apperr.BadRequest("validation.invalid_request", "score must be between 1 and 10")
+	if !ratingpolicy.ValidScore(score) {
+		return FeedItemRatingSummary{}, apperr.BadRequest("validation.invalid_request", ratingpolicy.ScoreRangeMessage)
 	}
 	if err := s.ensureRateableFeedItem(itemID); err != nil {
 		return FeedItemRatingSummary{}, err
@@ -62,7 +62,7 @@ func (s *Service) FeedItemRatingSummary(itemID uuid.UUID, viewerID *uuid.UUID) (
 		return FeedItemRatingSummary{}, err
 	}
 	summary := FeedItemRatingSummary{
-		RatingScore: math.Round(aggregate.RatingScore*10) / 10,
+		RatingScore: ratingpolicy.RoundAverage(aggregate.RatingScore),
 		RatingCount: aggregate.RatingCount,
 	}
 	if viewerID == nil {

@@ -220,7 +220,7 @@ type PostRating struct {
 	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_post_ratings_user_content,priority:1,where:deleted_at IS NULL"`
 	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
 	ContentID uuid.UUID `json:"content_id" gorm:"type:uuid;index;uniqueIndex:idx_post_ratings_user_content,priority:2,where:deleted_at IS NULL"`
-	Score     int       `json:"score" gorm:"not null"`
+	Score     int       `json:"score" gorm:"not null;check:chk_post_ratings_score,score BETWEEN 1 AND 10"`
 }
 
 func (PostRating) TableName() string { return "post_ratings" }
@@ -408,7 +408,7 @@ type FeedItemRating struct {
 	Base
 	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_feed_item_ratings_user_item,priority:1,where:deleted_at IS NULL"`
 	FeedItemID uuid.UUID `json:"feed_item_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_feed_item_ratings_user_item,priority:2,where:deleted_at IS NULL"`
-	Score      int       `json:"score" gorm:"not null"`
+	Score      int       `json:"score" gorm:"not null;check:chk_feed_item_ratings_score,score BETWEEN 1 AND 10"`
 }
 
 func (FeedItemRating) TableName() string { return "feed_item_ratings" }

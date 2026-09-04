@@ -303,7 +303,7 @@ type BookRating struct {
 	Base
 	UserID uuid.UUID `json:"-" gorm:"type:uuid;not null;index;uniqueIndex:idx_book_ratings_user_work,priority:1"`
 	WorkID uuid.UUID `json:"work_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_book_ratings_user_work,priority:2"`
-	Score  int       `json:"score" gorm:"not null;check:chk_book_ratings_score,score BETWEEN 1 AND 5"`
+	Score  int       `json:"score" gorm:"not null;check:chk_book_ratings_score,score BETWEEN 1 AND 10"`
 }
 
 func (BookRating) TableName() string { return "book_ratings" }
