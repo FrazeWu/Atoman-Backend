@@ -49,6 +49,24 @@ func TestAppleAlbumType(t *testing.T) {
 	}
 }
 
+func TestAppleCollectionsExcludeSinglesAndEPs(t *testing.T) {
+	items := []appleLookupItem{
+		{WrapperType: "collection", CollectionID: 1, CollectionName: "Album", TrackCount: 10},
+		{WrapperType: "collection", CollectionID: 2, CollectionName: "Single - Single", TrackCount: 1},
+		{WrapperType: "collection", CollectionID: 3, CollectionName: "Short Release - EP", TrackCount: 5},
+	}
+	collections := appleCollections(items, 20)
+	if len(collections) != 1 || collections[0].CollectionID != 1 {
+		t.Fatalf("expected only the full album, got %#v", collections)
+	}
+}
+
+func TestAppleAlbumCoverUsesHighResolutionArtwork(t *testing.T) {
+	if got := appleArtworkURL("https://example.com/100x100bb.jpg"); got != "https://example.com/1200x1200bb.jpg" {
+		t.Fatalf("unexpected artwork URL %q", got)
+	}
+}
+
 func TestHipHopConsensusArtistSeedsAreRankedAndUnique(t *testing.T) {
 	seeds := HipHopConsensusArtistSeeds()
 	if len(seeds) != 100 {
