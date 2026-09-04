@@ -24,6 +24,7 @@ func newPublicRSSTestDB(t *testing.T) *gorm.DB {
 		&model.Channel{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.ContentEpisodeExtension{},
 		&model.ContentVideoExtension{},
 		&model.ContentCollection{},

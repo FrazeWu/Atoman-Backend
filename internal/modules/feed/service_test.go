@@ -203,6 +203,7 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.PostCollection{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.ContentEpisodeExtension{},
 		&model.ContentVideoExtension{},
 		&model.ContentCollection{},
@@ -325,7 +326,7 @@ func newUnifiedSubscriptionFixture(t *testing.T) (*Service, *gorm.DB, authctx.Cu
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PostCollection{},
-		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentBlogTag{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
 		&model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
 		&model.FeedSource{}, &model.Subscription{}, &model.FeedItem{}, &model.FeedItemRead{},
 		&model.Like{}, &model.DiscussionTarget{}, &model.Follow{},

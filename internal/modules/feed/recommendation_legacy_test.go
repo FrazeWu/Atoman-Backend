@@ -19,6 +19,7 @@ func TestRecommendArticlesUsesCanonicalBlogExtensions(t *testing.T) {
 		&model.Channel{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.ContentCollectionMembership{},
 		&model.FeedSource{},
 		&model.FeedItem{},
@@ -75,6 +76,7 @@ func TestRecommendArticlesRanksReadableFeedItemsAheadOfLowQualityCandidates(t *t
 		&model.Channel{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.FeedSource{},
 		&model.FeedItem{},
 		&model.FeedItemRead{},
@@ -129,6 +131,7 @@ func TestRecommendArticlesDeduplicatesFeedItemsByCanonicalLink(t *testing.T) {
 		&model.Channel{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.FeedSource{},
 		&model.FeedItem{},
 		&model.FeedItemRead{},
@@ -194,6 +197,7 @@ func TestRecommendArticlesReturnsEmptyWithoutCanonicalBlogExtensions(t *testing.
 		&model.Post{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.FeedItem{},
 		&model.FeedItemRead{},
 		&model.FeedItemStar{},
@@ -241,6 +245,7 @@ func TestRecommendChannelsReturnsEmptyWithoutCanonicalBlogExtensions(t *testing.
 		&model.Post{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 	)
 
 	user := model.User{
