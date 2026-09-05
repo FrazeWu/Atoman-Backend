@@ -332,6 +332,22 @@ func TestMatchMusicBrainzTracksByPositionStillRequiresTitleOrDuration(t *testing
 	}
 }
 
+func TestMatchMusicBrainzTracksRejectsMissingOpeningTrack(t *testing.T) {
+	release := testMusicBrainzRelease(
+		flattenedMusicBrainzTrack{Title: "Donda Chant"},
+		flattenedMusicBrainzTrack{Title: "Jail"},
+		flattenedMusicBrainzTrack{Title: "God Breathed"},
+	)
+
+	_, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
+		{Title: "Jail"},
+		{Title: "God Breathed"},
+	})
+	if ok {
+		t.Fatal("a release with a missing opening track must not be accepted")
+	}
+}
+
 func TestMatchMusicBrainzTracksMatches808s(t *testing.T) {
 	remote := testMusicBrainzRelease(
 		flattenedMusicBrainzTrack{Title: "Say You Will"},
@@ -367,7 +383,7 @@ func TestMatchMusicBrainzTracksLeavesAmbiguousDurationTracksUnmatched(t *testing
 		flattenedMusicBrainzTrack{Title: "Remote Six", DurationMS: 220000},
 		flattenedMusicBrainzTrack{Title: "Remote Seven", DurationMS: 220000},
 	)
-	mapping, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
+	_, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
 		{Title: "Known One", DurationSeconds: 200},
 		{Title: "Known Two", DurationSeconds: 210},
 		{Title: "Known Three", DurationSeconds: 212},
@@ -376,8 +392,8 @@ func TestMatchMusicBrainzTracksLeavesAmbiguousDurationTracksUnmatched(t *testing
 		{Title: "Local Six", DurationSeconds: 220},
 		{Title: "Local Seven", DurationSeconds: 220},
 	})
-	if !ok || len(mapping) != 7 || mapping[5] != -1 || mapping[6] != -1 {
-		t.Fatalf("ambiguous tracks should remain unmatched: %#v, %v", mapping, ok)
+	if ok {
+		t.Fatal("ambiguous tracks must cause the release to remain unmatched")
 	}
 }
 
@@ -440,29 +456,36 @@ func TestBestMusicBrainzReleaseAcceptsOtherNonOfficialStatuses(t *testing.T) {
 	}
 }
 
-func TestMatchMusicBrainzTracksAllowsDifferentTrackCounts(t *testing.T) {
+func TestMatchMusicBrainzTracksRejectsDifferentTrackCounts(t *testing.T) {
 	release := testMusicBrainzRelease(
 		flattenedMusicBrainzTrack{Title: "One", DurationMS: 100000},
 		flattenedMusicBrainzTrack{Title: "Two", DurationMS: 120000},
 		flattenedMusicBrainzTrack{Title: "Three", DurationMS: 140000},
 	)
-	mapping, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
+	_, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
 		{Title: "Extra Local", DurationSeconds: 180},
 		{Title: "Three", DurationSeconds: 140},
 		{Title: "One", DurationSeconds: 100},
 		{Title: "Two", DurationSeconds: 120},
 	})
-	if !ok || len(mapping) != 3 || mapping[0] != 2 || mapping[1] != 3 || mapping[2] != 1 {
-		t.Fatalf("mapping = %#v, %v", mapping, ok)
+	if ok {
+		t.Fatal("different track counts must not be accepted as a MusicBrainz match")
 	}
-	tracks := applyMusicBrainzTracks([]AlbumImportDTOTrack{
-		{Title: "Extra Local", AudioKey: "extra"},
-		{Title: "Three", AudioKey: "three"},
-		{Title: "One", AudioKey: "one"},
-		{Title: "Two", AudioKey: "two"},
-	}, release, mapping)
-	if len(tracks) != 4 || tracks[0].AudioKey != "one" || tracks[1].AudioKey != "two" || tracks[2].AudioKey != "three" || tracks[3].AudioKey != "extra" {
-		t.Fatalf("tracks = %#v", tracks)
+}
+
+func TestApplyMusicBrainzTracksKeepsOriginalOrderForIncompleteMapping(t *testing.T) {
+	release := testMusicBrainzRelease(
+		flattenedMusicBrainzTrack{Title: "Donda Chant"},
+		flattenedMusicBrainzTrack{Title: "Jail"},
+	)
+	tracks := []AlbumImportDTOTrack{
+		{Title: "Jail", AudioKey: "jail"},
+		{Title: "Local Track", AudioKey: "local"},
+	}
+
+	result := applyMusicBrainzTracks(tracks, release, []int{-1, 0})
+	if len(result) != 2 || result[0].AudioKey != "jail" || result[0].Title != "Jail" || result[1].AudioKey != "local" {
+		t.Fatalf("incomplete mapping must keep original tracks: %#v", result)
 	}
 }
 
