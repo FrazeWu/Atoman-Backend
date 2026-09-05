@@ -115,6 +115,7 @@ func seedReadyImportMedia(t *testing.T, db *gorm.DB, sessionID uuid.UUID, coverU
 	for index, title := range trackTitles {
 		tracks = append(tracks, map[string]any{
 			"title": title, "track_number": index + 1,
+			"audio_key": fmt.Sprintf("audio-%d", index+1),
 			"audio_url": fmt.Sprintf("https://cdn.test/%s/%d.mp3", sessionID, index+1),
 		})
 	}

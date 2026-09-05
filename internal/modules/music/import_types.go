@@ -2,6 +2,7 @@ package music
 
 type AlbumImportTrackPayload struct {
 	SongID      string `json:"song_id"`
+	AudioKey    string `json:"audio_key"`
 	Title       string `json:"title"`
 	DiscNumber  int    `json:"disc_number"`
 	TrackNumber int    `json:"track_number"`

@@ -1094,6 +1094,39 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	}
 }
 
+func TestCommitAlbumImportSessionKeepsAudioBoundWhenMatchedTracksAreRenamedAndReordered(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	seedReadyImportMedia(t, db, session.ID, "https://cdn.test/igor.jpg", "IGOR'S THEME", "EARFQUAKE")
+
+	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: completeAlbumImportArtistPayload("Tyler, The Creator"),
+		Album: AlbumImportAlbumPayload{
+			Title: "IGOR", CoverURL: "https://cdn.test/igor.jpg", ReleaseDate: "2019-05-17",
+			Tracks: []AlbumImportTrackPayload{
+				{Title: "EARFQUAKE (用户修改)", TrackNumber: 1, AudioKey: "audio-2"},
+				{Title: "IGOR'S THEME", TrackNumber: 2, AudioKey: "audio-1"},
+			},
+		},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
+	})
+	if err != nil {
+		t.Fatalf("commit session: %v", err)
+	}
+
+	var songs []model.Song
+	if err := db.Order("track_number ASC").Find(&songs).Error; err != nil {
+		t.Fatalf("load songs: %v", err)
+	}
+	if len(songs) != 2 || songs[0].AudioURL != fmt.Sprintf("https://cdn.test/%s/2.mp3", session.ID) || songs[1].AudioURL != fmt.Sprintf("https://cdn.test/%s/1.mp3", session.ID) {
+		t.Fatalf("expected reordered tracks to retain their original audio, got %#v", songs)
+	}
+}
+
 func TestCommitAlbumImportSessionReadyCreatesStandaloneSong(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	artist := model.Artist{Name: "Standalone Artist", EntryStatus: "open", LifecycleStatus: model.MusicLifecycleActive}

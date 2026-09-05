@@ -315,8 +315,8 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 		}
 		seenSongIDs := map[uuid.UUID]bool{}
-		for index, track := range payload.Album.Tracks {
-			derived := matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
+		for _, track := range payload.Album.Tracks {
+			derived := matchDerivedTrackAudio(rawDerivedTracks, track, usedDerivedTrackIndexes)
 			audioURL := strings.TrimSpace(derived.AudioURL)
 			metadata := songAudioMetadataFromImportFile(importFilesByID[derived.FileID])
 			var existingSong *model.Song
@@ -544,7 +544,7 @@ func (s *Service) commitStandaloneSongImport(
 		sessionPayload = map[string]any{}
 	}
 	rawDerivedTracks, _ := sessionPayload["derived_tracks"].([]any)
-	derived := matchDerivedTrackAudio(rawDerivedTracks, track, 0, map[int]bool{})
+	derived := matchDerivedTrackAudio(rawDerivedTracks, track, map[int]bool{})
 	var importFile model.AlbumImportFile
 	if derived.FileID != "" {
 		fileID, err := uuid.Parse(derived.FileID)
@@ -903,7 +903,7 @@ type derivedTrackAudio struct {
 	FileID   string
 }
 
-func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, index int, used map[int]bool) derivedTrackAudio {
+func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, used map[int]bool) derivedTrackAudio {
 	tryMatch := func(predicate func(map[string]any) bool) derivedTrackAudio {
 		for i, rawTrack := range rawDerivedTracks {
 			if used[i] {
@@ -928,6 +928,15 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		}
 	}
 
+	audioKey := strings.TrimSpace(track.AudioKey)
+	if audioKey != "" {
+		if audio := tryMatch(func(trackMap map[string]any) bool {
+			return strings.TrimSpace(stringValue(trackMap["audio_key"])) == audioKey
+		}); audio.AudioURL != "" {
+			return audio
+		}
+	}
+
 	title := strings.TrimSpace(track.Title)
 	if track.TrackNumber > 0 {
 		if audio := tryMatch(func(trackMap map[string]any) bool {
@@ -942,12 +951,6 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		return strings.TrimSpace(stringValue(trackMap["title"])) == title
 	}); audio.AudioURL != "" {
 		return audio
-	}
-	if index >= 0 && index < len(rawDerivedTracks) && !used[index] {
-		if trackMap, ok := rawDerivedTracks[index].(map[string]any); ok {
-			used[index] = true
-			return derivedTrackAudio{AudioURL: stringValue(trackMap["audio_url"]), FileID: stringValue(trackMap["file_id"])}
-		}
 	}
 	if track.AudioURL != "" {
 		return derivedTrackAudio{AudioURL: strings.TrimSpace(track.AudioURL)}
