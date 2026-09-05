@@ -516,6 +516,8 @@ type SubscriptionHubMembership struct {
 	FeedSource       *FeedSource           `json:"feed_source,omitempty" gorm:"foreignKey:FeedSourceID"`
 	Title            string                `json:"title"`
 	Position         int                   `json:"position" gorm:"not null;default:0;index"`
+	UnreadCount      int64                 `json:"unread_count" gorm:"-"`
+	HasContent       bool                  `json:"-" gorm:"-"`
 }
 
 func (SubscriptionHubMembership) TableName() string { return "subscription_hub_memberships" }

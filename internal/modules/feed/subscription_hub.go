@@ -152,8 +152,10 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 		}
 
 		var channelBookmarks []model.ChannelBookmark
-		if err := tx.Where("user_id = ? AND kind IN ?", userID, []string{"podcast_show", "video_channel"}).Order("created_at ASC").Find(&channelBookmarks).Error; err != nil {
-			return err
+		if tx.Migrator().HasTable(&model.ChannelBookmark{}) {
+			if err := tx.Where("user_id = ? AND kind IN ?", userID, []string{"podcast_show", "video_channel"}).Order("created_at ASC").Find(&channelBookmarks).Error; err != nil {
+				return err
+			}
 		}
 		if len(channelBookmarks) > 0 {
 			channelIDs := make([]uuid.UUID, 0, len(channelBookmarks))
@@ -420,6 +422,9 @@ func (s *Service) GetSubscriptionHubTree(userID uuid.UUID) (SubscriptionHubTree,
 	if err := s.hydrateSubscriptionHubSourceImages(memberships); err != nil {
 		return SubscriptionHubTree{}, err
 	}
+	if err := s.hydrateSubscriptionHubUnreadCounts(userID, memberships); err != nil {
+		return SubscriptionHubTree{}, err
+	}
 	for _, membership := range memberships {
 		location, ok := groupsByID[membership.GroupID]
 		if !ok {
@@ -433,22 +438,181 @@ func (s *Service) GetSubscriptionHubTree(userID uuid.UUID) (SubscriptionHubTree,
 	}
 
 	for typeIndex := range tree.Types {
-		membershipsForType := make([]model.SubscriptionHubMembership, 0)
 		for groupIndex := range tree.Types[typeIndex].Groups {
-			membershipsForType = append(membershipsForType, tree.Types[typeIndex].Groups[groupIndex].Memberships...)
+			for _, membership := range tree.Types[typeIndex].Groups[groupIndex].Memberships {
+				if membership.HasContent {
+					tree.Types[typeIndex].HasContent = true
+					break
+				}
+			}
+			if tree.Types[typeIndex].HasContent {
+				break
+			}
 		}
-		_, total, err := s.getSubscriptionHubTimeline(userID, membershipsForType, FeedQuery{
-			Page:        1,
-			PageSize:    1,
-			ContentType: subscriptionHubContentType(tree.Types[typeIndex].SubscriptionType),
-		})
-		if err != nil {
-			return SubscriptionHubTree{}, err
-		}
-		tree.Types[typeIndex].HasContent = total > 0
 	}
 
 	return tree, nil
+}
+
+func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, memberships []model.SubscriptionHubMembership) error {
+	userIDs := make([]uuid.UUID, 0)
+	channelIDs := make([]uuid.UUID, 0)
+	collectionIDs := make([]uuid.UUID, 0)
+	feedSourceIDs := make([]uuid.UUID, 0)
+	for _, membership := range memberships {
+		if membership.FeedSource == nil {
+			continue
+		}
+		switch membership.FeedSource.SourceType {
+		case "internal_user":
+			if membership.FeedSource.SourceID != nil {
+				userIDs = append(userIDs, *membership.FeedSource.SourceID)
+			}
+		case "internal_channel":
+			if membership.FeedSource.SourceID != nil {
+				channelIDs = append(channelIDs, *membership.FeedSource.SourceID)
+			}
+		case "internal_collection":
+			if membership.FeedSource.SourceID != nil {
+				collectionIDs = append(collectionIDs, *membership.FeedSource.SourceID)
+			}
+		case "external_rss":
+			feedSourceIDs = append(feedSourceIDs, membership.FeedSourceID)
+		}
+	}
+	userIDs = dedupeUUIDs(userIDs)
+	channelIDs = dedupeUUIDs(channelIDs)
+	collectionIDs = dedupeUUIDs(collectionIDs)
+	feedSourceIDs = dedupeUUIDs(feedSourceIDs)
+
+	read := make(map[string]map[uuid.UUID]bool)
+	if s.db.Migrator().HasTable(&model.ContentLifecycleEvent{}) {
+		type readRow struct {
+			ContentType string    `gorm:"column:content_type"`
+			ContentID   uuid.UUID `gorm:"column:content_id"`
+		}
+		var rows []readRow
+		if err := s.db.Model(&model.ContentLifecycleEvent{}).
+			Select("content_type, content_id").
+			Where("user_id = ? AND content_type IN ?", userID, []string{"blog", "podcast", "video"}).
+			Group("content_type, content_id").Scan(&rows).Error; err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if read[row.ContentType] == nil {
+				read[row.ContentType] = make(map[uuid.UUID]bool)
+			}
+			read[row.ContentType][row.ContentID] = true
+		}
+	}
+
+	markContent := func(subscriptionType string, contentID, ownerID uuid.UUID, channelID *uuid.UUID, collections []model.Collection) {
+		for index := range memberships {
+			membership := &memberships[index]
+			source := membership.FeedSource
+			if membership.SubscriptionType != subscriptionType || source == nil || source.SourceID == nil {
+				continue
+			}
+			matches := false
+			switch source.SourceType {
+			case "internal_user":
+				matches = *source.SourceID == ownerID
+			case "internal_channel":
+				matches = channelID != nil && *source.SourceID == *channelID
+			case "internal_collection":
+				for _, collection := range collections {
+					if collection.ID == *source.SourceID {
+						matches = true
+						break
+					}
+				}
+			}
+			if !matches {
+				continue
+			}
+			membership.HasContent = true
+			if !read[subscriptionType][contentID] {
+				membership.UnreadCount++
+			}
+		}
+	}
+
+	for _, definition := range []struct {
+		subscriptionType string
+		contentType      string
+	}{
+		{SubscriptionHubTypeBlog, "blog"},
+		{SubscriptionHubTypePodcast, "podcast"},
+	} {
+		userPosts, err := s.repo.ListPublishedPostsByUserIDs(userIDs, definition.contentType)
+		if err != nil {
+			return err
+		}
+		channelPosts, err := s.repo.ListPublishedPostsByChannelIDs(channelIDs, definition.contentType)
+		if err != nil {
+			return err
+		}
+		collectionPosts, err := s.repo.ListPublishedPostsByCollectionIDs(collectionIDs, definition.contentType)
+		if err != nil {
+			return err
+		}
+		posts := dedupePosts(append(append(userPosts, channelPosts...), collectionPosts...))
+		if definition.subscriptionType == SubscriptionHubTypePodcast {
+			postIDs := make([]uuid.UUID, 0, len(posts))
+			postByID := make(map[uuid.UUID]model.Post, len(posts))
+			for _, post := range posts {
+				postIDs = append(postIDs, post.ID)
+				postByID[post.ID] = post
+			}
+			episodes, err := s.repo.ListPodcastEpisodesByPostIDs(postIDs)
+			if err != nil {
+				return err
+			}
+			for _, episode := range episodes {
+				if post, ok := postByID[episode.PostID]; ok {
+					markContent(definition.subscriptionType, episode.ID, post.UserID, post.ChannelID, post.Collections)
+				}
+			}
+			continue
+		}
+		for _, post := range posts {
+			markContent(definition.subscriptionType, post.ID, post.UserID, post.ChannelID, post.Collections)
+		}
+	}
+
+	videos, err := s.repo.ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs, "video")
+	if err != nil {
+		return err
+	}
+	for _, video := range dedupeVideos(videos) {
+		markContent(SubscriptionHubTypeVideo, video.ID, video.UserID, video.ChannelID, video.Collections)
+	}
+
+	if len(feedSourceIDs) == 0 {
+		return nil
+	}
+	type unreadRow struct {
+		FeedSourceID uuid.UUID `gorm:"column:feed_source_id"`
+		Count        int64     `gorm:"column:count"`
+		TotalCount   int64     `gorm:"column:total_count"`
+	}
+	var rows []unreadRow
+	if err := s.db.Table("feed_items").Select("feed_items.feed_source_id, COUNT(*) AS total_count, COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM feed_item_reads WHERE feed_item_reads.feed_item_id = feed_items.id AND feed_item_reads.user_id = ?)) AS count", userID).Where("feed_items.feed_source_id IN ?", feedSourceIDs).Group("feed_items.feed_source_id").Scan(&rows).Error; err != nil {
+		return err
+	}
+	counts := make(map[uuid.UUID]int64, len(rows))
+	totals := make(map[uuid.UUID]int64, len(rows))
+	for _, row := range rows {
+		counts[row.FeedSourceID] = row.Count
+		totals[row.FeedSourceID] = row.TotalCount
+	}
+	for index := range memberships {
+		if memberships[index].FeedSource != nil && memberships[index].FeedSource.SourceType == "external_rss" {
+			memberships[index].UnreadCount = counts[memberships[index].FeedSourceID]
+			memberships[index].HasContent = totals[memberships[index].FeedSourceID] > 0
+		}
+	}
+	return nil
 }
 
 func (s *Service) hydrateSubscriptionHubSourceImages(memberships []model.SubscriptionHubMembership) error {
