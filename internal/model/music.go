@@ -96,7 +96,7 @@ type Album struct {
 	Status               string        `json:"status" gorm:"default:'open'"`
 	AlbumType            string        `json:"album_type" gorm:"default:'album'"`
 	EditionType          string        `json:"edition_type" gorm:"default:'original'"`
-	MusicBrainzMatched   bool          `json:"-" gorm:"column:musicbrainz_matched;not null;default:false;index"`
+	MusicBrainzMatched   bool          `json:"musicbrainz_matched" gorm:"column:musicbrainz_matched;not null;default:false;index"`
 	MusicBrainzReleaseID string        `json:"-" gorm:"column:musicbrainz_release_id;type:varchar(36);index"`
 	MusicBrainzMatchedAt *time.Time    `json:"-" gorm:"column:musicbrainz_matched_at"`
 	CanonicalAlbumID     *uuid.UUID    `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`

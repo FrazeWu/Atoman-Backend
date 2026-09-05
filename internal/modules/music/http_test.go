@@ -2927,6 +2927,20 @@ func TestRegisterRoutesAlbumResponsesResolveMediaURLs(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesAlbumDetailIncludesMusicBrainzMatchState(t *testing.T) {
+	encoded, err := json.Marshal(model.Album{MusicBrainzMatched: true})
+	if err != nil {
+		t.Fatalf("marshal album detail: %v", err)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(encoded, &response); err != nil {
+		t.Fatalf("decode album detail: %v", err)
+	}
+	if response["musicbrainz_matched"] != true {
+		t.Fatalf("expected MusicBrainz match state in album detail, got %s", encoded)
+	}
+}
+
 func TestResolveMusicMediaURLAvoidsDuplicatingUploadsPrefix(t *testing.T) {
 	t.Setenv("PUBLIC_UPLOADS_BASE_URL", "http://localhost:8080/uploads")
 	t.Setenv("STORAGE_TYPE", "")
