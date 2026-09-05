@@ -10,16 +10,17 @@ import (
 )
 
 type Service struct {
-	db                     *gorm.DB
-	repo                   *Repo
-	s3                     *s3.S3
-	albumImportMultipart   albumImportMultipartStore
-	assetUploadMultipart   albumImportMultipartStore
-	albumLinkSuggestions   AlbumLinkSuggestionProvider
-	applePreviewHTTPClient *http.Client
-	applePreviewBaseURL    string
-	lyricsSaveMu           sync.Mutex
-	lyricsVoteMu           sync.Mutex
+	db                          *gorm.DB
+	repo                        *Repo
+	s3                          *s3.S3
+	albumImportMultipart        albumImportMultipartStore
+	assetUploadMultipart        albumImportMultipartStore
+	albumLinkSuggestions        AlbumLinkSuggestionProvider
+	albumImportMetadataEnricher AlbumImportMetadataEnricher
+	applePreviewHTTPClient      *http.Client
+	applePreviewBaseURL         string
+	lyricsSaveMu                sync.Mutex
+	lyricsVoteMu                sync.Mutex
 }
 
 func NewService(db *gorm.DB) *Service {
@@ -43,6 +44,11 @@ func NewServiceWithS3(db *gorm.DB, s3Client *s3.S3) *Service {
 // The provider is optional so catalog reads remain available without external metadata.
 func (s *Service) WithAlbumLinkSuggestionProvider(provider AlbumLinkSuggestionProvider) *Service {
 	s.albumLinkSuggestions = provider
+	return s
+}
+
+func (s *Service) WithAlbumImportMetadataEnricher(enricher AlbumImportMetadataEnricher) *Service {
+	s.albumImportMetadataEnricher = enricher
 	return s
 }
 

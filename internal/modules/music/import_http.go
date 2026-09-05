@@ -12,6 +12,24 @@ import (
 	"github.com/google/uuid"
 )
 
+func (h *Handler) previewAlbumImportMetadata(c *gin.Context) {
+	if _, ok := authctx.Current(c); !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req AlbumImportMetadataPreviewInput
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	preview, err := h.service.PreviewAlbumImportMetadata(c.Request.Context(), req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, preview)
+}
+
 // createAlbumImportSession godoc
 // @Summary 创建专辑导入会话
 // @Tags music-imports

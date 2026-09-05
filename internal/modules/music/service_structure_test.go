@@ -18,6 +18,7 @@ func TestMusicServiceOnlyOwnsCompositionAndSharedPagination(t *testing.T) {
 		"NewService":                       true,
 		"NewServiceWithS3":                 true,
 		"WithAlbumLinkSuggestionProvider":  true,
+		"WithAlbumImportMetadataEnricher":  true,
 		"normalizeMusicRecommendationPage": true,
 	}
 	actual := make(map[string]bool)

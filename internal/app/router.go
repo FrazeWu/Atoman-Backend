@@ -82,13 +82,14 @@ func RegisterV1Routes(
 		if musicBrainzBaseURL == "" {
 			musicBrainzBaseURL = "https://musicbrainz.org"
 		}
-		musicService.WithAlbumLinkSuggestionProvider(music.NewExternalAlbumMetadataEnricher(
+		metadataEnricher := music.NewExternalAlbumMetadataEnricher(
 			&http.Client{Timeout: 5 * time.Second},
 			musicBrainzBaseURL,
 			"",
 			"",
 			userAgent,
-		))
+		)
+		musicService.WithAlbumLinkSuggestionProvider(metadataEnricher).WithAlbumImportMetadataEnricher(metadataEnricher)
 	}
 	music.RegisterRoutes(musicGroup, musicService)
 	reputation.RegisterRoutes(group.Group("/reputation"), reputation.NewService(db))

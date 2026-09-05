@@ -33,6 +33,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/uploads/:uploadId/complete", h.completeMusicAssetUpload)
 	group.DELETE("/uploads/:uploadId", h.cancelMusicAssetUpload)
 	group.POST("/imports/albums", h.createAlbumImportSession)
+	group.POST("/imports/albums/metadata-preview", h.previewAlbumImportMetadata)
 	group.GET("/imports/albums", h.listAlbumImportSessions)
 	group.POST("/imports/albums/:sessionId/upload", h.uploadAlbumImportArchive)
 	group.POST("/imports/albums/:sessionId/multipart", h.startAlbumImportMultipart)
