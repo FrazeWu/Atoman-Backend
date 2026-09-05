@@ -139,6 +139,48 @@ func TestSubscriptionHubUsesCurrentSourceIdentityImages(t *testing.T) {
 	}
 }
 
+func TestSubscriptionHubCountsUnreadContentForEachModule(t *testing.T) {
+	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
+	_, episode, _ := seedUnifiedChannelUpdates(t, db, creator, channel)
+	testdb.Migrate(t, db, &model.ContentLifecycleEvent{}, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: "subscription-hub-unread-channel", Title: channel.Name}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create channel source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatalf("create channel subscription: %v", err)
+	}
+	if err := db.Create(&model.ContentLifecycleEvent{
+		UserID: &viewer.ID, ChannelID: channel.ID, ContentType: "podcast", ContentID: episode.ID,
+		Event: "open", Source: "subscription", ClientEventID: "subscription-hub-podcast-open",
+	}).Error; err != nil {
+		t.Fatalf("record podcast read: %v", err)
+	}
+
+	tree, err := service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatalf("get subscription tree: %v", err)
+	}
+	for _, expected := range []struct {
+		subscriptionType string
+		unread           int64
+	}{
+		{SubscriptionHubTypeBlog, 1},
+		{SubscriptionHubTypePodcast, 0},
+		{SubscriptionHubTypeVideo, 1},
+	} {
+		group := firstSubscriptionHubGroup(tree, expected.subscriptionType)
+		if group == nil || len(group.Memberships) != 1 {
+			t.Fatalf("missing %s membership: %#v", expected.subscriptionType, group)
+		}
+		membership := group.Memberships[0]
+		if membership.UnreadCount != expected.unread || !membership.HasContent {
+			t.Fatalf("%s unread=%d has_content=%t, want unread=%d content=true", expected.subscriptionType, membership.UnreadCount, membership.HasContent, expected.unread)
+		}
+	}
+}
+
 func TestSubscriptionHubKeepsChannelContextsSeparatedByType(t *testing.T) {
 	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
 	_, episode, video := seedUnifiedChannelUpdates(t, db, creator, channel)
