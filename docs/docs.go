@@ -38054,6 +38054,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "is_edited": {
+                    "type": "boolean"
+                },
                 "lines": {
                     "type": "array",
                     "items": {
@@ -38061,6 +38064,9 @@ const docTemplate = `{
                     }
                 },
                 "song_id": {
+                    "type": "string"
+                },
+                "source": {
                     "type": "string"
                 },
                 "translation": {

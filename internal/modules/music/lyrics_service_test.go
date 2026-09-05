@@ -407,7 +407,7 @@ func TestPersistAlbumImportTrackLyricsCreatesInitialHistory(t *testing.T) {
 		return persistAlbumImportTrackLyrics(tx, user.ID, song.ID, &AlbumImportTrackLyricsPayload{
 			Content: "[00:01.00]Alpha", Translation: "[00:01.00]甲",
 			Format: "lrc", Language: "zh-CN", EditSummary: "添加歌词",
-		})
+		}, "lrclib")
 	})
 	if err != nil {
 		t.Fatalf("persist imported lyrics: %v", err)
@@ -418,6 +418,16 @@ func TestPersistAlbumImportTrackLyricsCreatesInitialHistory(t *testing.T) {
 	}
 	if lyrics.Version != 1 || len(lyrics.Lines) != 1 || lyrics.Lines[0].Translation != "甲" {
 		t.Fatalf("unexpected imported lyrics: %#v", lyrics)
+	}
+	if lyrics.Source != "lrclib" || lyrics.IsEdited {
+		t.Fatalf("unexpected imported lyrics source state: %#v", lyrics)
+	}
+	lyrics, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "Alpha", Format: "plain", EditSummary: "手动修订"})
+	if err != nil {
+		t.Fatalf("edit imported lyrics: %v", err)
+	}
+	if lyrics.Source != "lrclib" || !lyrics.IsEdited {
+		t.Fatalf("unexpected edited lyrics source state: %#v", lyrics)
 	}
 	var versions int64
 	if err := db.Model(&model.MusicSongLyricVersion{}).Where("song_id = ?", song.ID).Count(&versions).Error; err != nil {

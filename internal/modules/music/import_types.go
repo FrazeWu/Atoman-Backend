@@ -7,8 +7,9 @@ type AlbumImportTrackPayload struct {
 	DiscNumber  int    `json:"disc_number"`
 	TrackNumber int    `json:"track_number"`
 	// AudioURL is retained for internal processors and legacy tests only. Client JSON cannot set it.
-	AudioURL string                         `json:"-"`
-	Lyrics   *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
+	AudioURL     string                         `json:"-"`
+	Lyrics       *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
+	LyricsSource string                         `json:"lyrics_source,omitempty"`
 }
 
 type AlbumImportTrackLyricsPayload struct {

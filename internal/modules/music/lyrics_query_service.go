@@ -35,6 +35,7 @@ func (s *Service) GetSongLyrics(user authctx.CurrentUser, songID uuid.UUID) (Mus
 	dto.ID, dto.Content, dto.Translation, dto.Format = lyric.ID, lyric.Content, lyric.Translation, lyric.Format
 	dto.TranslationLanguage = lyric.TranslationLanguage
 	dto.Version, dto.UpdatedBy, dto.EditSummary, dto.UpdatedAt = lyric.Version, lyric.UpdatedBy, lyric.EditSummary, lyric.UpdatedAt
+	dto.Source, dto.IsEdited = lyric.Source, lyric.Source != "" && lyric.Version > 1
 	var lines []model.MusicSongLyricLine
 	if err := s.db.Where("lyric_id = ?", lyric.ID).Order("line_index ASC").Find(&lines).Error; err != nil {
 		return MusicLyricsDTO{}, err

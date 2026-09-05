@@ -368,7 +368,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				if err := tx.Model(&song).Association("Artists").Replace(artists); err != nil {
 					return err
 				}
-				if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics); err != nil {
+				if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics, track.LyricsSource); err != nil {
 					return err
 				}
 				continue
@@ -418,7 +418,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			if err := tx.Model(&song).Association("Artists").Append(artists); err != nil {
 				return err
 			}
-			if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics); err != nil {
+			if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics, track.LyricsSource); err != nil {
 				return err
 			}
 		}
@@ -626,7 +626,7 @@ func (s *Service) commitStandaloneSongImport(
 	if err := replaceStandaloneSongArtistCredits(tx, song.ID, credits, user.ID); err != nil {
 		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
 	}
-	if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics); err != nil {
+	if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics, track.LyricsSource); err != nil {
 		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
 	}
 	for _, resolved := range resolvedArtists {
@@ -776,7 +776,7 @@ func (s *Service) markAlbumImportNeedsAttention(userID, importID uuid.UUID, mess
 	return out, nil
 }
 
-func persistAlbumImportTrackLyrics(tx *gorm.DB, actorID, songID uuid.UUID, payload *AlbumImportTrackLyricsPayload) error {
+func persistAlbumImportTrackLyrics(tx *gorm.DB, actorID, songID uuid.UUID, payload *AlbumImportTrackLyricsPayload, source string) error {
 	if payload == nil {
 		return nil
 	}
@@ -801,7 +801,13 @@ func persistAlbumImportTrackLyrics(tx *gorm.DB, actorID, songID uuid.UUID, paylo
 	if err != nil {
 		return err
 	}
-	return persistSongLyrics(tx, actorID, songID, input, lines, false)
+	if err := persistSongLyrics(tx, actorID, songID, input, lines, false); err != nil {
+		return err
+	}
+	if strings.TrimSpace(source) == "" {
+		return nil
+	}
+	return tx.Model(&model.MusicSongLyric{}).Where("song_id = ?", songID).Update("source", strings.TrimSpace(source)).Error
 }
 
 // FinalizeSubmittedAlbumImport creates a submitted album after media processing reaches ready.
@@ -1125,6 +1131,7 @@ func albumImportTracksFromDerived(payload map[string]any) []AlbumImportTrackPayl
 		track := AlbumImportTrackPayload{
 			SongID: stringValue(trackMap["song_id"]), Title: title,
 			DiscNumber: normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))), TrackNumber: trackNumber,
+			LyricsSource: stringValue(trackMap["lyrics_source"]),
 		}
 		if lyricsMap, ok := trackMap["lyrics"].(map[string]any); ok {
 			track.Lyrics = &AlbumImportTrackLyricsPayload{

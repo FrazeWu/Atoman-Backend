@@ -124,6 +124,8 @@ type MusicLyricsDTO struct {
 	Version             int                       `json:"version"`
 	UpdatedBy           uuid.UUID                 `json:"updated_by"`
 	EditSummary         string                    `json:"edit_summary"`
+	Source              string                    `json:"source"`
+	IsEdited            bool                      `json:"is_edited"`
 	UpdatedAt           time.Time                 `json:"updated_at"`
 	Lines               []MusicLyricLineDTO       `json:"lines"`
 	Annotations         []MusicLyricAnnotationDTO `json:"annotations"`

@@ -14,6 +14,7 @@ type MusicSongLyric struct {
 	UpdatedBy           uuid.UUID `json:"updated_by" gorm:"type:uuid;not null;index"`
 	UpdatedByUser       *User     `json:"updated_by_user,omitempty" gorm:"foreignKey:UpdatedBy;references:UUID"`
 	EditSummary         string    `json:"edit_summary" gorm:"type:text;not null;default:''"`
+	Source              string    `json:"source" gorm:"not null;default:''"`
 }
 
 func (MusicSongLyric) TableName() string { return "music_song_lyrics" }

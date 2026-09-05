@@ -7005,11 +7005,15 @@ definitions:
         type: string
       id:
         type: string
+      is_edited:
+        type: boolean
       lines:
         items:
           $ref: '#/definitions/music.MusicLyricLineDTO'
         type: array
       song_id:
+        type: string
+      source:
         type: string
       translation:
         type: string

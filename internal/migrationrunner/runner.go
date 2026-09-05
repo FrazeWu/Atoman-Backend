@@ -75,6 +75,7 @@ func Run(db *gorm.DB) error {
 		{"music favorite playlist migration", runMusicFavoritePlaylistMigration},
 		{"music play counts migration", migrations.RunMusicPlayCountsMigration},
 		{"music lyrics migration", migrations.RunMusicLyricsMigration},
+		{"music lyrics source migration", migrations.RunMusicLyricsSourceMigration},
 		{"global search indexes migration", migrations.RunGlobalSearchIndexes},
 		{"search query indexes migration", migrations.RunSearchQueryIndexes},
 		{"music listening migration", migrations.RunMusicListeningMigration},

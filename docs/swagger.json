@@ -38051,6 +38051,9 @@
                 "id": {
                     "type": "string"
                 },
+                "is_edited": {
+                    "type": "boolean"
+                },
                 "lines": {
                     "type": "array",
                     "items": {
@@ -38058,6 +38061,9 @@
                     }
                 },
                 "song_id": {
+                    "type": "string"
+                },
+                "source": {
                     "type": "string"
                 },
                 "translation": {
