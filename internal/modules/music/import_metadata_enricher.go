@@ -463,8 +463,8 @@ func musicBrainzDurationDifference(release musicBrainzRelease, uploaded []AlbumI
 	return difference
 }
 
-// matchMusicBrainzTracks maps safely identifiable remote tracks to uploaded audio.
-// A release is accepted when at least 70% of the smaller track list is matched.
+// matchMusicBrainzTracks maps every remote track to exactly one uploaded audio track.
+// Incomplete mappings are rejected so a missing intro cannot shift the displayed order.
 func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
 	remote := flattenMusicBrainzTracks(release)
 	if len(remote) == 0 || len(uploaded) == 0 {
@@ -480,6 +480,9 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 		if mapping, ok := matchMusicBrainzTracksByDurationMajority(remote, uploaded); ok {
 			return mapping, true
 		}
+	}
+	if len(remote) != len(uploaded) {
+		return nil, false
 	}
 	mapping := make([]int, len(remote))
 	for index := range mapping {
@@ -528,8 +531,7 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 			matched++
 		}
 	}
-	requiredBase := minInt(len(remote), len(uploaded))
-	if matched*100/requiredBase < 70 {
+	if matched != len(remote) {
 		return nil, false
 	}
 	return mapping, true
@@ -831,8 +833,13 @@ func flattenMusicBrainzTracks(release musicBrainzRelease) []flattenedMusicBrainz
 
 func applyMusicBrainzTracks(tracks []AlbumImportDTOTrack, release musicBrainzRelease, mapping []int) []AlbumImportDTOTrack {
 	remote := flattenMusicBrainzTracks(release)
-	if len(mapping) != len(remote) {
+	if len(mapping) != len(remote) || len(tracks) != len(remote) {
 		return tracks
+	}
+	for _, uploadedIndex := range mapping {
+		if uploadedIndex < 0 {
+			return tracks
+		}
 	}
 	result := make([]AlbumImportDTOTrack, 0, len(tracks))
 	used := make([]bool, len(tracks))
@@ -863,13 +870,6 @@ func musicBrainzReleaseStatusRank(status string) int {
 		return 2
 	}
 	return 1
-}
-
-func minInt(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
 }
 
 func (e *ExternalAlbumMetadataEnricher) musicBrainzJSON(ctx context.Context, endpoint string, target any) error {
