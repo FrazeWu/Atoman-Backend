@@ -43,16 +43,24 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 		playbackURLPrefix = strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
 	}
 	processor := NewMediaImportProcessor(db, mediaStore, NewSystemMediaCommandRunner(), playbackURLPrefix)
-	if userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT")); userAgent != "" {
-		processor.WithMetadataEnricher(NewExternalAlbumMetadataEnricher(
+	userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT"))
+	discogsKey := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_KEY"))
+	discogsSecret := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_SECRET"))
+	if userAgent != "" || (discogsKey != "" && discogsSecret != "") {
+		if userAgent == "" {
+			userAgent = "Atoman/1.0 (https://www.atoman.org)"
+		}
+		metadataEnricher := NewExternalAlbumMetadataEnricher(
 			&http.Client{Timeout: 10 * time.Second},
 			envOrDefault("MUSICBRAINZ_BASE_URL", "https://musicbrainz.org"),
 			envOrDefault("COVER_ART_ARCHIVE_BASE_URL", "https://coverartarchive.org"),
 			envOrDefault("LRCLIB_BASE_URL", "https://lrclib.net"),
 			userAgent,
-		))
+		)
+		metadataEnricher.WithDiscogs(envOrDefault("DISCOGS_BASE_URL", "https://api.discogs.com"), discogsKey, discogsSecret)
+		processor.WithMetadataEnricher(metadataEnricher)
 	} else {
-		log.Println("music metadata enrichment disabled: MUSICBRAINZ_USER_AGENT is empty")
+		log.Println("music metadata enrichment disabled: MUSICBRAINZ_USER_AGENT and Discogs credentials are empty")
 	}
 	importService := NewServiceWithS3(db, s3Client)
 	worker := NewImportWorker(db, NewMusicImportObjectStore(s3Client), workerID).WithCompletionFinalizer(

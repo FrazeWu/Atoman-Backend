@@ -13,9 +13,10 @@ type AlbumImportMetadataPreviewInput struct {
 }
 
 type AlbumImportMetadataPreviewDTO struct {
-	Matched   bool                  `json:"matched"`
-	SourceURL string                `json:"sourceUrl"`
-	Tracks    []AlbumImportDTOTrack `json:"tracks"`
+	Matched        bool                  `json:"matched"`
+	SourceURL      string                `json:"sourceUrl"`
+	MetadataSource string                `json:"metadataSource,omitempty"`
+	Tracks         []AlbumImportDTOTrack `json:"tracks"`
 }
 
 func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImportMetadataPreviewInput) (AlbumImportMetadataPreviewDTO, error) {
@@ -40,8 +41,8 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 		Tracks:     tracks,
 		SkipLyrics: true,
 	})
-	if err != nil || result.MusicBrainzReleaseID == "" {
+	if err != nil || result.MetadataSource == "" {
 		return AlbumImportMetadataPreviewDTO{Tracks: []AlbumImportDTOTrack{}}, nil
 	}
-	return AlbumImportMetadataPreviewDTO{Matched: true, SourceURL: result.SourceURL, Tracks: result.Tracks}, nil
+	return AlbumImportMetadataPreviewDTO{Matched: true, SourceURL: result.SourceURL, MetadataSource: result.MetadataSource, Tracks: result.Tracks}, nil
 }

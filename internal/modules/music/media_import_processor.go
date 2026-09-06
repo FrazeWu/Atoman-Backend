@@ -977,11 +977,15 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	if result.CoverURL != "" && stringValue(payload["cover_key"]) == "" {
 		payload["derived_cover"] = result.CoverURL
 	}
-	if result.SourceURL != "" {
+	if result.SourceURL != "" || result.MetadataSource != "" {
 		payload["metadata_source_url"] = result.SourceURL
+		payload["metadata_source"] = result.MetadataSource
+		payload["metadata_matched"] = result.MetadataSource != ""
 		payload["musicbrainz_release_id"] = result.MusicBrainzReleaseID
 	} else {
 		delete(payload, "metadata_source_url")
+		delete(payload, "metadata_source")
+		delete(payload, "metadata_matched")
 		delete(payload, "musicbrainz_release_id")
 	}
 	if len(result.MissingArtists) > 0 {

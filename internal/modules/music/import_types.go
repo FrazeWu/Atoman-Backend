@@ -219,6 +219,8 @@ type AlbumImportDTO struct {
 	DerivedReleaseDate string                         `json:"derivedReleaseDate,omitempty"`
 	DerivedAlbumType   string                         `json:"derivedAlbumType,omitempty"`
 	MetadataSourceURL  string                         `json:"metadataSourceUrl,omitempty"`
+	MetadataSource     string                         `json:"metadataSource,omitempty"`
+	MetadataMatched    bool                           `json:"metadataMatched"`
 	MissingArtists     []string                       `json:"missingArtists,omitempty"`
 	LastSyncedAt       string                         `json:"lastSyncedAt"`
 	ErrorMessage       string                         `json:"errorMessage"`

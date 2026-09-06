@@ -36999,6 +36999,12 @@ const docTemplate = `{
                 "metadataSourceUrl": {
                     "type": "string"
                 },
+                "metadataMatched": {
+                    "type": "boolean"
+                },
+                "metadataSource": {
+                    "type": "string"
+                },
                 "missingArtists": {
                     "type": "array",
                     "items": {

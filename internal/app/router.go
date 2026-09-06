@@ -77,7 +77,13 @@ func RegisterV1Routes(
 	musicGroup := group.Group("/music")
 	musicGroup.Use(middleware.OptionalAuthMiddleware())
 	musicService := music.NewServiceWithS3(db, s3Client)
-	if userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT")); userAgent != "" {
+	userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT"))
+	discogsKey := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_KEY"))
+	discogsSecret := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_SECRET"))
+	if userAgent != "" || (discogsKey != "" && discogsSecret != "") {
+		if userAgent == "" {
+			userAgent = "Atoman/1.0 (https://www.atoman.org)"
+		}
 		musicBrainzBaseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("MUSICBRAINZ_BASE_URL")), "/")
 		if musicBrainzBaseURL == "" {
 			musicBrainzBaseURL = "https://musicbrainz.org"
@@ -89,6 +95,11 @@ func RegisterV1Routes(
 			"",
 			userAgent,
 		)
+		discogsBaseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("DISCOGS_BASE_URL")), "/")
+		if discogsBaseURL == "" {
+			discogsBaseURL = "https://api.discogs.com"
+		}
+		metadataEnricher.WithDiscogs(discogsBaseURL, discogsKey, discogsSecret)
 		musicService.WithAlbumLinkSuggestionProvider(metadataEnricher).WithAlbumImportMetadataEnricher(metadataEnricher)
 	}
 	music.RegisterRoutes(musicGroup, musicService)

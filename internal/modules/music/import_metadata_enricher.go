@@ -46,6 +46,7 @@ type AlbumImportMetadataResult struct {
 	AlbumType            string
 	CoverURL             string
 	SourceURL            string
+	MetadataSource       string
 	MusicBrainzReleaseID string
 	MissingArtists       []string
 	MetadataError        string
@@ -57,17 +58,23 @@ type AlbumImportMetadataEnricher interface {
 }
 
 type ExternalAlbumMetadataEnricher struct {
-	httpClient      *http.Client
-	musicBrainzBase string
-	coverArtBase    string
-	lrcLibBase      string
-	userAgent       string
-	requestMu       sync.Mutex
-	lastMBRequest   time.Time
-	musicBrainzWait time.Duration
-	lrcLibMu        sync.Mutex
-	lastLRCRequest  time.Time
-	lrcLibWait      time.Duration
+	httpClient         *http.Client
+	musicBrainzBase    string
+	coverArtBase       string
+	lrcLibBase         string
+	userAgent          string
+	discogsBase        string
+	discogsKey         string
+	discogsSecret      string
+	requestMu          sync.Mutex
+	lastMBRequest      time.Time
+	musicBrainzWait    time.Duration
+	discogsMu          sync.Mutex
+	lastDiscogsRequest time.Time
+	discogsWait        time.Duration
+	lrcLibMu           sync.Mutex
+	lastLRCRequest     time.Time
+	lrcLibWait         time.Duration
 }
 
 func NewExternalAlbumMetadataEnricher(httpClient *http.Client, musicBrainzBase, coverArtBase, lrcLibBase, userAgent string) *ExternalAlbumMetadataEnricher {
@@ -77,8 +84,21 @@ func NewExternalAlbumMetadataEnricher(httpClient *http.Client, musicBrainzBase, 
 	return &ExternalAlbumMetadataEnricher{
 		httpClient: httpClient, musicBrainzBase: strings.TrimRight(musicBrainzBase, "/"),
 		coverArtBase: strings.TrimRight(coverArtBase, "/"), lrcLibBase: strings.TrimRight(lrcLibBase, "/"),
-		userAgent: strings.TrimSpace(userAgent), musicBrainzWait: time.Second, lrcLibWait: time.Second,
+		userAgent: strings.TrimSpace(userAgent), musicBrainzWait: time.Second, discogsWait: time.Second, lrcLibWait: time.Second,
 	}
+}
+
+func (e *ExternalAlbumMetadataEnricher) WithDiscogs(baseURL, consumerKey, consumerSecret string) *ExternalAlbumMetadataEnricher {
+	if e == nil {
+		return e
+	}
+	e.discogsBase = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if e.discogsBase == "" {
+		e.discogsBase = "https://api.discogs.com"
+	}
+	e.discogsKey = strings.TrimSpace(consumerKey)
+	e.discogsSecret = strings.TrimSpace(consumerSecret)
+	return e
 }
 
 type musicBrainzRelease struct {
@@ -134,6 +154,41 @@ type musicBrainzReleaseGroup struct {
 	ArtistCredit []musicBrainzArtistCredit `json:"artist-credit"`
 }
 
+type discogsRelease struct {
+	ID       int    `json:"id"`
+	Title    string `json:"title"`
+	Released string `json:"released"`
+	Year     int    `json:"year"`
+	URI      string `json:"uri"`
+	Artists  []struct {
+		Name string `json:"name"`
+	} `json:"artists"`
+	Images []struct {
+		Type string `json:"type"`
+		URI  string `json:"uri"`
+	} `json:"images"`
+	Formats []struct {
+		Name string `json:"name"`
+	} `json:"formats"`
+	Tracklist []struct {
+		Position string `json:"position"`
+		Title    string `json:"title"`
+		Duration string `json:"duration"`
+		Type     string `json:"type_"`
+	} `json:"tracklist"`
+}
+
+type discogsSearchResult struct {
+	ID          int    `json:"id"`
+	ResourceURL string `json:"resource_url"`
+	Title       string `json:"title"`
+	Type        string `json:"type"`
+}
+
+type discogsSearchResponse struct {
+	Results []discogsSearchResult `json:"results"`
+}
+
 func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumImportMetadataInput) (AlbumImportMetadataResult, error) {
 	result := AlbumImportMetadataResult{AlbumTitle: input.AlbumTitle, Tracks: baseMetadataTracks(input.Tracks)}
 	if e == nil {
@@ -148,17 +203,40 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	if err != nil {
 		result.MetadataError = err.Error()
 	}
+	lyricsArtists := []string{}
 	if releaseMatched {
 		result.AlbumTitle = release.Title
 		result.ReleaseDate = release.Date
 		result.AlbumType = normalizeMusicBrainzAlbumType(release.ReleaseGroup.PrimaryType)
 		result.SourceURL = e.musicBrainzBase + "/release/" + release.ID
+		result.MetadataSource = "musicbrainz"
 		result.MusicBrainzReleaseID = release.ID
 		result.MissingArtists = missingMusicBrainzArtists(release.ArtistCredit, uniqueMusicArtists(append([]string{input.Artist}, input.Artists...)))
 		if e.coverArtBase != "" {
 			result.CoverURL = e.coverArtBase + "/release/" + release.ID + "/front-500"
 		}
 		result.Tracks = applyMusicBrainzTracks(result.Tracks, release, trackMapping)
+		lyricsArtists = musicBrainzReleaseArtistNames(release)
+	} else if input.PreferredReleaseID == "" {
+		discogsRelease, discogsMapping, discogsErr := e.findDiscogsRelease(ctx, input)
+		if discogsErr == nil {
+			releaseMatched = true
+			result.AlbumTitle = discogsRelease.Title
+			result.ReleaseDate = discogsRelease.Released
+			if result.ReleaseDate == "" && discogsRelease.Year > 0 {
+				result.ReleaseDate = strconv.Itoa(discogsRelease.Year)
+			}
+			result.AlbumType = discogsAlbumType(discogsRelease)
+			result.SourceURL = discogsReleaseURL(discogsRelease)
+			result.MetadataSource = "discogs"
+			result.CoverURL = discogsReleaseCoverURL(discogsRelease)
+			result.Tracks = applyDiscogsTracks(result.Tracks, discogsRelease, discogsMapping)
+			lyricsArtists = discogsReleaseArtistNames(discogsRelease)
+		} else if err != nil {
+			result.MetadataError = fmt.Errorf("MusicBrainz: %v; Discogs: %w", err, discogsErr).Error()
+		} else {
+			result.MetadataError = discogsErr.Error()
+		}
 	}
 
 	if input.SkipLyrics {
@@ -177,7 +255,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		missingLyrics = append(missingLyrics, index)
 	}
 	if !releaseMatched {
-		log.Printf("WARN: skipping LRCLIB lookup because MusicBrainz did not safely match album=%q error=%v", input.AlbumTitle, result.MetadataError)
+		log.Printf("WARN: skipping LRCLIB lookup because no external metadata source safely matched album=%q error=%v", input.AlbumTitle, result.MetadataError)
 		return result, nil
 	}
 	var lyricsWG sync.WaitGroup
@@ -190,7 +268,10 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 			lyricsSlots <- struct{}{}
 			defer func() { <-lyricsSlots }()
 			original := metadataTrackForResult(input.Tracks, result.Tracks[index])
-			artistCandidates := musicBrainzReleaseArtistNames(release)
+			artistCandidates := lyricsArtists
+			if len(artistCandidates) == 0 {
+				artistCandidates = musicBrainzReleaseArtistNames(release)
+			}
 			if len(artistCandidates) == 0 {
 				artistCandidates = uniqueMusicArtists(append([]string{original.Artist, input.Artist}, input.Artists...))
 			}
@@ -279,6 +360,255 @@ func (e *ExternalAlbumMetadataEnricher) findRelease(ctx context.Context, input A
 		lastErr = errors.New("MusicBrainz has no safe matching release")
 	}
 	return musicBrainzRelease{}, nil, lastErr
+}
+
+func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, input AlbumImportMetadataInput) (discogsRelease, []int, error) {
+	if e.discogsBase == "" || e.discogsKey == "" || e.discogsSecret == "" {
+		return discogsRelease{}, nil, errors.New("Discogs is not configured")
+	}
+	if strings.TrimSpace(input.AlbumTitle) == "" || len(input.Tracks) == 0 {
+		return discogsRelease{}, nil, errors.New("not enough metadata for Discogs lookup")
+	}
+
+	artists := uniqueMusicArtists(append([]string{input.Artist}, input.Artists...))
+	firstArtist := ""
+	if len(artists) > 0 {
+		firstArtist = artists[0]
+	}
+	searches := []string{firstArtist}
+	if firstArtist == "" {
+		searches = []string{""}
+	} else {
+		searches = append(searches, "")
+	}
+	for _, artist := range searches {
+		params := url.Values{
+			"release_title": {musicBrainzLookupAlbumTitle(input.AlbumTitle)},
+			"type":          {"release"},
+			"per_page":      {"10"},
+		}
+		if artist != "" {
+			params.Set("artist", artist)
+		}
+		var search discogsSearchResponse
+		if err := e.discogsJSON(ctx, e.discogsBase+"/database/search?"+params.Encode(), &search); err != nil {
+			return discogsRelease{}, nil, err
+		}
+		for _, candidate := range search.Results {
+			if candidate.ID <= 0 || !strings.EqualFold(candidate.Type, "release") {
+				continue
+			}
+			endpoint := fmt.Sprintf("%s/releases/%d", e.discogsBase, candidate.ID)
+			var release discogsRelease
+			if err := e.discogsJSON(ctx, endpoint, &release); err != nil {
+				continue
+			}
+			if release.ID <= 0 || !musicBrainzAlbumTitlesMatch(release.Title, input.AlbumTitle) || !discogsArtistMatches(release, artists) {
+				continue
+			}
+			remote := flattenDiscogsTracks(release)
+			matchingRelease := discogsReleaseAsMusicBrainzRelease(release, remote)
+			mapping, ok := matchMusicBrainzTracks(matchingRelease, input.Tracks)
+			if ok {
+				return release, mapping, nil
+			}
+		}
+	}
+	return discogsRelease{}, nil, errors.New("Discogs candidates did not safely match uploaded tracks")
+}
+
+func (e *ExternalAlbumMetadataEnricher) discogsJSON(ctx context.Context, endpoint string, target any) error {
+	e.discogsMu.Lock()
+	defer e.discogsMu.Unlock()
+	if wait := e.discogsWait - time.Since(e.lastDiscogsRequest); wait > 0 && !e.lastDiscogsRequest.IsZero() {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Authorization", "Discogs key="+e.discogsKey+", secret="+e.discogsSecret)
+	if e.userAgent != "" {
+		request.Header.Set("User-Agent", e.userAgent)
+	}
+	response, err := e.httpClient.Do(request)
+	e.lastDiscogsRequest = time.Now()
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return metadataServiceHTTPError{statusCode: response.StatusCode, status: response.Status, retryAfter: parseRetryAfter(response.Header.Get("Retry-After"))}
+	}
+	return json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(target)
+}
+
+func discogsReleaseAsMusicBrainzRelease(release discogsRelease, tracks []flattenedMusicBrainzTrack) musicBrainzRelease {
+	matching := musicBrainzRelease{ID: strconv.Itoa(release.ID), Title: release.Title, Date: release.Released}
+	matching.ReleaseGroup.Title = release.Title
+	for _, track := range tracks {
+		mediumIndex := track.Disc
+		for len(matching.Media) < mediumIndex {
+			matching.Media = append(matching.Media, struct {
+				Position int `json:"position"`
+				Tracks   []struct {
+					Position  int    `json:"position"`
+					Title     string `json:"title"`
+					Length    int    `json:"length"`
+					Recording struct {
+						Title  string `json:"title"`
+						Length int    `json:"length"`
+					} `json:"recording"`
+				} `json:"tracks"`
+			}{Position: len(matching.Media) + 1})
+		}
+		medium := &matching.Media[mediumIndex-1]
+		medium.Tracks = append(medium.Tracks, struct {
+			Position  int    `json:"position"`
+			Title     string `json:"title"`
+			Length    int    `json:"length"`
+			Recording struct {
+				Title  string `json:"title"`
+				Length int    `json:"length"`
+			} `json:"recording"`
+		}{Position: track.Position, Title: track.Title, Length: track.DurationMS})
+	}
+	return matching
+}
+
+func flattenDiscogsTracks(release discogsRelease) []flattenedMusicBrainzTrack {
+	tracks := make([]flattenedMusicBrainzTrack, 0, len(release.Tracklist))
+	for index, track := range release.Tracklist {
+		if strings.TrimSpace(track.Type) != "" && !strings.EqualFold(track.Type, "track") {
+			continue
+		}
+		title := strings.TrimSpace(track.Title)
+		if title == "" {
+			continue
+		}
+		disc, position := parseDiscogsTrackPosition(track.Position, len(tracks)+1)
+		tracks = append(tracks, flattenedMusicBrainzTrack{
+			Title: title, Disc: disc, Position: position, DurationMS: int(discogsDurationSeconds(track.Duration) * 1000),
+		})
+		if position <= 0 {
+			tracks[len(tracks)-1].Position = index + 1
+		}
+	}
+	return tracks
+}
+
+func parseDiscogsTrackPosition(value string, fallback int) (int, int) {
+	value = strings.TrimSpace(value)
+	if parts := strings.Split(value, "-"); len(parts) == 2 {
+		disc, discErr := strconv.Atoi(strings.TrimSpace(parts[0]))
+		track, trackErr := strconv.Atoi(strings.TrimSpace(parts[1]))
+		if discErr == nil && trackErr == nil && disc > 0 && track > 0 {
+			return disc, track
+		}
+	}
+	letterCount := 0
+	for letterCount < len(value) && unicode.IsLetter(rune(value[letterCount])) {
+		letterCount++
+	}
+	if letterCount > 0 {
+		disc := 0
+		for _, letter := range strings.ToUpper(value[:letterCount]) {
+			disc = disc*26 + int(letter-'A') + 1
+		}
+		track, err := strconv.Atoi(strings.TrimSpace(value[letterCount:]))
+		if err == nil && track > 0 {
+			return disc, track
+		}
+	}
+	if track, err := strconv.Atoi(value); err == nil && track > 0 {
+		return 1, track
+	}
+	return 1, fallback
+}
+
+func discogsDurationSeconds(value string) float64 {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0
+	}
+	seconds, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil {
+		return 0
+	}
+	minutes, err := strconv.Atoi(parts[len(parts)-2])
+	if err != nil {
+		return 0
+	}
+	if len(parts) == 3 {
+		hours, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return 0
+		}
+		return float64(hours*3600 + minutes*60 + seconds)
+	}
+	return float64(minutes*60 + seconds)
+}
+
+func discogsArtistMatches(release discogsRelease, artists []string) bool {
+	if len(artists) == 0 {
+		return true
+	}
+	for _, remote := range release.Artists {
+		for _, local := range artists {
+			if compactMusicText(remote.Name) == compactMusicText(local) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func discogsReleaseURL(release discogsRelease) string {
+	if strings.TrimSpace(release.URI) != "" {
+		return strings.TrimSpace(release.URI)
+	}
+	return fmt.Sprintf("https://www.discogs.com/release/%d", release.ID)
+}
+
+func discogsReleaseCoverURL(release discogsRelease) string {
+	for _, image := range release.Images {
+		if strings.EqualFold(image.Type, "primary") && strings.TrimSpace(image.URI) != "" {
+			return strings.TrimSpace(image.URI)
+		}
+	}
+	for _, image := range release.Images {
+		if strings.TrimSpace(image.URI) != "" {
+			return strings.TrimSpace(image.URI)
+		}
+	}
+	return ""
+}
+
+func discogsReleaseArtistNames(release discogsRelease) []string {
+	artists := make([]string, 0, len(release.Artists))
+	for _, artist := range release.Artists {
+		artists = append(artists, artist.Name)
+	}
+	return uniqueMusicArtists(artists)
+}
+
+func discogsAlbumType(release discogsRelease) string {
+	for _, format := range release.Formats {
+		name := strings.ToLower(strings.TrimSpace(format.Name))
+		if strings.Contains(name, "single") {
+			return "single"
+		}
+		if strings.Contains(name, "ep") {
+			return "ep"
+		}
+	}
+	return "album"
 }
 
 func (e *ExternalAlbumMetadataEnricher) findReleaseWithArtist(ctx context.Context, input AlbumImportMetadataInput, artist string) (musicBrainzRelease, []int, error) {
@@ -832,7 +1162,14 @@ func flattenMusicBrainzTracks(release musicBrainzRelease) []flattenedMusicBrainz
 }
 
 func applyMusicBrainzTracks(tracks []AlbumImportDTOTrack, release musicBrainzRelease, mapping []int) []AlbumImportDTOTrack {
-	remote := flattenMusicBrainzTracks(release)
+	return applyMatchedExternalTracks(tracks, flattenMusicBrainzTracks(release), mapping)
+}
+
+func applyDiscogsTracks(tracks []AlbumImportDTOTrack, release discogsRelease, mapping []int) []AlbumImportDTOTrack {
+	return applyMatchedExternalTracks(tracks, flattenDiscogsTracks(release), mapping)
+}
+
+func applyMatchedExternalTracks(tracks []AlbumImportDTOTrack, remote []flattenedMusicBrainzTrack, mapping []int) []AlbumImportDTOTrack {
 	if len(mapping) != len(remote) || len(tracks) != len(remote) {
 		return tracks
 	}

@@ -89,6 +89,8 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 		DerivedReleaseDate: stringValue(payload["derived_release_date"]),
 		DerivedAlbumType:   stringValue(payload["derived_album_type"]),
 		MetadataSourceURL:  stringValue(payload["metadata_source_url"]),
+		MetadataSource:     stringValue(payload["metadata_source"]),
+		MetadataMatched:    boolValue(payload["metadata_matched"]),
 		MissingArtists:     missingArtists,
 		LastSyncedAt:       session.UpdatedAt.Format(time.RFC3339),
 		ErrorMessage:       errorMessage,
@@ -206,6 +208,11 @@ func stringValue(value any) string {
 	default:
 		return ""
 	}
+}
+
+func boolValue(value any) bool {
+	parsed, ok := value.(bool)
+	return ok && parsed
 }
 
 func floatValue(value any) float64 {
