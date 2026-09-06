@@ -141,10 +141,13 @@ func TestResourceManagementMigrationRenamesLegacyUnifiedDefaultCollection(t *tes
 	owner := model.User{Username: "default-name-owner", Email: "default-name-owner@example.com", Password: "hash", IsActive: true}
 	require.NoError(t, db.Create(&owner).Error)
 	legacyChannel := model.Channel{UserID: &owner.UUID, Name: "朗读频道", Slug: "reading-channel"}
+	bracketChannel := model.Channel{UserID: &owner.UUID, Name: "带括号频道", Slug: "bracket-channel"}
 	customChannel := model.Channel{UserID: &owner.UUID, Name: "自定义频道", Slug: "custom-channel"}
 	require.NoError(t, db.Create(&legacyChannel).Error)
+	require.NoError(t, db.Create(&bracketChannel).Error)
 	require.NoError(t, db.Create(&customChannel).Error)
 	require.NoError(t, db.Create(&model.ContentCollection{ChannelID: legacyChannel.ID, CreatedBy: &owner.UUID, Name: "未分类", IsDefault: true}).Error)
+	require.NoError(t, db.Create(&model.ContentCollection{ChannelID: bracketChannel.ID, CreatedBy: &owner.UUID, Name: "《带括号频道》的合集", IsDefault: true}).Error)
 	custom := model.ContentCollection{ChannelID: customChannel.ID, CreatedBy: &owner.UUID, Name: "精选内容", IsDefault: true}
 	require.NoError(t, db.Create(&custom).Error)
 
@@ -153,6 +156,9 @@ func TestResourceManagementMigrationRenamesLegacyUnifiedDefaultCollection(t *tes
 	var renamed model.ContentCollection
 	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", legacyChannel.ID, true).First(&renamed).Error)
 	require.Equal(t, "朗读频道的合集", renamed.Name)
+	var unquoted model.ContentCollection
+	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", bracketChannel.ID, true).First(&unquoted).Error)
+	require.Equal(t, "带括号频道的合集", unquoted.Name)
 	var kept model.ContentCollection
 	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", customChannel.ID, true).First(&kept).Error)
 	require.Equal(t, "精选内容", kept.Name)
