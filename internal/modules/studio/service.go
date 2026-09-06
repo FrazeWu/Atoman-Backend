@@ -445,10 +445,14 @@ func (s *Service) ensureSystemDefaultCollection(channelID uuid.UUID, module Modu
 	var collection model.ContentCollection
 	err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		var channel model.Channel
+		if err := s.db.Select("id", "name").First(&channel, "id = ?", channelID).Error; err != nil {
+			return model.Collection{}, err
+		}
 		collection = model.ContentCollection{
 			ChannelID:   channelID,
 			CreatedBy:   &ownerID,
-			Name:        defaultStudioCollectionName,
+			Name:        channelDefaultCollectionName(channel.Name),
 			Description: defaultStudioCollectionDescription,
 			IsDefault:   true,
 		}
@@ -462,15 +466,22 @@ func (s *Service) ensureSystemDefaultCollection(channelID uuid.UUID, module Modu
 }
 
 const (
-	defaultStudioCollectionName        = "默认合集"
 	defaultStudioCollectionDescription = "默认合集"
 )
+
+func channelDefaultCollectionName(channelName string) string {
+	channelName = strings.TrimSpace(channelName)
+	if channelName == "" {
+		channelName = "默认频道"
+	}
+	return fmt.Sprintf("《%s》的合集", channelName)
+}
 
 func createSystemDefaultCollections(tx *gorm.DB, channelID, ownerID uuid.UUID, channelName string) error {
 	collection := model.ContentCollection{
 		ChannelID:   channelID,
 		CreatedBy:   &ownerID,
-		Name:        fmt.Sprintf("《%s》的合集", channelName),
+		Name:        channelDefaultCollectionName(channelName),
 		Description: defaultStudioCollectionDescription,
 		IsDefault:   true,
 	}
