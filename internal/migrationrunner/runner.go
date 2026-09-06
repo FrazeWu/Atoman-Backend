@@ -382,10 +382,10 @@ func cleanupLegacyDefaultChannel(tx *gorm.DB, userID, channelID uuid.UUID) error
 	if err := tx.Model(&model.UserStudioState{}).Where("user_id = ? AND channel_id = ?", userID, channelID).Update("channel_id", nil).Error; err != nil {
 		return err
 	}
-	if err := tx.Delete(&collection).Error; err != nil {
+	if err := tx.Delete(&channel).Error; err != nil {
 		return err
 	}
-	return tx.Delete(&channel).Error
+	return tx.Delete(&collection).Error
 }
 
 func preparePostgresExtensions(db *gorm.DB) error {
