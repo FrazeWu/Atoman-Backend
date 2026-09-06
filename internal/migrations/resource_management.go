@@ -27,7 +27,7 @@ func channelDefaultCollectionName(channelName string) string {
 	return fmt.Sprintf("%s的合集", channelName)
 }
 
-func isLegacySystemDefaultCollectionName(name string) bool {
+func isLegacySystemDefaultCollectionName(name, channelName string) bool {
 	name = strings.TrimSpace(name)
 	if name == "未分类" {
 		return true
@@ -37,7 +37,11 @@ func isLegacySystemDefaultCollectionName(name string) bool {
 			return true
 		}
 	}
-	return false
+	channelName = strings.TrimSpace(channelName)
+	if channelName == "" {
+		channelName = "默认频道"
+	}
+	return name == fmt.Sprintf("《%s》的合集", channelName)
 }
 
 // RunResourceManagementMigration establishes the additive single-collection model.
@@ -87,7 +91,7 @@ func ensureStudioDefaultCollections(tx *gorm.DB) (map[string]uuid.UUID, error) {
 			}
 		} else if err != nil {
 			return nil, fmt.Errorf("load unified default collection for channel %s: %w", channel.ID, err)
-		} else if isLegacySystemDefaultCollectionName(unified.Name) {
+		} else if isLegacySystemDefaultCollectionName(unified.Name, channel.Name) {
 			if err := tx.Model(&unified).Update("name", channelDefaultCollectionName(channel.Name)).Error; err != nil {
 				return nil, fmt.Errorf("rename unified default collection for channel %s: %w", channel.ID, err)
 			}
