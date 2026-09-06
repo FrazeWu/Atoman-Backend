@@ -242,7 +242,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		}
 		lyricsArtists = discogsReleaseArtistNames(discogsRelease)
 	}
-	if e.preferDiscogs && input.PreferredReleaseID == "" {
+	if e.preferDiscogs {
 		var matchedRelease discogsRelease
 		var mapping []int
 		matchedRelease, mapping, discogsErr = e.findDiscogsRelease(ctx, input)

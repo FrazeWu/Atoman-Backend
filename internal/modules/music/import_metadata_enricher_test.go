@@ -229,7 +229,7 @@ func TestExternalAlbumMetadataEnricherCanPreferDiscogs(t *testing.T) {
 		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
 	enricher.discogsWait = 0
 	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
-		AlbumTitle: "Album", Artist: "Artist", SkipLyrics: true,
+		AlbumTitle: "Album", Artist: "Artist", PreferredReleaseID: "preferred-id", SkipLyrics: true,
 		Tracks: []AlbumImportMetadataTrack{{Title: "First Song", DurationSeconds: 200, AudioKey: "first"}},
 	})
 	if err != nil {
