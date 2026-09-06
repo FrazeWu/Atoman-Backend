@@ -7,6 +7,7 @@ const (
 	ModeFeatured Mode = "featured"
 	ModeDiscover Mode = "discover"
 	ModeLatest   Mode = "latest"
+	ModeRandom   Mode = "random"
 )
 
 type EntityType string

@@ -782,7 +782,7 @@ func (r *Repo) listLegacyRecommendationArticlePosts(includeText bool, publishedA
 	return posts, err
 }
 
-func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category string, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticleFeedItemRow, error) {
+func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category string, publishedAfter time.Time, keywords []string, languageCode string, search string, sourceIDs []uuid.UUID, limit int) ([]RecommendationArticleFeedItemRow, error) {
 	columns := []string{
 		"feed_items.id",
 		"feed_items.feed_source_id",
@@ -815,6 +815,9 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		Where("feed_items.published_at >= ?", publishedAfter).
 		Where(recommendationFeedItemQualityPredicate(), recommendationFeedReaderQualityThreshold, recommendationFeedFallbackWordCount, recommendationFeedFallbackSummaryLength).
 		Where(recommendationFeedItemCategorySQL()+" = ?", category)
+	if len(sourceIDs) > 0 {
+		db = db.Where("feed_items.feed_source_id IN ?", sourceIDs)
+	}
 	db = applyRecommendationLanguageFilter(db, "feed_items.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "feed_items.title", "feed_items.summary", keywords)
 	db = applyRecommendationFeedItemSearchFilter(db, search)

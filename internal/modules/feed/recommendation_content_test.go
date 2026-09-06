@@ -121,3 +121,67 @@ func TestRecommendArticlesSeparatesHotFromFeaturedRanking(t *testing.T) {
 		t.Fatalf("expected higher-quality article first for featured mode, got %+v", featuredItems)
 	}
 }
+
+func TestCuratedRecommendationsOnlyUseTwelveTopSourcesForLanguage(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.FeedSource{},
+		&model.FeedItem{},
+		&model.Subscription{},
+	)
+
+	now := time.Now().UTC()
+	selectedItemIDs := make(map[string]struct{}, 12)
+	for index := 0; index < 12; index++ {
+		source := model.FeedSource{
+			SourceType:   "external_rss",
+			Hash:         "selected-source-" + uuid.NewString(),
+			Title:        "Selected source",
+			Category:     "blog",
+			LanguageCode: "zh",
+		}
+		if err := db.Create(&source).Error; err != nil {
+			t.Fatalf("create selected source: %v", err)
+		}
+		if err := db.Create(&model.Subscription{UserID: uuid.New(), FeedSourceID: source.ID}).Error; err != nil {
+			t.Fatalf("create selected subscription: %v", err)
+		}
+		item := model.FeedItem{
+			FeedSourceID: source.ID, GUID: "selected-item-" + uuid.NewString(), Title: "Selected item",
+			Summary: strings.Repeat("完整内容。", 80), Link: "https://example.com/selected/" + source.ID.String(),
+			ReaderQualityScore: 90, FullTextWordCount: 1200, LanguageCode: "zh", PublishedAt: now, FetchedAt: now,
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create selected item: %v", err)
+		}
+		selectedItemIDs[item.ID.String()] = struct{}{}
+	}
+
+	unselectedSource := model.FeedSource{SourceType: "external_rss", Hash: "unselected-source-" + uuid.NewString(), Title: "Unselected source", Category: "blog", LanguageCode: "zh"}
+	if err := db.Create(&unselectedSource).Error; err != nil {
+		t.Fatalf("create unselected source: %v", err)
+	}
+	unselectedItem := model.FeedItem{
+		FeedSourceID: unselectedSource.ID, GUID: "unselected-item", Title: "Unselected item",
+		Summary: strings.Repeat("完整内容。", 80), Link: "https://example.com/unselected",
+		ReaderQualityScore: 100, FullTextWordCount: 1200, LanguageCode: "zh", PublishedAt: now, FetchedAt: now,
+	}
+	if err := db.Create(&unselectedItem).Error; err != nil {
+		t.Fatalf("create unselected item: %v", err)
+	}
+
+	for _, mode := range []recommendation.Mode{recommendation.ModeFeatured, recommendation.ModeRandom} {
+		items, _, err := NewService(db).RecommendArticlesByMode(mode, "blog", "", "zh", "", 1, 20)
+		if err != nil {
+			t.Fatalf("recommend %s articles: %v", mode, err)
+		}
+		if len(items) != 12 {
+			t.Fatalf("expected 12 curated items for %s, got %#v", mode, items)
+		}
+		for _, item := range items {
+			if _, ok := selectedItemIDs[item.ID]; !ok || item.ID == unselectedItem.ID.String() {
+				t.Fatalf("%s recommendations must exclude items outside the top 12 sources: %#v", mode, items)
+			}
+		}
+	}
+}

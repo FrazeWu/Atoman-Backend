@@ -1201,7 +1201,7 @@ func TestFeedRecommendationModeValidation(t *testing.T) {
 	}
 }
 
-func TestFeedRecommendationLatestModeIsAccepted(t *testing.T) {
+func TestFeedRecommendationRandomModeIsAccepted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, _, _ := newFeedTestService(t)
 
@@ -1209,15 +1209,15 @@ func TestFeedRecommendationLatestModeIsAccepted(t *testing.T) {
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
 	for _, rawURL := range []string{
-		"/api/v1/feed/recommend/articles?mode=latest",
-		"/api/v1/feed/recommend/channels?mode=latest",
+		"/api/v1/feed/recommend/articles?mode=random",
+		"/api/v1/feed/recommend/channels?mode=random",
 	} {
 		req := httptest.NewRequest(http.MethodGet, rawURL, nil)
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
 
 		if rr.Code != http.StatusOK {
-			t.Fatalf("expected latest mode to be accepted for %s, got %d with body %s", rawURL, rr.Code, rr.Body.String())
+			t.Fatalf("expected random mode to be accepted for %s, got %d with body %s", rawURL, rr.Code, rr.Body.String())
 		}
 	}
 }
