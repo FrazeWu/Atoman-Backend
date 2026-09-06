@@ -118,7 +118,7 @@ func TestResourceManagementMigrationProtectsDefaultAndReusesDeletedNames(t *test
 
 	var collection model.ContentCollection
 	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&collection).Error)
-	require.Equal(t, "《Case Name》的合集", collection.Name)
+	require.Equal(t, "Case Name的合集", collection.Name)
 	require.Error(t, db.Delete(&collection).Error)
 	require.Error(t, db.Model(&collection).Update("is_default", false).Error)
 	require.Error(t, db.Create(&model.Channel{UserID: &owner.UUID, Name: "case name", Slug: "case-name-2"}).Error)
@@ -152,7 +152,7 @@ func TestResourceManagementMigrationRenamesLegacyUnifiedDefaultCollection(t *tes
 
 	var renamed model.ContentCollection
 	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", legacyChannel.ID, true).First(&renamed).Error)
-	require.Equal(t, "《朗读频道》的合集", renamed.Name)
+	require.Equal(t, "朗读频道的合集", renamed.Name)
 	var kept model.ContentCollection
 	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", customChannel.ID, true).First(&kept).Error)
 	require.Equal(t, "精选内容", kept.Name)
