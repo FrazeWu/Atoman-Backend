@@ -155,7 +155,7 @@ func backfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent, discog
 		return nil, err
 	}
 	enricher := NewExternalAlbumMetadataEnricher(&http.Client{Timeout: 10 * time.Second}, "https://musicbrainz.org", "https://coverartarchive.org", "https://lrclib.net", userAgent).
-		WithDiscogs(discogsBaseURL, discogsConsumerKey, discogsConsumerSecret)
+		WithDiscogs(discogsBaseURL, discogsConsumerKey, discogsConsumerSecret).WithDiscogsFirst()
 	results := make([]CatalogMetadataBackfillResult, 0, len(albums))
 	for index := range albums {
 		preferredReleaseID := ""
