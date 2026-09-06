@@ -146,6 +146,74 @@ func TestSubscriptionHubBuildsAllViewFromSubscriptionsWithoutDerivedTables(t *te
 	}
 }
 
+func TestSubscriptionHubHidesChannelsOwnedBySubscribedAccounts(t *testing.T) {
+	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
+	testdb.Migrate(t, db, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+
+	otherCreator := model.User{Username: "other-creator", Email: "other-creator@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&otherCreator).Error; err != nil {
+		t.Fatalf("create other creator: %v", err)
+	}
+	otherChannel := model.Channel{UserID: &otherCreator.UUID, Name: "Other Channel", Slug: "other-channel"}
+	if err := db.Create(&otherChannel).Error; err != nil {
+		t.Fatalf("create other channel: %v", err)
+	}
+
+	accountSource := model.FeedSource{
+		SourceType: "internal_user",
+		SourceID:   &creator.UUID,
+		Hash:       "subscription-hub-account-precedence-user",
+		Title:      creator.Username,
+	}
+	ownedChannelSource := model.FeedSource{
+		SourceType: "internal_channel",
+		SourceID:   &channel.ID,
+		Hash:       "subscription-hub-account-precedence-owned-channel",
+		Title:      channel.Name,
+	}
+	otherChannelSource := model.FeedSource{
+		SourceType: "internal_channel",
+		SourceID:   &otherChannel.ID,
+		Hash:       "subscription-hub-account-precedence-other-channel",
+		Title:      otherChannel.Name,
+	}
+	for _, source := range []*model.FeedSource{&accountSource, &ownedChannelSource, &otherChannelSource} {
+		if err := db.Create(source).Error; err != nil {
+			t.Fatalf("create subscription source: %v", err)
+		}
+		if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+			t.Fatalf("create subscription: %v", err)
+		}
+	}
+
+	tree, err := service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatalf("get subscription hub tree: %v", err)
+	}
+	for _, subscriptionType := range []string{SubscriptionHubTypeAll, SubscriptionHubTypePodcast, SubscriptionHubTypeVideo, SubscriptionHubTypeBlog} {
+		group := firstSubscriptionHubGroup(tree, subscriptionType)
+		if group == nil {
+			t.Fatalf("missing %s group", subscriptionType)
+		}
+		foundAccount := false
+		foundOwnedChannel := false
+		foundOtherChannel := false
+		for _, membership := range group.Memberships {
+			switch membership.FeedSourceID {
+			case accountSource.ID:
+				foundAccount = true
+			case ownedChannelSource.ID:
+				foundOwnedChannel = true
+			case otherChannelSource.ID:
+				foundOtherChannel = true
+			}
+		}
+		if !foundAccount || foundOwnedChannel || !foundOtherChannel {
+			t.Fatalf("%s memberships account=%t owned_channel=%t other_channel=%t", subscriptionType, foundAccount, foundOwnedChannel, foundOtherChannel)
+		}
+	}
+}
+
 func TestSubscriptionHubUsesCurrentSourceIdentityImages(t *testing.T) {
 	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
 	testdb.Migrate(t, db, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
