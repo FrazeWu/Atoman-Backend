@@ -323,6 +323,11 @@ func cleanupLegacyDefaultChannels(db *gorm.DB) error {
 func cleanupLegacyDefaultChannel(tx *gorm.DB, userID, channelID uuid.UUID) error {
 	var user model.User
 	if err := tx.First(&user, "uuid = ?", userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// A stale studio state can outlive a soft-deleted account. It is
+			// already unusable, so leave it untouched and continue the migration.
+			return nil
+		}
 		return err
 	}
 	var channel model.Channel

@@ -259,6 +259,19 @@ func TestRunMigrationsCleansEmptyLegacyDefaultChannel(t *testing.T) {
 	}
 }
 
+func TestCleanupLegacyDefaultChannelsSkipsOrphanedState(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.UserStudioState{})
+	orphanedUserID := uuid.New()
+	channelID := uuid.New()
+	if err := db.Create(&model.UserStudioState{UserID: orphanedUserID, ChannelID: &channelID}).Error; err != nil {
+		t.Fatalf("create orphaned studio state: %v", err)
+	}
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("cleanup orphaned state: %v", err)
+	}
+}
+
 func TestRunMigrationsDeduplicatesLegacyForumDrafts(t *testing.T) {
 	db := testdb.Open(t)
 	if err := db.Exec(`
