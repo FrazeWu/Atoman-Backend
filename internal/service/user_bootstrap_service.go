@@ -18,8 +18,6 @@ import (
 const (
 	defaultSubscriptionGroupName = "默认分组"
 	defaultBookmarkFolderName    = "默认收藏夹"
-	defaultChannelDescription    = "默认合集"
-	defaultCollectionName        = "默认合集"
 	minChannelSlugLength         = 2
 	maxChannelSlugLength         = 30
 )
@@ -33,14 +31,6 @@ func NewUserBootstrapService(db *gorm.DB) *UserBootstrapService {
 }
 
 func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string) error {
-	channel, err := s.ensureStudioChannel(userID, username)
-	if err != nil {
-		return err
-	}
-	if err := s.ensureDefaultCollectionForChannel(userID, channel.ID); err != nil {
-		return err
-	}
-
 	group, err := s.ensureDefaultSubscriptionGroup(userID)
 	if err != nil {
 		return err
@@ -52,101 +42,6 @@ func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string)
 		return err
 	}
 	return nil
-}
-
-func (s *UserBootstrapService) ensureStudioChannel(userID uuid.UUID, username string) (*model.Channel, error) {
-	var state model.UserStudioState
-	if err := s.db.Preload("Channel").First(&state, "user_id = ?", userID).Error; err == nil {
-		if state.Channel != nil && state.Channel.UserID != nil && *state.Channel.UserID == userID {
-			return state.Channel, nil
-		}
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	var channel model.Channel
-	err := s.db.Where("user_id = ?", userID).Order("created_at ASC, id ASC").First(&channel).Error
-	if err == nil {
-		if err := s.saveStudioState(userID, channel.ID); err != nil {
-			return nil, err
-		}
-		return &channel, nil
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	baseName := strings.TrimSpace(username)
-	if baseName == "" {
-		baseName = defaultChannelDescription
-	}
-	slugBase := strings.TrimSpace(username)
-	if slugBase == "" {
-		slugBase = "channel"
-	}
-
-	name, err := s.uniqueChannelName(baseName)
-	if err != nil {
-		return nil, err
-	}
-	slug, err := s.uniqueChannelSlug(slugBase)
-	if err != nil {
-		return nil, err
-	}
-
-	channel = model.Channel{
-		UserID:      &userID,
-		Name:        name,
-		Slug:        slug,
-		Description: defaultChannelDescription,
-	}
-	if err := s.db.Create(&channel).Error; err != nil {
-		return nil, err
-	}
-	if err := s.saveStudioState(userID, channel.ID); err != nil {
-		return nil, err
-	}
-	return &channel, nil
-}
-
-func (s *UserBootstrapService) saveStudioState(userID, channelID uuid.UUID) error {
-	return s.db.Save(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
-}
-
-func (s *UserBootstrapService) ensureDefaultCollectionForChannel(userID, channelID uuid.UUID) error {
-	var collection model.ContentCollection
-	err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-
-	var softDeleted model.ContentCollection
-	softErr := s.db.Unscoped().Where(
-		"channel_id = ? AND (is_default = ? OR name = ?)",
-		channelID, true, defaultCollectionName,
-	).First(&softDeleted).Error
-	if softErr == nil && softDeleted.DeletedAt.Valid {
-		return s.db.Unscoped().Model(&softDeleted).Updates(map[string]any{
-			"deleted_at": nil,
-			"is_default": true,
-			"created_by": userID,
-		}).Error
-	}
-	if softErr != nil && !errors.Is(softErr, gorm.ErrRecordNotFound) {
-		return softErr
-	}
-
-	collection = model.ContentCollection{
-		ChannelID:   channelID,
-		CreatedBy:   &userID,
-		Name:        defaultCollectionName,
-		Description: defaultChannelDescription,
-		IsDefault:   true,
-	}
-	return s.db.Create(&collection).Error
 }
 
 func (s *UserBootstrapService) ensureDefaultSubscriptionGroup(userID uuid.UUID) (*model.SubscriptionGroup, error) {

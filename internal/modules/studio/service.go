@@ -110,7 +110,7 @@ func (s *Service) CreateChannel(user authctx.CurrentUser, input CreateChannelInp
 		if err := tx.Create(&channel).Error; err != nil {
 			return err
 		}
-		if err := createSystemDefaultCollections(tx, channel.ID, user.ID); err != nil {
+		if err := createSystemDefaultCollections(tx, channel.ID, user.ID, channel.Name); err != nil {
 			return err
 		}
 		if err := recordStudioAudit(tx, user.ID, "studio.channel_created", "channel", channel.ID, map[string]any{"slug": channel.Slug}); err != nil {
@@ -466,11 +466,11 @@ const (
 	defaultStudioCollectionDescription = "默认合集"
 )
 
-func createSystemDefaultCollections(tx *gorm.DB, channelID, ownerID uuid.UUID) error {
+func createSystemDefaultCollections(tx *gorm.DB, channelID, ownerID uuid.UUID, channelName string) error {
 	collection := model.ContentCollection{
 		ChannelID:   channelID,
 		CreatedBy:   &ownerID,
-		Name:        defaultStudioCollectionName,
+		Name:        fmt.Sprintf("《%s》的合集", channelName),
 		Description: defaultStudioCollectionDescription,
 		IsDefault:   true,
 	}

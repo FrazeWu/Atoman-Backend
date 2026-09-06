@@ -2,6 +2,7 @@ package migrationrunner
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -93,6 +94,7 @@ func Run(db *gorm.DB) error {
 		{"music revision baselines migration", runMusicRevisionBaselinesMigration},
 		{"unified studio migration", migrations.RunUnifiedStudioMigration},
 		{"user default resources migration", backfillUserDefaultResources},
+		{"legacy default channel cleanup", cleanupLegacyDefaultChannels},
 		{"resource management migration", migrations.RunResourceManagementMigration},
 		{"unified content migration", migrations.RunUnifiedContentMigration},
 		{"blog archive removal migration", migrations.RunBlogArchiveRemovalMigration},
@@ -296,6 +298,89 @@ func backfillUserDefaultResources(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+const legacyDefaultChannelDescription = "默认合集"
+
+func cleanupLegacyDefaultChannels(db *gorm.DB) error {
+	var states []model.UserStudioState
+	if err := db.Where("channel_id IS NOT NULL").Find(&states).Error; err != nil {
+		return err
+	}
+	for _, state := range states {
+		if state.ChannelID == nil {
+			continue
+		}
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			return cleanupLegacyDefaultChannel(tx, state.UserID, *state.ChannelID)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cleanupLegacyDefaultChannel(tx *gorm.DB, userID, channelID uuid.UUID) error {
+	var user model.User
+	if err := tx.First(&user, "uuid = ?", userID).Error; err != nil {
+		return err
+	}
+	var channel model.Channel
+	if err := tx.First(&channel, "id = ? AND user_id = ?", channelID, userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if channel.Name != user.Username || channel.Description != legacyDefaultChannelDescription || channel.CoverURL != "" {
+		return nil
+	}
+
+	var collections []model.ContentCollection
+	if err := tx.Unscoped().Where("channel_id = ?", channelID).Find(&collections).Error; err != nil {
+		return err
+	}
+	if len(collections) != 1 {
+		return nil
+	}
+	collection := collections[0]
+	if collection.DeletedAt.Valid || !collection.IsDefault || collection.Name != legacyDefaultChannelDescription || collection.Description != legacyDefaultChannelDescription || collection.CreatedBy == nil || *collection.CreatedBy != userID {
+		return nil
+	}
+
+	checks := []struct {
+		model any
+		field string
+	}{
+		{&model.ContentEntry{}, "channel_id"},
+		{&model.Post{}, "channel_id"},
+		{&model.Video{}, "channel_id"},
+		{&model.PodcastEpisode{}, "channel_id"},
+		{&model.VideoImportSession{}, "channel_id"},
+	}
+	for _, check := range checks {
+		var count int64
+		if err := tx.Model(check.model).Where(check.field+" = ?", channelID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return nil
+		}
+	}
+	var membershipCount int64
+	if err := tx.Model(&model.ContentCollectionMembership{}).Where("collection_id = ?", collection.ID).Count(&membershipCount).Error; err != nil {
+		return err
+	}
+	if membershipCount > 0 {
+		return nil
+	}
+	if err := tx.Model(&model.UserStudioState{}).Where("user_id = ? AND channel_id = ?", userID, channelID).Update("channel_id", nil).Error; err != nil {
+		return err
+	}
+	if err := tx.Delete(&collection).Error; err != nil {
+		return err
+	}
+	return tx.Delete(&channel).Error
 }
 
 func preparePostgresExtensions(db *gorm.DB) error {
