@@ -1075,7 +1075,7 @@ func TestCreateDefaultChannelForUserSetsInitialStudioChannel(t *testing.T) {
 	if err := db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&collection).Error; err != nil {
 		t.Fatalf("load default collection: %v", err)
 	}
-	if collection.Name != "《Alice》的合集" {
+	if collection.Name != "Alice的合集" {
 		t.Fatalf("expected channel-derived default collection, got %q", collection.Name)
 	}
 }

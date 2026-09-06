@@ -389,7 +389,7 @@ func TestStudioChannelCreateBecomesCurrentWhenStateIsEmpty(t *testing.T) {
 	if err := fixture.db.Where("channel_id = ? AND is_default = ?", payload.Data.ID, true).First(&collection).Error; err != nil {
 		t.Fatalf("load default collection: %v", err)
 	}
-	if collection.Name != "《First Studio》的合集" {
+	if collection.Name != "First Studio的合集" {
 		t.Fatalf("default collection name = %q, want channel-derived name", collection.Name)
 	}
 }

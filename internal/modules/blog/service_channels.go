@@ -307,7 +307,7 @@ func ensureDefaultCollectionName(channelName string) string {
 	if channelName == "" {
 		channelName = "默认频道"
 	}
-	return fmt.Sprintf("《%s》的合集", channelName)
+	return fmt.Sprintf("%s的合集", channelName)
 }
 
 func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
