@@ -189,25 +189,15 @@ func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
 	if err := db.Model(&model.UserSettings{}).Where("user_id = ?", user.UUID).Count(&settings).Error; err != nil || settings != 1 {
 		t.Fatalf("expected one user settings row, got %d err=%v", settings, err)
 	}
-	var channels []model.Channel
-	if err := db.Where("user_id = ?", user.UUID).Find(&channels).Error; err != nil {
-		t.Fatalf("find studio channels: %v", err)
-	}
-	if len(channels) != 1 {
-		t.Fatalf("expected one studio channel, got %d", len(channels))
-	}
-	var state model.UserStudioState
-	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
-		t.Fatalf("find studio state: %v", err)
-	}
-	if state.ChannelID == nil || *state.ChannelID != channels[0].ID {
-		t.Fatalf("expected current channel %s, got %#v", channels[0].ID, state.ChannelID)
+	var channels int64
+	if err := db.Model(&model.Channel{}).Where("user_id = ?", user.UUID).Count(&channels).Error; err != nil || channels != 0 {
+		t.Fatalf("expected legacy user to have no implicit channel, got %d err=%v", channels, err)
 	}
 	var collections int64
 	if err := db.Model(&model.ContentCollection{}).
-		Where("channel_id = ? AND is_default = ?", channels[0].ID, true).
-		Count(&collections).Error; err != nil || collections != 1 {
-		t.Fatalf("expected one default content collection, got %d err=%v", collections, err)
+		Where("created_by = ?", user.UUID).
+		Count(&collections).Error; err != nil || collections != 0 {
+		t.Fatalf("expected no implicit content collection, got %d err=%v", collections, err)
 	}
 	if db.Migrator().HasTable("user_default_channels") {
 		t.Fatal("expected legacy default channel selections to be removed")
@@ -230,12 +220,23 @@ func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
 	}
 }
 
-func TestRunMigrationsCreatesUnifiedStudioStateAndTypedCollections(t *testing.T) {
+func TestRunMigrationsCleansEmptyLegacyDefaultChannel(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.ContentCollection{}, &model.UserStudioState{})
 	user := model.User{Username: "studio-user", Email: "studio-user@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
+	}
+	channel := model.Channel{UserID: &user.UUID, Name: user.Username, Slug: "studio-user", Description: "默认合集"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create legacy channel: %v", err)
+	}
+	collection := model.ContentCollection{ChannelID: channel.ID, CreatedBy: &user.UUID, Name: "默认合集", Description: "默认合集", IsDefault: true}
+	if err := db.Create(&collection).Error; err != nil {
+		t.Fatalf("create legacy collection: %v", err)
+	}
+	if err := db.Create(&model.UserStudioState{UserID: user.UUID, ChannelID: &channel.ID}).Error; err != nil {
+		t.Fatalf("create legacy studio state: %v", err)
 	}
 
 	if err := runMigrations(db); err != nil {
@@ -246,19 +247,15 @@ func TestRunMigrationsCreatesUnifiedStudioStateAndTypedCollections(t *testing.T)
 	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
 		t.Fatalf("load studio state: %v", err)
 	}
-	if state.ChannelID == nil {
-		t.Fatal("expected a current studio channel")
+	if state.ChannelID != nil {
+		t.Fatalf("expected empty legacy channel to be cleared, got %s", *state.ChannelID)
 	}
-
-	var collections int64
-	if err := db.Model(&model.ContentCollection{}).
-		Joins("JOIN channels ON channels.id = content_collections.channel_id").
-		Where("channels.user_id = ? AND content_collections.is_default = ?", user.UUID, true).
-		Count(&collections).Error; err != nil {
-		t.Fatalf("count default content collections: %v", err)
+	var count int64
+	if err := db.Model(&model.Channel{}).Where("id = ?", channel.ID).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("expected legacy channel to be deleted, got %d err=%v", count, err)
 	}
-	if collections != 1 {
-		t.Fatalf("expected one default content collection, got %d", collections)
+	if err := db.Model(&model.ContentCollection{}).Where("id = ?", collection.ID).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("expected legacy collection to be deleted, got %d err=%v", count, err)
 	}
 }
 

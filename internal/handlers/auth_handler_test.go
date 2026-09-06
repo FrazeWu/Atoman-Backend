@@ -789,27 +789,13 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 		t.Fatalf("find registration web session: %v", err)
 	}
 
-	var channels []model.Channel
-	if err := db.Where("user_id = ?", user.UUID).Find(&channels).Error; err != nil {
-		t.Fatalf("find default channels: %v", err)
+	var channels int64
+	if err := db.Model(&model.Channel{}).Where("user_id = ?", user.UUID).Count(&channels).Error; err != nil || channels != 0 {
+		t.Fatalf("expected registration to defer channel creation, got %d err=%v", channels, err)
 	}
-	if len(channels) != 1 {
-		t.Fatalf("expected one unified studio channel, got %d", len(channels))
-	}
-	channel := channels[0]
-	var state model.UserStudioState
-	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
-		t.Fatalf("find current studio channel: %v", err)
-	}
-	if state.ChannelID == nil || *state.ChannelID != channel.ID {
-		t.Fatalf("expected current channel %s, got %#v", channel.ID, state.ChannelID)
-	}
-	var collections []model.ContentCollection
-	if err := db.Where("channel_id = ? AND is_default = ?", channel.ID, true).Find(&collections).Error; err != nil {
-		t.Fatalf("find default collection: %v", err)
-	}
-	if len(collections) != 1 || collections[0].Name != "默认合集" {
-		t.Fatalf("expected one mixed-content default collection, got %#v", collections)
+	var collections int64
+	if err := db.Model(&model.ContentCollection{}).Where("created_by = ?", user.UUID).Count(&collections).Error; err != nil || collections != 0 {
+		t.Fatalf("expected registration to defer collection creation, got %d err=%v", collections, err)
 	}
 
 	var groups []model.SubscriptionGroup
