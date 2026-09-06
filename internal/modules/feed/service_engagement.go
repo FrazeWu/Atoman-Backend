@@ -19,6 +19,27 @@ func (s *Service) MarkRead(user authctx.CurrentUser, ids []uuid.UUID) error {
 	return s.repo.MarkRead(user.ID, dedupeUUIDs(ids))
 }
 
+func (s *Service) MarkShortNotesRead(user authctx.CurrentUser, ids []uuid.UUID) error {
+	if user.ID == uuid.Nil || len(ids) == 0 || !s.db.Migrator().HasTable(&model.ShortNoteRead{}) {
+		return nil
+	}
+	now := time.Now().UTC()
+	for _, id := range dedupeUUIDs(ids) {
+		row := model.ShortNoteRead{UserID: user.ID, ShortNoteID: id, ReadAt: now}
+		if err := s.db.Where("user_id = ? AND short_note_id = ?", user.ID, id).Assign(map[string]any{"read_at": now}).FirstOrCreate(&row).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) MarkShortNotesUnread(user authctx.CurrentUser, ids []uuid.UUID) error {
+	if user.ID == uuid.Nil || len(ids) == 0 || !s.db.Migrator().HasTable(&model.ShortNoteRead{}) {
+		return nil
+	}
+	return s.db.Where("user_id = ? AND short_note_id IN ?", user.ID, dedupeUUIDs(ids)).Delete(&model.ShortNoteRead{}).Error
+}
+
 func (s *Service) MarkUnread(user authctx.CurrentUser, ids []uuid.UUID) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
@@ -31,7 +52,14 @@ func (s *Service) MarkSubscriptionRead(user authctx.CurrentUser, subscriptionID 
 	if err != nil {
 		return err
 	}
-	return s.repo.MarkRead(user.ID, ids)
+	if err := s.repo.MarkRead(user.ID, ids); err != nil {
+		return err
+	}
+	shortNoteIDs, err := s.subscriptionShortNoteIDs(user.ID, subscriptionID)
+	if err != nil {
+		return err
+	}
+	return s.MarkShortNotesRead(user, shortNoteIDs)
 }
 
 func (s *Service) MarkSubscriptionUnread(user authctx.CurrentUser, subscriptionID uuid.UUID) error {
@@ -39,7 +67,14 @@ func (s *Service) MarkSubscriptionUnread(user authctx.CurrentUser, subscriptionI
 	if err != nil {
 		return err
 	}
-	return s.repo.DeleteReads(user.ID, ids)
+	if err := s.repo.DeleteReads(user.ID, ids); err != nil {
+		return err
+	}
+	shortNoteIDs, err := s.subscriptionShortNoteIDs(user.ID, subscriptionID)
+	if err != nil {
+		return err
+	}
+	return s.MarkShortNotesUnread(user, shortNoteIDs)
 }
 
 func (s *Service) subscriptionFeedItemIDs(user authctx.CurrentUser, subscriptionID uuid.UUID) ([]uuid.UUID, error) {
@@ -79,7 +114,25 @@ func (s *Service) MarkAllRead(user authctx.CurrentUser) error {
 	for _, item := range items {
 		ids = append(ids, item.ID)
 	}
-	return s.repo.MarkRead(user.ID, ids)
+	if err := s.repo.MarkRead(user.ID, ids); err != nil {
+		return err
+	}
+	if !s.db.Migrator().HasTable(&model.ShortNoteRead{}) {
+		return nil
+	}
+	authorIDs, err := s.subscribedShortNoteAuthorIDs(user.ID)
+	if err != nil {
+		return err
+	}
+	notes, err := s.repo.ListPublishedShortNotesByUserIDs(authorIDs)
+	if err != nil {
+		return err
+	}
+	noteIDs := make([]uuid.UUID, 0, len(notes))
+	for _, note := range notes {
+		noteIDs = append(noteIDs, note.ID)
+	}
+	return s.MarkShortNotesRead(user, noteIDs)
 }
 
 func (s *Service) MarkAllUnread(user authctx.CurrentUser) error {
@@ -94,7 +147,25 @@ func (s *Service) MarkAllUnread(user authctx.CurrentUser) error {
 	for _, item := range items {
 		ids = append(ids, item.ID)
 	}
-	return s.repo.DeleteReads(user.ID, ids)
+	if err := s.repo.DeleteReads(user.ID, ids); err != nil {
+		return err
+	}
+	if !s.db.Migrator().HasTable(&model.ShortNoteRead{}) {
+		return nil
+	}
+	authorIDs, err := s.subscribedShortNoteAuthorIDs(user.ID)
+	if err != nil {
+		return err
+	}
+	notes, err := s.repo.ListPublishedShortNotesByUserIDs(authorIDs)
+	if err != nil {
+		return err
+	}
+	noteIDs := make([]uuid.UUID, 0, len(notes))
+	for _, note := range notes {
+		noteIDs = append(noteIDs, note.ID)
+	}
+	return s.MarkShortNotesUnread(user, noteIDs)
 }
 
 func (s *Service) ToggleStar(user authctx.CurrentUser, feedItemID uuid.UUID) (bool, error) {

@@ -36,7 +36,7 @@ func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuer
 	items := make([]TimelineItemDTO, 0, len(feedItems))
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{
-			Type:        "feed_item",
+			Type:        timelineFeedItemType(&feedItems[i]),
 			FeedItem:    &feedItems[i],
 			PublishedAt: feedItems[i].PublishedAt,
 		})
@@ -145,6 +145,14 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	posts = append(posts, collectionPosts...)
 	posts = dedupePosts(posts)
 	posts = filterVisibleSubscribedPosts(posts, user.ID, userIDs, channelIDs, collectionIDs)
+	shortNotes := make([]model.ShortNote, 0)
+	shortNoteRead := make(map[uuid.UUID]bool)
+	if query.ContentType == "" {
+		shortNotes, shortNoteRead, err = s.listSubscribedShortNotes(user.ID, userIDs)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
 	postIDs := make([]uuid.UUID, 0, len(posts))
 	for i := range posts {
 		postIDs = append(postIDs, posts[i].ID)
@@ -184,7 +192,15 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		return nil, 0, err
 	}
 
-	items := make([]TimelineItemDTO, 0, len(posts)+len(videos)+len(feedItems))
+	items := make([]TimelineItemDTO, 0, len(posts)+len(videos)+len(feedItems)+len(shortNotes))
+	for i := range shortNotes {
+		items = append(items, TimelineItemDTO{
+			Type:        "short_note",
+			ShortNote:   &shortNotes[i],
+			PublishedAt: shortNotes[i].CreatedAt,
+			IsRead:      shortNoteRead[shortNotes[i].ID],
+		})
+	}
 	for i := range posts {
 		if episode, ok := episodeByPostID[posts[i].ID]; ok {
 			episode.Post = &posts[i]
@@ -213,7 +229,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	}
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{
-			Type:        "feed_item",
+			Type:        timelineFeedItemType(&feedItems[i]),
 			FeedItem:    &feedItems[i],
 			PublishedAt: feedItems[i].PublishedAt,
 			IsRead:      feedItemClusterRead(feedItems[i], readMap),
@@ -275,6 +291,11 @@ func (s *Service) getSubscribedBlogFeed(
 	if err != nil {
 		return nil, 0, err
 	}
+	shortNoteUserIDs := append(append([]uuid.UUID{}, userIDs...), followedUserIDs...)
+	shortNotes, shortNoteRead, err := s.listSubscribedShortNotes(userID, shortNoteUserIDs)
+	if err != nil {
+		return nil, 0, err
+	}
 	postIDs := make([]uuid.UUID, 0, len(posts))
 	for i := range posts {
 		postIDs = append(postIDs, posts[i].ID)
@@ -287,7 +308,7 @@ func (s *Service) getSubscribedBlogFeed(
 	for _, count := range engagementCounts {
 		engagementByPostID[count.PostID] = count
 	}
-	items := make([]TimelineItemDTO, 0, len(posts))
+	items := make([]TimelineItemDTO, 0, len(posts)+len(shortNotes))
 	for i := range posts {
 		items = append(items, TimelineItemDTO{
 			Type:        "post",
@@ -296,6 +317,15 @@ func (s *Service) getSubscribedBlogFeed(
 			IsRead:      false,
 		})
 	}
+	for i := range shortNotes {
+		items = append(items, TimelineItemDTO{
+			Type:        "short_note",
+			ShortNote:   &shortNotes[i],
+			PublishedAt: shortNotes[i].CreatedAt,
+			IsRead:      shortNoteRead[shortNotes[i].ID],
+		})
+	}
+	total += int64(len(shortNotes))
 	return items, total, nil
 }
 
@@ -358,7 +388,7 @@ func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uu
 	items := make([]TimelineItemDTO, 0, len(feedItems))
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{
-			Type:        "feed_item",
+			Type:        timelineFeedItemType(&feedItems[i]),
 			FeedItem:    &feedItems[i],
 			PublishedAt: feedItems[i].PublishedAt,
 			IsRead:      readMap[feedItems[i].ID],
@@ -383,7 +413,7 @@ func (s *Service) getSubscribedExternalFeedWithReadFilter(userID uuid.UUID, feed
 	items := make([]TimelineItemDTO, 0, len(feedItems))
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{
-			Type:        "feed_item",
+			Type:        timelineFeedItemType(&feedItems[i]),
 			FeedItem:    &feedItems[i],
 			PublishedAt: feedItems[i].PublishedAt,
 			IsRead:      readMap[feedItems[i].ID],
@@ -423,7 +453,7 @@ func (s *Service) GetPublicFeed(query FeedQuery) ([]TimelineItemDTO, int64, erro
 		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], PostEngagementCount{}), PublishedAt: posts[i].CreatedAt})
 	}
 	for i := range feedItems {
-		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt})
+		items = append(items, TimelineItemDTO{Type: timelineFeedItemType(&feedItems[i]), FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt})
 	}
 
 	items = filterTimeline(items, query)
@@ -466,7 +496,7 @@ func (s *Service) getPublicFeedWithDuplicateFilter(query FeedQuery, page int, li
 		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], PostEngagementCount{}), PublishedAt: posts[i].CreatedAt})
 	}
 	for i := range feedItems {
-		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt})
+		items = append(items, TimelineItemDTO{Type: timelineFeedItemType(&feedItems[i]), FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt})
 	}
 
 	items = filterTimeline(items, query)
@@ -507,7 +537,7 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 	}
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{
-			Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt,
+			Type: timelineFeedItemType(&feedItems[i]), FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt,
 			IsRead: readMap[feedItems[i].ID],
 		})
 	}
@@ -557,7 +587,7 @@ func (s *Service) getExploreFeedWithDuplicateFilter(user authctx.CurrentUser, qu
 		if query.HideDuplicates {
 			isRead = feedItemClusterRead(feedItems[i], readMap)
 		}
-		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt, IsRead: isRead})
+		items = append(items, TimelineItemDTO{Type: timelineFeedItemType(&feedItems[i]), FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt, IsRead: isRead})
 	}
 
 	sortTimeline(items)

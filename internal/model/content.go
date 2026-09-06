@@ -141,11 +141,11 @@ type ContentVideoExtension struct {
 	VideoURL           string          `json:"video_url" gorm:"type:text"`
 	ThumbnailURL       string          `json:"thumbnail_url" gorm:"type:text"`
 	SubtitleURL        string          `json:"subtitle_url" gorm:"type:text"`
-	Chapters           json.RawMessage `json:"chapters" gorm:"type:jsonb"`
+	Chapters           json.RawMessage `json:"chapters" gorm:"type:jsonb" swaggertype:"array,object"`
 	DurationSec        int             `json:"duration_sec" gorm:"not null;default:0"`
 	ProcessingStatus   string          `json:"processing_status" gorm:"not null;default:'none'"`
 	ProcessingError    string          `json:"processing_error" gorm:"type:text"`
-	PreviewThumbnails  json.RawMessage `json:"preview_thumbnails" gorm:"type:jsonb"`
+	PreviewThumbnails  json.RawMessage `json:"preview_thumbnails" gorm:"type:jsonb" swaggertype:"array,object"`
 	ViewCount          int             `json:"view_count" gorm:"not null;default:0"`
 	CollectionConflict bool            `json:"collection_conflict" gorm:"not null;default:false;index"`
 }

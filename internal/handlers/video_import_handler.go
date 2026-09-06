@@ -56,7 +56,7 @@ type VideoImportPayload struct {
 	Description   string          `json:"description"`
 	ThumbnailURL  string          `json:"thumbnail_url"`
 	SubtitleURL   string          `json:"subtitle_url"`
-	Chapters      json.RawMessage `json:"chapters"`
+	Chapters      json.RawMessage `json:"chapters" swaggertype:"object"`
 	DurationSec   int             `json:"duration_sec"`
 	Visibility    string          `json:"visibility"`
 	Tags          []string        `json:"tags"`

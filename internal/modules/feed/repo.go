@@ -35,6 +35,8 @@ type ExploreSourceRow struct {
 	RSSURL            string                    `json:"rss_url"`
 	CoverURL          string                    `json:"cover_url"`
 	Category          string                    `json:"category"`
+	Platform          string                    `json:"platform,omitempty"`
+	ContentType       string                    `json:"content_type,omitempty"`
 	LanguageCode      string                    `json:"language_code,omitempty"`
 	SubscriptionCount int64                     `json:"subscription_count"`
 	RecentItemCount   int64                     `json:"recent_item_count"`
@@ -165,6 +167,18 @@ func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID, contentType stri
 		blogPosts, err := r.listPublishedCanonicalBlogPosts("user_id", userIDs)
 		return append(podcastPosts, blogPosts...), err
 	}
+}
+
+func (r *Repo) ListPublishedShortNotesByUserIDs(userIDs []uuid.UUID) ([]model.ShortNote, error) {
+	if len(userIDs) == 0 {
+		return []model.ShortNote{}, nil
+	}
+	var notes []model.ShortNote
+	err := r.db.Preload("User").Preload("Media", func(db *gorm.DB) *gorm.DB {
+		return db.Order("position ASC")
+	}).Where("user_id IN ?", userIDs).
+		Order("created_at DESC, id DESC").Find(&notes).Error
+	return notes, err
 }
 
 func (r *Repo) ListPublishedPostsByChannelIDs(channelIDs []uuid.UUID, contentType string) ([]model.Post, error) {
@@ -1161,6 +1175,8 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		RSSURL            string
 		CoverURL          string
 		Category          string
+		Platform          string `json:"platform,omitempty"`
+		ContentType       string `json:"content_type,omitempty"`
 		LanguageCode      string
 		SubscriptionCount int64
 		RecentItemCount   int64
@@ -1228,10 +1244,12 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 			RSSURL:            raw.RSSURL,
 			CoverURL:          raw.CoverURL,
 			Category:          raw.Category,
+			Platform:          platformForRSSURL(raw.RSSURL),
 			LanguageCode:      raw.LanguageCode,
 			SubscriptionCount: raw.SubscriptionCount,
 			RecentItemCount:   raw.RecentItemCount,
 		}
+		row.ContentType = contentTypeForPlatform(row.Platform)
 		if raw.LastPublishedAt.Valid {
 			parsed, parseErr := parseExploreSourceTimestamp(raw.LastPublishedAt.String)
 			if parseErr != nil {
@@ -1325,7 +1343,8 @@ func (r *Repo) ListCuratedExploreSources(limit int, languageCode string) ([]Expl
 			continue
 		}
 		seenCanonicalURLs[canonicalURL] = struct{}{}
-		row := ExploreSourceRow{ID: raw.ID, Title: raw.Title, RSSURL: raw.RSSURL, CoverURL: raw.CoverURL, Category: raw.Category, LanguageCode: languageCode, SubscriptionCount: raw.SubscriptionCount, RecentItemCount: raw.RecentItemCount}
+		row := ExploreSourceRow{ID: raw.ID, Title: raw.Title, RSSURL: raw.RSSURL, CoverURL: raw.CoverURL, Category: raw.Category, Platform: platformForRSSURL(raw.RSSURL), LanguageCode: languageCode, SubscriptionCount: raw.SubscriptionCount, RecentItemCount: raw.RecentItemCount}
+		row.ContentType = contentTypeForPlatform(row.Platform)
 		if raw.LastPublishedAt.Valid {
 			publishedAt, err := parseExploreSourceTimestamp(raw.LastPublishedAt.String)
 			if err != nil {
@@ -1484,6 +1503,31 @@ func defaultFeedSourceCategory(category string) string {
 		return normalized
 	}
 	return "blog"
+}
+
+func platformForRSSURL(rawURL string) string {
+	value := strings.ToLower(strings.TrimSpace(rawURL))
+	switch {
+	case strings.Contains(value, "/youtube/"):
+		return "youtube"
+	case strings.Contains(value, "/bilibili/"):
+		return "bilibili"
+	case strings.Contains(value, "/github/"):
+		return "github"
+	default:
+		return ""
+	}
+}
+
+func contentTypeForPlatform(platform string) string {
+	switch platform {
+	case "youtube", "bilibili":
+		return "video"
+	case "github":
+		return "project_update"
+	default:
+		return ""
+	}
 }
 
 func exploreSourceInferredCategorySQL(category string) string {

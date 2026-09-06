@@ -402,7 +402,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.StudioMetricEvent{}, &model.StudioInteractionState{}, &model.StudioReplyTemplate{}, &model.StudioGoalCycle{}, &model.StudioGoal{}, &model.StudioGoalAction{}, &model.StudioGoalReview{}, &model.ContentLifecycleEvent{},
 		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{}, &model.BlogPublishSchedule{}, &model.ContentBlogTag{},
 		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.BlogRecommendationFeedback{}, &model.ShortNote{},
-		&model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.Like{}, &model.PostRating{},
+		&model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.ShortNoteRead{}, &model.Like{}, &model.PostRating{},
 		&model.ReputationRun{}, &model.BlogQualitySnapshot{}, &model.UserReputationSnapshot{},
 		&model.MusicContributionEvent{}, &model.MusicContributionEvidence{},
 		&model.AuditLog{}, &model.ActivityLog{}, &model.MediaAsset{}, &model.ContentMediaAsset{},

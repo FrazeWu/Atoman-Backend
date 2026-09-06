@@ -1964,7 +1964,11 @@ definitions:
         type: string
       category:
         type: string
+      content_type:
+        type: string
       id:
+        type: string
+      platform:
         type: string
       provider:
         type: string
@@ -2168,8 +2172,10 @@ definitions:
         items:
           type: string
         type: array
-    required:
-    - feed_item_ids
+      short_note_ids:
+        items:
+          type: string
+        type: array
     type: object
   feed.MessageResponse:
     properties:
@@ -2500,6 +2506,8 @@ definitions:
         type: string
       published_at:
         type: string
+      short_note:
+        $ref: '#/definitions/model.ShortNote'
       type:
         type: string
       video:
@@ -4229,7 +4237,8 @@ definitions:
     properties:
       channel_id:
         type: string
-      chapters: {}
+      chapters:
+        type: object
       collection_id:
         type: string
       collection_ids:
@@ -4478,6 +4487,8 @@ definitions:
         type: string
       lifecycle_status:
         type: string
+      musicbrainz_matched:
+        type: boolean
       other_versions:
         items:
           $ref: '#/definitions/model.Album'
@@ -5650,6 +5661,40 @@ definitions:
         description: Version control
         type: integer
     type: object
+  model.ShortNote:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      media:
+        items:
+          $ref: '#/definitions/model.ShortNoteMedia'
+        type: array
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      user_id:
+        type: string
+    type: object
+  model.ShortNoteMedia:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      position:
+        type: integer
+      short_note_id:
+        type: string
+      updated_at:
+        type: string
+      url:
+        type: string
+    type: object
   model.Song:
     properties:
       album:
@@ -5911,6 +5956,8 @@ definitions:
         type: string
       title:
         type: string
+      unread_count:
+        type: integer
       updated_at:
         type: string
       user_id:
@@ -6071,7 +6118,10 @@ definitions:
         $ref: '#/definitions/model.Channel'
       channel_id:
         type: string
-      chapters: {}
+      chapters:
+        items:
+          type: object
+        type: array
       collection:
         $ref: '#/definitions/model.Collection'
       collection_conflict:
@@ -6277,11 +6327,11 @@ definitions:
         type: string
       lastSyncedAt:
         type: string
-      metadataSourceUrl:
-        type: string
       metadataMatched:
         type: boolean
       metadataSource:
+        type: string
+      metadataSourceUrl:
         type: string
       missingArtists:
         items:
@@ -6459,10 +6509,14 @@ definitions:
     type: object
   music.AlbumImportTrackPayload:
     properties:
+      audio_key:
+        type: string
       disc_number:
         type: integer
       lyrics:
         $ref: '#/definitions/music.AlbumImportTrackLyricsPayload'
+      lyrics_source:
+        type: string
       song_id:
         type: string
       title:
@@ -15440,6 +15494,39 @@ paths:
       summary: Send DM to target
       tags:
       - dm
+  /api/v1/feed/bookmarks:
+    get:
+      description: 返回当前用户收藏的文章、播客和视频，按收藏时间倒序排列。
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.TimelineListResponseDTO'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取统一收藏时间线
+      tags:
+      - feed
   /api/v1/feed/explore:
     get:
       description: 分页返回公开文章与 RSS 条目，支持搜索、来源类型、语言和排序筛选。
@@ -17186,7 +17273,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 批量将指定 feed item 标记为已读。
+      description: 批量将指定 feed item 或短笺标记为已读。
       parameters:
       - description: 已读输入
         in: body

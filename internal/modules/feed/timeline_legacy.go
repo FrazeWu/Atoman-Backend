@@ -462,12 +462,13 @@ func startOfMonth(t time.Time) time.Time {
 }
 
 type MarkReadInput struct {
-	FeedItemIDs []uuid.UUID `json:"feed_item_ids" binding:"required"`
+	FeedItemIDs  []uuid.UUID `json:"feed_item_ids"`
+	ShortNoteIDs []uuid.UUID `json:"short_note_ids"`
 }
 
 // MarkItemsRead godoc
 // @Summary 标记条目已读
-// @Description 批量将指定 feed item 标记为已读。
+// @Description 批量将指定 feed item 或短笺标记为已读。
 // @Tags feed
 // @Accept json
 // @Produce json

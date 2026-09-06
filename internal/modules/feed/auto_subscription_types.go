@@ -36,6 +36,8 @@ type AutoSubscriptionCandidate struct {
 type AutoSubscriptionSource struct {
 	ID           *uuid.UUID `json:"id,omitempty"`
 	Provider     string     `json:"provider"`
+	Platform     string     `json:"platform,omitempty"`
+	ContentType  string     `json:"content_type,omitempty"`
 	SourceType   string     `json:"source_type"`
 	Category     string     `json:"category"`
 	Title        string     `json:"title"`
@@ -53,13 +55,15 @@ type AutoSubscriptionResolveResponse struct {
 }
 
 type autoSubscriptionTarget struct {
-	Provider   string
-	SourceType string
-	Title      string
-	RssURL     string
-	SiteURL    string
-	Canonical  string
-	Category   string
+	Provider    string
+	Platform    string
+	ContentType string
+	SourceType  string
+	Title       string
+	RssURL      string
+	SiteURL     string
+	Canonical   string
+	Category    string
 }
 
 type autoSubscriptionHTTPError struct {

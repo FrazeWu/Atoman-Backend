@@ -1,6 +1,10 @@
 package model
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type ShortNote struct {
 	Base
@@ -29,3 +33,11 @@ type ShortNoteVote struct {
 }
 
 func (ShortNoteVote) TableName() string { return "short_note_votes" }
+
+type ShortNoteRead struct {
+	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;primaryKey;index"`
+	ShortNoteID uuid.UUID `json:"short_note_id" gorm:"type:uuid;not null;primaryKey;index"`
+	ReadAt      time.Time `json:"read_at"`
+}
+
+func (ShortNoteRead) TableName() string { return "short_note_reads" }

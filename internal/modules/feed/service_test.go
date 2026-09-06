@@ -404,6 +404,58 @@ func TestChannelSubscriptionIncludesBlogPodcastAndVideoUpdates(t *testing.T) {
 	assertUnifiedUpdates(t, items, blogPost.ID, episode.ID, video.ID)
 }
 
+func TestSubscribedFeedIncludesShortNotesOnlyInUnifiedAndBlogViews(t *testing.T) {
+	service, db, viewer, creator, _ := newUnifiedSubscriptionFixture(t)
+	testdb.Migrate(t, db, &model.ShortNote{}, &model.ShortNoteMedia{}, &model.ShortNoteRead{})
+	source := model.FeedSource{SourceType: "internal_user", SourceID: &creator.UUID, Hash: "short-note-user-source", Title: creator.Username}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	subscription := model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: creator.Username}
+	if err := db.Create(&subscription).Error; err != nil {
+		t.Fatal(err)
+	}
+	note := model.ShortNote{UserID: creator.UUID, Content: "统一时间线短笺"}
+	if err := db.Create(&note).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(viewer, FeedQuery{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Type != "short_note" || items[0].ShortNote == nil || items[0].ShortNote.ID != note.ID {
+		t.Fatalf("expected short note in unified timeline, total=%d items=%#v", total, items)
+	}
+
+	items, total, err = service.GetSubscribedFeed(viewer, FeedQuery{ContentType: "blog", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Type != "short_note" {
+		t.Fatalf("expected short note in blog timeline, total=%d items=%#v", total, items)
+	}
+
+	items, total, err = service.GetSubscribedFeed(viewer, FeedQuery{ContentType: "podcast", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("short note must not appear in podcast timeline, total=%d items=%#v", total, items)
+	}
+
+	if err := service.MarkSubscriptionRead(viewer, subscription.ID); err != nil {
+		t.Fatal(err)
+	}
+	items, _, err = service.GetSubscribedFeed(viewer, FeedQuery{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || !items[0].IsRead {
+		t.Fatalf("subscription read state was not persisted: %#v", items)
+	}
+}
+
 func TestFollowingUserIncludesUpdatesFromAllOwnedChannels(t *testing.T) {
 	service, db, viewer, creator, firstChannel := newUnifiedSubscriptionFixture(t)
 	blogPost, episode, _ := seedUnifiedChannelUpdates(t, db, creator, firstChannel)

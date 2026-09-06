@@ -64,6 +64,13 @@ func resolveSubscriptionInputForUser(db *gorm.DB, userID uuid.UUID, rawInput str
 		}
 		return response, http.StatusOK
 	}
+	if target, ok := platformSubscriptionTarget(u); ok {
+		response, err := classifyAutoSubscriptionTarget(db, userID, target)
+		if err != nil {
+			return newAutoSubscriptionResolveResponse("error"), http.StatusInternalServerError
+		}
+		return response, http.StatusOK
+	}
 	if err := validateFeedDiscoveryFetchURL(u); err != nil {
 		return newAutoSubscriptionResolveResponse("invalid"), http.StatusOK
 	}
@@ -110,7 +117,7 @@ func parseAutoSubscriptionURL(rawInput string) (*url.URL, error) {
 }
 
 func githubRepositoryTarget(u *url.URL) (autoSubscriptionTarget, bool) {
-	if u == nil || u.Scheme != "https" || !strings.EqualFold(u.Hostname(), "github.com") {
+	if u == nil || u.Scheme != "https" || !isGithubHost(u.Hostname()) {
 		return autoSubscriptionTarget{}, false
 	}
 
@@ -139,12 +146,14 @@ func githubRepositoryTarget(u *url.URL) (autoSubscriptionTarget, bool) {
 
 	siteURL := "https://github.com/" + url.PathEscape(owner) + "/" + url.PathEscape(repo)
 	return autoSubscriptionTarget{
-		Provider:   "rsshub",
-		SourceType: "external_rss",
-		Title:      owner + "/" + repo,
-		RssURL:     feedURL,
-		SiteURL:    siteURL,
-		Canonical:  normalizeCanonicalFeedURL(feedURL),
+		Provider:    "rsshub",
+		Platform:    "github",
+		ContentType: "project_update",
+		SourceType:  "external_rss",
+		Title:       owner + "/" + repo,
+		RssURL:      feedURL,
+		SiteURL:     siteURL,
+		Canonical:   normalizeCanonicalFeedURL(feedURL),
 	}, true
 }
 
@@ -162,7 +171,7 @@ func validGithubPathSegment(segment string) bool {
 }
 
 func malformedGithubRepositoryPath(u *url.URL) bool {
-	if u == nil || !strings.EqualFold(u.Hostname(), "github.com") {
+	if u == nil || !isGithubHost(u.Hostname()) {
 		return false
 	}
 
@@ -253,6 +262,8 @@ func findUserSubscriptionForSource(db *gorm.DB, userID uuid.UUID, sourceID uuid.
 func sourceDTOFromTarget(target autoSubscriptionTarget) *AutoSubscriptionSource {
 	return &AutoSubscriptionSource{
 		Provider:     target.Provider,
+		Platform:     target.Platform,
+		ContentType:  target.ContentType,
 		SourceType:   target.SourceType,
 		Category:     defaultFeedSourceCategory(target.Category),
 		Title:        target.Title,
@@ -263,9 +274,12 @@ func sourceDTOFromTarget(target autoSubscriptionTarget) *AutoSubscriptionSource 
 }
 
 func sourceDTOFromModel(source model.FeedSource) *AutoSubscriptionSource {
+	platform, contentType := platformMetadataForSource(source)
 	return &AutoSubscriptionSource{
 		ID:           &source.ID,
 		Provider:     source.Provider,
+		Platform:     platform,
+		ContentType:  contentType,
 		SourceType:   source.SourceType,
 		Category:     defaultFeedSourceCategory(source.Category),
 		Title:        source.Title,

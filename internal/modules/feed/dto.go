@@ -29,6 +29,7 @@ type FeedQuery struct {
 type TimelineItemDTO struct {
 	Type           string                `json:"type"`
 	Post           *TimelinePostDTO      `json:"post,omitempty"`
+	ShortNote      *model.ShortNote      `json:"short_note,omitempty"`
 	PodcastEpisode *model.PodcastEpisode `json:"podcast_episode,omitempty"`
 	Video          *model.Video          `json:"video,omitempty"`
 	FeedItem       *model.FeedItem       `json:"feed_item,omitempty"`
@@ -88,6 +89,8 @@ type RecommendationItemDTO struct {
 	SourceTitle          string                     `json:"source_title,omitempty"`
 	SourceType           string                     `json:"source_type,omitempty"`
 	SourceCategory       string                     `json:"source_category,omitempty"`
+	Platform             string                     `json:"platform,omitempty"`
+	SourceContentType    string                     `json:"source_content_type,omitempty"`
 	SourcePath           string                     `json:"source_path,omitempty"`
 	RssURL               string                     `json:"rss_url,omitempty"`
 	RecentItems          []RecommendationPreviewDTO `json:"recent_items,omitempty"`

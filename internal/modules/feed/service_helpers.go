@@ -14,7 +14,7 @@ func filterTimeline(items []TimelineItemDTO, query FeedQuery) []TimelineItemDTO 
 	mergedSearchMatches := make(map[uuid.UUID]bool)
 	if query.HideDuplicates && hasSearch {
 		for _, item := range items {
-			if item.Type != "feed_item" || item.FeedItem == nil || !matchesTimelineSearch(item, query.Search) {
+			if !isExternalTimelineItem(item) || item.FeedItem == nil || !matchesTimelineSearch(item, query.Search) {
 				continue
 			}
 			primaryID := item.FeedItem.ID
@@ -36,10 +36,10 @@ func filterTimeline(items []TimelineItemDTO, query FeedQuery) []TimelineItemDTO 
 		if query.IsRead != nil && item.IsRead != *query.IsRead {
 			continue
 		}
-		if query.HideDuplicates && item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.IsDuplicate {
+		if query.HideDuplicates && isExternalTimelineItem(item) && item.FeedItem != nil && item.FeedItem.IsDuplicate {
 			continue
 		}
-		if query.HideDuplicates && hasSearch && item.Type == "feed_item" && item.FeedItem != nil {
+		if query.HideDuplicates && hasSearch && isExternalTimelineItem(item) && item.FeedItem != nil {
 			if !mergedSearchMatches[item.FeedItem.ID] {
 				continue
 			}
@@ -51,7 +51,32 @@ func filterTimeline(items []TimelineItemDTO, query FeedQuery) []TimelineItemDTO 
 	return filtered
 }
 
+func isExternalTimelineItem(item TimelineItemDTO) bool {
+	return item.Type == "feed_item" || item.Type == "project_update"
+}
+
+func timelineFeedItemType(item *model.FeedItem) string {
+	if item != nil && item.FeedSource != nil && isGitHubFeedSource(item.FeedSource) {
+		return "project_update"
+	}
+	return "feed_item"
+}
+
+func isGitHubFeedSource(source *model.FeedSource) bool {
+	if source == nil {
+		return false
+	}
+	value := strings.ToLower(strings.TrimSpace(source.SiteURL + " " + source.CanonicalURL + " " + source.RssURL))
+	return strings.Contains(value, "github")
+}
+
 func timelineItemCategory(item TimelineItemDTO) string {
+	if item.Type == "short_note" {
+		return "blog"
+	}
+	if item.Type == "project_update" {
+		return "project_update"
+	}
 	if item.Post != nil {
 		return "blog"
 	}
@@ -71,6 +96,9 @@ func timelineItemCategory(item TimelineItemDTO) string {
 }
 
 func timelineItemLanguageCode(item TimelineItemDTO) string {
+	if item.ShortNote != nil {
+		return ""
+	}
 	if item.Post != nil {
 		return strings.TrimSpace(item.Post.LanguageCode)
 	}
@@ -101,6 +129,12 @@ func matchesTimelineSearch(item TimelineItemDTO, search string) bool {
 
 func timelineSearchValues(item TimelineItemDTO) []string {
 	values := make([]string, 0, 7)
+	if item.ShortNote != nil {
+		values = append(values, item.ShortNote.Content)
+		if item.ShortNote.User != nil {
+			values = append(values, item.ShortNote.User.Username, item.ShortNote.User.DisplayName)
+		}
+	}
 	if item.Post != nil {
 		values = append(values, item.Post.Title, item.Post.Summary)
 		if item.Post.Channel != nil {
@@ -313,14 +347,16 @@ func timelineTypeRank(itemType string) int {
 	switch itemType {
 	case "post":
 		return 0
-	case "podcast_episode":
+	case "short_note":
 		return 1
+	case "podcast_episode":
+		return 2
 	case "video":
-		return 2
-	case "feed_item":
 		return 3
+	case "feed_item", "project_update":
+		return 4
 	default:
-		return 2
+		return 3
 	}
 }
 
@@ -336,6 +372,9 @@ func timelineItemID(item TimelineItemDTO) string {
 	}
 	if item.Video != nil {
 		return item.Video.ID.String()
+	}
+	if item.ShortNote != nil {
+		return item.ShortNote.ID.String()
 	}
 	return ""
 }

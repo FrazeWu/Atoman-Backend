@@ -300,20 +300,22 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 			continue
 		}
 		items = append(items, RecommendationItemDTO{
-			ID:              source.ID.String(),
-			Title:           source.Title,
-			Summary:         recommendationSourceSummary(source),
-			Description:     recommendationSourceDescription(source),
-			ContentType:     normalizeSourceCategory(source.Category),
-			LanguageCode:    rowLanguageCode(source.LanguageCode, languageCode),
-			ImageURL:        source.CoverURL,
-			TargetPath:      "/feed/sources?source_id=" + source.ID.String(),
-			SourceID:        source.ID.String(),
-			SourceType:      "external_rss",
-			ScoreLabel:      recommendationScoreLabel(mode, item.FinalScore),
-			BookmarkCount:   source.SubscriptionCount,
-			LastPublishedAt: source.LastPublishedAt,
-			RssURL:          source.RSSURL,
+			ID:                source.ID.String(),
+			Title:             source.Title,
+			Summary:           recommendationSourceSummary(source),
+			Description:       recommendationSourceDescription(source),
+			ContentType:       normalizeSourceCategory(source.Category),
+			LanguageCode:      rowLanguageCode(source.LanguageCode, languageCode),
+			ImageURL:          source.CoverURL,
+			TargetPath:        "/feed/sources?source_id=" + source.ID.String(),
+			SourceID:          source.ID.String(),
+			SourceType:        "external_rss",
+			Platform:          source.Platform,
+			SourceContentType: source.ContentType,
+			ScoreLabel:        recommendationScoreLabel(mode, item.FinalScore),
+			BookmarkCount:     source.SubscriptionCount,
+			LastPublishedAt:   source.LastPublishedAt,
+			RssURL:            source.RSSURL,
 		})
 	}
 

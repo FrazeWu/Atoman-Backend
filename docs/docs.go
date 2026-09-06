@@ -10740,6 +10740,60 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/bookmarks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回当前用户收藏的文章、播客和视频，按收藏时间倒序排列。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取统一收藏时间线",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.TimelineListResponseDTO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/explore": {
             "get": {
                 "security": [
@@ -13558,7 +13612,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "批量将指定 feed item 标记为已读。",
+                "description": "批量将指定 feed item 或短笺标记为已读。",
                 "consumes": [
                     "application/json"
                 ],
@@ -30578,7 +30632,13 @@ const docTemplate = `{
                 "category": {
                     "type": "string"
                 },
+                "content_type": {
+                    "type": "string"
+                },
                 "id": {
+                    "type": "string"
+                },
+                "platform": {
                     "type": "string"
                 },
                 "provider": {
@@ -30875,11 +30935,14 @@ const docTemplate = `{
         },
         "feed.MarkReadInput": {
             "type": "object",
-            "required": [
-                "feed_item_ids"
-            ],
             "properties": {
                 "feed_item_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "short_note_ids": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -31373,6 +31436,9 @@ const docTemplate = `{
                 },
                 "published_at": {
                     "type": "string"
+                },
+                "short_note": {
+                    "$ref": "#/definitions/model.ShortNote"
                 },
                 "type": {
                     "type": "string"
@@ -33922,7 +33988,9 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
-                "chapters": {},
+                "chapters": {
+                    "type": "object"
+                },
                 "collection_id": {
                     "type": "string"
                 },
@@ -34297,6 +34365,9 @@ const docTemplate = `{
                 },
                 "lifecycle_status": {
                     "type": "string"
+                },
+                "musicbrainz_matched": {
+                    "type": "boolean"
                 },
                 "other_versions": {
                     "type": "array",
@@ -36056,6 +36127,58 @@ const docTemplate = `{
                 }
             }
         },
+        "model.ShortNote": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "media": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ShortNoteMedia"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ShortNoteMedia": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "short_note_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
         "model.Song": {
             "type": "object",
             "properties": {
@@ -36450,6 +36573,9 @@ const docTemplate = `{
                 "title": {
                     "type": "string"
                 },
+                "unread_count": {
+                    "type": "integer"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -36690,7 +36816,12 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
-                "chapters": {},
+                "chapters": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                },
                 "collection": {
                     "$ref": "#/definitions/model.Collection"
                 },
@@ -36996,13 +37127,13 @@ const docTemplate = `{
                 "lastSyncedAt": {
                     "type": "string"
                 },
-                "metadataSourceUrl": {
-                    "type": "string"
-                },
                 "metadataMatched": {
                     "type": "boolean"
                 },
                 "metadataSource": {
+                    "type": "string"
+                },
+                "metadataSourceUrl": {
                     "type": "string"
                 },
                 "missingArtists": {
@@ -37276,11 +37407,17 @@ const docTemplate = `{
         "music.AlbumImportTrackPayload": {
             "type": "object",
             "properties": {
+                "audio_key": {
+                    "type": "string"
+                },
                 "disc_number": {
                     "type": "integer"
                 },
                 "lyrics": {
                     "$ref": "#/definitions/music.AlbumImportTrackLyricsPayload"
+                },
+                "lyrics_source": {
+                    "type": "string"
                 },
                 "song_id": {
                     "type": "string"

@@ -563,6 +563,18 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 			read[row.ContentType][row.ContentID] = true
 		}
 	}
+	if s.db.Migrator().HasTable(&model.ShortNoteRead{}) {
+		var rows []model.ShortNoteRead
+		if err := s.db.Where("user_id = ?", userID).Find(&rows).Error; err != nil {
+			return err
+		}
+		if read["blog"] == nil {
+			read["blog"] = make(map[uuid.UUID]bool)
+		}
+		for _, row := range rows {
+			read["blog"][row.ShortNoteID] = true
+		}
+	}
 
 	markContent := func(subscriptionType, contentType string, contentID, ownerID uuid.UUID, channelID *uuid.UUID, collections []model.Collection) {
 		for index := range memberships {
@@ -636,6 +648,17 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		for _, post := range posts {
 			markContent(definition.subscriptionType, definition.contentType, post.ID, post.UserID, post.ChannelID, post.Collections)
 		}
+	}
+	shortNotes, err := s.repo.ListPublishedShortNotesByUserIDs(userIDs)
+	if err != nil {
+		if !s.db.Migrator().HasTable(&model.ShortNote{}) {
+			shortNotes = nil
+		} else {
+			return err
+		}
+	}
+	for _, note := range shortNotes {
+		markContent(SubscriptionHubTypeBlog, "blog", note.ID, note.UserID, nil, nil)
 	}
 
 	videos, err := s.repo.ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs, "video")
@@ -865,6 +888,14 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 	posts = append(posts, collectionPosts...)
 	posts = dedupePosts(posts)
 	posts = filterVisibleSubscribedPosts(posts, userID, userIDs, channelIDs, collectionIDs)
+	shortNotes := make([]model.ShortNote, 0)
+	shortNoteRead := make(map[uuid.UUID]bool)
+	if query.ContentType == "" {
+		shortNotes, shortNoteRead, err = s.listSubscribedShortNotes(userID, userIDs)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
 
 	postIDs := make([]uuid.UUID, 0, len(posts))
 	for i := range posts {
@@ -900,7 +931,15 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 		return nil, 0, err
 	}
 
-	items := make([]TimelineItemDTO, 0, len(posts)+len(videos)+len(feedItems))
+	items := make([]TimelineItemDTO, 0, len(posts)+len(videos)+len(feedItems)+len(shortNotes))
+	for i := range shortNotes {
+		items = append(items, TimelineItemDTO{
+			Type:        "short_note",
+			ShortNote:   &shortNotes[i],
+			PublishedAt: shortNotes[i].CreatedAt,
+			IsRead:      shortNoteRead[shortNotes[i].ID],
+		})
+	}
 	for i := range posts {
 		if episode, ok := episodeByPostID[posts[i].ID]; ok {
 			episode.Post = &posts[i]
@@ -913,7 +952,7 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 		items = append(items, TimelineItemDTO{Type: "video", Video: &videos[i], PublishedAt: videos[i].CreatedAt})
 	}
 	for i := range feedItems {
-		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt, IsRead: feedItemClusterRead(feedItems[i], readMap)})
+		items = append(items, TimelineItemDTO{Type: timelineFeedItemType(&feedItems[i]), FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt, IsRead: feedItemClusterRead(feedItems[i], readMap)})
 	}
 
 	items = filterTimeline(items, query)

@@ -380,13 +380,18 @@ func (h *Handler) markRead(c *gin.Context) {
 		return
 	}
 	var req struct {
-		FeedItemIDs []uuid.UUID `json:"feed_item_ids"`
+		FeedItemIDs  []uuid.UUID `json:"feed_item_ids"`
+		ShortNoteIDs []uuid.UUID `json:"short_note_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
 		return
 	}
 	if err := h.service.MarkRead(user, req.FeedItemIDs); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.MarkShortNotesRead(user, req.ShortNoteIDs); err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -400,13 +405,18 @@ func (h *Handler) markUnread(c *gin.Context) {
 		return
 	}
 	var req struct {
-		FeedItemIDs []uuid.UUID `json:"feed_item_ids"`
+		FeedItemIDs  []uuid.UUID `json:"feed_item_ids"`
+		ShortNoteIDs []uuid.UUID `json:"short_note_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
 		return
 	}
 	if err := h.service.MarkUnread(user, req.FeedItemIDs); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.MarkShortNotesUnread(user, req.ShortNoteIDs); err != nil {
 		httpx.Error(c, err)
 		return
 	}

@@ -75,14 +75,20 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 			return autoSubscriptionTarget{}, newAutoSubscriptionHTTPError(http.StatusBadRequest, "candidate_feed_url must be an absolute http/https URL")
 		}
 		rssURL := normalizeCanonicalFeedURL(u.String())
+		platform, contentType := "", ""
+		if sourceTarget, ok := platformSubscriptionTargetURL(input.Input); ok {
+			platform, contentType = sourceTarget.Platform, sourceTarget.ContentType
+		}
 		return autoSubscriptionTarget{
-			Provider:   "rss",
-			SourceType: "external_rss",
-			Category:   defaultFeedSourceCategory(input.Category),
-			Title:      firstNonBlank(input.Title, rssURL),
-			RssURL:     rssURL,
-			SiteURL:    validAutoSubscriptionSiteURL(input.Input),
-			Canonical:  normalizeCanonicalFeedURL(rssURL),
+			Provider:    "rss",
+			Platform:    platform,
+			ContentType: contentType,
+			SourceType:  "external_rss",
+			Category:    defaultFeedSourceCategory(input.Category),
+			Title:       firstNonBlank(input.Title, rssURL),
+			RssURL:      rssURL,
+			SiteURL:     validAutoSubscriptionSiteURL(input.Input),
+			Canonical:   normalizeCanonicalFeedURL(rssURL),
 		}, nil
 	}
 
@@ -94,6 +100,15 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 	if target, ok := githubRepositoryTarget(u); ok {
 		target.Title = firstNonBlank(input.Title, target.Title)
 		target.Category = defaultFeedSourceCategory(input.Category)
+		return target, nil
+	}
+	if target, ok := platformSubscriptionTarget(u); ok {
+		target.Title = firstNonBlank(input.Title, target.Title)
+		if strings.TrimSpace(input.Category) == "" {
+			target.Category = defaultFeedSourceCategory(target.Category)
+		} else {
+			target.Category = defaultFeedSourceCategory(input.Category)
+		}
 		return target, nil
 	}
 	if malformedGithubRepositoryPath(u) {
@@ -149,14 +164,24 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 	if feedURL == "" {
 		return autoSubscriptionTarget{}, newAutoSubscriptionHTTPError(http.StatusBadRequest, "no feed candidates found for input")
 	}
+	provider := "rss"
+	platformName, contentType := "", ""
+	if sourceTarget, ok := platformSubscriptionTargetURL(input.Input); ok {
+		platformName, contentType = sourceTarget.Platform, sourceTarget.ContentType
+	}
+	if platformName != "" {
+		provider = "rsshub"
+	}
 	return autoSubscriptionTarget{
-		Provider:   "rss",
-		SourceType: "external_rss",
-		Category:   defaultFeedSourceCategory(input.Category),
-		Title:      firstNonBlank(input.Title, candidate.Title, feedURL),
-		RssURL:     feedURL,
-		SiteURL:    candidate.SiteURL,
-		Canonical:  normalizeCanonicalFeedURL(feedURL),
+		Provider:    provider,
+		Platform:    platformName,
+		ContentType: contentType,
+		SourceType:  "external_rss",
+		Category:    defaultFeedSourceCategory(input.Category),
+		Title:       firstNonBlank(input.Title, candidate.Title, feedURL),
+		RssURL:      feedURL,
+		SiteURL:     candidate.SiteURL,
+		Canonical:   normalizeCanonicalFeedURL(feedURL),
 	}, nil
 }
 
@@ -413,13 +438,15 @@ func autoSubscriptionGroup(tx *gorm.DB, userID uuid.UUID, groupID *uuid.UUID) (*
 func autoSubscriptionTargetFromSource(source AutoSubscriptionSource, title string) autoSubscriptionTarget {
 	rssURL := normalizeCanonicalFeedURL(source.RssURL)
 	return autoSubscriptionTarget{
-		Provider:   firstNonBlank(source.Provider, "rss"),
-		SourceType: firstNonBlank(source.SourceType, "external_rss"),
-		Category:   defaultFeedSourceCategory(source.Category),
-		Title:      firstNonBlank(title, source.Title, rssURL),
-		RssURL:     rssURL,
-		SiteURL:    source.SiteURL,
-		Canonical:  normalizeCanonicalFeedURL(firstNonBlank(source.CanonicalURL, rssURL)),
+		Provider:    firstNonBlank(source.Provider, "rss"),
+		Platform:    source.Platform,
+		ContentType: source.ContentType,
+		SourceType:  firstNonBlank(source.SourceType, "external_rss"),
+		Category:    defaultFeedSourceCategory(source.Category),
+		Title:       firstNonBlank(title, source.Title, rssURL),
+		RssURL:      rssURL,
+		SiteURL:     source.SiteURL,
+		Canonical:   normalizeCanonicalFeedURL(firstNonBlank(source.CanonicalURL, rssURL)),
 	}
 }
 
