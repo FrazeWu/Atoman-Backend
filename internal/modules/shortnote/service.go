@@ -55,13 +55,17 @@ func (s *Service) Create(user authctx.CurrentUser, input noteInput) (NoteDTO, er
 	return s.Get(note.ID, user.ID)
 }
 
-func (s *Service) List(page, pageSize int, viewerID uuid.UUID) ([]NoteDTO, int64, error) {
+func (s *Service) List(page, pageSize int, viewerID uuid.UUID, authorID *uuid.UUID) ([]NoteDTO, int64, error) {
 	var notes []model.ShortNote
 	var total int64
-	if err := s.db.Model(&model.ShortNote{}).Count(&total).Error; err != nil {
+	query := s.db.Model(&model.ShortNote{})
+	if authorID != nil {
+		query = query.Where("user_id = ?", *authorID)
+	}
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := s.db.Preload("User").Preload("Media", func(db *gorm.DB) *gorm.DB { return db.Order("position ASC") }).
+	if err := query.Session(&gorm.Session{}).Preload("User").Preload("Media", func(db *gorm.DB) *gorm.DB { return db.Order("position ASC") }).
 		Order("created_at DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&notes).Error; err != nil {
 		return nil, 0, err
 	}
