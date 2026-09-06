@@ -49,6 +49,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	protected := group.Group("")
 	protected.Use(middleware.AuthMiddleware())
 	{
+		protected.GET("/bookmarks", h.getBookmarkedFeed)
 		protected.GET("/subscription-hub/tree", h.getSubscriptionHubTree)
 		protected.GET("/subscription-hub/updates", h.getSubscriptionHubUpdates)
 		protected.DELETE("/subscription-hub/sources/:feed_source_id", h.deleteSubscriptionHubSource)
@@ -114,6 +115,36 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.DELETE("/subscribe/collection/:collection_id", UnsubscribeCollection(service.db))
 		protected.GET("/subscribe/collection/:collection_id/status", CheckCollectionSubscription(service.db))
 	}
+}
+
+// getBookmarkedFeed godoc
+// @Summary 获取统一收藏时间线
+// @Description 返回当前用户收藏的文章、播客和视频，按收藏时间倒序排列。
+// @Tags feed
+// @Produce json
+// @Param page query int false "页码"
+// @Param limit query int false "每页数量"
+// @Success 200 {object} TimelineListResponseDTO
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/bookmarks [get]
+func (h *Handler) getBookmarkedFeed(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	items, total, err := h.service.GetBookmarkedFeed(user, FeedQuery{
+		Page:     normalizedPageFromQuery(c),
+		PageSize: normalizedPageSizeFromQuery(c),
+	})
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	writeTimelineList(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total, time.Now().UTC())
 }
 
 // syncSubscription godoc
