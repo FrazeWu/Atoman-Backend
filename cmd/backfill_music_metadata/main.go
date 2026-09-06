@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"strings"
 
 	"atoman/internal/app"
 	"atoman/internal/config"
@@ -32,6 +33,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	discogsBaseURL := strings.TrimSpace(os.Getenv("DISCOGS_BASE_URL"))
+	discogsConsumerKey := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_KEY"))
+	discogsConsumerSecret := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_SECRET"))
 	if *stripTitlePrefix != "" {
 		updated, err := music.StripCatalogSongTitlePrefix(context.Background(), db, *stripTitlePrefix)
 		if err != nil {
@@ -70,9 +74,9 @@ func main() {
 	}
 	var results []music.CatalogMetadataBackfillResult
 	if *unmatchedOnly {
-		results, err = music.BackfillUnmatchedCatalogMetadata(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), *apply, *albumID, *preferredReleaseID)
+		results, err = music.BackfillUnmatchedCatalogMetadata(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), discogsBaseURL, discogsConsumerKey, discogsConsumerSecret, *apply, *albumID, *preferredReleaseID)
 	} else {
-		results, err = music.BackfillCatalogMetadata(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), *apply, *albumID, *preferredReleaseID)
+		results, err = music.BackfillCatalogMetadata(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), discogsBaseURL, discogsConsumerKey, discogsConsumerSecret, *apply, *albumID, *preferredReleaseID)
 	}
 	if err != nil {
 		log.Fatal(err)

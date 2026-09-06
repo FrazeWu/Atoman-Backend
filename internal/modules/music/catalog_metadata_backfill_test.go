@@ -86,6 +86,13 @@ func TestAppendMusicBrainzSourcePreservesAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestAppendCatalogMetadataSourceUsesProviderTitle(t *testing.T) {
+	got := appendCatalogMetadataSource(nil, "https://www.discogs.com/release/123", "Discogs")
+	if len(got) != 1 || got[0].Title != "Discogs" || got[0].URL != "https://www.discogs.com/release/123" {
+		t.Fatalf("sources = %#v", got)
+	}
+}
+
 func TestParseBackfillReleaseDate(t *testing.T) {
 	date, precision, ok := parseBackfillReleaseDate("2008-11")
 	if !ok || precision != "month" || date != time.Date(2008, 11, 1, 0, 0, 0, 0, time.UTC) {

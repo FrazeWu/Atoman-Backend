@@ -23,6 +23,7 @@ type CatalogMetadataBackfillResult struct {
 	AlbumTitle           string
 	MatchedTitle         string
 	SourceURL            string
+	MetadataSource       string
 	MusicBrainzReleaseID string
 	Matched              bool
 	Applied              bool
@@ -128,15 +129,15 @@ func StripCatalogSongTitlePrefix(ctx context.Context, db *gorm.DB, prefix string
 	return updated, nil
 }
 
-func BackfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent string, apply bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
-	return backfillCatalogMetadata(ctx, db, userAgent, apply, false, options...)
+func BackfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent, discogsBaseURL, discogsConsumerKey, discogsConsumerSecret string, apply bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
+	return backfillCatalogMetadata(ctx, db, userAgent, discogsBaseURL, discogsConsumerKey, discogsConsumerSecret, apply, false, options...)
 }
 
-func BackfillUnmatchedCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent string, apply bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
-	return backfillCatalogMetadata(ctx, db, userAgent, apply, true, options...)
+func BackfillUnmatchedCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent, discogsBaseURL, discogsConsumerKey, discogsConsumerSecret string, apply bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
+	return backfillCatalogMetadata(ctx, db, userAgent, discogsBaseURL, discogsConsumerKey, discogsConsumerSecret, apply, true, options...)
 }
 
-func backfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent string, apply, unmatchedOnly bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
+func backfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent, discogsBaseURL, discogsConsumerKey, discogsConsumerSecret string, apply, unmatchedOnly bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
 	var albums []model.Album
 	query := db.WithContext(ctx).
 		Preload("Artists").
@@ -153,7 +154,8 @@ func backfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent string,
 	if err := query.Order("created_at ASC").Find(&albums).Error; err != nil {
 		return nil, err
 	}
-	enricher := NewExternalAlbumMetadataEnricher(&http.Client{Timeout: 10 * time.Second}, "https://musicbrainz.org", "https://coverartarchive.org", "https://lrclib.net", userAgent)
+	enricher := NewExternalAlbumMetadataEnricher(&http.Client{Timeout: 10 * time.Second}, "https://musicbrainz.org", "https://coverartarchive.org", "https://lrclib.net", userAgent).
+		WithDiscogs(discogsBaseURL, discogsConsumerKey, discogsConsumerSecret)
 	results := make([]CatalogMetadataBackfillResult, 0, len(albums))
 	for index := range albums {
 		preferredReleaseID := ""
@@ -220,6 +222,10 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 	result.Matched = true
 	result.MatchedTitle = enriched.AlbumTitle
 	result.SourceURL = enriched.SourceURL
+	result.MetadataSource = strings.ToLower(strings.TrimSpace(enriched.MetadataSource))
+	if result.MetadataSource == "" && enriched.MusicBrainzReleaseID != "" {
+		result.MetadataSource = "musicbrainz"
+	}
 	result.MusicBrainzReleaseID = enriched.MusicBrainzReleaseID
 	result.MissingArtists = enriched.MissingArtists
 	if !apply {
@@ -238,14 +244,21 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 		if _, err := revisions.EnsureInitialRevision("album", album.ID, actorID); err != nil {
 			return err
 		}
-		sources := appendMusicBrainzSource(album.Sources, enriched.SourceURL)
+		sourceTitle := catalogMetadataSourceTitle(result.MetadataSource)
+		if sourceTitle == "" {
+			return fmt.Errorf("unsupported metadata source %q", enriched.MetadataSource)
+		}
+		sources := appendCatalogMetadataSource(album.Sources, enriched.SourceURL, sourceTitle)
 		sourcesJSON, err := json.Marshal(sources)
 		if err != nil {
 			return err
 		}
 		updates := map[string]any{
 			"title": enriched.AlbumTitle, "album_type": enriched.AlbumType, "sources_json": string(sourcesJSON),
-			"musicbrainz_matched": true, "musicbrainz_release_id": enriched.MusicBrainzReleaseID, "musicbrainz_matched_at": time.Now().UTC(),
+			"musicbrainz_matched": result.MetadataSource == "musicbrainz", "musicbrainz_release_id": enriched.MusicBrainzReleaseID, "musicbrainz_matched_at": nil,
+		}
+		if result.MetadataSource == "musicbrainz" {
+			updates["musicbrainz_matched_at"] = time.Now().UTC()
 		}
 		if date, precision, ok := parseBackfillReleaseDate(enriched.ReleaseDate); ok {
 			updates["release_date"] = date
@@ -334,14 +347,30 @@ func probeExistingSongDuration(ctx context.Context, audioURL string) float64 {
 	return duration
 }
 
-func appendMusicBrainzSource(sources []model.MusicSource, sourceURL string) []model.MusicSource {
+func appendCatalogMetadataSource(sources []model.MusicSource, sourceURL, sourceTitle string) []model.MusicSource {
 	result := append([]model.MusicSource(nil), sources...)
-	for _, source := range result {
+	for index, source := range result {
 		if source.URL == sourceURL {
+			result[index].Title = sourceTitle
 			return result
 		}
 	}
-	return append(result, model.MusicSource{Type: "url", URL: sourceURL, Title: "MusicBrainz"})
+	return append(result, model.MusicSource{Type: "url", URL: sourceURL, Title: sourceTitle})
+}
+
+func appendMusicBrainzSource(sources []model.MusicSource, sourceURL string) []model.MusicSource {
+	return appendCatalogMetadataSource(sources, sourceURL, "MusicBrainz")
+}
+
+func catalogMetadataSourceTitle(source string) string {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "musicbrainz":
+		return "MusicBrainz"
+	case "discogs":
+		return "Discogs"
+	default:
+		return ""
+	}
 }
 
 func parseBackfillReleaseDate(value string) (time.Time, string, bool) {
@@ -363,5 +392,5 @@ func FormatCatalogMetadataBackfillResult(result CatalogMetadataBackfillResult) s
 	if result.Applied {
 		status = "APPLIED"
 	}
-	return fmt.Sprintf("%s\t%s\t%s => %s\trelease=%s\tlyrics=%d\tsource=%s\tmissing_artists=%s\t%s", status, result.AlbumID, result.AlbumTitle, result.MatchedTitle, result.MusicBrainzReleaseID, result.LyricsAdded, result.SourceURL, strings.Join(result.MissingArtists, ","), result.Reason)
+	return fmt.Sprintf("%s\t%s\t%s => %s\tprovider=%s\trelease=%s\tlyrics=%d\tsource=%s\tmissing_artists=%s\t%s", status, result.AlbumID, result.AlbumTitle, result.MatchedTitle, result.MetadataSource, result.MusicBrainzReleaseID, result.LyricsAdded, result.SourceURL, strings.Join(result.MissingArtists, ","), result.Reason)
 }
