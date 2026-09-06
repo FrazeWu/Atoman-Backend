@@ -252,7 +252,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	}
 	if !releaseMatched {
 		release, trackMapping, err = e.findRelease(ctx, input)
-		if err != nil && input.PreferredReleaseID != "" {
+		if err != nil && input.PreferredReleaseID != "" && !e.preferDiscogs {
 			return result, err
 		}
 		if err == nil && release.ID != "" {
