@@ -302,8 +302,12 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 	return channel, nil
 }
 
-func ensureDefaultCollectionName() string {
-	return "默认合集"
+func ensureDefaultCollectionName(channelName string) string {
+	channelName = strings.TrimSpace(channelName)
+	if channelName == "" {
+		channelName = "默认频道"
+	}
+	return fmt.Sprintf("《%s》的合集", channelName)
 }
 
 func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
@@ -311,6 +315,10 @@ func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
 }
 
 func (s *Service) ensureDefaultCollectionForChannelDB(db *gorm.DB, channelID uuid.UUID) error {
+	var channel model.Channel
+	if err := db.Select("id", "name").First(&channel, "id = ?", channelID).Error; err != nil {
+		return err
+	}
 	var collection model.ContentCollection
 	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
 	if err == nil {
@@ -321,7 +329,7 @@ func (s *Service) ensureDefaultCollectionForChannelDB(db *gorm.DB, channelID uui
 	}
 	collection = model.ContentCollection{
 		ChannelID:   channelID,
-		Name:        ensureDefaultCollectionName(),
+		Name:        ensureDefaultCollectionName(channel.Name),
 		Description: "默认合集",
 		IsDefault:   true,
 	}

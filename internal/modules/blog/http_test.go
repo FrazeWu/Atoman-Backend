@@ -1071,6 +1071,13 @@ func TestCreateDefaultChannelForUserSetsInitialStudioChannel(t *testing.T) {
 	if state.ChannelID == nil || *state.ChannelID != channel.ID {
 		t.Fatalf("expected selected channel %s, got %#v", channel.ID, state.ChannelID)
 	}
+	var collection model.ContentCollection
+	if err := db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&collection).Error; err != nil {
+		t.Fatalf("load default collection: %v", err)
+	}
+	if collection.Name != "《Alice》的合集" {
+		t.Fatalf("expected channel-derived default collection, got %q", collection.Name)
+	}
 }
 
 func TestCreateDefaultChannelForUserUsesCurrentStudioChannel(t *testing.T) {
@@ -1145,9 +1152,8 @@ func TestRegisterRoutesCreatePostReturnsCreatedPost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create default channel: %v", err)
 	}
-	defaultCollectionName := ensureDefaultCollectionName()
 	var collection model.ContentCollection
-	if err := service.db.Where("channel_id = ? AND name = ?", channel.ID, defaultCollectionName).First(&collection).Error; err != nil {
+	if err := service.db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&collection).Error; err != nil {
 		t.Fatalf("load default collection: %v", err)
 	}
 

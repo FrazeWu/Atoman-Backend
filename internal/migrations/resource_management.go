@@ -19,6 +19,27 @@ var studioDefaultCollectionNames = map[string]string{
 	"video":   "默认合集",
 }
 
+func channelDefaultCollectionName(channelName string) string {
+	channelName = strings.TrimSpace(channelName)
+	if channelName == "" {
+		channelName = "默认频道"
+	}
+	return fmt.Sprintf("《%s》的合集", channelName)
+}
+
+func isLegacySystemDefaultCollectionName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "未分类" {
+		return true
+	}
+	for _, legacyName := range legacySystemDefaultCollectionNames {
+		if name == legacyName {
+			return true
+		}
+	}
+	return false
+}
+
 // RunResourceManagementMigration establishes the additive single-collection model.
 // Legacy join tables remain available during the compatibility window.
 func RunResourceManagementMigration(db *gorm.DB) error {
@@ -57,7 +78,7 @@ func ensureStudioDefaultCollections(tx *gorm.DB) (map[string]uuid.UUID, error) {
 			unified = model.ContentCollection{
 				ChannelID:   channel.ID,
 				CreatedBy:   channel.UserID,
-				Name:        "默认合集",
+				Name:        channelDefaultCollectionName(channel.Name),
 				Description: "默认合集",
 				IsDefault:   true,
 			}
@@ -66,6 +87,10 @@ func ensureStudioDefaultCollections(tx *gorm.DB) (map[string]uuid.UUID, error) {
 			}
 		} else if err != nil {
 			return nil, fmt.Errorf("load unified default collection for channel %s: %w", channel.ID, err)
+		} else if isLegacySystemDefaultCollectionName(unified.Name) {
+			if err := tx.Model(&unified).Update("name", channelDefaultCollectionName(channel.Name)).Error; err != nil {
+				return nil, fmt.Errorf("rename unified default collection for channel %s: %w", channel.ID, err)
+			}
 		}
 
 		for _, contentType := range []string{"blog", "podcast", "video"} {
