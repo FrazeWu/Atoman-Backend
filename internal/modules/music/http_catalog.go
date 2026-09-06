@@ -305,7 +305,7 @@ func (h *Handler) getArtist(c *gin.Context) {
 		Preload("Albums", func(db *gorm.DB) *gorm.DB {
 			return scopeVisibleMusicEntries(db, "\"Albums\"", "uploaded_by", viewerPtr, false)
 		}).
-		Preload("Albums.Artists", visibleArtistPreload(viewerPtr)).Preload("Albums.ArtistCredits", visibleAlbumArtistCreditsPreload(viewerPtr)).Preload("Albums.ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).Preload("Albums.Songs", visibleSongPreload(viewerPtr))
+		Preload("Albums.Artists", visibleArtistPreload(viewerPtr)).Preload("Albums.ArtistCredits", visibleAlbumArtistCreditsPreload(viewerPtr)).Preload("Albums.ArtistCredits.Artist", visibleArtistPreload(viewerPtr))
 	if h.service.db.Migrator().HasTable(&model.ArtistMember{}) {
 		query = query.Preload("MemberRelations.MemberArtist", visibleArtistPreload(viewerPtr))
 	}
@@ -496,7 +496,7 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	}
 
 	var albums []model.Album
-	findDB := db.Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("ArtistCredits", visibleAlbumArtistCreditsPreload(viewerPtr)).Preload("ArtistCredits.Artist", visibleArtistPreload(viewerPtr))
+	findDB := db.Preload("Artists", visibleArtistPreload(viewerPtr))
 	if joinedArtists {
 		findDB = findDB.Distinct("\"Albums\".*")
 	}

@@ -12,17 +12,31 @@ import (
 	"github.com/google/uuid"
 )
 
-const musicRecommendationCandidateLimit = 1000
+const (
+	musicRecommendationMinimumCandidates = 120
+	musicRecommendationMaximumCandidates = 400
+)
+
+func musicRecommendationCandidateLimit(page, pageSize int) int {
+	limit := page * pageSize * 4
+	if limit < musicRecommendationMinimumCandidates {
+		return musicRecommendationMinimumCandidates
+	}
+	if limit > musicRecommendationMaximumCandidates {
+		return musicRecommendationMaximumCandidates
+	}
+	return limit
+}
 
 func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, pageSize int) ([]feed.RecommendationItemDTO, int64, error) {
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	candidateLimit := musicRecommendationCandidateLimit(page, pageSize)
 
 	var albums []model.Album
 	if err := s.db.Model(&model.Album{}).
-		Preload("Songs", "lifecycle_status = ?", model.MusicLifecycleActive).
 		Where("\"Albums\".lifecycle_status = ?", model.MusicLifecycleActive).
 		Order("\"Albums\".hot_score DESC, \"Albums\".created_at DESC").
-		Limit(musicRecommendationCandidateLimit).
+		Limit(candidateLimit).
 		Find(&albums).Error; err != nil {
 		return nil, 0, err
 	}
@@ -30,6 +44,23 @@ func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, page
 	albumIDs := make([]uuid.UUID, 0, len(albums))
 	for _, album := range albums {
 		albumIDs = append(albumIDs, album.ID)
+	}
+	albumPlayCounts := map[uuid.UUID]int64{}
+	if len(albumIDs) > 0 {
+		var playRows []struct {
+			AlbumID   uuid.UUID
+			PlayCount int64
+		}
+		if err := s.db.Model(&model.Song{}).
+			Select("album_id, COALESCE(SUM(play_count), 0) AS play_count").
+			Where("album_id IN ? AND lifecycle_status = ? AND deleted_at IS NULL", albumIDs, model.MusicLifecycleActive).
+			Group("album_id").
+			Scan(&playRows).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, row := range playRows {
+			albumPlayCounts[row.AlbumID] = row.PlayCount
+		}
 	}
 	albumBookmarkCounts := map[uuid.UUID]int64{}
 	if len(albumIDs) > 0 {
@@ -77,19 +108,13 @@ func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, page
 			continue
 		}
 		items = append(items, feed.RecommendationItemDTO{
-			ID:         album.ID.String(),
-			Title:      album.Title,
-			Summary:    "",
-			ImageURL:   album.CoverURL,
-			TargetPath: "/music/album/" + album.ID.String(),
-			ScoreLabel: musicRecommendationScoreLabel(mode, item.FinalScore),
-			PlayCount: func() int64 {
-				var total int64
-				for _, song := range album.Songs {
-					total += song.PlayCount
-				}
-				return total
-			}(),
+			ID:            album.ID.String(),
+			Title:         album.Title,
+			Summary:       "",
+			ImageURL:      album.CoverURL,
+			TargetPath:    "/music/album/" + album.ID.String(),
+			ScoreLabel:    musicRecommendationScoreLabel(mode, item.FinalScore),
+			PlayCount:     albumPlayCounts[album.ID],
 			BookmarkCount: albumBookmarkCounts[album.ID],
 		})
 	}
@@ -114,6 +139,7 @@ type artistWithHotScore struct {
 
 func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pageSize int) ([]feed.RecommendationItemDTO, int64, error) {
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	candidateLimit := musicRecommendationCandidateLimit(page, pageSize)
 
 	var dbArtists []artistWithHotScore
 	if err := s.db.Table("Artists").
@@ -123,7 +149,7 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 		Where("\"Artists\".deleted_at IS NULL AND \"Artists\".lifecycle_status = ?", model.MusicLifecycleActive).
 		Group("\"Artists\".id").
 		Order("max_hot_score DESC, \"Artists\".created_at DESC").
-		Limit(musicRecommendationCandidateLimit).
+		Limit(candidateLimit).
 		Find(&dbArtists).Error; err != nil {
 		return nil, 0, err
 	}

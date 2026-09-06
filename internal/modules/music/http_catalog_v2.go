@@ -203,7 +203,7 @@ func (h *Handler) search(c *gin.Context) {
 			return
 		}
 		result.Meta.Totals["album"] = total
-		if err := albumQuery().Distinct(`"Albums".*, CASE WHEN LOWER("Albums".title) = LOWER(?) THEN 0 WHEN LOWER("Albums".title) LIKE LOWER(?) THEN 1 ELSE 2 END AS search_rank`, query, prefix).Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("Songs", visibleSongPreload(viewerPtr)).
+		if err := albumQuery().Distinct(`"Albums".*, CASE WHEN LOWER("Albums".title) = LOWER(?) THEN 0 WHEN LOWER("Albums".title) LIKE LOWER(?) THEN 1 ELSE 2 END AS search_rank`, query, prefix).Preload("Artists", visibleArtistPreload(viewerPtr)).
 			Order(`search_rank ASC, "Albums".hot_score DESC, "Albums".title ASC`).Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
 			httpx.Error(c, err)
 			return
