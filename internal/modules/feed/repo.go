@@ -1268,6 +1268,83 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 	return rows[offset:end], nil
 }
 
+// ListCuratedExploreSources returns only editorially selected sources. It uses
+// the catalog's language assignment so legacy detected-language values cannot
+// put a source into the wrong recommendation pool.
+func (r *Repo) ListCuratedExploreSources(limit int, languageCode string) ([]ExploreSourceRow, error) {
+	titles := curatedSourceTitles(languageCode)
+	if len(titles) == 0 || limit <= 0 {
+		return []ExploreSourceRow{}, nil
+	}
+	normalizedTitles := make([]string, 0, len(titles))
+	for _, title := range titles {
+		normalizedTitles = append(normalizedTitles, strings.ToLower(strings.TrimSpace(title)))
+	}
+
+	type curatedSourceRowRaw struct {
+		ID                uuid.UUID
+		Title             string
+		RSSURL            string
+		CanonicalURL      string
+		CoverURL          string
+		Category          string
+		SubscriptionCount int64
+		RecentItemCount   int64
+		LastPublishedAt   sql.NullString
+	}
+	var rawRows []curatedSourceRowRaw
+	if err := r.db.Table("feed_sources").
+		Select(`
+			feed_sources.id, feed_sources.title, feed_sources.rss_url, feed_sources.canonical_url,
+			feed_sources.cover_url, feed_sources.category,
+			COUNT(DISTINCT subscriptions.id) AS subscription_count,
+			COUNT(DISTINCT feed_items.id) AS recent_item_count,
+			MAX(feed_items.published_at) AS last_published_at`).
+		Joins("LEFT JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id AND subscriptions.deleted_at IS NULL").
+		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id AND feed_items.deleted_at IS NULL").
+		Where("feed_sources.source_type = ? AND feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL", "external_rss", false).
+		Where("LOWER(TRIM(feed_sources.title)) IN ?", normalizedTitles).
+		Group("feed_sources.id").
+		Having("COUNT(DISTINCT feed_items.id) > 0").
+		Order("subscription_count DESC, last_published_at DESC NULLS LAST, feed_sources.created_at DESC").
+		Limit(limit * 2).
+		Scan(&rawRows).Error; err != nil {
+		return nil, err
+	}
+
+	rows := make([]ExploreSourceRow, 0, min(limit, len(rawRows)))
+	sourceIDs := make([]uuid.UUID, 0, min(limit, len(rawRows)))
+	seenCanonicalURLs := make(map[string]struct{}, len(rawRows))
+	for _, raw := range rawRows {
+		canonicalURL := strings.TrimSpace(raw.CanonicalURL)
+		if canonicalURL == "" {
+			canonicalURL = strings.TrimSpace(raw.RSSURL)
+		}
+		canonicalURL = strings.ToLower(canonicalURL)
+		if _, exists := seenCanonicalURLs[canonicalURL]; exists {
+			continue
+		}
+		seenCanonicalURLs[canonicalURL] = struct{}{}
+		row := ExploreSourceRow{ID: raw.ID, Title: raw.Title, RSSURL: raw.RSSURL, CoverURL: raw.CoverURL, Category: raw.Category, LanguageCode: languageCode, SubscriptionCount: raw.SubscriptionCount, RecentItemCount: raw.RecentItemCount}
+		if raw.LastPublishedAt.Valid {
+			publishedAt, err := parseExploreSourceTimestamp(raw.LastPublishedAt.String)
+			if err != nil {
+				return nil, err
+			}
+			row.LastPublishedAt = &publishedAt
+		}
+		rows = append(rows, row)
+		sourceIDs = append(sourceIDs, raw.ID)
+		if len(rows) == limit {
+			break
+		}
+	}
+	if err := r.attachExploreSourceRecentItems(rows, sourceIDs); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs []uuid.UUID) error {
 	if len(rows) == 0 {
 		return nil

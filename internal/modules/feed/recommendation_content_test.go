@@ -136,9 +136,10 @@ func TestCuratedRecommendationsOnlyUseTwelveTopSourcesForLanguage(t *testing.T) 
 		source := model.FeedSource{
 			SourceType:   "external_rss",
 			Hash:         "selected-source-" + uuid.NewString(),
-			Title:        "Selected source",
+			Title:        curatedSourceCatalog["zh"][index],
 			Category:     "blog",
 			LanguageCode: "zh",
+			RssURL:       "https://example.com/selected-source/" + uuid.NewString(),
 		}
 		if err := db.Create(&source).Error; err != nil {
 			t.Fatalf("create selected source: %v", err)
@@ -183,5 +184,82 @@ func TestCuratedRecommendationsOnlyUseTwelveTopSourcesForLanguage(t *testing.T) 
 				t.Fatalf("%s recommendations must exclude items outside the top 12 sources: %#v", mode, items)
 			}
 		}
+	}
+}
+
+func TestCuratedRecommendationsUseEditorialSourcesWithCorrectedLanguage(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.FeedSource{},
+		&model.FeedItem{},
+	)
+
+	now := time.Now().UTC()
+	trustedSource := model.FeedSource{
+		SourceType:   "external_rss",
+		Hash:         "curated-trusted-" + uuid.NewString(),
+		Title:        "少数派",
+		Category:     "blog",
+		LanguageCode: "en", // 编辑目录而非旧数据的语言标记决定归属。
+		RssURL:       "https://sspai.example.com/feed",
+		CanonicalURL: "https://sspai.example.com",
+	}
+	duplicateTrustedSource := model.FeedSource{
+		SourceType:   "external_rss",
+		Hash:         "curated-trusted-duplicate-" + uuid.NewString(),
+		Title:        "少数派",
+		Category:     "blog",
+		LanguageCode: "zh",
+		RssURL:       "https://sspai.example.com/duplicate-feed",
+		CanonicalURL: "https://sspai.example.com",
+	}
+	untrustedSource := model.FeedSource{
+		SourceType:   "external_rss",
+		Hash:         "curated-untrusted-" + uuid.NewString(),
+		Title:        "Golang Weekly",
+		Category:     "blog",
+		LanguageCode: "pt",
+		RssURL:       "https://golangweekly.example.com/feed",
+	}
+	for _, source := range []*model.FeedSource{&trustedSource, &duplicateTrustedSource, &untrustedSource} {
+		if err := db.Create(source).Error; err != nil {
+			t.Fatalf("create source: %v", err)
+		}
+	}
+	trustedItem := model.FeedItem{
+		FeedSourceID: trustedSource.ID, GUID: "curated-trusted-item", Title: "可信中文文章",
+		Summary: strings.Repeat("完整内容。", 80), Link: "https://example.com/trusted",
+		ReaderQualityScore: 90, FullTextWordCount: 1200, LanguageCode: "zh", PublishedAt: now, FetchedAt: now,
+	}
+	duplicateTrustedItem := model.FeedItem{
+		FeedSourceID: duplicateTrustedSource.ID, GUID: "curated-trusted-duplicate-item", Title: "重复来源文章",
+		Summary: strings.Repeat("完整内容。", 80), Link: "https://example.com/trusted-duplicate",
+		ReaderQualityScore: 90, FullTextWordCount: 1200, LanguageCode: "zh", PublishedAt: now, FetchedAt: now,
+	}
+	untrustedItem := model.FeedItem{
+		FeedSourceID: untrustedSource.ID, GUID: "curated-untrusted-item", Title: "误标来源文章",
+		Summary: strings.Repeat("Complete content. ", 80), Link: "https://example.com/untrusted",
+		ReaderQualityScore: 90, FullTextWordCount: 1200, LanguageCode: "pt", PublishedAt: now, FetchedAt: now,
+	}
+	for _, item := range []*model.FeedItem{&trustedItem, &duplicateTrustedItem, &untrustedItem} {
+		if err := db.Create(item).Error; err != nil {
+			t.Fatalf("create item: %v", err)
+		}
+	}
+
+	items, _, err := NewService(db).RecommendArticlesByMode(recommendation.ModeFeatured, "blog", "", "zh", "", 1, 20)
+	if err != nil {
+		t.Fatalf("recommend curated Chinese articles: %v", err)
+	}
+	if len(items) != 1 || (items[0].ID != trustedItem.ID.String() && items[0].ID != duplicateTrustedItem.ID.String()) {
+		t.Fatalf("expected only the editorial Chinese source, got %#v", items)
+	}
+
+	items, _, err = NewService(db).RecommendArticlesByMode(recommendation.ModeFeatured, "blog", "", "pt", "", 1, 20)
+	if err != nil {
+		t.Fatalf("recommend curated Portuguese articles: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("mislabelled sources must not fill the Portuguese curated pool: %#v", items)
 	}
 }

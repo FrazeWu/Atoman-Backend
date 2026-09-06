@@ -76,7 +76,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 	curated := mode == recommendation.ModeFeatured || mode == recommendation.ModeRandom
 	curatedSourceIDs := make([]uuid.UUID, 0, recommendationFeaturedSourceLimit)
 	if curated {
-		sources, err := s.repo.ListExploreSources(recommendationFeaturedSourceLimit, 0, "", "", languageCode)
+		sources, err := s.repo.ListCuratedExploreSources(recommendationFeaturedSourceLimit, languageCode)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -205,7 +205,13 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 	if curated {
 		sourceLimit = recommendationFeaturedSourceLimit
 	}
-	sourceRows, err := s.repo.ListExploreSources(sourceLimit, 0, "", "", languageCode)
+	var sourceRows []ExploreSourceRow
+	var err error
+	if curated {
+		sourceRows, err = s.repo.ListCuratedExploreSources(sourceLimit, languageCode)
+	} else {
+		sourceRows, err = s.repo.ListExploreSources(sourceLimit, 0, "", "", languageCode)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
