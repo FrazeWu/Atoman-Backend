@@ -21,6 +21,9 @@ func TestModeConstants(t *testing.T) {
 	if ModeLatest != "latest" {
 		t.Fatalf("expected ModeLatest to be latest, got %q", ModeLatest)
 	}
+	if ModeRandom != "random" {
+		t.Fatalf("expected ModeRandom to be random, got %q", ModeRandom)
+	}
 }
 
 func TestScoreLatestUsesPublishedTime(t *testing.T) {

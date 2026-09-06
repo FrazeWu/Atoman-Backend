@@ -38,8 +38,10 @@ func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 		return recommendation.ModeDiscover, nil
 	case recommendation.ModeLatest:
 		return recommendation.ModeLatest, nil
+	case recommendation.ModeRandom:
+		return recommendation.ModeRandom, nil
 	default:
-		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover, latest")
+		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover, latest, random")
 	}
 }
 
@@ -71,8 +73,23 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 	includeText := len(keywords) > 0 || strings.TrimSpace(search) != ""
 	publishedAfter := time.Now().Add(-recommendationArticleCandidateWindow(mode))
 
+	curated := mode == recommendation.ModeFeatured || mode == recommendation.ModeRandom
+	curatedSourceIDs := make([]uuid.UUID, 0, recommendationFeaturedSourceLimit)
+	if curated {
+		sources, err := s.repo.ListExploreSources(recommendationFeaturedSourceLimit, 0, "", "", languageCode)
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, source := range sources {
+			curatedSourceIDs = append(curatedSourceIDs, source.ID)
+		}
+		if len(curatedSourceIDs) == 0 {
+			return []RecommendationItemDTO{}, 0, nil
+		}
+	}
+
 	posts := []RecommendationArticlePostRow{}
-	if normalizedCategory == "blog" {
+	if normalizedCategory == "blog" && !curated {
 		var err error
 		posts, err = s.repo.ListRecommendationArticlePosts(includeText, publishedAfter, keywords, languageCode, search, recommendationInternalArticleCandidateLimit)
 		if err != nil {
@@ -80,7 +97,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 		}
 	}
 	feedItemLimit := recommendationArticleCandidateLimit - len(posts)
-	feedItems, err := s.repo.ListRecommendationArticleFeedItems(includeText, normalizedCategory, publishedAfter, keywords, languageCode, search, feedItemLimit)
+	feedItems, err := s.repo.ListRecommendationArticleFeedItems(includeText, normalizedCategory, publishedAfter, keywords, languageCode, search, curatedSourceIDs, feedItemLimit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -175,11 +192,20 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 }
 
 func (s *Service) RecommendChannels(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	rows, err := s.repo.ListRecommendationChannels(languageCode)
-	if err != nil {
-		return nil, 0, err
+	curated := mode == recommendation.ModeFeatured || mode == recommendation.ModeRandom
+	rows := []RecommendationChannelRow{}
+	if !curated {
+		var err error
+		rows, err = s.repo.ListRecommendationChannels(languageCode)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
-	sourceRows, err := s.repo.ListExploreSources(100, 0, "")
+	sourceLimit := 100
+	if curated {
+		sourceLimit = recommendationFeaturedSourceLimit
+	}
+	sourceRows, err := s.repo.ListExploreSources(sourceLimit, 0, "", "", languageCode)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -814,12 +840,15 @@ func recommendationScoreLabel(mode recommendation.Mode, score float64) string {
 		recommendation.ModeFeatured: "精选",
 		recommendation.ModeDiscover: "探索",
 		recommendation.ModeLatest:   "最新",
+		recommendation.ModeRandom:   "随机",
 	}[mode]
 	if prefix == "" {
 		prefix = "推荐"
 	}
 	return fmt.Sprintf("%s %.0f", prefix, math.Round(score*100))
 }
+
+const recommendationFeaturedSourceLimit = 12
 
 func clamp01(value float64) float64 {
 	if value < 0 {

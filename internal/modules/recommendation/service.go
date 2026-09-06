@@ -1,12 +1,30 @@
 package recommendation
 
-import "sort"
+import (
+	"math/rand"
+	"sort"
+)
 
 func RankCandidates(mode Mode, candidates []Candidate, limit int) []RankedItem {
 	return rankCandidates(mode, candidates, limit)
 }
 
 func rankCandidates(mode Mode, candidates []Candidate, limit int) []RankedItem {
+	if mode == ModeRandom {
+		shuffled := append([]Candidate(nil), candidates...)
+		rand.Shuffle(len(shuffled), func(i, j int) {
+			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		})
+		ranked := make([]RankedItem, 0, len(shuffled))
+		for _, candidate := range shuffled {
+			ranked = append(ranked, RankedItem{Candidate: candidate, FinalScore: 1})
+		}
+		if limit > 0 && len(ranked) > limit {
+			return ranked[:limit]
+		}
+		return ranked
+	}
+
 	ranked := make([]RankedItem, 0, len(candidates))
 
 	for _, candidate := range candidates {
