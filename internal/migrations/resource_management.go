@@ -24,7 +24,7 @@ func channelDefaultCollectionName(channelName string) string {
 	if channelName == "" {
 		channelName = "默认频道"
 	}
-	return fmt.Sprintf("《%s》的合集", channelName)
+	return fmt.Sprintf("%s的合集", channelName)
 }
 
 func isLegacySystemDefaultCollectionName(name string) bool {
