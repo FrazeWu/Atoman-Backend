@@ -74,6 +74,51 @@ func TestSubscriptionHubReconcilesSubscriptionChanges(t *testing.T) {
 	}
 }
 
+func TestSubscriptionHubAllContextDeduplicatesSourcesAndCombinesContentTypes(t *testing.T) {
+	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
+	testdb.Migrate(t, db, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+	post, episode, video := seedUnifiedChannelUpdates(t, db, creator, channel)
+
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: "subscription-hub-all-channel", Title: channel.Name}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create channel source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatalf("create channel subscription: %v", err)
+	}
+
+	tree, err := service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatalf("get subscription hub tree: %v", err)
+	}
+	group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeAll)
+	if group == nil || len(group.Memberships) != 1 || group.Memberships[0].FeedSourceID != source.ID {
+		t.Fatalf("all context must contain one channel source: %#v", group)
+	}
+
+	items, total, err := service.GetSubscriptionHubUpdates(viewer, SubscriptionHubUpdatesQuery{
+		SubscriptionType: SubscriptionHubTypeAll,
+		GroupID:          group.ID,
+		Page:             1,
+		PageSize:         20,
+	})
+	if err != nil {
+		t.Fatalf("get all subscription updates: %v", err)
+	}
+	if total != 3 || len(items) != 3 {
+		t.Fatalf("items=%d total=%d, want 3", len(items), total)
+	}
+	if items[0].Post == nil && items[1].Post == nil && items[2].Post == nil {
+		t.Fatalf("missing blog post %s: %#v", post.ID, items)
+	}
+	if items[0].PodcastEpisode == nil && items[1].PodcastEpisode == nil && items[2].PodcastEpisode == nil {
+		t.Fatalf("missing podcast episode %s: %#v", episode.ID, items)
+	}
+	if items[0].Video == nil && items[1].Video == nil && items[2].Video == nil {
+		t.Fatalf("missing video %s: %#v", video.ID, items)
+	}
+}
+
 func TestSubscriptionHubUsesCurrentSourceIdentityImages(t *testing.T) {
 	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
 	testdb.Migrate(t, db, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
@@ -166,6 +211,7 @@ func TestSubscriptionHubCountsUnreadContentForEachModule(t *testing.T) {
 		subscriptionType string
 		unread           int64
 	}{
+		{SubscriptionHubTypeAll, 2},
 		{SubscriptionHubTypeBlog, 1},
 		{SubscriptionHubTypePodcast, 0},
 		{SubscriptionHubTypeVideo, 1},
@@ -287,8 +333,14 @@ func TestSubscriptionHubMarksSubscribedTypeWithoutContentEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get subscription hub tree: %v", err)
 	}
-	videoNode := tree.Types[1]
-	if videoNode.SubscriptionType != SubscriptionHubTypeVideo || videoNode.HasContent {
+	var videoNode *SubscriptionHubTypeNode
+	for index := range tree.Types {
+		if tree.Types[index].SubscriptionType == SubscriptionHubTypeVideo {
+			videoNode = &tree.Types[index]
+			break
+		}
+	}
+	if videoNode == nil || videoNode.HasContent {
 		t.Fatalf("video type with no updates must be marked empty: %#v", videoNode)
 	}
 }
@@ -318,7 +370,7 @@ func TestSubscriptionHubImportsSelfSubscriptionIntoAllContentTypes(t *testing.T)
 	if err != nil {
 		t.Fatalf("get subscription hub tree: %v", err)
 	}
-	for _, subscriptionType := range []string{SubscriptionHubTypeBlog, SubscriptionHubTypePodcast, SubscriptionHubTypeVideo} {
+	for _, subscriptionType := range []string{SubscriptionHubTypeAll, SubscriptionHubTypeBlog, SubscriptionHubTypePodcast, SubscriptionHubTypeVideo} {
 		group := firstSubscriptionHubGroup(tree, subscriptionType)
 		if group == nil || len(group.Memberships) != 1 || group.Memberships[0].FeedSourceID != source.ID {
 			t.Fatalf("self subscription should be available in %s: %#v", subscriptionType, group)

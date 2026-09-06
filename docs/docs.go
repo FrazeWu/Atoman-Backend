@@ -12347,7 +12347,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "返回按播客、视频、博客和 RSS 分离的分组与订阅叶子。",
+                "description": "返回统一全部订阅，以及按播客、视频、博客和 RSS 分离的分组与订阅叶子。",
                 "produces": [
                     "application/json"
                 ],
@@ -12398,6 +12398,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "enum": [
+                            "all",
                             "podcast",
                             "video",
                             "blog",

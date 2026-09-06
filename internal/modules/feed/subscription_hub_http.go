@@ -15,7 +15,7 @@ import (
 
 // getSubscriptionHubTree godoc
 // @Summary 获取订阅中心树
-// @Description 返回按播客、视频、博客和 RSS 分离的分组与订阅叶子。
+// @Description 返回统一全部订阅，以及按播客、视频、博客和 RSS 分离的分组与订阅叶子。
 // @Tags feed
 // @Produce json
 // @Success 200 {object} SubscriptionHubTree
@@ -75,7 +75,7 @@ func (h *Handler) deleteSubscriptionHubSource(c *gin.Context) {
 // @Description 返回选中类型和分组的最新更新；可进一步按订阅叶子收窄。
 // @Tags feed
 // @Produce json
-// @Param type query string true "订阅类型" Enums(podcast,video,blog,rss)
+// @Param type query string true "订阅类型" Enums(all,podcast,video,blog,rss)
 // @Param group_id query string false "分组 UUID"
 // @Param membership_id query string false "订阅叶子 UUID"
 // @Param page query int false "页码"
