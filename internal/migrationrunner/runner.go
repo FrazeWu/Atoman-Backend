@@ -323,6 +323,11 @@ func cleanupLegacyDefaultChannels(db *gorm.DB) error {
 func cleanupLegacyDefaultChannel(tx *gorm.DB, userID, channelID uuid.UUID) error {
 	var user model.User
 	if err := tx.First(&user, "uuid = ?", userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// A stale studio state can outlive a soft-deleted account. It is
+			// already unusable, so leave it untouched and continue the migration.
+			return nil
+		}
 		return err
 	}
 	var channel model.Channel
@@ -377,10 +382,10 @@ func cleanupLegacyDefaultChannel(tx *gorm.DB, userID, channelID uuid.UUID) error
 	if err := tx.Model(&model.UserStudioState{}).Where("user_id = ? AND channel_id = ?", userID, channelID).Update("channel_id", nil).Error; err != nil {
 		return err
 	}
-	if err := tx.Delete(&collection).Error; err != nil {
+	if err := tx.Delete(&channel).Error; err != nil {
 		return err
 	}
-	return tx.Delete(&channel).Error
+	return tx.Delete(&collection).Error
 }
 
 func preparePostgresExtensions(db *gorm.DB) error {

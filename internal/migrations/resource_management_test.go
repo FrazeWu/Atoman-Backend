@@ -118,7 +118,7 @@ func TestResourceManagementMigrationProtectsDefaultAndReusesDeletedNames(t *test
 
 	var collection model.ContentCollection
 	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&collection).Error)
-	require.Equal(t, "默认合集", collection.Name)
+	require.Equal(t, "《Case Name》的合集", collection.Name)
 	require.Error(t, db.Delete(&collection).Error)
 	require.Error(t, db.Model(&collection).Update("is_default", false).Error)
 	require.Error(t, db.Create(&model.Channel{UserID: &owner.UUID, Name: "case name", Slug: "case-name-2"}).Error)
@@ -130,4 +130,30 @@ func TestResourceManagementMigrationProtectsDefaultAndReusesDeletedNames(t *test
 
 	require.NoError(t, db.Delete(&channel).Error)
 	require.NoError(t, db.Delete(&collection).Error)
+}
+
+func TestResourceManagementMigrationRenamesLegacyUnifiedDefaultCollection(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.ContentCollection{}, &model.StudioModuleSettings{},
+		&model.Post{}, &model.PostCollection{}, &model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
+	)
+	owner := model.User{Username: "default-name-owner", Email: "default-name-owner@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&owner).Error)
+	legacyChannel := model.Channel{UserID: &owner.UUID, Name: "朗读频道", Slug: "reading-channel"}
+	customChannel := model.Channel{UserID: &owner.UUID, Name: "自定义频道", Slug: "custom-channel"}
+	require.NoError(t, db.Create(&legacyChannel).Error)
+	require.NoError(t, db.Create(&customChannel).Error)
+	require.NoError(t, db.Create(&model.ContentCollection{ChannelID: legacyChannel.ID, CreatedBy: &owner.UUID, Name: "未分类", IsDefault: true}).Error)
+	custom := model.ContentCollection{ChannelID: customChannel.ID, CreatedBy: &owner.UUID, Name: "精选内容", IsDefault: true}
+	require.NoError(t, db.Create(&custom).Error)
+
+	require.NoError(t, RunResourceManagementMigration(db))
+
+	var renamed model.ContentCollection
+	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", legacyChannel.ID, true).First(&renamed).Error)
+	require.Equal(t, "《朗读频道》的合集", renamed.Name)
+	var kept model.ContentCollection
+	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", customChannel.ID, true).First(&kept).Error)
+	require.Equal(t, "精选内容", kept.Name)
 }
