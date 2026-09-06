@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	SubscriptionHubTypeAll     = "all"
 	SubscriptionHubTypePodcast = "podcast"
 	SubscriptionHubTypeVideo   = "video"
 	SubscriptionHubTypeBlog    = "blog"
@@ -22,6 +23,7 @@ const (
 )
 
 var subscriptionHubTypes = []string{
+	SubscriptionHubTypeAll,
 	SubscriptionHubTypePodcast,
 	SubscriptionHubTypeVideo,
 	SubscriptionHubTypeBlog,
@@ -76,7 +78,7 @@ func isSubscriptionHubType(value string) bool {
 }
 
 func subscriptionHubContentType(subscriptionType string) string {
-	if subscriptionType == SubscriptionHubTypeRSS {
+	if subscriptionType == SubscriptionHubTypeAll || subscriptionType == SubscriptionHubTypeRSS {
 		return ""
 	}
 	return subscriptionType
@@ -86,6 +88,9 @@ func subscriptionHubSourceMatchesType(subscriptionType string, source *model.Fee
 	if source == nil {
 		return false
 	}
+	if subscriptionType == SubscriptionHubTypeAll {
+		return source.SourceType == "internal_user" || source.SourceType == "internal_channel" || source.SourceType == "internal_collection" || source.SourceType == "external_rss"
+	}
 	if subscriptionType == SubscriptionHubTypeRSS {
 		return source.SourceType == "external_rss"
 	}
@@ -94,15 +99,15 @@ func subscriptionHubSourceMatchesType(subscriptionType string, source *model.Fee
 
 func subscriptionHubTypesForLegacySource(source *model.FeedSource) []string {
 	if source != nil && source.SourceType == "external_rss" {
-		return []string{SubscriptionHubTypeRSS}
+		return []string{SubscriptionHubTypeAll, SubscriptionHubTypeRSS}
 	}
 	if source != nil {
 		switch source.SourceType {
 		case "internal_user", "internal_channel", "internal_collection":
-			return []string{SubscriptionHubTypePodcast, SubscriptionHubTypeVideo, SubscriptionHubTypeBlog}
+			return []string{SubscriptionHubTypeAll, SubscriptionHubTypePodcast, SubscriptionHubTypeVideo, SubscriptionHubTypeBlog}
 		}
 	}
-	return []string{SubscriptionHubTypeBlog}
+	return []string{SubscriptionHubTypeAll, SubscriptionHubTypeBlog}
 }
 
 func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
@@ -225,6 +230,13 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 				}
 				candidates = append(candidates, legacyContextCandidate{
 					subscriptionType: subscriptionType,
+					groupName:        defaultSubscriptionGroupName,
+					feedSource:       &source,
+					title:            source.Title,
+					position:         position,
+				})
+				candidates = append(candidates, legacyContextCandidate{
+					subscriptionType: SubscriptionHubTypeAll,
 					groupName:        defaultSubscriptionGroupName,
 					feedSource:       &source,
 					title:            source.Title,
@@ -506,11 +518,11 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		}
 	}
 
-	markContent := func(subscriptionType string, contentID, ownerID uuid.UUID, channelID *uuid.UUID, collections []model.Collection) {
+	markContent := func(subscriptionType, contentType string, contentID, ownerID uuid.UUID, channelID *uuid.UUID, collections []model.Collection) {
 		for index := range memberships {
 			membership := &memberships[index]
 			source := membership.FeedSource
-			if membership.SubscriptionType != subscriptionType || source == nil || source.SourceID == nil {
+			if (membership.SubscriptionType != subscriptionType && membership.SubscriptionType != SubscriptionHubTypeAll) || source == nil || source.SourceID == nil {
 				continue
 			}
 			matches := false
@@ -531,7 +543,7 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 				continue
 			}
 			membership.HasContent = true
-			if !read[subscriptionType][contentID] {
+			if !read[contentType][contentID] {
 				membership.UnreadCount++
 			}
 		}
@@ -570,13 +582,13 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 			}
 			for _, episode := range episodes {
 				if post, ok := postByID[episode.PostID]; ok {
-					markContent(definition.subscriptionType, episode.ID, post.UserID, post.ChannelID, post.Collections)
+					markContent(definition.subscriptionType, definition.contentType, episode.ID, post.UserID, post.ChannelID, post.Collections)
 				}
 			}
 			continue
 		}
 		for _, post := range posts {
-			markContent(definition.subscriptionType, post.ID, post.UserID, post.ChannelID, post.Collections)
+			markContent(definition.subscriptionType, definition.contentType, post.ID, post.UserID, post.ChannelID, post.Collections)
 		}
 	}
 
@@ -585,7 +597,7 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		return err
 	}
 	for _, video := range dedupeVideos(videos) {
-		markContent(SubscriptionHubTypeVideo, video.ID, video.UserID, video.ChannelID, video.Collections)
+		markContent(SubscriptionHubTypeVideo, "video", video.ID, video.UserID, video.ChannelID, video.Collections)
 	}
 
 	if len(feedSourceIDs) == 0 {
@@ -717,7 +729,7 @@ func (s *Service) GetSubscriptionHubUpdates(user authctx.CurrentUser, query Subs
 	}
 	query.SubscriptionType = strings.ToLower(strings.TrimSpace(query.SubscriptionType))
 	if !isSubscriptionHubType(query.SubscriptionType) {
-		return nil, 0, apperr.BadRequest("subscription_hub.invalid_type", "subscription type must be podcast, video, blog, or rss")
+		return nil, 0, apperr.BadRequest("subscription_hub.invalid_type", "subscription type must be all, podcast, video, blog, or rss")
 	}
 
 	db := s.db.Where("user_id = ? AND subscription_type = ?", user.ID, query.SubscriptionType)
