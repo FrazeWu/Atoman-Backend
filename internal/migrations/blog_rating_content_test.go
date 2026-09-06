@@ -62,3 +62,23 @@ func TestRunBlogRatingContentMigrationSkipsMissingLegacyPostID(t *testing.T) {
 	require.NoError(t, RunBlogRatingContentMigration(db))
 	assertIndexExists(t, db, "post_ratings", "idx_post_ratings_user_content")
 }
+
+func TestRunBlogRatingContentMigrationPreservesVideoRatings(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.ContentEntry{}, &model.PostRating{})
+	owner := model.User{Username: "video-rating-owner", Email: "video-rating-owner@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&owner).Error)
+	channel := model.Channel{UserID: &owner.UUID, Name: "Video ratings", Slug: "video-ratings"}
+	require.NoError(t, db.Create(&channel).Error)
+	videoID := uuid.New()
+	require.NoError(t, db.Create(&model.ContentEntry{
+		Base: model.Base{ID: videoID}, ChannelID: channel.ID, Kind: "video", Title: "Video rating", Status: "published", Visibility: "public",
+	}).Error)
+	require.NoError(t, db.Create(&model.PostRating{UserID: owner.UUID, ContentID: videoID, Score: 9}).Error)
+
+	require.NoError(t, RunBlogRatingContentMigration(db))
+
+	var count int64
+	require.NoError(t, db.Model(&model.PostRating{}).Where("content_id = ? AND deleted_at IS NULL", videoID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}

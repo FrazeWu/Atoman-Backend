@@ -31,15 +31,17 @@ WHERE content_id IS NULL`).Error; err != nil {
 			}
 		}
 
-		var missing int64
-		if err := tx.Table("post_ratings AS ratings").
-			Joins("LEFT JOIN content_entries AS entries ON entries.id = ratings.content_id AND entries.kind = ? AND entries.deleted_at IS NULL", "blog").
-			Where("ratings.deleted_at IS NULL AND entries.id IS NULL").
-			Count(&missing).Error; err != nil {
-			return fmt.Errorf("validate post rating content mapping: %w", err)
-		}
-		if missing != 0 {
-			return fmt.Errorf("post rating content migration: %d active ratings have no canonical blog content entry", missing)
+		if hasLegacyPostID {
+			var missing int64
+			if err := tx.Table("post_ratings AS ratings").
+				Joins("LEFT JOIN content_entries AS entries ON entries.id = ratings.content_id AND entries.kind = ? AND entries.deleted_at IS NULL", "blog").
+				Where("ratings.deleted_at IS NULL AND ratings.post_id IS NOT NULL AND entries.id IS NULL").
+				Count(&missing).Error; err != nil {
+				return fmt.Errorf("validate post rating content mapping: %w", err)
+			}
+			if missing != 0 {
+				return fmt.Errorf("post rating content migration: %d active ratings have no canonical blog content entry", missing)
+			}
 		}
 
 		if hasLegacyPostID {
