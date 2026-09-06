@@ -15,7 +15,7 @@ import (
 func TestSubscriptionHubHandlersExposeTypeScopedTreeAndUpdates(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
-	testdb.Migrate(t, db, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+	testdb.Migrate(t, db, &model.SubscriptionGroup{})
 
 	var source model.FeedSource
 	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
@@ -39,12 +39,21 @@ func TestSubscriptionHubHandlersExposeTypeScopedTreeAndUpdates(t *testing.T) {
 	if err := json.Unmarshal(treeRecorder.Body.Bytes(), &treeResponse); err != nil {
 		t.Fatalf("decode tree response: %v", err)
 	}
-	group := firstSubscriptionHubGroup(treeResponse.Data, SubscriptionHubTypeRSS)
-	if group == nil || len(group.Memberships) != 1 || group.Memberships[0].FeedSourceID != source.ID {
+	group := firstSubscriptionHubGroup(treeResponse.Data, SubscriptionHubTypeAll)
+	foundSource := false
+	if group != nil {
+		for _, membership := range group.Memberships {
+			if membership.FeedSourceID == source.ID {
+				foundSource = true
+				break
+			}
+		}
+	}
+	if !foundSource {
 		t.Fatalf("unexpected tree branch: %#v", group)
 	}
 
-	updatesRequest := httptest.NewRequest(http.MethodGet, "/api/v1/feed/subscription-hub/updates?type=rss&group_id="+group.ID.String(), nil)
+	updatesRequest := httptest.NewRequest(http.MethodGet, "/api/v1/feed/subscription-hub/updates?type=all&group_id="+group.ID.String(), nil)
 	updatesRequest.Header.Set("Authorization", "Bearer "+token)
 	updatesRecorder := httptest.NewRecorder()
 	router.ServeHTTP(updatesRecorder, updatesRequest)
@@ -55,7 +64,14 @@ func TestSubscriptionHubHandlersExposeTypeScopedTreeAndUpdates(t *testing.T) {
 	if err := json.Unmarshal(updatesRecorder.Body.Bytes(), &updatesResponse); err != nil {
 		t.Fatalf("decode updates response: %v", err)
 	}
-	if len(updatesResponse.Data) != 1 || updatesResponse.Data[0].FeedItem == nil || updatesResponse.Data[0].FeedItem.FeedSourceID != source.ID {
+	foundItem := false
+	for _, item := range updatesResponse.Data {
+		if item.FeedItem != nil && item.FeedItem.FeedSourceID == source.ID {
+			foundItem = true
+			break
+		}
+	}
+	if !foundItem {
 		t.Fatalf("unexpected RSS update stream: %#v", updatesResponse.Data)
 	}
 }
@@ -63,23 +79,14 @@ func TestSubscriptionHubHandlersExposeTypeScopedTreeAndUpdates(t *testing.T) {
 func TestDeleteSubscriptionHubSourceRemovesAllBackingSubscriptions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
-	testdb.Migrate(t, db, &model.ChannelBookmark{}, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+	testdb.Migrate(t, db, &model.SubscriptionGroup{})
 
 	var source model.FeedSource
 	if err := db.Where("source_type = ?", "internal_channel").First(&source).Error; err != nil {
 		t.Fatalf("load internal channel source: %v", err)
 	}
-	if source.SourceID == nil {
-		t.Fatal("internal channel source is missing source_id")
-	}
-	if err := db.Create(&[]model.ChannelBookmark{
-		{UserID: user.ID, ChannelID: *source.SourceID, Kind: "podcast_show"},
-		{UserID: user.ID, ChannelID: *source.SourceID, Kind: "video_channel"},
-	}).Error; err != nil {
-		t.Fatalf("create channel bookmarks: %v", err)
-	}
-	if _, err := service.GetSubscriptionHubTree(user.ID); err != nil {
-		t.Fatalf("seed subscription hub tree: %v", err)
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatalf("create channel subscription: %v", err)
 	}
 
 	router := gin.New()
@@ -97,15 +104,7 @@ func TestDeleteSubscriptionHubSourceRemovesAllBackingSubscriptions(t *testing.T)
 	if err := db.Model(&model.Subscription{}).Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).Count(&subscriptionCount).Error; err != nil {
 		t.Fatalf("count subscriptions: %v", err)
 	}
-	var bookmarkCount int64
-	if err := db.Model(&model.ChannelBookmark{}).Where("user_id = ? AND channel_id = ?", user.ID, *source.SourceID).Count(&bookmarkCount).Error; err != nil {
-		t.Fatalf("count channel bookmarks: %v", err)
-	}
-	var membershipCount int64
-	if err := db.Model(&model.SubscriptionHubMembership{}).Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).Count(&membershipCount).Error; err != nil {
-		t.Fatalf("count subscription hub memberships: %v", err)
-	}
-	if subscriptionCount != 0 || bookmarkCount != 0 || membershipCount != 0 {
-		t.Fatalf("backing records remained: subscriptions=%d bookmarks=%d memberships=%d", subscriptionCount, bookmarkCount, membershipCount)
+	if subscriptionCount != 0 {
+		t.Fatalf("subscription remained: %d", subscriptionCount)
 	}
 }

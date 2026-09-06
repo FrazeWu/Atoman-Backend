@@ -110,6 +110,55 @@ func subscriptionHubTypesForLegacySource(source *model.FeedSource) []string {
 	return []string{SubscriptionHubTypeAll, SubscriptionHubTypeBlog}
 }
 
+func subscriptionHubTypesForSource(source *model.FeedSource) []string {
+	if source != nil && source.SourceType == "external_rss" {
+		return []string{SubscriptionHubTypeAll}
+	}
+	if source != nil && subscriptionHubSourceMatchesType(SubscriptionHubTypeAll, source) {
+		return []string{
+			SubscriptionHubTypeAll,
+			SubscriptionHubTypePodcast,
+			SubscriptionHubTypeVideo,
+			SubscriptionHubTypeBlog,
+		}
+	}
+	return nil
+}
+
+func (s *Service) subscriptionHubMemberships(userID uuid.UUID) ([]model.SubscriptionHubMembership, error) {
+	var subscriptions []model.Subscription
+	if err := s.db.Preload("FeedSource").Preload("SubscriptionGroup").
+		Where("user_id = ?", userID).
+		Order("position ASC, created_at ASC").
+		Find(&subscriptions).Error; err != nil {
+		return nil, err
+	}
+
+	memberships := make([]model.SubscriptionHubMembership, 0, len(subscriptions)*2)
+	for _, subscription := range subscriptions {
+		if subscription.FeedSource == nil {
+			continue
+		}
+		groupID := uuid.Nil
+		if subscription.SubscriptionGroupID != nil {
+			groupID = *subscription.SubscriptionGroupID
+		}
+		for _, subscriptionType := range subscriptionHubTypesForSource(subscription.FeedSource) {
+			memberships = append(memberships, model.SubscriptionHubMembership{
+				Base:             subscription.Base,
+				UserID:           subscription.UserID,
+				SubscriptionType: subscriptionType,
+				GroupID:          groupID,
+				FeedSourceID:     subscription.FeedSourceID,
+				FeedSource:       subscription.FeedSource,
+				Title:            firstNonBlank(subscription.Title, subscription.FeedSource.Title),
+				Position:         subscription.Position,
+			})
+		}
+	}
+	return memberships, nil
+}
+
 func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 	type groupKey struct {
 		subscriptionType string
@@ -389,9 +438,6 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 }
 
 func (s *Service) GetSubscriptionHubTree(userID uuid.UUID) (SubscriptionHubTree, error) {
-	if err := s.ensureLegacySubscriptionHubContexts(userID); err != nil {
-		return SubscriptionHubTree{}, err
-	}
 	tree := SubscriptionHubTree{Types: make([]SubscriptionHubTypeNode, 0, len(subscriptionHubTypes))}
 	typeIndexes := make(map[string]int, len(subscriptionHubTypes))
 	for _, subscriptionType := range subscriptionHubTypes {
@@ -402,33 +448,8 @@ func (s *Service) GetSubscriptionHubTree(userID uuid.UUID) (SubscriptionHubTree,
 		typeIndexes[subscriptionType] = len(tree.Types) - 1
 	}
 
-	var groups []model.SubscriptionHubGroup
-	if err := s.db.Where("user_id = ?", userID).Order("subscription_type ASC, position ASC, created_at ASC").Find(&groups).Error; err != nil {
-		return SubscriptionHubTree{}, err
-	}
-
-	type groupLocation struct{ typeIndex, groupIndex int }
-	groupsByID := make(map[uuid.UUID]groupLocation, len(groups))
-	for _, group := range groups {
-		typeIndex, ok := typeIndexes[group.SubscriptionType]
-		if !ok {
-			continue
-		}
-		tree.Types[typeIndex].Groups = append(tree.Types[typeIndex].Groups, SubscriptionHubGroupNode{
-			SubscriptionHubGroup: group,
-			Memberships:          []model.SubscriptionHubMembership{},
-		})
-		groupsByID[group.ID] = groupLocation{
-			typeIndex:  typeIndex,
-			groupIndex: len(tree.Types[typeIndex].Groups) - 1,
-		}
-	}
-
-	var memberships []model.SubscriptionHubMembership
-	if err := s.db.Preload("FeedSource").
-		Where("user_id = ?", userID).
-		Order("subscription_type ASC, group_id ASC, position ASC, created_at ASC").
-		Find(&memberships).Error; err != nil {
+	memberships, err := s.subscriptionHubMemberships(userID)
+	if err != nil {
 		return SubscriptionHubTree{}, err
 	}
 	if err := s.hydrateSubscriptionHubSourceImages(memberships); err != nil {
@@ -437,16 +458,41 @@ func (s *Service) GetSubscriptionHubTree(userID uuid.UUID) (SubscriptionHubTree,
 	if err := s.hydrateSubscriptionHubUnreadCounts(userID, memberships); err != nil {
 		return SubscriptionHubTree{}, err
 	}
+	type groupLocation struct{ typeIndex, groupIndex int }
+	groupsByKey := make(map[string]groupLocation)
 	for _, membership := range memberships {
-		location, ok := groupsByID[membership.GroupID]
+		typeIndex, ok := typeIndexes[membership.SubscriptionType]
 		if !ok {
 			continue
 		}
-		group := &tree.Types[location.typeIndex].Groups[location.groupIndex]
-		if group.SubscriptionType != membership.SubscriptionType {
-			continue
+		groupName := defaultSubscriptionGroupName
+		groupPosition := 0
+		groupID := membership.GroupID
+		if groupID != uuid.Nil {
+			var subscriptionGroup model.SubscriptionGroup
+			if err := s.db.Where("id = ? AND user_id = ?", groupID, userID).First(&subscriptionGroup).Error; err == nil {
+				groupName = subscriptionGroup.Name
+				groupPosition = subscriptionGroup.Position
+			}
 		}
-		group.Memberships = append(group.Memberships, membership)
+		key := membership.SubscriptionType + ":" + groupID.String()
+		location, exists := groupsByKey[key]
+		if !exists {
+			group := model.SubscriptionHubGroup{
+				UserID:           userID,
+				SubscriptionType: membership.SubscriptionType,
+				Name:             groupName,
+				Position:         groupPosition,
+			}
+			group.ID = groupID
+			tree.Types[typeIndex].Groups = append(tree.Types[typeIndex].Groups, SubscriptionHubGroupNode{
+				SubscriptionHubGroup: group,
+				Memberships:          []model.SubscriptionHubMembership{},
+			})
+			location = groupLocation{typeIndex: typeIndex, groupIndex: len(tree.Types[typeIndex].Groups) - 1}
+			groupsByKey[key] = location
+		}
+		tree.Types[location.typeIndex].Groups[location.groupIndex].Memberships = append(tree.Types[location.typeIndex].Groups[location.groupIndex].Memberships, membership)
 	}
 
 	for typeIndex := range tree.Types {
@@ -724,38 +770,36 @@ func (s *Service) GetSubscriptionHubUpdates(user authctx.CurrentUser, query Subs
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Authentication is required")
 	}
-	if err := s.ensureLegacySubscriptionHubContexts(user.ID); err != nil {
-		return nil, 0, err
-	}
 	query.SubscriptionType = strings.ToLower(strings.TrimSpace(query.SubscriptionType))
 	if !isSubscriptionHubType(query.SubscriptionType) {
 		return nil, 0, apperr.BadRequest("subscription_hub.invalid_type", "subscription type must be all, podcast, video, blog, or rss")
 	}
-
-	db := s.db.Where("user_id = ? AND subscription_type = ?", user.ID, query.SubscriptionType)
 	if query.GroupID != uuid.Nil {
-		var group model.SubscriptionHubGroup
-		err := s.db.Where("id = ? AND user_id = ? AND subscription_type = ?", query.GroupID, user.ID, query.SubscriptionType).First(&group).Error
+		var group model.SubscriptionGroup
+		err := s.db.Where("id = ? AND user_id = ?", query.GroupID, user.ID).First(&group).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil, 0, apperr.NotFound("subscription_hub.group_not_found", "Subscription group not found")
 			}
 			return nil, 0, err
 		}
-		db = db.Where("group_id = ?", query.GroupID)
 	}
-	if query.MembershipID != uuid.Nil {
-		db = db.Where("id = ?", query.MembershipID)
-	}
-
-	var memberships []model.SubscriptionHubMembership
-	if err := db.Where("user_id = ?", user.ID).Preload("FeedSource").Order("position ASC, created_at ASC").Find(&memberships).Error; err != nil {
+	memberships, err := s.subscriptionHubMemberships(user.ID)
+	if err != nil {
 		return nil, 0, err
 	}
+	selected := make([]model.SubscriptionHubMembership, 0, len(memberships))
 	for _, membership := range memberships {
-		if !subscriptionHubSourceMatchesType(query.SubscriptionType, membership.FeedSource) {
-			return nil, 0, apperr.BadRequest("subscription_hub.invalid_source", "subscription source does not match its type")
+		if membership.SubscriptionType != query.SubscriptionType {
+			continue
 		}
+		if query.GroupID != uuid.Nil && membership.GroupID != query.GroupID {
+			continue
+		}
+		if query.MembershipID != uuid.Nil && membership.ID != query.MembershipID {
+			continue
+		}
+		selected = append(selected, membership)
 	}
 
 	feedQuery := FeedQuery{
@@ -763,7 +807,7 @@ func (s *Service) GetSubscriptionHubUpdates(user authctx.CurrentUser, query Subs
 		PageSize:    normalizedPageSize(query.PageSize),
 		ContentType: subscriptionHubContentType(query.SubscriptionType),
 	}
-	return s.getSubscriptionHubTimeline(user.ID, memberships, feedQuery)
+	return s.getSubscriptionHubTimeline(user.ID, selected, feedQuery)
 }
 
 func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []model.SubscriptionHubMembership, query FeedQuery) ([]TimelineItemDTO, int64, error) {
