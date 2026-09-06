@@ -133,11 +133,20 @@ func (s *Service) subscriptionHubMemberships(userID uuid.UUID) ([]model.Subscrip
 		Find(&subscriptions).Error; err != nil {
 		return nil, err
 	}
+	suppressedChannelIDs, err := s.suppressedSubscriptionHubChannelIDs(subscriptions)
+	if err != nil {
+		return nil, err
+	}
 
 	memberships := make([]model.SubscriptionHubMembership, 0, len(subscriptions)*2)
 	for _, subscription := range subscriptions {
 		if subscription.FeedSource == nil {
 			continue
+		}
+		if subscription.FeedSource.SourceType == "internal_channel" && subscription.FeedSource.SourceID != nil {
+			if _, suppressed := suppressedChannelIDs[*subscription.FeedSource.SourceID]; suppressed {
+				continue
+			}
 		}
 		groupID := uuid.Nil
 		if subscription.SubscriptionGroupID != nil {
@@ -157,6 +166,41 @@ func (s *Service) subscriptionHubMemberships(userID uuid.UUID) ([]model.Subscrip
 		}
 	}
 	return memberships, nil
+}
+
+func (s *Service) suppressedSubscriptionHubChannelIDs(subscriptions []model.Subscription) (map[uuid.UUID]struct{}, error) {
+	accountIDs := make(map[uuid.UUID]struct{})
+	channelIDs := make([]uuid.UUID, 0)
+	for _, subscription := range subscriptions {
+		source := subscription.FeedSource
+		if source == nil || source.SourceID == nil {
+			continue
+		}
+		switch source.SourceType {
+		case "internal_user":
+			accountIDs[*source.SourceID] = struct{}{}
+		case "internal_channel":
+			channelIDs = append(channelIDs, *source.SourceID)
+		}
+	}
+	if len(accountIDs) == 0 || len(channelIDs) == 0 {
+		return map[uuid.UUID]struct{}{}, nil
+	}
+
+	var channels []model.Channel
+	if err := s.db.Select("id, user_id").Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	suppressed := make(map[uuid.UUID]struct{})
+	for _, channel := range channels {
+		if channel.UserID == nil {
+			continue
+		}
+		if _, subscribed := accountIDs[*channel.UserID]; subscribed {
+			suppressed[channel.ID] = struct{}{}
+		}
+	}
+	return suppressed, nil
 }
 
 func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
