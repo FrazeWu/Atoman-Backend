@@ -456,18 +456,21 @@ func TestRegisterRoutesSongListFiltersArtistAndStandaloneReleaseTypes(t *testing
 	}
 
 	olderType := "leak"
+	legacyLeakType := "leak_song"
 	newerType := "single"
 	olderSong := model.Song{Title: "Older Song", ReleaseType: &olderType, ReleaseDate: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC), AudioURL: "/audio/older.mp3", Status: "open"}
+	legacyLeakSong := model.Song{Title: "Legacy Leak Song", ReleaseType: &legacyLeakType, ReleaseDate: time.Date(2023, time.January, 1, 0, 0, 0, 0, time.UTC), AudioURL: "/audio/legacy-leak.mp3", Status: "open"}
 	newerSong := model.Song{Title: "Newer Song", ReleaseType: &newerType, ReleaseDate: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC), AudioURL: "/audio/newer.mp3", Status: "open"}
 	studioSong := model.Song{Title: "Studio Album Track", AlbumID: &studioAlbum.ID, ReleaseDate: studioAlbum.ReleaseDate, AudioURL: "/audio/studio.mp3", Status: "open"}
 	otherSong := model.Song{Title: "Other Song", ReleaseType: &newerType, ReleaseDate: newerSong.ReleaseDate, AudioURL: "/audio/other.mp3", Status: "open"}
-	for _, song := range []*model.Song{&olderSong, &newerSong, &studioSong, &otherSong} {
+	for _, song := range []*model.Song{&olderSong, &legacyLeakSong, &newerSong, &studioSong, &otherSong} {
 		if err := db.Create(song).Error; err != nil {
 			t.Fatalf("create song: %v", err)
 		}
 	}
 	credits := []model.SongArtist{
 		{SongID: olderSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
+		{SongID: legacyLeakSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
 		{SongID: olderSong.ID, ArtistID: artist.ID, Role: "custom", CustomRole: "Composer", Position: 1},
 		{SongID: newerSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
 		{SongID: studioSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
@@ -497,10 +500,10 @@ func TestRegisterRoutesSongListFiltersArtistAndStandaloneReleaseTypes(t *testing
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode song list response: %v", err)
 	}
-	if payload.Meta.Total != 2 || len(payload.Data) != 2 {
-		t.Fatalf("expected the artist's unique single and leak songs, got total=%d data=%#v", payload.Meta.Total, payload.Data)
+	if payload.Meta.Total != 3 || len(payload.Data) != 3 {
+		t.Fatalf("expected the artist's single and both leak type values, got total=%d data=%#v", payload.Meta.Total, payload.Data)
 	}
-	if payload.Data[0].Title != newerSong.Title || payload.Data[1].Title != olderSong.Title {
+	if payload.Data[0].Title != newerSong.Title || payload.Data[1].Title != olderSong.Title || payload.Data[2].Title != legacyLeakSong.Title {
 		t.Fatalf("unexpected release date order: %#v", payload.Data)
 	}
 

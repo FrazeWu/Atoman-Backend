@@ -79,9 +79,16 @@ func (h *Handler) listSongs(c *gin.Context) {
 				httpx.Error(c, apperr.BadRequest("validation.invalid_request", "release_type must contain only single or leak"))
 				return
 			}
-			if !seenReleaseTypes[releaseType] {
-				releaseTypes = append(releaseTypes, releaseType)
-				seenReleaseTypes[releaseType] = true
+			values := []string{releaseType}
+			if releaseType == "leak" {
+				values = append(values, "leak_song")
+			}
+			for _, value := range values {
+				if seenReleaseTypes[value] {
+					continue
+				}
+				releaseTypes = append(releaseTypes, value)
+				seenReleaseTypes[value] = true
 			}
 		}
 		query = query.Where(`"Songs".album_id IS NULL AND LOWER("Songs".release_type) IN ?`, releaseTypes)
