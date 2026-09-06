@@ -7976,6 +7976,48 @@ definitions:
       total:
         type: integer
     type: object
+  shortnote.MediaDTO:
+    properties:
+      id:
+        type: string
+      position:
+        type: integer
+      url:
+        type: string
+    type: object
+  shortnote.NoteDTO:
+    properties:
+      comments_count:
+        type: integer
+      content:
+        type: string
+      created_at:
+        type: string
+      dislikes_count:
+        type: integer
+      edited:
+        type: boolean
+      id:
+        type: string
+      liked:
+        type: boolean
+      likes_count:
+        type: integer
+      media:
+        items:
+          $ref: '#/definitions/shortnote.MediaDTO'
+        type: array
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      user_id:
+        type: string
+      viewer_vote:
+        type: string
+      vote_score:
+        type: integer
+    type: object
   studio.AnalyticsContentMetric:
     properties:
       id:
@@ -21749,6 +21791,42 @@ paths:
       summary: 更新站点模块访问设置
       tags:
       - settings
+  /api/v1/short-notes:
+    get:
+      description: 返回公开短笺，可按作者筛选。
+      parameters:
+      - description: 用户 UUID
+        in: query
+        name: user_id
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/shortnote.NoteDTO'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取短笺列表
+      tags:
+      - shortnote
   /api/v1/songs:
     get:
       description: 返回所有未关闭的歌曲公开列表。

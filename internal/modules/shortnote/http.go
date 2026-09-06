@@ -28,10 +28,31 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/:id/vote", h.clearVote)
 }
 
+// list godoc
+// @Summary 获取短笺列表
+// @Description 返回公开短笺，可按作者筛选。
+// @Tags shortnote
+// @Produce json
+// @Param user_id query string false "用户 UUID"
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Success 200 {array} NoteDTO
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/short-notes [get]
 func (h *Handler) list(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
+	var authorID *uuid.UUID
+	if rawUserID := c.Query("user_id"); rawUserID != "" {
+		parsedUserID, err := uuid.Parse(rawUserID)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "user_id must be a valid uuid"))
+			return
+		}
+		authorID = &parsedUserID
+	}
 	user, _ := authctx.Current(c)
-	items, total, err := h.service.List(page, pageSize, user.ID)
+	items, total, err := h.service.List(page, pageSize, user.ID, authorID)
 	if err != nil {
 		httpx.Error(c, err)
 		return

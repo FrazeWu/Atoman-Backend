@@ -20888,6 +20888,61 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/short-notes": {
+            "get": {
+                "description": "返回公开短笺，可按作者筛选。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "shortnote"
+                ],
+                "summary": "获取短笺列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 UUID",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/shortnote.NoteDTO"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/songs": {
             "get": {
                 "description": "返回所有未关闭的歌曲公开列表。",
@@ -39534,6 +39589,70 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "shortnote.MediaDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "shortnote.NoteDTO": {
+            "type": "object",
+            "properties": {
+                "comments_count": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "dislikes_count": {
+                    "type": "integer"
+                },
+                "edited": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "liked": {
+                    "type": "boolean"
+                },
+                "likes_count": {
+                    "type": "integer"
+                },
+                "media": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/shortnote.MediaDTO"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "viewer_vote": {
+                    "type": "string"
+                },
+                "vote_score": {
                     "type": "integer"
                 }
             }

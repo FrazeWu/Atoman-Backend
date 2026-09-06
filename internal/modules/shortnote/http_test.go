@@ -154,6 +154,35 @@ func TestShortNoteTimelineOrdersByCreationAndPaginates(t *testing.T) {
 	}
 }
 
+func TestShortNoteTimelineFiltersByAuthor(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	other := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ShortNote{UserID: user.ID, Content: "alice note"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ShortNote{UserID: other.UUID, Content: "bob note"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	r := newShortNoteHTTPRouter(service, nil)
+	w := shortNoteRequest(t, r, http.MethodGet, "/api/v1/short-notes?user_id="+other.UUID.String(), "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"content":"bob note"`) || strings.Contains(w.Body.String(), `"content":"alice note"`) || !strings.Contains(w.Body.String(), `"total":1`) {
+		t.Fatalf("unexpected author timeline: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestShortNoteTimelineRejectsInvalidAuthorID(t *testing.T) {
+	service, _, _ := newShortNoteHTTPTestService(t)
+	r := newShortNoteHTTPRouter(service, nil)
+	w := shortNoteRequest(t, r, http.MethodGet, "/api/v1/short-notes?user_id=invalid", "")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestShortNoteOnlyAuthorCanUpdateOrDeleteAndUpdateMarksEdited(t *testing.T) {
 	service, db, owner := newShortNoteHTTPTestService(t)
 	note := model.ShortNote{UserID: owner.ID, Content: "before"}
