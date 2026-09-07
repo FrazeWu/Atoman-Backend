@@ -1,0 +1,8 @@
+#!/bin/sh
+set -u
+
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+sync_script="$hook_dir/../scripts/codegraph-sync.sh"
+
+[ -x "$sync_script" ] || exit 0
+exec "$sync_script"
