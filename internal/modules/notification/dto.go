@@ -41,6 +41,24 @@ type PublishAnnouncementResponse struct {
 	Delivered int `json:"delivered"`
 }
 
+type ListAnnouncementsQuery struct {
+	Page     int    `json:"page" form:"page"`
+	PageSize int    `json:"page_size" form:"page_size"`
+	Search   string `json:"search" form:"search"`
+	Status   string `json:"status" form:"status"`
+}
+
+type AnnouncementDTO struct {
+	SourceID    string    `json:"source_id"`
+	Title       string    `json:"title"`
+	Body        string    `json:"body"`
+	Path        string    `json:"path,omitempty"`
+	PublishedAt time.Time `json:"published_at"`
+	Delivered   int64     `json:"delivered"`
+	Status      string    `json:"status"`
+	Actor       *ActorDTO `json:"actor,omitempty"`
+}
+
 type NotificationDTO struct {
 	ID         string                 `json:"id"`
 	Type       string                 `json:"type"`
