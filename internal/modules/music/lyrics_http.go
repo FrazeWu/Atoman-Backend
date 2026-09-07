@@ -28,6 +28,10 @@ type SaveLyricsRequest struct {
 type CreateLyricAnnotationRequest struct {
 	LineID       uuid.UUID `json:"line_id"`
 	LineKey      string    `json:"line_key"`
+	StartLineID  uuid.UUID `json:"start_line_id"`
+	StartLineKey string    `json:"start_line_key"`
+	EndLineID    uuid.UUID `json:"end_line_id"`
+	EndLineKey   string    `json:"end_line_key"`
 	SelectedText string    `json:"selected_text"`
 	StartOffset  int       `json:"start_offset"`
 	EndOffset    int       `json:"end_offset"`
@@ -37,6 +41,8 @@ type CreateLyricAnnotationRequest struct {
 type UpdateLyricAnnotationRequest struct {
 	Body         *string `json:"body"`
 	LineKey      *string `json:"line_key"`
+	StartLineKey *string `json:"start_line_key"`
+	EndLineKey   *string `json:"end_line_key"`
 	SelectedText *string `json:"selected_text"`
 	StartOffset  *int    `json:"start_offset"`
 	EndOffset    *int    `json:"end_offset"`
@@ -248,7 +254,7 @@ func (h *Handler) revertSongLyrics(c *gin.Context) {
 
 // createLyricAnnotation godoc
 // @Summary 创建歌词注释
-// @Description 使用当前歌词行的 line_key 或可选 line_id 创建文本锚点注释。
+// @Description 使用当前歌词的起止行与偏移创建文本锚点注释；单行旧字段 line_key 仍兼容。
 // @Tags music-lyrics
 // @Accept json
 // @Produce json

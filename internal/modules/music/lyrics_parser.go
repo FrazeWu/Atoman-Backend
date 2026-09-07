@@ -157,6 +157,47 @@ func ValidateAnnotationAnchor(text string, startOffset, endOffset int, selectedT
 	return nil
 }
 
+// ValidateMultiLineAnnotationAnchor validates a selection spanning one or more
+// consecutive lyric lines. Offsets use UTF-16 code units, matching browser
+// Selection and the existing single-line anchor contract.
+func ValidateMultiLineAnnotationAnchor(lines []string, startOffset, endOffset int, selectedText string) error {
+	if len(lines) == 0 {
+		return lyricValidationError("annotation lines are required")
+	}
+	if len(lines) == 1 {
+		return ValidateAnnotationAnchor(lines[0], startOffset, endOffset, selectedText)
+	}
+
+	firstUnits := utf16.Encode([]rune(lines[0]))
+	lastUnits := utf16.Encode([]rune(lines[len(lines)-1]))
+	if startOffset < 0 || startOffset > len(firstUnits) || splitsUTF16SurrogatePair(firstUnits, startOffset) ||
+		endOffset < 0 || endOffset > len(lastUnits) || splitsUTF16SurrogatePair(lastUnits, endOffset) {
+		return lyricValidationError("annotation offsets are invalid")
+	}
+
+	parts := make([]string, 0, len(lines))
+	parts = append(parts, string(utf16.Decode(firstUnits[startOffset:])))
+	for _, line := range lines[1 : len(lines)-1] {
+		parts = append(parts, line)
+	}
+	parts = append(parts, string(utf16.Decode(lastUnits[:endOffset])))
+	anchorText := strings.Join(parts, "\n")
+	if anchorText == "" {
+		return lyricValidationError("annotation offsets are invalid")
+	}
+	anchorUnits := utf16.Encode([]rune(anchorText))
+	selectedUnits := utf16.Encode([]rune(selectedText))
+	if len(anchorUnits) != len(selectedUnits) {
+		return lyricValidationError("selected_text does not match the lyric text")
+	}
+	for index := range anchorUnits {
+		if anchorUnits[index] != selectedUnits[index] {
+			return lyricValidationError("selected_text does not match the lyric text")
+		}
+	}
+	return nil
+}
+
 func splitsUTF16SurrogatePair(units []uint16, offset int) bool {
 	return offset > 0 && offset < len(units) &&
 		units[offset-1] >= 0xD800 && units[offset-1] <= 0xDBFF &&
