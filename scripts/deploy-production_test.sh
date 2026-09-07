@@ -25,7 +25,7 @@ awk '/^case "\$MODE" in/{exit} {print}' "$repo/scripts/deploy-production.sh" >"$
 
 cat >"$repo/.env.prod" <<'EOF'
 DATABASE_TYPE=postgres
-DATABASE_URL=postgres://atoman:database-password@127.0.0.1:5432/atoman_prod?sslmode=disable
+DATABASE_URL=postgres://atoman:compose-password@127.0.0.1:5432/atoman_prod?sslmode=disable
 AUTH_CODE_SECRET=test-auth-code-secret
 BASE_URL=https://api.example.test
 S3_BUCKET=test-bucket
@@ -84,5 +84,18 @@ if output="$(
   exit 1
 fi
 printf '%s' "$output" | grep -q 'missing POSTGRES_PASSWORD'
+
+sed 's#DATABASE_URL=postgres://atoman:compose-password#DATABASE_URL=postgres://atoman:database-password#' \
+  "$repo/.env.prod" >"$repo/.env.prod.mismatched-password"
+if output="$(
+  (
+    export ENV_FILE="$repo/.env.prod.mismatched-password"
+    check_prerequisites
+  ) 2>&1
+)"; then
+  echo "expected mismatched database credentials to fail prerequisites" >&2
+  exit 1
+fi
+printf '%s' "$output" | grep -q 'DATABASE_URL password must match POSTGRES_PASSWORD'
 
 echo "deployment environment checks passed"

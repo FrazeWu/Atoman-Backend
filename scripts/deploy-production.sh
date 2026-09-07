@@ -80,6 +80,18 @@ run_compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
+validate_database_credentials() {
+  local database_url database_url_password postgres_password
+
+  database_url="$(sed -n 's/^DATABASE_URL=//p' "$ENV_FILE" | head -n 1)"
+  database_url_password="$(printf '%s\n' "$database_url" | sed -nE 's#^[^:]+://[^:]+:([^@]*)@.*#\1#p')"
+  postgres_password="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$ENV_FILE" | head -n 1)"
+
+  [[ -n "$database_url_password" ]] || die "DATABASE_URL must include a password"
+  [[ "$database_url_password" == "$postgres_password" ]] \
+    || die "DATABASE_URL password must match POSTGRES_PASSWORD"
+}
+
 check_go_version() {
   local version major minor
   version="$(go env GOVERSION)"
@@ -112,6 +124,7 @@ check_prerequisites() {
   for required_env in DATABASE_TYPE DATABASE_URL AUTH_CODE_SECRET BASE_URL S3_BUCKET POSTGRES_PASSWORD; do
     grep -q "^${required_env}=" "$ENV_FILE" || die "$ENV_FILE is missing $required_env"
   done
+  validate_database_credentials
 
   if [[ "$MODE" == "install" ]]; then
     require_file "$CERT_DIR/atoman.org.pem"
