@@ -142,9 +142,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/posts/:id/unpin", h.unpinPost)
 	group.PUT("/collections/:id/posts/order", h.reorderCollectionPosts)
 	group.GET("/drafts", h.getBlogDraft)
-	group.PUT("/drafts", canPublish, h.putBlogDraft)
+	group.PUT("/drafts", h.putBlogDraft)
 	group.POST("/imports/markdown", canPublish, h.previewMarkdownImport)
 	group.GET("/imports/markdown/:id", h.getMarkdownImport)
 	group.POST("/imports/markdown/:id/confirm", canPublish, h.confirmMarkdownImport)
-	group.DELETE("/drafts", canPublish, h.deleteBlogDraft)
+	group.DELETE("/drafts", h.deleteBlogDraft)
 }
