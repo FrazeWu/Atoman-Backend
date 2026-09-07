@@ -2836,6 +2836,25 @@ func TestRegisterRoutesPutBlogDraftPersistsFollowersVisibility(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesPutBlogDraftDoesNotRequirePublishingFeature(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	testdb.Migrate(t, db, &model.SiteSetting{})
+	setting := `{"modules":{"blog":{"enabled":true,"features":{"post.create":false}}}}`
+	if err := db.Create(&model.SiteSetting{Key: "site.module_access", Value: setting}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/drafts", bytes.NewBufferString(`{"context_key":"editor:feature-disabled","title":"Draft","content":"body"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 when post publishing is disabled, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestRegisterRoutesDeleteBlogDraftRemovesSavedDraft(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	draft := model.ContentBlogDraft{UserID: user.ID, ContextKey: "editor:3", Title: "Saved", Content: "body"}
