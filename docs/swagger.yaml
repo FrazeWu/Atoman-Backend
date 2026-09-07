@@ -7186,6 +7186,27 @@ definitions:
           $ref: '#/definitions/music.MusicSongLyricsVersionDTO'
         type: array
     type: object
+  music.MusicTagDTO:
+    properties:
+      assignment_id:
+        type: string
+      can_delete:
+        type: boolean
+      downvotes:
+        type: integer
+      id:
+        type: string
+      kind:
+        type: string
+      name:
+        type: string
+      score:
+        type: integer
+      upvotes:
+        type: integer
+      viewer_vote:
+        type: string
+    type: object
   music.PaginationMetaResponse:
     properties:
       has_more:
@@ -7504,6 +7525,18 @@ definitions:
         items:
           $ref: '#/definitions/model.Song'
         type: array
+    type: object
+  music.musicTagInput:
+    properties:
+      kind:
+        type: string
+      name:
+        type: string
+    type: object
+  music.musicTagVoteInput:
+    properties:
+      vote:
+        type: string
     type: object
   music.recordSearchInteractionRequest:
     properties:
@@ -18540,6 +18573,10 @@ paths:
         in: query
         name: artist_id
         type: string
+      - description: 标签 ID
+        in: query
+        name: tag_id
+        type: string
       - description: 排序方式
         in: query
         name: sort
@@ -18756,6 +18793,107 @@ paths:
       security:
       - BearerAuth: []
       summary: 评分专辑
+      tags:
+      - music
+  /api/v1/music/albums/{albumId}/tags:
+    get:
+      parameters:
+      - description: 专辑 ID
+        in: path
+        name: albumId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/music.MusicTagDTO'
+            type: array
+      summary: 获取专辑标签
+      tags:
+      - music
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 专辑 ID
+        in: path
+        name: albumId
+        required: true
+        type: string
+      - description: 标签
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.musicTagInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/music.MusicTagDTO'
+      summary: 添加专辑标签
+      tags:
+      - music
+  /api/v1/music/albums/{albumId}/tags/{tagId}:
+    delete:
+      parameters:
+      - description: 专辑 ID
+        in: path
+        name: albumId
+        required: true
+        type: string
+      - description: 标签 ID
+        in: path
+        name: tagId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      summary: 删除专辑标签
+      tags:
+      - music
+  /api/v1/music/albums/{albumId}/tags/{tagId}/vote:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 专辑 ID
+        in: path
+        name: albumId
+        required: true
+        type: string
+      - description: 标签 ID
+        in: path
+        name: tagId
+        required: true
+        type: string
+      - description: 投票，可选 up、down、none
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.musicTagVoteInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicTagDTO'
+      summary: 评价专辑标签
       tags:
       - music
   /api/v1/music/artists:
@@ -20276,6 +20414,10 @@ paths:
         in: query
         name: release_type
         type: string
+      - description: 标签 ID
+        in: query
+        name: tag_id
+        type: string
       - description: 排序方式
         enum:
         - -release_date
@@ -20839,6 +20981,107 @@ paths:
       security:
       - BearerAuth: []
       summary: 评分歌曲
+      tags:
+      - music
+  /api/v1/music/songs/{songId}/tags:
+    get:
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/music.MusicTagDTO'
+            type: array
+      summary: 获取歌曲标签
+      tags:
+      - music
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      - description: 标签
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.musicTagInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/music.MusicTagDTO'
+      summary: 添加歌曲标签
+      tags:
+      - music
+  /api/v1/music/songs/{songId}/tags/{tagId}:
+    delete:
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      - description: 标签 ID
+        in: path
+        name: tagId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      summary: 删除歌曲标签
+      tags:
+      - music
+  /api/v1/music/songs/{songId}/tags/{tagId}/vote:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      - description: 标签 ID
+        in: path
+        name: tagId
+        required: true
+        type: string
+      - description: 投票，可选 up、down、none
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.musicTagVoteInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicTagDTO'
+      summary: 评价歌曲标签
       tags:
       - music
   /api/v1/music/state-requests:

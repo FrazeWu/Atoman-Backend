@@ -431,6 +431,7 @@ func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 // @Produce json
 // @Param q query string false "搜索关键词"
 // @Param artist_id query string false "艺术家 ID"
+// @Param tag_id query string false "标签 ID"
 // @Param sort query string false "排序方式"
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
@@ -478,6 +479,20 @@ func (h *Handler) listAlbums(c *gin.Context) {
 			Joins("JOIN \"Artists\" AS filter_artists ON filter_artists.id = filter_album_artists.artist_id AND "+artistVisibility, artistArgs...).
 			Where("filter_album_artists.artist_id = ?", artistID)
 		joinedArtists = true
+	}
+	if tagIDRaw := strings.TrimSpace(c.Query("tag_id")); tagIDRaw != "" {
+		tagID, err := parseMusicID(tagIDRaw, "tag_id")
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		db = db.Where(`EXISTS (
+			SELECT 1 FROM music_tag_assignments
+			WHERE music_tag_assignments.entity_type = 'album'
+			  AND music_tag_assignments.entity_id = "Albums".id
+			  AND music_tag_assignments.tag_id = ?
+			  AND music_tag_assignments.deleted_at IS NULL
+		)`, tagID)
 	}
 	if cursor != nil {
 		db = db.Where("(\"Albums\".created_at < ? OR (\"Albums\".created_at = ? AND \"Albums\".id < ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
