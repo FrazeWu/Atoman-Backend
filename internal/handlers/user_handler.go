@@ -16,11 +16,11 @@ func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
 	{
 		// Public routes — lookup by username (must come before /:id routes)
 		users.GET("/search", middleware.OptionalAuthMiddleware(), SearchUsers(db))
-		users.GET("/by-username/:username", GetUserByUsername(db))
+		users.GET("/by-username/:username", middleware.OptionalAuthMiddleware(), GetUserByUsername(db))
 		users.GET("/blocked", middleware.AuthMiddleware(), ListBlockedUsers(db))
-		users.GET("/:id/profile", GetUserProfile(db))
-		users.GET("/:id/followers", GetUserFollowers(db))
-		users.GET("/:id/following", GetUserFollowing(db))
+		users.GET("/:id/profile", middleware.OptionalAuthMiddleware(), GetUserProfile(db))
+		users.GET("/:id/followers", middleware.OptionalAuthMiddleware(), GetUserFollowers(db))
+		users.GET("/:id/following", middleware.OptionalAuthMiddleware(), GetUserFollowing(db))
 
 		// Protected routes
 		protected := users.Group("")
@@ -28,6 +28,7 @@ func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
 		{
 			protected.GET("/me", GetCurrentUser(db))
 			protected.PUT("/me", UpdateUserProfile(db))
+			protected.DELETE("/me", DeleteCurrentUser(db))
 			protected.GET("/me/settings", GetUserSettings(db))
 			protected.PUT("/me/settings", UpdateUserSettings(db))
 			protected.POST("/me/password", SetPassword(db))

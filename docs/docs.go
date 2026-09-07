@@ -26248,6 +26248,41 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "立即停用账号，撤销全部会话并将公开内容与频道匿名化保留。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "注销当前账户",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/users/me/password": {
@@ -33534,9 +33569,15 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Seoul"
                 },
+                "private_profile": {
+                    "type": "boolean"
+                },
                 "quality": {
                     "type": "number",
                     "example": 20
+                },
+                "show_relations": {
+                    "type": "boolean"
                 },
                 "username": {
                     "type": "string",
@@ -34030,7 +34071,7 @@ const docTemplate = `{
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.User"
+                        "$ref": "#/definitions/handlers.UserRelationItem"
                     }
                 },
                 "message": {
@@ -34079,6 +34120,9 @@ const docTemplate = `{
                     "type": "integer",
                     "example": 5
                 },
+                "private_profile": {
+                    "type": "boolean"
+                },
                 "quality": {
                     "type": "number",
                     "example": 20
@@ -34086,6 +34130,9 @@ const docTemplate = `{
                 "role": {
                     "type": "string",
                     "example": "user"
+                },
+                "show_relations": {
+                    "type": "boolean"
                 },
                 "username": {
                     "type": "string",
@@ -34180,6 +34227,44 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.UserRelationItem": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "kind": {
+                    "type": "string",
+                    "example": "channel"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "owner": {
+                    "$ref": "#/definitions/handlers.UserRelationItem"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string",
+                    "format": "uuid"
+                }
+            }
+        },
         "handlers.UserResponse": {
             "type": "object",
             "properties": {
@@ -34251,6 +34336,9 @@ const docTemplate = `{
             "properties": {
                 "private_profile": {
                     "type": "boolean"
+                },
+                "show_relations": {
+                    "type": "boolean"
                 }
             }
         },
@@ -34261,6 +34349,9 @@ const docTemplate = `{
                     "type": "object",
                     "properties": {
                         "private_profile": {
+                            "type": "boolean"
+                        },
+                        "show_relations": {
                             "type": "boolean"
                         }
                     }

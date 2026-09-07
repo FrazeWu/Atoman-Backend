@@ -3624,9 +3624,13 @@ definitions:
       location:
         example: Seoul
         type: string
+      private_profile:
+        type: boolean
       quality:
         example: 20
         type: number
+      show_relations:
+        type: boolean
       username:
         example: fafa
         type: string
@@ -3961,7 +3965,7 @@ definitions:
     properties:
       data:
         items:
-          $ref: '#/definitions/model.User'
+          $ref: '#/definitions/handlers.UserRelationItem'
         type: array
       message:
         example: ok
@@ -3997,12 +4001,16 @@ definitions:
       posts_count:
         example: 5
         type: integer
+      private_profile:
+        type: boolean
       quality:
         example: 20
         type: number
       role:
         example: user
         type: string
+      show_relations:
+        type: boolean
       username:
         example: fafa
         type: string
@@ -4066,6 +4074,32 @@ definitions:
         example: 5
         type: integer
     type: object
+  handlers.UserRelationItem:
+    properties:
+      avatar_url:
+        type: string
+      cover_url:
+        type: string
+      display_name:
+        type: string
+      id:
+        format: uuid
+        type: string
+      kind:
+        example: channel
+        type: string
+      name:
+        type: string
+      owner:
+        $ref: '#/definitions/handlers.UserRelationItem'
+      slug:
+        type: string
+      username:
+        type: string
+      uuid:
+        format: uuid
+        type: string
+    type: object
   handlers.UserResponse:
     properties:
       data:
@@ -4116,12 +4150,16 @@ definitions:
     properties:
       private_profile:
         type: boolean
+      show_relations:
+        type: boolean
     type: object
   handlers.UserSettingsResponse:
     properties:
       data:
         properties:
           private_profile:
+            type: boolean
+          show_relations:
             type: boolean
         type: object
       message:
@@ -25468,6 +25506,27 @@ paths:
       tags:
       - users
   /api/v1/users/me:
+    delete:
+      description: 立即停用账号，撤销全部会话并将公开内容与频道匿名化保留。
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 注销当前账户
+      tags:
+      - users
     get:
       description: 返回当前登录用户的完整资料。
       produces:

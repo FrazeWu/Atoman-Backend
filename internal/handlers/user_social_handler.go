@@ -9,7 +9,46 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 )
+
+type publicRelationUser struct {
+	UUID        uuid.UUID `json:"uuid"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name,omitempty"`
+	AvatarURL   string    `json:"avatar_url,omitempty"`
+}
+
+func relationUser(user model.User) publicRelationUser {
+	return publicRelationUser{UUID: user.UUID, Username: user.Username, DisplayName: user.DisplayName, AvatarURL: user.AvatarURL}
+}
+
+type publicRelationChannel struct {
+	Kind     string              `json:"kind"`
+	ID       uuid.UUID           `json:"id"`
+	Name     string              `json:"name"`
+	Slug     string              `json:"slug,omitempty"`
+	CoverURL string              `json:"cover_url,omitempty"`
+	Owner    *publicRelationUser `json:"owner,omitempty"`
+}
+
+func canViewRelations(c *gin.Context, db *gorm.DB, targetID uuid.UUID) bool {
+	viewer, ok := authctx.Current(c)
+	if ok && viewer.ID == targetID {
+		return true
+	}
+	privateProfile, showRelations := publicUserPrivacy(db, targetID)
+	return !privateProfile && showRelations
+}
+
+func relationTargetID(c *gin.Context) (uuid.UUID, bool) {
+	targetID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user UUID"})
+		return uuid.Nil, false
+	}
+	return targetID, true
+}
 
 // FollowUser godoc
 // @Summary 关注用户
@@ -164,25 +203,44 @@ func UnblockUser(db *gorm.DB) gin.HandlerFunc {
 // @Router /api/v1/users/{id}/followers [get]
 func GetUserFollowers(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
-		var follows []model.Follow
+		targetID, ok := relationTargetID(c)
+		if !ok || !canViewRelations(c, db, targetID) {
+			if ok {
+				c.JSON(http.StatusForbidden, gin.H{"error": "User relations are private"})
+			}
+			return
+		}
 
-		if err := db.Where("following_id = ?", id).Find(&follows).Error; err != nil {
+		var follows []model.Follow
+		if err := db.Where("following_id = ?", targetID).Find(&follows).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch followers"})
 			return
 		}
 
-		// Get user details for followers
-		var followerIDs []uuid.UUID
+		followerIDs := make([]uuid.UUID, 0, len(follows))
 		for _, f := range follows {
 			followerIDs = append(followerIDs, f.FollowerID)
 		}
 
-		var users []model.User
-		if len(followerIDs) > 0 {
-			db.Where("uuid IN ?", followerIDs).Find(&users)
+		var channelIDs []uuid.UUID
+		if err := db.Model(&model.Channel{}).Where("user_id = ?", targetID).Pluck("id", &channelIDs).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch follower channels"})
+			return
+		}
+		if len(channelIDs) > 0 && db.Migrator().HasTable(&model.Subscription{}) && db.Migrator().HasTable(&model.FeedSource{}) {
+			var subscriberIDs []uuid.UUID
+			err := db.Table("subscriptions").
+				Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+				Where("subscriptions.deleted_at IS NULL AND subscriptions.user_id <> ? AND feed_sources.deleted_at IS NULL AND feed_sources.source_type = ? AND feed_sources.source_id IN ?", targetID, "internal_channel", channelIDs).
+				Pluck("subscriptions.user_id", &subscriberIDs).Error
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch channel subscribers"})
+				return
+			}
+			followerIDs = append(followerIDs, subscriberIDs...)
 		}
 
+		users := loadPublicRelationUsers(db, followerIDs)
 		c.JSON(http.StatusOK, gin.H{"data": users, "message": "ok"})
 	}
 }
@@ -199,27 +257,134 @@ func GetUserFollowers(db *gorm.DB) gin.HandlerFunc {
 // @Router /api/v1/users/{id}/following [get]
 func GetUserFollowing(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
+		targetID, ok := relationTargetID(c)
+		if !ok || !canViewRelations(c, db, targetID) {
+			if ok {
+				c.JSON(http.StatusForbidden, gin.H{"error": "User relations are private"})
+			}
+			return
+		}
 		var follows []model.Follow
 
-		if err := db.Where("follower_id = ?", id).Find(&follows).Error; err != nil {
+		if err := db.Where("follower_id = ?", targetID).Find(&follows).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch following"})
 			return
 		}
 
-		// Get user details for following
-		var followingIDs []uuid.UUID
+		followingIDs := make([]uuid.UUID, 0, len(follows))
 		for _, f := range follows {
 			followingIDs = append(followingIDs, f.FollowingID)
 		}
 
-		var users []model.User
-		if len(followingIDs) > 0 {
-			db.Where("uuid IN ?", followingIDs).Find(&users)
+		items := make([]any, 0, len(followingIDs))
+		for _, user := range loadPublicRelationUsers(db, followingIDs) {
+			items = append(items, user)
+		}
+		if db.Migrator().HasTable(&model.Subscription{}) && db.Migrator().HasTable(&model.FeedSource{}) {
+			var subscriptions []model.Subscription
+			if err := db.Preload("FeedSource").Where("user_id = ?", targetID).Find(&subscriptions).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch channel subscriptions"})
+				return
+			}
+			channelIDs := make([]uuid.UUID, 0)
+			for _, subscription := range subscriptions {
+				if subscription.FeedSource == nil || subscription.FeedSource.SourceType != "internal_channel" || subscription.FeedSource.SourceID == nil {
+					continue
+				}
+				channelIDs = append(channelIDs, *subscription.FeedSource.SourceID)
+			}
+			if len(channelIDs) > 0 {
+				var channels []model.Channel
+				if err := db.Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch followed channels"})
+					return
+				}
+				owners := make(map[uuid.UUID]publicRelationUser)
+				ownerIDs := make([]uuid.UUID, 0, len(channels))
+				for _, channel := range channels {
+					if channel.UserID != nil {
+						ownerIDs = append(ownerIDs, *channel.UserID)
+					}
+				}
+				for _, user := range loadPublicRelationUsers(db, ownerIDs) {
+					owners[user.UUID] = user
+				}
+				for _, channel := range channels {
+					item := publicRelationChannel{Kind: "channel", ID: channel.ID, Name: channel.Name, Slug: channel.Slug, CoverURL: channel.CoverURL}
+					if channel.UserID != nil {
+						if owner, exists := owners[*channel.UserID]; exists {
+							item.Owner = &owner
+						}
+					}
+					items = append(items, item)
+				}
+			}
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": users, "message": "ok"})
+		c.JSON(http.StatusOK, gin.H{"data": items, "message": "ok"})
 	}
+}
+
+func loadPublicRelationUsers(db *gorm.DB, ids []uuid.UUID) []publicRelationUser {
+	if len(ids) == 0 {
+		return []publicRelationUser{}
+	}
+	var users []model.User
+	if err := db.Select("uuid, username, display_name, avatar_url").Where("uuid IN ? AND is_active = ?", ids, true).Find(&users).Error; err != nil {
+		return []publicRelationUser{}
+	}
+	seen := make(map[uuid.UUID]struct{}, len(users))
+	result := make([]publicRelationUser, 0, len(users))
+	for _, user := range users {
+		if _, exists := seen[user.UUID]; exists {
+			continue
+		}
+		seen[user.UUID] = struct{}{}
+		result = append(result, relationUser(user))
+	}
+	return result
+}
+
+func countUniqueRelationUsers(db *gorm.DB, userID uuid.UUID, followers bool) int64 {
+	ids := make(map[uuid.UUID]struct{})
+	var followIDs []uuid.UUID
+	followQuery := db.Model(&model.Follow{})
+	if followers {
+		followQuery = followQuery.Where("following_id = ?", userID)
+		if err := followQuery.Pluck("follower_id", &followIDs).Error; err != nil {
+			return 0
+		}
+	} else {
+		followQuery = followQuery.Where("follower_id = ?", userID)
+		if err := followQuery.Pluck("following_id", &followIDs).Error; err != nil {
+			return 0
+		}
+	}
+	for _, id := range followIDs {
+		ids[id] = struct{}{}
+	}
+	if !db.Migrator().HasTable(&model.Subscription{}) || !db.Migrator().HasTable(&model.FeedSource{}) || !db.Migrator().HasTable(&model.Channel{}) {
+		return int64(len(ids))
+	}
+	var subscriptionIDs []uuid.UUID
+	query := db.Table("subscriptions").Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").Joins("JOIN channels ON channels.id = feed_sources.source_id").Where("subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL AND channels.deleted_at IS NULL AND feed_sources.source_type = ?", "internal_channel")
+	if followers {
+		query = query.Where("channels.user_id = ? AND subscriptions.user_id <> ?", userID, userID)
+		if err := query.Pluck("subscriptions.user_id", &subscriptionIDs).Error; err != nil {
+			return int64(len(ids))
+		}
+	} else {
+		query = query.Where("subscriptions.user_id = ?", userID)
+		if err := query.Pluck("channels.user_id", &subscriptionIDs).Error; err != nil {
+			return int64(len(ids))
+		}
+	}
+	for _, id := range subscriptionIDs {
+		if id != uuid.Nil {
+			ids[id] = struct{}{}
+		}
+	}
+	return int64(len(ids))
 }
 
 // SearchUsers returns users matching the query string.

@@ -97,13 +97,27 @@ type UserResponse struct {
 }
 
 type UserListResponse struct {
-	Data    []model.User `json:"data"`
-	Message string       `json:"message" example:"ok"`
+	Data    []UserRelationItem `json:"data"`
+	Message string             `json:"message" example:"ok"`
+}
+
+type UserRelationItem struct {
+	Kind        string            `json:"kind,omitempty" example:"channel"`
+	ID          string            `json:"id,omitempty" format:"uuid"`
+	UUID        string            `json:"uuid,omitempty" format:"uuid"`
+	Username    string            `json:"username,omitempty"`
+	DisplayName string            `json:"display_name,omitempty"`
+	AvatarURL   string            `json:"avatar_url,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Slug        string            `json:"slug,omitempty"`
+	CoverURL    string            `json:"cover_url,omitempty"`
+	Owner       *UserRelationItem `json:"owner,omitempty"`
 }
 
 type UserSettingsResponse struct {
 	Data struct {
 		PrivateProfile bool `json:"private_profile"`
+		ShowRelations  bool `json:"show_relations"`
 	} `json:"data"`
 	Message string `json:"message" example:"ok"`
 }
@@ -157,6 +171,8 @@ type UserLookupData struct {
 	PostsCount        int64   `json:"posts_count" example:"5"`
 	Quality           float64 `json:"quality" example:"20.0"`
 	ContributionTotal int     `json:"contribution_total" example:"100"`
+	PrivateProfile    bool    `json:"private_profile"`
+	ShowRelations     bool    `json:"show_relations"`
 }
 
 type UserLookupResponse struct {
@@ -176,6 +192,8 @@ type PublicProfileUser struct {
 	CreatedAt         string  `json:"created_at" format:"date-time" example:"2026-05-25T11:00:00Z"`
 	Quality           float64 `json:"quality" example:"20.0"`
 	ContributionTotal int     `json:"contribution_total" example:"100"`
+	PrivateProfile    bool    `json:"private_profile"`
+	ShowRelations     bool    `json:"show_relations"`
 }
 
 type UserProfileStats struct {

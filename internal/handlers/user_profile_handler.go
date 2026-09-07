@@ -13,6 +13,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/modules/reputation"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/service"
 )
 
@@ -27,6 +28,7 @@ type UserProfileInput struct {
 // UserSettingsInput represents the request body for updating user settings
 type UserSettingsInput struct {
 	PrivateProfile *bool `json:"private_profile"`
+	ShowRelations  *bool `json:"show_relations"`
 }
 
 func isUserSettingsDuplicateError(err error) bool {
@@ -80,6 +82,22 @@ func loadOrCreateUserSettings(db *gorm.DB, userID uuid.UUID) (model.UserSettings
 	return settings, nil
 }
 
+func publicUserPrivacy(db *gorm.DB, userID uuid.UUID) (privateProfile, showRelations bool) {
+	if !db.Migrator().HasTable(&model.UserSettings{}) {
+		return false, false
+	}
+	var settings model.UserSettings
+	if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {
+		return false, false
+	}
+	return settings.PrivateProfile, settings.ShowRelations
+}
+
+func canViewPrivateProfile(c *gin.Context, userID uuid.UUID) bool {
+	viewer, ok := authctx.Current(c)
+	return ok && viewer.ID == userID
+}
+
 // GetCurrentUser returns the authenticated user's own full profile
 // GetCurrentUser godoc
 // @Summary 获取当前用户
@@ -122,8 +140,13 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 		username := c.Param("username")
 		var user model.User
 
-		if err := db.Where("username = ?", username).First(&user).Error; err != nil {
+		if err := db.Where("username = ? AND is_active = ?", username, true).First(&user).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		privateProfile, showRelations := publicUserPrivacy(db, user.UUID)
+		if privateProfile && !canViewPrivateProfile(c, user.UUID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "User profile is private"})
 			return
 		}
 		avatarURL := service.ResolveUserAvatarURL(db, user)
@@ -135,8 +158,8 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 		userMetrics := metrics[user.UUID]
 
 		var followersCount, followingCount, postsCount int64
-		db.Model(&model.Follow{}).Where("following_id = ?", user.UUID).Count(&followersCount)
-		db.Model(&model.Follow{}).Where("follower_id = ?", user.UUID).Count(&followingCount)
+		followersCount = countUniqueRelationUsers(db, user.UUID, true)
+		followingCount = countUniqueRelationUsers(db, user.UUID, false)
 		db.Model(&model.ContentEntry{}).Where("author_id = ? AND kind = ? AND status = ?", user.UUID, "blog", "published").Count(&postsCount)
 
 		c.JSON(http.StatusOK, gin.H{
@@ -155,6 +178,8 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 				"posts_count":        postsCount,
 				"quality":            userMetrics.Quality,
 				"contribution_total": userMetrics.ContributionTotal,
+				"private_profile":    privateProfile,
+				"show_relations":     showRelations,
 			},
 			"message": "ok",
 		})
@@ -176,8 +201,13 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 		var user model.User
 
-		if err := db.Where("uuid = ? OR username = ?", id, id).First(&user).Error; err != nil {
+		if err := db.Where("(uuid = ? OR username = ?) AND is_active = ?", id, id, true).First(&user).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		privateProfile, showRelations := publicUserPrivacy(db, user.UUID)
+		if privateProfile && !canViewPrivateProfile(c, user.UUID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "User profile is private"})
 			return
 		}
 		avatarURL := service.ResolveUserAvatarURL(db, user)
@@ -193,8 +223,8 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 		var followingCount int64
 		var postsCount int64
 
-		db.Model(&model.Follow{}).Where("following_id = ?", user.UUID).Count(&followersCount)
-		db.Model(&model.Follow{}).Where("follower_id = ?", user.UUID).Count(&followingCount)
+		followersCount = countUniqueRelationUsers(db, user.UUID, true)
+		followingCount = countUniqueRelationUsers(db, user.UUID, false)
 		db.Model(&model.ContentEntry{}).Where("author_id = ? AND kind = ? AND status = ?", user.UUID, "blog", "published").Count(&postsCount)
 
 		// Get user's channels
@@ -215,6 +245,8 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 					"created_at":         user.CreatedAt,
 					"quality":            userMetrics.Quality,
 					"contribution_total": userMetrics.ContributionTotal,
+					"private_profile":    privateProfile,
+					"show_relations":     showRelations,
 				},
 				"stats": gin.H{
 					"followers_count": followersCount,
@@ -311,7 +343,7 @@ func GetUserSettings(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": gin.H{"private_profile": settings.PrivateProfile}, "message": "ok"})
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"private_profile": settings.PrivateProfile, "show_relations": settings.ShowRelations}, "message": "ok"})
 	}
 }
 
@@ -350,6 +382,9 @@ func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
 		if input.PrivateProfile != nil {
 			updates["private_profile"] = *input.PrivateProfile
 		}
+		if input.ShowRelations != nil {
+			updates["show_relations"] = *input.ShowRelations
+		}
 
 		if len(updates) > 0 {
 			if err := db.Model(&settings).Updates(updates).Error; err != nil {
@@ -364,7 +399,7 @@ func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
 			}
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": gin.H{"private_profile": settings.PrivateProfile}, "message": "ok"})
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"private_profile": settings.PrivateProfile, "show_relations": settings.ShowRelations}, "message": "ok"})
 	}
 }
 
