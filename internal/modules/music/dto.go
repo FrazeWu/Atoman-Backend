@@ -11,6 +11,18 @@ import (
 
 type Source = model.MusicSource
 
+type MusicTagDTO struct {
+	ID           uuid.UUID `json:"id"`
+	AssignmentID uuid.UUID `json:"assignment_id"`
+	Name         string    `json:"name"`
+	Kind         string    `json:"kind"`
+	Upvotes      int64     `json:"upvotes"`
+	Downvotes    int64     `json:"downvotes"`
+	Score        int64     `json:"score"`
+	ViewerVote   string    `json:"viewer_vote"`
+	CanDelete    bool      `json:"can_delete"`
+}
+
 type SubmitEditRequest struct {
 	Type       string         `json:"type"`
 	EntityType string         `json:"entity_type"`
