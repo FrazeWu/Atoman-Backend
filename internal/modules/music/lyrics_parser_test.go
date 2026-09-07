@@ -347,6 +347,34 @@ func TestValidateAnnotationAnchorRejectsInvalidAnchors(t *testing.T) {
 	}
 }
 
+func TestValidateMultiLineAnnotationAnchorMatchesJoinedText(t *testing.T) {
+	if err := ValidateMultiLineAnnotationAnchor(
+		[]string{"first line", "second line"},
+		6, 6,
+		"line\nsecond",
+	); err != nil {
+		t.Fatalf("valid multi-line anchor rejected: %v", err)
+	}
+}
+
+func TestValidateMultiLineAnnotationAnchorUsesUTF16Offsets(t *testing.T) {
+	if err := ValidateMultiLineAnnotationAnchor(
+		[]string{"你好吗", "a😀b"},
+		1, 3,
+		"好吗\na😀",
+	); err != nil {
+		t.Fatalf("valid unicode multi-line anchor rejected: %v", err)
+	}
+
+	if err := ValidateMultiLineAnnotationAnchor(
+		[]string{"你好吗", "a😀b"},
+		1, 2,
+		"好吗\na",
+	); err == nil {
+		t.Fatal("expected UTF-16 end offset to reject a split surrogate pair")
+	}
+}
+
 func assertValidationError(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {

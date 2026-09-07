@@ -44,6 +44,10 @@ type AnnotationResolutionInput struct {
 	Action       string    `json:"action"`
 	LineID       uuid.UUID `json:"line_id"`
 	LineKey      string    `json:"line_key"`
+	StartLineID  uuid.UUID `json:"start_line_id"`
+	StartLineKey string    `json:"start_line_key"`
+	EndLineID    uuid.UUID `json:"end_line_id"`
+	EndLineKey   string    `json:"end_line_key"`
 	SelectedText string    `json:"selected_text"`
 	StartOffset  int       `json:"start_offset"`
 	EndOffset    int       `json:"end_offset"`
@@ -52,6 +56,10 @@ type AnnotationResolutionInput struct {
 type CreateAnnotationInput struct {
 	LineID       uuid.UUID `json:"line_id"`
 	LineKey      string    `json:"line_key"`
+	StartLineID  uuid.UUID `json:"start_line_id"`
+	StartLineKey string    `json:"start_line_key"`
+	EndLineID    uuid.UUID `json:"end_line_id"`
+	EndLineKey   string    `json:"end_line_key"`
 	SelectedText string    `json:"selected_text"`
 	StartOffset  int       `json:"start_offset"`
 	EndOffset    int       `json:"end_offset"`
@@ -61,6 +69,8 @@ type CreateAnnotationInput struct {
 type UpdateLyricAnnotationInput struct {
 	Body         *string
 	LineKey      *string
+	StartLineKey *string
+	EndLineKey   *string
 	SelectedText *string
 	StartOffset  *int
 	EndOffset    *int
@@ -99,6 +109,9 @@ type MusicLyricAnnotationDTO struct {
 	SongID       uuid.UUID            `json:"song_id"`
 	LineID       uuid.UUID            `json:"line_id"`
 	LineKey      string               `json:"line_key"`
+	StartLineKey string               `json:"start_line_key"`
+	EndLineID    uuid.UUID            `json:"end_line_id"`
+	EndLineKey   string               `json:"end_line_key"`
 	SelectedText string               `json:"selected_text"`
 	StartOffset  int                  `json:"start_offset"`
 	EndOffset    int                  `json:"end_offset"`
@@ -730,12 +743,6 @@ func replaceCurrentLyricLines(tx *gorm.DB, lyricID uuid.UUID, parsed []ParsedLyr
 }
 
 func resolveInvalidAnnotationAnchors(tx *gorm.DB, actorID, songID uuid.UUID, lines []model.MusicSongLyricLine, resolutions []AnnotationResolutionInput, autoNeedsRebind bool) error {
-	lineByID := make(map[uuid.UUID]model.MusicSongLyricLine, len(lines))
-	lineByKey := make(map[string]model.MusicSongLyricLine, len(lines))
-	for _, line := range lines {
-		lineByID[line.ID] = line
-		lineByKey[line.LineKey] = line
-	}
 	resolutionByID := make(map[uuid.UUID]AnnotationResolutionInput, len(resolutions))
 	for _, resolution := range resolutions {
 		resolutionByID[resolution.AnnotationID] = resolution
@@ -747,8 +754,16 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, actorID, songID uuid.UUID, lin
 	invalid := make([]model.MusicLyricAnnotation, 0)
 	unresolvedIDs := make([]string, 0)
 	for _, annotation := range annotations {
-		line, exists := lineByID[annotation.LineID]
-		if exists && ValidateAnnotationAnchor(line.Text, annotation.StartOffset, annotation.EndOffset, annotation.SelectedText) == nil {
+		endLineID := annotation.LineID
+		if annotation.EndLineID != nil {
+			endLineID = *annotation.EndLineID
+		}
+		annotationLines, rangeValid := lyricRangeFromLines(lines, annotation.LineID, "", endLineID, "")
+		texts := make([]string, 0, len(annotationLines))
+		for _, line := range annotationLines {
+			texts = append(texts, line.Text)
+		}
+		if rangeValid && ValidateMultiLineAnnotationAnchor(texts, annotation.StartOffset, annotation.EndOffset, annotation.SelectedText) == nil {
 			continue
 		}
 		invalid = append(invalid, annotation)
@@ -794,15 +809,24 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, actorID, songID uuid.UUID, lin
 				}
 			}
 		case "rebind":
-			target, ok := lineByID[resolution.LineID]
-			if resolution.LineID == uuid.Nil {
-				target, ok = lineByKey[resolution.LineKey]
+			startLineID, startLineKey := resolution.StartLineID, resolution.StartLineKey
+			if startLineID == uuid.Nil && startLineKey == "" {
+				startLineID, startLineKey = resolution.LineID, resolution.LineKey
 			}
-			if !ok || ValidateAnnotationAnchor(target.Text, resolution.StartOffset, resolution.EndOffset, resolution.SelectedText) != nil {
+			endLineID, endLineKey := resolution.EndLineID, resolution.EndLineKey
+			if endLineID == uuid.Nil && endLineKey == "" {
+				endLineID, endLineKey = startLineID, startLineKey
+			}
+			resolvedLines, ok := lyricRangeFromLines(lines, startLineID, startLineKey, endLineID, endLineKey)
+			texts := make([]string, 0, len(resolvedLines))
+			for _, line := range resolvedLines {
+				texts = append(texts, line.Text)
+			}
+			if !ok || ValidateMultiLineAnnotationAnchor(texts, resolution.StartOffset, resolution.EndOffset, resolution.SelectedText) != nil {
 				return lyricValidationError("annotation rebind anchor is invalid")
 			}
 			updates := map[string]any{
-				"line_id": target.ID, "selected_text": resolution.SelectedText,
+				"line_id": resolvedLines[0].ID, "end_line_id": resolvedLines[len(resolvedLines)-1].ID, "selected_text": resolution.SelectedText,
 				"start_offset": resolution.StartOffset, "end_offset": resolution.EndOffset, "status": "active",
 			}
 			result := tx.Model(&model.MusicLyricAnnotation{}).
@@ -819,6 +843,46 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, actorID, songID uuid.UUID, lin
 		}
 	}
 	return nil
+}
+
+func lyricRangeFromLines(lines []model.MusicSongLyricLine, startLineID uuid.UUID, startLineKey string, endLineID uuid.UUID, endLineKey string) ([]model.MusicSongLyricLine, bool) {
+	find := func(id uuid.UUID, key string) (model.MusicSongLyricLine, bool) {
+		for _, line := range lines {
+			if id != uuid.Nil && line.ID == id {
+				return line, true
+			}
+			if id == uuid.Nil && key != "" && line.LineKey == key {
+				return line, true
+			}
+		}
+		return model.MusicSongLyricLine{}, false
+	}
+	start, ok := find(startLineID, startLineKey)
+	if !ok {
+		return nil, false
+	}
+	if endLineID == uuid.Nil && endLineKey == "" {
+		endLineID, endLineKey = start.ID, start.LineKey
+	}
+	end, ok := find(endLineID, endLineKey)
+	if !ok || end.LineIndex < start.LineIndex || end.LyricID != start.LyricID {
+		return nil, false
+	}
+	rangeLines := make([]model.MusicSongLyricLine, 0, end.LineIndex-start.LineIndex+1)
+	for _, line := range lines {
+		if line.LineIndex >= start.LineIndex && line.LineIndex <= end.LineIndex {
+			rangeLines = append(rangeLines, line)
+		}
+	}
+	if len(rangeLines) != end.LineIndex-start.LineIndex+1 || rangeLines[0].ID != start.ID || rangeLines[len(rangeLines)-1].ID != end.ID {
+		return nil, false
+	}
+	for index := 1; index < len(rangeLines); index++ {
+		if rangeLines[index].LineIndex != rangeLines[index-1].LineIndex+1 {
+			return nil, false
+		}
+	}
+	return rangeLines, true
 }
 
 func createLyricsRebindNotification(tx *gorm.DB, actorID, songID uuid.UUID, annotation model.MusicLyricAnnotation) error {
@@ -843,15 +907,28 @@ func (s *Service) CreateLyricAnnotation(user authctx.CurrentUser, songID uuid.UU
 		if err := revisionservice.ValidateMusicEntryEdit(tx, "song", songID, user.ID, "lyrics_annotation"); err != nil {
 			return err
 		}
-		line, err := findCurrentLyricLine(tx, songID, input.LineID, input.LineKey)
+		startLineID, startLineKey := input.StartLineID, input.StartLineKey
+		if startLineID == uuid.Nil && startLineKey == "" {
+			startLineID, startLineKey = input.LineID, input.LineKey
+		}
+		endLineID, endLineKey := input.EndLineID, input.EndLineKey
+		if endLineID == uuid.Nil && endLineKey == "" {
+			endLineID, endLineKey = startLineID, startLineKey
+		}
+		lines, err := findCurrentLyricRange(tx, songID, startLineID, startLineKey, endLineID, endLineKey)
 		if err != nil {
 			return err
 		}
-		if err := ValidateAnnotationAnchor(line.Text, input.StartOffset, input.EndOffset, input.SelectedText); err != nil {
+		texts := make([]string, 0, len(lines))
+		for _, line := range lines {
+			texts = append(texts, line.Text)
+		}
+		if err := ValidateMultiLineAnnotationAnchor(texts, input.StartOffset, input.EndOffset, input.SelectedText); err != nil {
 			return err
 		}
+		startLine, endLine := lines[0], lines[len(lines)-1]
 		annotation = model.MusicLyricAnnotation{
-			SongID: songID, LineID: line.ID, SelectedText: input.SelectedText,
+			SongID: songID, LineID: startLine.ID, EndLineID: &endLine.ID, SelectedText: input.SelectedText,
 			StartOffset: input.StartOffset, EndOffset: input.EndOffset,
 			Body: strings.TrimSpace(input.Body), CreatedBy: user.ID, Status: "active",
 		}
@@ -884,13 +961,39 @@ func findCurrentLyricLine(db *gorm.DB, songID, lineID uuid.UUID, lineKey string)
 	return line, nil
 }
 
+func findCurrentLyricRange(db *gorm.DB, songID, startLineID uuid.UUID, startLineKey string, endLineID uuid.UUID, endLineKey string) ([]model.MusicSongLyricLine, error) {
+	start, err := findCurrentLyricLine(db, songID, startLineID, startLineKey)
+	if err != nil {
+		return nil, err
+	}
+	if endLineID == uuid.Nil && endLineKey == "" {
+		endLineID, endLineKey = start.ID, start.LineKey
+	}
+	end, err := findCurrentLyricLine(db, songID, endLineID, endLineKey)
+	if err != nil {
+		return nil, err
+	}
+	if start.LyricID != end.LyricID || end.LineIndex < start.LineIndex {
+		return nil, lyricValidationError("annotation lines must be in order")
+	}
+	var lines []model.MusicSongLyricLine
+	if err := db.Where("lyric_id = ? AND line_index >= ? AND line_index <= ?", start.LyricID, start.LineIndex, end.LineIndex).
+		Order("line_index ASC").Find(&lines).Error; err != nil {
+		return nil, err
+	}
+	if len(lines) == 0 || lines[0].ID != start.ID || lines[len(lines)-1].ID != end.ID {
+		return nil, lyricValidationError("annotation lines are invalid")
+	}
+	return lines, nil
+}
+
 func (s *Service) UpdateLyricAnnotation(user authctx.CurrentUser, songID, annotationID uuid.UUID, input UpdateLyricAnnotationInput) (MusicLyricAnnotationDTO, error) {
 	if user.ID == uuid.Nil {
 		return MusicLyricAnnotationDTO{}, apperr.Unauthorized("Login required")
 	}
-	hasAnchor := input.LineKey != nil || input.SelectedText != nil || input.StartOffset != nil || input.EndOffset != nil
-	if hasAnchor && (input.LineKey == nil || input.SelectedText == nil || input.StartOffset == nil || input.EndOffset == nil) {
-		return MusicLyricAnnotationDTO{}, lyricValidationError("line_key, selected_text, start_offset, and end_offset are required together")
+	hasAnchor := input.LineKey != nil || input.StartLineKey != nil || input.EndLineKey != nil || input.SelectedText != nil || input.StartOffset != nil || input.EndOffset != nil
+	if hasAnchor && (input.SelectedText == nil || input.StartOffset == nil || input.EndOffset == nil || (input.LineKey == nil && input.StartLineKey == nil)) {
+		return MusicLyricAnnotationDTO{}, lyricValidationError("start_line_key, end_line_key, selected_text, start_offset, and end_offset are required together")
 	}
 	if input.Body == nil && !hasAnchor {
 		return MusicLyricAnnotationDTO{}, lyricValidationError("annotation update is required")
@@ -920,14 +1023,27 @@ func (s *Service) UpdateLyricAnnotation(user authctx.CurrentUser, songID, annota
 			updates["body"] = body
 		}
 		if hasAnchor {
-			line, err := findCurrentLyricLine(tx, songID, uuid.Nil, *input.LineKey)
+			startLineKey := input.StartLineKey
+			if startLineKey == nil {
+				startLineKey = input.LineKey
+			}
+			endLineKey := input.EndLineKey
+			if endLineKey == nil {
+				endLineKey = startLineKey
+			}
+			lines, err := findCurrentLyricRange(tx, songID, uuid.Nil, *startLineKey, uuid.Nil, *endLineKey)
 			if err != nil {
 				return err
 			}
-			if err := ValidateAnnotationAnchor(line.Text, *input.StartOffset, *input.EndOffset, *input.SelectedText); err != nil {
+			texts := make([]string, 0, len(lines))
+			for _, line := range lines {
+				texts = append(texts, line.Text)
+			}
+			if err := ValidateMultiLineAnnotationAnchor(texts, *input.StartOffset, *input.EndOffset, *input.SelectedText); err != nil {
 				return err
 			}
-			updates["line_id"] = line.ID
+			updates["line_id"] = lines[0].ID
+			updates["end_line_id"] = lines[len(lines)-1].ID
 			updates["selected_text"] = *input.SelectedText
 			updates["start_offset"] = *input.StartOffset
 			updates["end_offset"] = *input.EndOffset
@@ -1070,6 +1186,8 @@ type lyricAnnotationRow struct {
 	SongID       uuid.UUID
 	LineID       uuid.UUID
 	LineKey      string
+	EndLineID    uuid.UUID
+	EndLineKey   string
 	SelectedText string
 	StartOffset  int
 	EndOffset    int
@@ -1090,11 +1208,12 @@ func (s *Service) listLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid.
 func (s *Service) queryLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid.UUID, annotationID *uuid.UUID) ([]MusicLyricAnnotationDTO, error) {
 	var rows []lyricAnnotationRow
 	query := s.db.Table("music_lyric_annotations AS a").
-		Select(`a.id, a.song_id, a.line_id, l.line_key, a.selected_text, a.start_offset, a.end_offset,
+		Select(`a.id, a.song_id, a.line_id, l.line_key, COALESCE(el.id, l.id) AS end_line_id, COALESCE(el.line_key, l.line_key) AS end_line_key, a.selected_text, a.start_offset, a.end_offset,
 			a.body, a.created_by, u.username, a.status, a.created_at, a.updated_at,
 			COALESCE(SUM(CASE WHEN v.vote = 'up' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS upvotes,
 			COALESCE(SUM(CASE WHEN v.vote = 'down' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS downvotes`).
 		Joins("JOIN music_song_lyric_lines l ON l.id = a.line_id").
+		Joins("LEFT JOIN music_song_lyric_lines el ON el.id = a.end_line_id").
 		Joins(`JOIN "Users" u ON u.uuid = a.created_by`).
 		Joins("LEFT JOIN music_lyric_annotation_votes v ON v.annotation_id = a.id").
 		Where("a.song_id = ? AND a.status <> ? AND a.deleted_at IS NULL", songID, "deleted")
@@ -1102,7 +1221,7 @@ func (s *Service) queryLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid
 		query = query.Where("a.id = ?", *annotationID)
 	}
 	err := query.
-		Group("a.id, l.line_key, u.uuid, u.username").
+		Group("a.id, l.line_key, el.id, el.line_key, u.uuid, u.username").
 		Order("(COALESCE(SUM(CASE WHEN v.vote = 'up' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN v.vote = 'down' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0)) DESC").
 		Order("upvotes DESC").Order("a.updated_at DESC").Order("a.created_at DESC").Scan(&rows).Error
 	if err != nil {
@@ -1129,7 +1248,7 @@ func (s *Service) queryLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid
 			viewerVote = "none"
 		}
 		dtos = append(dtos, MusicLyricAnnotationDTO{
-			ID: row.ID, SongID: row.SongID, LineID: row.LineID, LineKey: row.LineKey,
+			ID: row.ID, SongID: row.SongID, LineID: row.LineID, LineKey: row.LineKey, StartLineKey: row.LineKey, EndLineID: row.EndLineID, EndLineKey: row.EndLineKey,
 			SelectedText: row.SelectedText, StartOffset: row.StartOffset, EndOffset: row.EndOffset,
 			Body: row.Body, Creator: MusicLyricCreatorDTO{ID: row.CreatedBy, Username: row.Username},
 			Upvotes: row.Upvotes, Downvotes: row.Downvotes, NetScore: row.Upvotes - row.Downvotes,

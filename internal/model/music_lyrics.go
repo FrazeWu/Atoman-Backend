@@ -55,6 +55,7 @@ type MusicLyricAnnotation struct {
 	Song          *Song               `json:"song,omitempty" gorm:"foreignKey:SongID"`
 	LineID        uuid.UUID           `json:"line_id" gorm:"type:uuid;not null;index"`
 	Line          *MusicSongLyricLine `json:"line,omitempty" gorm:"foreignKey:LineID"`
+	EndLineID     *uuid.UUID          `json:"end_line_id,omitempty" gorm:"type:uuid;index"`
 	SelectedText  string              `json:"selected_text" gorm:"type:text;not null"`
 	StartOffset   int                 `json:"start_offset" gorm:"not null"`
 	EndOffset     int                 `json:"end_offset" gorm:"not null"`
