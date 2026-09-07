@@ -1,11 +1,19 @@
 package music
 
 type AlbumImportTrackPayload struct {
-	SongID      string `json:"song_id"`
-	AudioKey    string `json:"audio_key"`
-	Title       string `json:"title"`
-	DiscNumber  int    `json:"disc_number"`
-	TrackNumber int    `json:"track_number"`
+	SongID          string  `json:"song_id"`
+	AudioKey        string  `json:"audio_key"`
+	Title           string  `json:"title"`
+	DiscNumber      int     `json:"disc_number"`
+	TrackNumber     int     `json:"track_number"`
+	OriginalTitle   string  `json:"original_title,omitempty"`
+	OriginalDisc    int     `json:"original_disc_number,omitempty"`
+	OriginalTrack   int     `json:"original_track_number,omitempty"`
+	MatchStatus     string  `json:"match_status,omitempty"`
+	MatchProvider   string  `json:"match_provider,omitempty"`
+	MatchExternalID string  `json:"match_external_id,omitempty"`
+	MatchSourceURL  string  `json:"match_source_url,omitempty"`
+	MatchConfidence float64 `json:"match_confidence,omitempty"`
 	// AudioURL is retained for internal processors and legacy tests only. Client JSON cannot set it.
 	AudioURL     string                         `json:"-"`
 	Lyrics       *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
@@ -150,15 +158,23 @@ type CompleteAlbumImportMultipartPartInput struct {
 }
 
 type AlbumImportDTOTrack struct {
-	SongID       string                         `json:"songId"`
-	Title        string                         `json:"title"`
-	AudioKey     string                         `json:"audioKey"`
-	AudioURL     string                         `json:"audioUrl"`
-	Origin       string                         `json:"origin"`
-	DiscNumber   int                            `json:"discNumber,omitempty"`
-	TrackNumber  int                            `json:"trackNumber,omitempty"`
-	Lyrics       *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
-	LyricsSource string                         `json:"lyricsSource,omitempty"`
+	SongID          string                         `json:"songId"`
+	Title           string                         `json:"title"`
+	AudioKey        string                         `json:"audioKey"`
+	AudioURL        string                         `json:"audioUrl"`
+	Origin          string                         `json:"origin"`
+	DiscNumber      int                            `json:"discNumber,omitempty"`
+	TrackNumber     int                            `json:"trackNumber,omitempty"`
+	OriginalTitle   string                         `json:"originalTitle,omitempty"`
+	OriginalDisc    int                            `json:"originalDiscNumber,omitempty"`
+	OriginalTrack   int                            `json:"originalTrackNumber,omitempty"`
+	MatchStatus     string                         `json:"matchStatus,omitempty"`
+	MatchProvider   string                         `json:"matchProvider,omitempty"`
+	MatchExternalID string                         `json:"matchExternalId,omitempty"`
+	MatchSourceURL  string                         `json:"matchSourceUrl,omitempty"`
+	MatchConfidence float64                        `json:"matchConfidence,omitempty"`
+	Lyrics          *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
+	LyricsSource    string                         `json:"lyricsSource,omitempty"`
 }
 
 type AlbumImportProgressDTO struct {
@@ -193,37 +209,40 @@ type AlbumImportErrorDTO struct {
 }
 
 type AlbumImportDTO struct {
-	ImportID           string                         `json:"importId"`
-	TargetAlbumID      string                         `json:"targetAlbumId"`
-	TargetSongID       string                         `json:"targetSongId"`
-	ArtistID           string                         `json:"artistId"`
-	ArtistSource       string                         `json:"artistSource"`
-	CommitRequest      *CommitAlbumImportSessionInput `json:"commitRequest,omitempty"`
-	AlbumTitle         string                         `json:"albumTitle"`
-	AlbumSource        string                         `json:"albumSource"`
-	Status             string                         `json:"status"`
-	InputMode          string                         `json:"inputMode"`
-	Stage              string                         `json:"stage"`
-	Progress           AlbumImportProgressDTO         `json:"progress"`
-	Files              []AlbumImportFileDTO           `json:"files"`
-	Tracks             []AlbumImportDTOTrack          `json:"tracks"`
-	Errors             []AlbumImportErrorDTO          `json:"errors"`
-	ArchiveName        string                         `json:"archiveName"`
-	UploadProgress     float64                        `json:"uploadProgress"`
-	UploadSpeed        float64                        `json:"uploadSpeed"`
-	CoverURL           string                         `json:"coverUrl"`
-	CoverKey           string                         `json:"coverKey"`
-	DerivedAlbumTitle  string                         `json:"derivedAlbumTitle"`
-	DerivedCover       string                         `json:"derivedCover"`
-	DerivedTracks      []AlbumImportDTOTrack          `json:"derivedTracks"`
-	DerivedReleaseDate string                         `json:"derivedReleaseDate,omitempty"`
-	DerivedAlbumType   string                         `json:"derivedAlbumType,omitempty"`
-	MetadataSourceURL  string                         `json:"metadataSourceUrl,omitempty"`
-	MetadataSource     string                         `json:"metadataSource,omitempty"`
-	MetadataMatched    bool                           `json:"metadataMatched"`
-	MissingArtists     []string                       `json:"missingArtists,omitempty"`
-	LastSyncedAt       string                         `json:"lastSyncedAt"`
-	ErrorMessage       string                         `json:"errorMessage"`
+	ImportID                string                         `json:"importId"`
+	TargetAlbumID           string                         `json:"targetAlbumId"`
+	TargetSongID            string                         `json:"targetSongId"`
+	ArtistID                string                         `json:"artistId"`
+	ArtistSource            string                         `json:"artistSource"`
+	CommitRequest           *CommitAlbumImportSessionInput `json:"commitRequest,omitempty"`
+	AlbumTitle              string                         `json:"albumTitle"`
+	AlbumSource             string                         `json:"albumSource"`
+	Status                  string                         `json:"status"`
+	InputMode               string                         `json:"inputMode"`
+	Stage                   string                         `json:"stage"`
+	Progress                AlbumImportProgressDTO         `json:"progress"`
+	Files                   []AlbumImportFileDTO           `json:"files"`
+	Tracks                  []AlbumImportDTOTrack          `json:"tracks"`
+	Errors                  []AlbumImportErrorDTO          `json:"errors"`
+	ArchiveName             string                         `json:"archiveName"`
+	UploadProgress          float64                        `json:"uploadProgress"`
+	UploadSpeed             float64                        `json:"uploadSpeed"`
+	CoverURL                string                         `json:"coverUrl"`
+	CoverKey                string                         `json:"coverKey"`
+	DerivedAlbumTitle       string                         `json:"derivedAlbumTitle"`
+	DerivedCover            string                         `json:"derivedCover"`
+	DerivedTracks           []AlbumImportDTOTrack          `json:"derivedTracks"`
+	DerivedReleaseDate      string                         `json:"derivedReleaseDate,omitempty"`
+	DerivedAlbumType        string                         `json:"derivedAlbumType,omitempty"`
+	MetadataSourceURL       string                         `json:"metadataSourceUrl,omitempty"`
+	MetadataSource          string                         `json:"metadataSource,omitempty"`
+	MetadataExternalID      string                         `json:"metadataExternalId,omitempty"`
+	MetadataMatchStatus     string                         `json:"metadataMatchStatus,omitempty"`
+	MetadataMatchConfidence float64                        `json:"metadataMatchConfidence,omitempty"`
+	MetadataMatched         bool                           `json:"metadataMatched"`
+	MissingArtists          []string                       `json:"missingArtists,omitempty"`
+	LastSyncedAt            string                         `json:"lastSyncedAt"`
+	ErrorMessage            string                         `json:"errorMessage"`
 }
 
 type AlbumImportResponse struct {

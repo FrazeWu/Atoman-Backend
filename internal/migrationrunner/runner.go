@@ -417,7 +417,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.ArtistCorrection{}, &model.ArtistAlias{}, &model.ArtistMerge{},
 		&model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{},
 		&model.MusicTag{}, &model.MusicTagAssignment{}, &model.MusicTagVote{},
-		&model.AlbumImportSession{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicAssetUploadSession{}, &model.MusicExternalImport{}, &model.MusicCatalogLink{},
+		&model.AlbumImportSession{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicAssetUploadSession{}, &model.MusicExternalImport{}, &model.MusicCatalogLink{}, &model.MusicMatchRecord{},
 		&model.ArtistBookmark{}, &model.AlbumBookmark{}, &model.PlaylistBookmark{},
 		&model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicPlaybackSession{}, &model.MusicPlaybackProgress{}, &model.MusicSearchInteraction{}, &model.MusicRecommendationEvent{},
 		&model.Bookmark{}, &model.BookmarkFolder{}, &model.ChannelBookmark{}, &model.SiteSetting{}, &model.SiteVisitDaily{},
@@ -466,6 +466,7 @@ func MigrateSchema(db *gorm.DB) error {
 		{"dm v2 migration", migrations.RunDMV2Migration},
 		{"content references migration", migrations.RunContentReferencesMigration},
 		{"music wiki state migration", migrations.RunMusicWikiStateMigration},
+		{"music match state migration", migrations.RunMusicMatchStateMigration},
 		{"feed subscription management migration", migrations.RunFeedSubscriptionManagementMigration},
 		{"reputation indexes migration", migrations.RunReputationIndexes},
 	}

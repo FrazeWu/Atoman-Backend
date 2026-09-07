@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"atoman/internal/model"
 )
 
 type AlbumImportMetadataTrack struct {
@@ -47,6 +49,9 @@ type AlbumImportMetadataResult struct {
 	CoverURL             string
 	SourceURL            string
 	MetadataSource       string
+	ExternalID           string
+	MatchStatus          string
+	MatchConfidence      float64
 	MusicBrainzReleaseID string
 	MissingArtists       []string
 	MetadataError        string
@@ -120,6 +125,7 @@ type musicBrainzRelease struct {
 			Title     string `json:"title"`
 			Length    int    `json:"length"`
 			Recording struct {
+				ID     string `json:"id"`
 				Title  string `json:"title"`
 				Length int    `json:"length"`
 			} `json:"recording"`
@@ -190,7 +196,10 @@ type discogsSearchResponse struct {
 }
 
 func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumImportMetadataInput) (AlbumImportMetadataResult, error) {
-	result := AlbumImportMetadataResult{AlbumTitle: input.AlbumTitle, Tracks: baseMetadataTracks(input.Tracks)}
+	result := AlbumImportMetadataResult{
+		AlbumTitle: input.AlbumTitle, Tracks: baseMetadataTracks(input.Tracks),
+		MatchStatus: model.MusicMatchUnmatched,
+	}
 	if e == nil {
 		return result, nil
 	}
@@ -210,12 +219,21 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.AlbumType = normalizeMusicBrainzAlbumType(release.ReleaseGroup.PrimaryType)
 		result.SourceURL = e.musicBrainzBase + "/release/" + release.ID
 		result.MetadataSource = "musicbrainz"
+		result.ExternalID = release.ID
+		result.MatchStatus = model.MusicMatchMatched
+		result.MatchConfidence = 1
 		result.MusicBrainzReleaseID = release.ID
 		result.MissingArtists = missingMusicBrainzArtists(release.ArtistCredit, uniqueMusicArtists(append([]string{input.Artist}, input.Artists...)))
 		if e.coverArtBase != "" {
 			result.CoverURL = e.coverArtBase + "/release/" + release.ID + "/front-500"
 		}
 		result.Tracks = applyMusicBrainzTracks(result.Tracks, release, trackMapping)
+		for index := range result.Tracks {
+			if result.Tracks[index].MatchStatus == model.MusicMatchMatched {
+				result.Tracks[index].MatchProvider = result.MetadataSource
+				result.Tracks[index].MatchSourceURL = result.SourceURL
+			}
+		}
 		lyricsArtists = musicBrainzReleaseArtistNames(release)
 	} else if input.PreferredReleaseID == "" {
 		discogsRelease, discogsMapping, discogsErr := e.findDiscogsRelease(ctx, input)
@@ -229,8 +247,17 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 			result.AlbumType = discogsAlbumType(discogsRelease)
 			result.SourceURL = discogsReleaseURL(discogsRelease)
 			result.MetadataSource = "discogs"
+			result.ExternalID = strconv.Itoa(discogsRelease.ID)
+			result.MatchStatus = model.MusicMatchMatched
+			result.MatchConfidence = 1
 			result.CoverURL = discogsReleaseCoverURL(discogsRelease)
 			result.Tracks = applyDiscogsTracks(result.Tracks, discogsRelease, discogsMapping)
+			for index := range result.Tracks {
+				if result.Tracks[index].MatchStatus == model.MusicMatchMatched {
+					result.Tracks[index].MatchProvider = result.MetadataSource
+					result.Tracks[index].MatchSourceURL = result.SourceURL
+				}
+			}
 			lyricsArtists = discogsReleaseArtistNames(discogsRelease)
 		} else if err != nil {
 			result.MetadataError = fmt.Errorf("MusicBrainz: %v; Discogs: %w", err, discogsErr).Error()
@@ -313,6 +340,8 @@ func baseMetadataTracks(tracks []AlbumImportMetadataTrack) []AlbumImportDTOTrack
 		result = append(result, AlbumImportDTOTrack{
 			Title: track.Title, AudioKey: track.AudioKey, AudioURL: track.AudioURL, Origin: track.Origin,
 			DiscNumber: track.DiscNumber, TrackNumber: track.TrackNumber,
+			OriginalTitle: track.Title, OriginalDisc: track.DiscNumber, OriginalTrack: track.TrackNumber,
+			MatchStatus: model.MusicMatchUnmatched,
 		})
 	}
 	return result
@@ -462,6 +491,7 @@ func discogsReleaseAsMusicBrainzRelease(release discogsRelease, tracks []flatten
 					Title     string `json:"title"`
 					Length    int    `json:"length"`
 					Recording struct {
+						ID     string `json:"id"`
 						Title  string `json:"title"`
 						Length int    `json:"length"`
 					} `json:"recording"`
@@ -474,6 +504,7 @@ func discogsReleaseAsMusicBrainzRelease(release discogsRelease, tracks []flatten
 			Title     string `json:"title"`
 			Length    int    `json:"length"`
 			Recording struct {
+				ID     string `json:"id"`
 				Title  string `json:"title"`
 				Length int    `json:"length"`
 			} `json:"recording"`
@@ -495,6 +526,7 @@ func flattenDiscogsTracks(release discogsRelease) []flattenedMusicBrainzTrack {
 		disc, position := parseDiscogsTrackPosition(track.Position, len(tracks)+1)
 		tracks = append(tracks, flattenedMusicBrainzTrack{
 			Title: title, Disc: disc, Position: position, DurationMS: int(discogsDurationSeconds(track.Duration) * 1000),
+			ExternalID: fmt.Sprintf("%d:%d-%d", release.ID, disc, position),
 		})
 		if position <= 0 {
 			tracks[len(tracks)-1].Position = index + 1
@@ -1133,6 +1165,7 @@ type flattenedMusicBrainzTrack struct {
 	Disc       int
 	Position   int
 	DurationMS int
+	ExternalID string
 }
 
 func flattenMusicBrainzTracks(release musicBrainzRelease) []flattenedMusicBrainzTrack {
@@ -1155,7 +1188,10 @@ func flattenMusicBrainzTracks(release musicBrainzRelease) []flattenedMusicBrainz
 			if length <= 0 {
 				length = track.Recording.Length
 			}
-			tracks = append(tracks, flattenedMusicBrainzTrack{Title: title, Disc: disc, Position: position, DurationMS: length})
+			tracks = append(tracks, flattenedMusicBrainzTrack{
+				Title: title, Disc: disc, Position: position, DurationMS: length,
+				ExternalID: track.Recording.ID,
+			})
 		}
 	}
 	return tracks
@@ -1189,9 +1225,21 @@ func applyMatchedExternalTracks(tracks []AlbumImportDTOTrack, remote []flattened
 		}
 		used[uploadedIndex] = true
 		track := tracks[uploadedIndex]
+		if track.OriginalTitle == "" {
+			track.OriginalTitle = track.Title
+		}
+		if track.OriginalDisc == 0 {
+			track.OriginalDisc = track.DiscNumber
+		}
+		if track.OriginalTrack == 0 {
+			track.OriginalTrack = track.TrackNumber
+		}
 		track.Title = remote[remoteIndex].Title
 		track.DiscNumber = remote[remoteIndex].Disc
 		track.TrackNumber = remote[remoteIndex].Position
+		track.MatchStatus = model.MusicMatchMatched
+		track.MatchExternalID = remote[remoteIndex].ExternalID
+		track.MatchConfidence = 1
 		result = append(result, track)
 	}
 	for index, track := range tracks {

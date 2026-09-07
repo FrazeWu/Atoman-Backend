@@ -1336,7 +1336,15 @@ func applySongRevisionSnapshot(tx *gorm.DB, songID, actorID uuid.UUID, raw []byt
 		"sources_json": string(sourcesJSON), "track_number": snapshot.TrackNumber,
 		"disc_number": snapshot.DiscNumber, "lyrics": snapshot.Lyrics,
 		"audio_url": strings.TrimSpace(snapshot.AudioURL), "cover_url": strings.TrimSpace(snapshot.CoverURL),
+		"metadata_manual_override": true,
 	}
+	if strings.TrimSpace(snapshot.AudioURL) != "" {
+		updates["audio_status"] = "ready"
+	} else {
+		updates["audio_status"] = "missing"
+	}
+	checkedAt := time.Now().UTC()
+	updates["audio_checked_at"] = &checkedAt
 	if strings.TrimSpace(snapshot.AudioURL) != "" {
 		updates["audio_source"] = coverSourceForRevision(snapshot.AudioURL)
 	}
@@ -1349,6 +1357,11 @@ func applySongRevisionSnapshot(tx *gorm.DB, songID, actorID uuid.UUID, raw []byt
 	}
 	if result.RowsAffected == 0 {
 		return errors.New("song not found")
+	}
+	if err := tx.Model(&model.MusicMatchRecord{}).
+		Where("entity_type = ? AND entity_id = ?", "song", songID).
+		Updates(map[string]any{"status": model.MusicMatchManual, "user_overridden": true}).Error; err != nil {
+		return err
 	}
 	if snapshot.ArtistCredits != nil {
 		if err := validateAppliedArtistCredits(tx, snapshot.ArtistCredits, actorID); err != nil {
@@ -1400,6 +1413,7 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 	if strings.TrimSpace(snapshot.Album.Title) != "" {
 		album.Title = strings.TrimSpace(snapshot.Album.Title)
 	}
+	album.MetadataManualOverride = true
 	if strings.TrimSpace(snapshot.Album.AlbumType) != "" {
 		album.AlbumType = strings.TrimSpace(snapshot.Album.AlbumType)
 	}
@@ -1432,6 +1446,11 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 	}
 
 	if err := tx.Save(&album).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&model.MusicMatchRecord{}).
+		Where("entity_type = ? AND entity_id = ?", "album", albumID).
+		Updates(map[string]any{"status": model.MusicMatchManual, "user_overridden": true}).Error; err != nil {
 		return err
 	}
 	if err := tx.Model(&model.Song{}).Where("album_id = ?", album.ID).Updates(map[string]any{
@@ -1520,11 +1539,19 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 				existingSong.DiscNumber = songSnap.DiscNumber
 				existingSong.Lyrics = songSnap.Lyrics
 				existingSong.AudioURL = audioURL
+				if audioURL != "" {
+					existingSong.AudioStatus = "ready"
+				} else {
+					existingSong.AudioStatus = "missing"
+				}
+				checkedAt := time.Now().UTC()
+				existingSong.AudioCheckedAt = &checkedAt
 				existingSong.CoverURL = songSnap.CoverURL
 				existingSong.AudioSource = coverSourceForRevision(audioURL)
 				existingSong.Status = status
 				existingSong.AlbumID = &albumID
 				existingSong.ReleaseDate = album.ReleaseDate
+				existingSong.MetadataManualOverride = true
 				if err := tx.Unscoped().Save(existingSong).Error; err != nil {
 					return err
 				}
@@ -1544,19 +1571,27 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 				return fmt.Errorf("invalid song id in snapshot: %w", err)
 			}
 			newSong := model.Song{
-				Base:        model.Base{ID: parsedID},
-				Title:       title,
-				TrackNumber: songSnap.TrackNumber,
-				DiscNumber:  songSnap.DiscNumber,
-				Lyrics:      songSnap.Lyrics,
-				AudioURL:    audioURL,
-				CoverURL:    songSnap.CoverURL,
-				AudioSource: coverSourceForRevision(audioURL),
-				Status:      status,
-				AlbumID:     &albumID,
-				ReleaseDate: album.ReleaseDate,
-				UploadedBy:  album.UploadedBy,
+				Base:                   model.Base{ID: parsedID},
+				Title:                  title,
+				TrackNumber:            songSnap.TrackNumber,
+				DiscNumber:             songSnap.DiscNumber,
+				Lyrics:                 songSnap.Lyrics,
+				AudioURL:               audioURL,
+				CoverURL:               songSnap.CoverURL,
+				AudioSource:            coverSourceForRevision(audioURL),
+				Status:                 status,
+				AlbumID:                &albumID,
+				ReleaseDate:            album.ReleaseDate,
+				UploadedBy:             album.UploadedBy,
+				MetadataManualOverride: true,
 			}
+			if audioURL != "" {
+				newSong.AudioStatus = "ready"
+			} else {
+				newSong.AudioStatus = "missing"
+			}
+			checkedAt := time.Now().UTC()
+			newSong.AudioCheckedAt = &checkedAt
 			if err := tx.Create(&newSong).Error; err != nil {
 				return err
 			}
@@ -1572,18 +1607,26 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 		}
 
 		newSong := model.Song{
-			Title:       title,
-			TrackNumber: songSnap.TrackNumber,
-			DiscNumber:  songSnap.DiscNumber,
-			Lyrics:      songSnap.Lyrics,
-			AudioURL:    audioURL,
-			CoverURL:    songSnap.CoverURL,
-			AudioSource: coverSourceForRevision(audioURL),
-			Status:      status,
-			AlbumID:     &albumID,
-			ReleaseDate: album.ReleaseDate,
-			UploadedBy:  album.UploadedBy,
+			Title:                  title,
+			TrackNumber:            songSnap.TrackNumber,
+			DiscNumber:             songSnap.DiscNumber,
+			Lyrics:                 songSnap.Lyrics,
+			AudioURL:               audioURL,
+			CoverURL:               songSnap.CoverURL,
+			AudioSource:            coverSourceForRevision(audioURL),
+			Status:                 status,
+			AlbumID:                &albumID,
+			ReleaseDate:            album.ReleaseDate,
+			UploadedBy:             album.UploadedBy,
+			MetadataManualOverride: true,
 		}
+		if audioURL != "" {
+			newSong.AudioStatus = "ready"
+		} else {
+			newSong.AudioStatus = "missing"
+		}
+		checkedAt := time.Now().UTC()
+		newSong.AudioCheckedAt = &checkedAt
 		if err := tx.Create(&newSong).Error; err != nil {
 			return err
 		}
