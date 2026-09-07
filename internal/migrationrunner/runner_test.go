@@ -86,3 +86,53 @@ func TestRunCreatesShortNoteSchema(t *testing.T) {
 		t.Fatalf("unexpected preloaded media: %+v", loaded.Media[0])
 	}
 }
+
+func TestBackfillUserDefaultResourcesUsesDisplayName(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.UserSettings{}, &model.Channel{}, &model.UserStudioState{},
+		&model.ContentCollection{}, &model.FeedSource{}, &model.SubscriptionGroup{}, &model.Subscription{},
+		&model.BookmarkFolder{},
+	)
+	user := model.User{Username: "legacy-user", DisplayName: "存量用户", Email: "legacy-user@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	channel := model.Channel{UserID: &user.UUID, Name: user.Username, Slug: user.Username, Description: "默认合集"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create legacy channel: %v", err)
+	}
+	collection := model.ContentCollection{ChannelID: channel.ID, CreatedBy: &user.UUID, Name: "legacy-user的合集", Description: "默认合集", IsDefault: true}
+	if err := db.Create(&collection).Error; err != nil {
+		t.Fatalf("create legacy collection: %v", err)
+	}
+	if err := db.Create(&model.UserStudioState{UserID: user.UUID, ChannelID: &channel.ID}).Error; err != nil {
+		t.Fatalf("create studio state: %v", err)
+	}
+
+	if err := backfillUserDefaultResources(db); err != nil {
+		t.Fatalf("backfillUserDefaultResources: %v", err)
+	}
+
+	var migratedChannel model.Channel
+	if err := db.First(&migratedChannel, "id = ?", channel.ID).Error; err != nil {
+		t.Fatalf("load migrated channel: %v", err)
+	}
+	if migratedChannel.Name != user.DisplayName {
+		t.Fatalf("channel name = %q, want %q", migratedChannel.Name, user.DisplayName)
+	}
+	var migratedCollection model.ContentCollection
+	if err := db.First(&migratedCollection, "id = ?", collection.ID).Error; err != nil {
+		t.Fatalf("load migrated collection: %v", err)
+	}
+	if migratedCollection.Name != user.DisplayName+"的合集" {
+		t.Fatalf("collection name = %q, want %q", migratedCollection.Name, user.DisplayName+"的合集")
+	}
+	var source model.FeedSource
+	if err := db.Where("source_type = ? AND source_id = ?", "internal_user", user.UUID).First(&source).Error; err != nil {
+		t.Fatalf("load migrated source: %v", err)
+	}
+	if source.Title != user.DisplayName {
+		t.Fatalf("source title = %q, want %q", source.Title, user.DisplayName)
+	}
+}

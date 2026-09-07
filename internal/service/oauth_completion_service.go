@@ -69,7 +69,7 @@ func (s *OAuthService) CompleteProfile(ctx context.Context, input OAuthCompleteP
 		if err := tx.Create(&model.UserSettings{UserID: user.UUID}).Error; err != nil {
 			return err
 		}
-		if err := NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username); err != nil {
+		if err := NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.DisplayName, user.Username); err != nil {
 			return err
 		}
 

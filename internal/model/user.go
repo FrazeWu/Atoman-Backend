@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,13 @@ type User struct {
 	DeletedAt             gorm.DeletedAt  `json:"-" gorm:"index"`
 	ForumTrust            *ForumUserTrust `json:"-" gorm:"foreignKey:UserID;references:UUID"`
 	ForumTrustLevel       int             `json:"forum_trust_level" gorm:"-"`
+}
+
+func DisplayNameOrUsername(displayName, username string) string {
+	if name := strings.TrimSpace(displayName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(username)
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) error {

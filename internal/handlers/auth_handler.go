@@ -299,7 +299,7 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 			if err := tx.Create(&model.UserSettings{UserID: user.UUID}).Error; err != nil {
 				return err
 			}
-			if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username); err != nil {
+			if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.DisplayName, user.Username); err != nil {
 				return err
 			}
 			created, err := authsession.New(tx).Create(user.UUID, authsession.KindWeb, authSessionMetadata(requestInfo))

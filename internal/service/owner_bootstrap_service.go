@@ -100,7 +100,7 @@ func (s *OwnerBootstrapService) EnsureOwner(input OwnerBootstrapInput) (model.Us
 			return err
 		}
 
-		if err := NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username); err != nil {
+		if err := NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.DisplayName, user.Username); err != nil {
 			return err
 		}
 

@@ -1080,6 +1080,21 @@ func TestCreateDefaultChannelForUserSetsInitialStudioChannel(t *testing.T) {
 	}
 }
 
+func TestCreateDefaultChannelForUserUsesStoredDisplayName(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+
+	channel, err := service.CreateDefaultChannelForUser(user.ID, user.Username)
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	if channel.Name != "Alice" {
+		t.Fatalf("default channel name = %q, want display name %q", channel.Name, "Alice")
+	}
+	if !strings.HasPrefix(channel.Slug, user.Username) {
+		t.Fatalf("default channel slug = %q, want username-based slug", channel.Slug)
+	}
+}
+
 func TestCreateDefaultChannelForUserUsesCurrentStudioChannel(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	first := model.Channel{UserID: &user.ID, Name: "First", Slug: "first-" + uuid.NewString()[:8]}

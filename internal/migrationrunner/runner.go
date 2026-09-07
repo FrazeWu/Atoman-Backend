@@ -293,7 +293,10 @@ func backfillUserDefaultResources(db *gorm.DB) error {
 			if err := tx.FirstOrCreate(&model.UserSettings{UserID: user.UUID}, model.UserSettings{UserID: user.UUID}).Error; err != nil {
 				return err
 			}
-			return service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username)
+			if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.DisplayName, user.Username); err != nil {
+				return err
+			}
+			return migrateUserDefaultChannelName(tx, user)
 		}); err != nil {
 			return err
 		}
@@ -302,6 +305,68 @@ func backfillUserDefaultResources(db *gorm.DB) error {
 }
 
 const legacyDefaultChannelDescription = "默认合集"
+
+func migrateUserDefaultChannelName(tx *gorm.DB, user model.User) error {
+	newName := model.DisplayNameOrUsername(user.DisplayName, user.Username)
+	if strings.TrimSpace(user.DisplayName) == "" || newName == "" || strings.EqualFold(newName, strings.TrimSpace(user.Username)) {
+		return nil
+	}
+
+	var channel model.Channel
+	result := tx.Where("user_id = ? AND name = ? AND description = ? AND cover_url = ''", user.UUID, user.Username, legacyDefaultChannelDescription).
+		Order("created_at ASC, id ASC").First(&channel)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if result.Error != nil {
+		return result.Error
+	}
+
+	var collection model.ContentCollection
+	result = tx.Where("channel_id = ? AND is_default = ?", channel.ID, true).
+		Order("created_at ASC, id ASC").First(&collection)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if result.Error != nil {
+		return result.Error
+	}
+	if !isLegacyUserDefaultCollectionName(collection.Name, user.Username) {
+		return nil
+	}
+
+	newName, err := uniqueMigratedChannelName(tx, newName, channel.ID)
+	if err != nil {
+		return err
+	}
+	if err := tx.Model(&channel).Update("name", newName).Error; err != nil {
+		return err
+	}
+	return tx.Model(&collection).Update("name", fmt.Sprintf("%s的合集", newName)).Error
+}
+
+func isLegacyUserDefaultCollectionName(name, username string) bool {
+	name = strings.TrimSpace(name)
+	if name == "未分类" || name == legacyDefaultChannelDescription {
+		return true
+	}
+	return name == fmt.Sprintf("%s的合集", strings.TrimSpace(username)) ||
+		name == fmt.Sprintf("《%s》的合集", strings.TrimSpace(username))
+}
+
+func uniqueMigratedChannelName(tx *gorm.DB, base string, excludeID uuid.UUID) (string, error) {
+	candidate := strings.TrimSpace(base)
+	for counter := 2; ; counter++ {
+		var count int64
+		if err := tx.Model(&model.Channel{}).Where("LOWER(name) = LOWER(?) AND id <> ?", candidate, excludeID).Count(&count).Error; err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return candidate, nil
+		}
+		candidate = fmt.Sprintf("%s-%d", strings.TrimSpace(base), counter)
+	}
+}
 
 func cleanupLegacyDefaultChannels(db *gorm.DB) error {
 	var states []model.UserStudioState

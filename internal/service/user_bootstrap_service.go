@@ -30,12 +30,16 @@ func NewUserBootstrapService(db *gorm.DB) *UserBootstrapService {
 	return &UserBootstrapService{db: db}
 }
 
-func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string) error {
+func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, displayName, username string) error {
+	name := model.DisplayNameOrUsername(displayName, username)
+	if name == "" {
+		name = "默认频道"
+	}
 	group, err := s.ensureDefaultSubscriptionGroup(userID)
 	if err != nil {
 		return err
 	}
-	if err := s.ensureSelfSubscription(userID, username, group.ID); err != nil {
+	if err := s.ensureSelfSubscription(userID, name, group.ID); err != nil {
 		return err
 	}
 	if err := s.ensureDefaultBookmarkFolder(userID); err != nil {
@@ -78,8 +82,8 @@ func (s *UserBootstrapService) ensureDefaultSubscriptionGroup(userID uuid.UUID) 
 	return &group, nil
 }
 
-func (s *UserBootstrapService) ensureSelfSubscription(userID uuid.UUID, username string, groupID uuid.UUID) error {
-	source, err := s.ensureInternalUserFeedSource(userID, username)
+func (s *UserBootstrapService) ensureSelfSubscription(userID uuid.UUID, name string, groupID uuid.UUID) error {
+	source, err := s.ensureInternalUserFeedSource(userID, name)
 	if err != nil {
 		return err
 	}
@@ -87,7 +91,10 @@ func (s *UserBootstrapService) ensureSelfSubscription(userID uuid.UUID, username
 	var existing model.Subscription
 	err = s.db.Where("user_id = ? AND feed_source_id = ?", userID, source.ID).First(&existing).Error
 	if err == nil {
-		return nil
+		if existing.Title == source.Title {
+			return nil
+		}
+		return s.db.Model(&existing).Update("title", source.Title).Error
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -102,19 +109,25 @@ func (s *UserBootstrapService) ensureSelfSubscription(userID uuid.UUID, username
 	return s.db.Create(&subscription).Error
 }
 
-func (s *UserBootstrapService) ensureInternalUserFeedSource(userID uuid.UUID, username string) (*model.FeedSource, error) {
+func (s *UserBootstrapService) ensureInternalUserFeedSource(userID uuid.UUID, name string) (*model.FeedSource, error) {
 	hash := buildUserBootstrapFeedSourceHash("internal_user", userID)
 
 	var source model.FeedSource
 	err := s.db.Where("hash = ?", hash).First(&source).Error
 	if err == nil {
+		if source.Title != name {
+			if err := s.db.Model(&source).Update("title", name).Error; err != nil {
+				return nil, err
+			}
+			source.Title = name
+		}
 		return &source, nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
-	title := strings.TrimSpace(username)
+	title := strings.TrimSpace(name)
 	if title == "" {
 		title = "默认频道"
 	}

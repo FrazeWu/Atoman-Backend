@@ -240,7 +240,7 @@ func (handler *adminUserHandler) create(c *gin.Context) {
 		if err := tx.Create(&model.UserSettings{UserID: user.UUID}).Error; err != nil {
 			return err
 		}
-		if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username); err != nil {
+		if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.DisplayName, user.Username); err != nil {
 			return err
 		}
 		return handler.recordAdminAudit(c, tx, actor, user, "admin_user.created", "", map[string]any{

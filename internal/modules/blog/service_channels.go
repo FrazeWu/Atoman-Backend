@@ -237,9 +237,25 @@ func (s *Service) DeleteCollection(user authctx.CurrentUser, collectionID uuid.U
 	})
 }
 
-func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName string) (model.Channel, error) {
+func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, fallbackName string) (model.Channel, error) {
 	if userID == uuid.Nil {
 		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "user_id is required")
+	}
+	var owner model.User
+	ownerResult := s.db.Select("uuid", "username", "display_name").First(&owner, "uuid = ?", userID)
+	if ownerResult.Error != nil && !errors.Is(ownerResult.Error, gorm.ErrRecordNotFound) {
+		return model.Channel{}, ownerResult.Error
+	}
+	baseName := model.DisplayNameOrUsername(owner.DisplayName, owner.Username)
+	if baseName == "" {
+		baseName = strings.TrimSpace(fallbackName)
+	}
+	if baseName == "" {
+		baseName = "默认频道"
+	}
+	slugBase := strings.TrimSpace(owner.Username)
+	if slugBase == "" {
+		slugBase = baseName
 	}
 
 	var state model.UserStudioState
@@ -270,16 +286,11 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 		return model.Channel{}, err
 	}
 
-	baseName := strings.TrimSpace(displayName)
-	if baseName == "" {
-		baseName = "默认频道"
-	}
-
 	name, err := s.uniqueChannelName(baseName)
 	if err != nil {
 		return model.Channel{}, err
 	}
-	slug, err := s.uniqueChannelSlug(baseName)
+	slug, err := s.uniqueChannelSlug(slugBase)
 	if err != nil {
 		return model.Channel{}, err
 	}
