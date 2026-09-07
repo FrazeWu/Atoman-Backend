@@ -135,6 +135,28 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			return apperr.BadRequest("validation.invalid_request", "album cover, release date and at least one track are required")
 		}
 		musicBrainzReleaseID := strings.TrimSpace(stringValue(sessionPayload["musicbrainz_release_id"]))
+		metadataProvider := strings.ToLower(strings.TrimSpace(stringValue(sessionPayload["metadata_source"])))
+		metadataExternalID := strings.TrimSpace(stringValue(sessionPayload["metadata_external_id"]))
+		if metadataExternalID == "" {
+			metadataExternalID = musicBrainzReleaseID
+		}
+		metadataMatchStatus := strings.TrimSpace(stringValue(sessionPayload["metadata_match_status"]))
+		if metadataMatchStatus == "" {
+			if metadataProvider != "" {
+				metadataMatchStatus = model.MusicMatchMatched
+			} else {
+				metadataMatchStatus = model.MusicMatchUnmatched
+			}
+		}
+		metadataMatchConfidence := floatValue(sessionPayload["metadata_match_confidence"])
+		if metadataMatchStatus == model.MusicMatchMatched && metadataMatchConfidence == 0 {
+			metadataMatchConfidence = 1
+		}
+		albumMetadataManualOverride := strings.TrimSpace(stringValue(sessionPayload["derived_album_title"])) != "" &&
+			!strings.EqualFold(strings.TrimSpace(stringValue(sessionPayload["derived_album_title"])), strings.TrimSpace(payload.Album.Title))
+		if albumMetadataManualOverride && metadataMatchStatus == model.MusicMatchMatched {
+			metadataMatchStatus = model.MusicMatchManual
+		}
 		var musicBrainzMatchedAt *time.Time
 		if musicBrainzReleaseID != "" {
 			matchedAt := time.Now().UTC()
@@ -153,23 +175,24 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 
 		album := model.Album{
-			Title:                strings.TrimSpace(payload.Album.Title),
-			Description:          strings.TrimSpace(payload.Album.Description),
-			ReleaseYear:          payload.Album.ReleaseYear,
-			Year:                 payload.Album.ReleaseYear,
-			CoverURL:             coverURL,
-			CoverSource:          coverSourceFromURL(coverURL),
-			Status:               "open",
-			EntryStatus:          "open",
-			LifecycleStatus:      model.MusicLifecycleActive,
-			EditStatus:           model.MusicEditDevelopment,
-			AlbumType:            strings.TrimSpace(payload.Album.AlbumType),
-			UploadedBy:           &user.ID,
-			SourcesJSON:          albumSourcesJSON,
-			Sources:              albumSources,
-			MusicBrainzMatched:   musicBrainzReleaseID != "",
-			MusicBrainzReleaseID: musicBrainzReleaseID,
-			MusicBrainzMatchedAt: musicBrainzMatchedAt,
+			Title:                  strings.TrimSpace(payload.Album.Title),
+			Description:            strings.TrimSpace(payload.Album.Description),
+			ReleaseYear:            payload.Album.ReleaseYear,
+			Year:                   payload.Album.ReleaseYear,
+			CoverURL:               coverURL,
+			CoverSource:            coverSourceFromURL(coverURL),
+			Status:                 "open",
+			EntryStatus:            "open",
+			LifecycleStatus:        model.MusicLifecycleActive,
+			EditStatus:             model.MusicEditDevelopment,
+			AlbumType:              strings.TrimSpace(payload.Album.AlbumType),
+			UploadedBy:             &user.ID,
+			SourcesJSON:            albumSourcesJSON,
+			Sources:                albumSources,
+			MusicBrainzMatched:     musicBrainzReleaseID != "",
+			MusicBrainzReleaseID:   musicBrainzReleaseID,
+			MusicBrainzMatchedAt:   musicBrainzMatchedAt,
+			MetadataManualOverride: albumMetadataManualOverride,
 		}
 		if album.AlbumType == "" {
 			album.AlbumType = "album"
@@ -232,6 +255,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			existing.MusicBrainzMatched = album.MusicBrainzMatched
 			existing.MusicBrainzReleaseID = album.MusicBrainzReleaseID
 			existing.MusicBrainzMatchedAt = album.MusicBrainzMatchedAt
+			existing.MetadataManualOverride = existing.MetadataManualOverride || album.MetadataManualOverride
 			album = existing
 			if err := tx.Save(&album).Error; err != nil {
 				return err
@@ -261,6 +285,12 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}).Error; err != nil {
 				return err
 			}
+		}
+		if err := upsertMusicMatchRecord(tx, "album", album.ID, metadataProvider, metadataExternalID, strings.TrimSpace(stringValue(sessionPayload["metadata_source_url"])), metadataMatchStatus, metadataMatchConfidence, album.MetadataManualOverride, map[string]any{
+			"album_title": payload.Album.Title,
+			"source":      metadataProvider,
+		}); err != nil {
+			return err
 		}
 		if err := replaceAlbumArtistCredits(tx, album.ID, credits, true, user.ID); err != nil {
 			return err
@@ -319,6 +349,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			derived := matchDerivedTrackAudio(rawDerivedTracks, track, usedDerivedTrackIndexes)
 			audioURL := strings.TrimSpace(derived.AudioURL)
 			metadata := songAudioMetadataFromImportFile(importFilesByID[derived.FileID])
+			matchStatus, matchProvider, matchExternalID, matchSourceURL, matchConfidence, matchManualOverride := importTrackMatchState(track, derived)
 			var existingSong *model.Song
 			if strings.TrimSpace(track.SongID) != "" {
 				songID, err := uuid.Parse(strings.TrimSpace(track.SongID))
@@ -345,6 +376,10 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				song.Status = "open"
 				song.ReleaseDate = album.ReleaseDate
 				song.ReleaseDatePrecision = album.ReleaseDatePrecision
+				song.MetadataManualOverride = song.MetadataManualOverride || matchManualOverride
+				song.AudioStatus = "ready"
+				audioCheckedAt := time.Now().UTC()
+				song.AudioCheckedAt = &audioCheckedAt
 				if strings.TrimSpace(audioURL) != "" && audioURL != song.AudioURL {
 					promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
 						audioURL,
@@ -365,6 +400,11 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				if err := tx.Save(&song).Error; err != nil {
 					return err
 				}
+				if err := upsertMusicMatchRecord(tx, "song", song.ID, matchProvider, matchExternalID, matchSourceURL, matchStatus, matchConfidence, song.MetadataManualOverride, map[string]any{
+					"title": track.Title, "track_number": track.TrackNumber, "disc_number": track.DiscNumber,
+				}); err != nil {
+					return err
+				}
 				if err := tx.Model(&song).Association("Artists").Replace(artists); err != nil {
 					return err
 				}
@@ -378,21 +418,30 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 
 			song := model.Song{
-				Title:                strings.TrimSpace(track.Title),
-				TrackNumber:          track.TrackNumber,
-				DiscNumber:           normalizedDiscNumber(track.DiscNumber),
-				ReleaseDate:          album.ReleaseDate,
-				ReleaseDatePrecision: album.ReleaseDatePrecision,
-				AlbumID:              &album.ID,
-				Status:               "open",
-				LifecycleStatus:      model.MusicLifecycleActive,
-				EditStatus:           model.MusicEditDevelopment,
-				AudioURL:             audioURL,
-				AudioSource:          coverSourceFromURL(audioURL),
-				UploadedBy:           &user.ID,
+				Title:                  strings.TrimSpace(track.Title),
+				TrackNumber:            track.TrackNumber,
+				DiscNumber:             normalizedDiscNumber(track.DiscNumber),
+				ReleaseDate:            album.ReleaseDate,
+				ReleaseDatePrecision:   album.ReleaseDatePrecision,
+				AlbumID:                &album.ID,
+				Status:                 "open",
+				LifecycleStatus:        model.MusicLifecycleActive,
+				EditStatus:             model.MusicEditDevelopment,
+				AudioURL:               audioURL,
+				AudioSource:            coverSourceFromURL(audioURL),
+				AudioStatus:            "ready",
+				MetadataManualOverride: matchManualOverride,
+				UploadedBy:             &user.ID,
 			}
+			audioCheckedAt := time.Now().UTC()
+			song.AudioCheckedAt = &audioCheckedAt
 			applySongAudioMetadata(&song, metadata)
 			if err := tx.Create(&song).Error; err != nil {
+				return err
+			}
+			if err := upsertMusicMatchRecord(tx, "song", song.ID, matchProvider, matchExternalID, matchSourceURL, matchStatus, matchConfidence, song.MetadataManualOverride, map[string]any{
+				"title": track.Title, "track_number": track.TrackNumber, "disc_number": track.DiscNumber,
+			}); err != nil {
 				return err
 			}
 			promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
@@ -545,6 +594,7 @@ func (s *Service) commitStandaloneSongImport(
 	}
 	rawDerivedTracks, _ := sessionPayload["derived_tracks"].([]any)
 	derived := matchDerivedTrackAudio(rawDerivedTracks, track, map[int]bool{})
+	matchStatus, matchProvider, matchExternalID, matchSourceURL, matchConfidence, matchManualOverride := importTrackMatchState(track, derived)
 	var importFile model.AlbumImportFile
 	if derived.FileID != "" {
 		fileID, err := uuid.Parse(derived.FileID)
@@ -612,6 +662,10 @@ func (s *Service) commitStandaloneSongImport(
 	song.AlbumID = nil
 	song.AudioURL = promotedAudioURL
 	song.AudioSource = coverSourceFromURL(promotedAudioURL)
+	song.AudioStatus = "ready"
+	audioCheckedAt := time.Now().UTC()
+	song.AudioCheckedAt = &audioCheckedAt
+	song.MetadataManualOverride = song.MetadataManualOverride || matchManualOverride
 	song.Status = "open"
 	song.LifecycleStatus = model.MusicLifecycleActive
 	song.EditStatus = model.MusicEditDevelopment
@@ -621,6 +675,11 @@ func (s *Service) commitStandaloneSongImport(
 			return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
 		}
 	} else if err := tx.Create(&song).Error; err != nil {
+		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+	}
+	if err := upsertMusicMatchRecord(tx, "song", song.ID, matchProvider, matchExternalID, matchSourceURL, matchStatus, matchConfidence, song.MetadataManualOverride, map[string]any{
+		"title": track.Title, "track_number": track.TrackNumber, "disc_number": track.DiscNumber,
+	}); err != nil {
 		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
 	}
 	if err := replaceStandaloneSongArtistCredits(tx, song.ID, credits, user.ID); err != nil {
@@ -905,8 +964,13 @@ func (s *Service) deleteAlbumImportObjects(keys []string) {
 }
 
 type derivedTrackAudio struct {
-	AudioURL string
-	FileID   string
+	AudioURL        string
+	FileID          string
+	MatchStatus     string
+	MatchProvider   string
+	MatchExternalID string
+	MatchSourceURL  string
+	MatchConfidence float64
 }
 
 func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, used map[int]bool) derivedTrackAudio {
@@ -920,7 +984,12 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 				continue
 			}
 			used[i] = true
-			return derivedTrackAudio{AudioURL: stringValue(trackMap["audio_url"]), FileID: stringValue(trackMap["file_id"])}
+			return derivedTrackAudio{
+				AudioURL: stringValue(trackMap["audio_url"]), FileID: stringValue(trackMap["file_id"]),
+				MatchStatus: stringValue(trackMap["match_status"]), MatchProvider: stringValue(trackMap["match_provider"]),
+				MatchExternalID: stringValue(trackMap["match_external_id"]), MatchSourceURL: stringValue(trackMap["match_source_url"]),
+				MatchConfidence: floatValue(trackMap["match_confidence"]),
+			}
 		}
 		return derivedTrackAudio{}
 	}
@@ -962,6 +1031,73 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		return derivedTrackAudio{AudioURL: strings.TrimSpace(track.AudioURL)}
 	}
 	return derivedTrackAudio{}
+}
+
+func importTrackMatchState(track AlbumImportTrackPayload, derived derivedTrackAudio) (string, string, string, string, float64, bool) {
+	status := strings.TrimSpace(track.MatchStatus)
+	provider := strings.ToLower(strings.TrimSpace(track.MatchProvider))
+	externalID := strings.TrimSpace(track.MatchExternalID)
+	sourceURL := strings.TrimSpace(track.MatchSourceURL)
+	confidence := track.MatchConfidence
+	if status == "" {
+		status = strings.TrimSpace(derived.MatchStatus)
+	}
+	if provider == "" {
+		provider = strings.ToLower(strings.TrimSpace(derived.MatchProvider))
+	}
+	if externalID == "" {
+		externalID = strings.TrimSpace(derived.MatchExternalID)
+	}
+	if sourceURL == "" {
+		sourceURL = strings.TrimSpace(derived.MatchSourceURL)
+	}
+	if confidence == 0 {
+		confidence = derived.MatchConfidence
+	}
+	if status == "" {
+		status = model.MusicMatchUnmatched
+	}
+	if status == model.MusicMatchMatched && confidence == 0 {
+		confidence = 1
+	}
+	return status, provider, externalID, sourceURL, confidence, status == model.MusicMatchManual
+}
+
+func upsertMusicMatchRecord(tx *gorm.DB, entityType string, entityID uuid.UUID, provider, externalID, sourceURL, status string, confidence float64, userOverridden bool, metadata any) error {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		provider = "metadata"
+	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = model.MusicMatchUnmatched
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	var record model.MusicMatchRecord
+	queryErr := tx.Where("entity_type = ? AND entity_id = ? AND provider = ?", entityType, entityID, provider).First(&record).Error
+	matchedAt := (*time.Time)(nil)
+	if status == model.MusicMatchMatched || status == model.MusicMatchManual {
+		now := time.Now().UTC()
+		matchedAt = &now
+	}
+	if errors.Is(queryErr, gorm.ErrRecordNotFound) {
+		record = model.MusicMatchRecord{
+			Base: model.Base{ID: uuid.New()}, EntityType: entityType, EntityID: entityID, Provider: provider,
+		}
+	} else if queryErr != nil {
+		return queryErr
+	}
+	record.ExternalID = strings.TrimSpace(externalID)
+	record.SourceURL = strings.TrimSpace(sourceURL)
+	record.Status = status
+	record.Confidence = confidence
+	record.MatchedAt = matchedAt
+	record.UserOverridden = userOverridden
+	record.MetadataJSON = string(metadataJSON)
+	return tx.Save(&record).Error
 }
 
 type songAudioMetadata struct {

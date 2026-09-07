@@ -929,7 +929,10 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 			payload["derived_album_title"] = albumTitle
 		}
 	}
-	result := AlbumImportMetadataResult{AlbumTitle: albumTitle, Tracks: baseMetadataTracks(metadataTracks)}
+	result := AlbumImportMetadataResult{
+		AlbumTitle: albumTitle, Tracks: baseMetadataTracks(metadataTracks),
+		MatchStatus: model.MusicMatchUnmatched,
+	}
 	if p.enricher != nil {
 		if enriched, enrichErr := p.enricher.Enrich(ctx, AlbumImportMetadataInput{
 			AlbumTitle: result.AlbumTitle, Artist: artist, Tracks: metadataTracks, LocalLyrics: localLyrics,
@@ -951,6 +954,10 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 		derived := map[string]any{
 			"title": track.Title, "disc_number": track.DiscNumber, "track_number": track.TrackNumber,
 			"audio_key": track.AudioKey, "audio_url": track.AudioURL, "origin": track.Origin,
+			"original_title": track.OriginalTitle, "original_disc_number": track.OriginalDisc, "original_track_number": track.OriginalTrack,
+			"match_status": track.MatchStatus, "match_provider": track.MatchProvider,
+			"match_external_id": track.MatchExternalID, "match_source_url": track.MatchSourceURL,
+			"match_confidence": track.MatchConfidence,
 		}
 		for _, file := range files {
 			if file.PlaybackKey == track.AudioKey {
@@ -981,11 +988,17 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 		payload["metadata_source_url"] = result.SourceURL
 		payload["metadata_source"] = result.MetadataSource
 		payload["metadata_matched"] = result.MetadataSource != ""
+		payload["metadata_external_id"] = result.ExternalID
+		payload["metadata_match_status"] = result.MatchStatus
+		payload["metadata_match_confidence"] = result.MatchConfidence
 		payload["musicbrainz_release_id"] = result.MusicBrainzReleaseID
 	} else {
 		delete(payload, "metadata_source_url")
 		delete(payload, "metadata_source")
 		delete(payload, "metadata_matched")
+		delete(payload, "metadata_external_id")
+		delete(payload, "metadata_match_status")
+		delete(payload, "metadata_match_confidence")
 		delete(payload, "musicbrainz_release_id")
 	}
 	if len(result.MissingArtists) > 0 {
