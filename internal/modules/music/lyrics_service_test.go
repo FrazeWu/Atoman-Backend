@@ -691,6 +691,89 @@ func TestSaveSongLyricsAnchorConflictRollsBackAndRebindSucceeds(t *testing.T) {
 	}
 }
 
+func TestCreateLyricAnnotationSupportsMultiLineRange(t *testing.T) {
+	svc, _, user, song := newLyricsTestService(t)
+	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "first line\nsecond line", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	annotation, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		StartLineKey: lyrics.Lines[0].LineKey,
+		EndLineKey:   lyrics.Lines[1].LineKey,
+		SelectedText: "line\nsecond",
+		StartOffset:  6,
+		EndOffset:    6,
+		Body:         "跨行解释",
+	})
+	if err != nil {
+		t.Fatalf("create multi-line annotation: %v", err)
+	}
+	if annotation.LineKey != lyrics.Lines[0].LineKey || annotation.EndLineKey != lyrics.Lines[1].LineKey {
+		t.Fatalf("unexpected multi-line anchor: %#v", annotation)
+	}
+}
+
+func TestSaveSongLyricsRebindsMultiLineAnnotationAfterAnchorChange(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	initial, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Content: "first line\nsecond line\nthird line", Format: "plain",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		StartLineKey: initial.Lines[0].LineKey,
+		EndLineKey:   initial.Lines[1].LineKey,
+		SelectedText: "line\nsecond",
+		StartOffset:  6,
+		EndOffset:    6,
+		Body:         "跨行解释",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Content: "first line\nchanged line\nthird line", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{
+			AnnotationID: annotation.ID, Action: "needs_rebind",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed.Annotations) != 1 || changed.Annotations[0].Status != "needs_rebind" {
+		t.Fatalf("expected changed anchor to need rebind: %#v", changed.Annotations)
+	}
+
+	rebound, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Content: "first line\nchanged line\nthird line", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{
+			AnnotationID: annotation.ID,
+			Action:       "rebind",
+			StartLineKey: changed.Lines[0].LineKey,
+			EndLineKey:   changed.Lines[1].LineKey,
+			SelectedText: "line\nchanged",
+			StartOffset:  6,
+			EndOffset:    7,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rebound.Annotations) != 1 || rebound.Annotations[0].Status != "active" || rebound.Annotations[0].EndLineKey != changed.Lines[1].LineKey {
+		t.Fatalf("unexpected rebound annotation: %#v", rebound.Annotations)
+	}
+	var stored model.MusicLyricAnnotation
+	if err := db.First(&stored, "id = ?", annotation.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.EndLineID == nil || *stored.EndLineID != changed.Lines[1].ID {
+		t.Fatalf("end line was not persisted: %#v", stored)
+	}
+}
+
 func TestSaveSongLyricsAnchorConflictReportsAllUnresolvedAnnotationsBeforeResolving(t *testing.T) {
 	svc, db, user, song := newLyricsTestService(t)
 	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "alpha beta", Format: "plain"})

@@ -105,7 +105,7 @@ func TestRunMusicLyricsMigrationCreatesSchema(t *testing.T) {
 		"music_song_lyrics":            {"song_id", "content", "translation", "format", "version", "updated_by", "edit_summary"},
 		"music_song_lyric_lines":       {"lyric_id", "line_key", "line_index", "time_ms", "text", "translation"},
 		"music_song_lyric_versions":    {"song_id", "version", "content", "translation", "format", "edit_summary", "created_by"},
-		"music_lyric_annotations":      {"song_id", "line_id", "selected_text", "start_offset", "end_offset", "body", "created_by", "status"},
+		"music_lyric_annotations":      {"song_id", "line_id", "end_line_id", "selected_text", "start_offset", "end_offset", "body", "created_by", "status"},
 		"music_lyric_annotation_votes": {"annotation_id", "user_id", "vote"},
 	} {
 		for _, column := range columns {

@@ -18986,7 +18986,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "使用当前歌词行的 line_key 或可选 line_id 创建文本锚点注释。",
+                "description": "使用当前歌词的起止行与偏移创建文本锚点注释；单行旧字段 line_key 仍兼容。",
                 "consumes": [
                     "application/json"
                 ],
@@ -38082,6 +38082,12 @@ const docTemplate = `{
                 "annotation_id": {
                     "type": "string"
                 },
+                "end_line_id": {
+                    "type": "string"
+                },
+                "end_line_key": {
+                    "type": "string"
+                },
                 "end_offset": {
                     "type": "integer"
                 },
@@ -38092,6 +38098,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "selected_text": {
+                    "type": "string"
+                },
+                "start_line_id": {
+                    "type": "string"
+                },
+                "start_line_key": {
                     "type": "string"
                 },
                 "start_offset": {
@@ -38357,6 +38369,12 @@ const docTemplate = `{
                 "body": {
                     "type": "string"
                 },
+                "end_line_id": {
+                    "type": "string"
+                },
+                "end_line_key": {
+                    "type": "string"
+                },
                 "end_offset": {
                     "type": "integer"
                 },
@@ -38367,6 +38385,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "selected_text": {
+                    "type": "string"
+                },
+                "start_line_id": {
+                    "type": "string"
+                },
+                "start_line_key": {
                     "type": "string"
                 },
                 "start_offset": {
@@ -38684,6 +38708,12 @@ const docTemplate = `{
                 "downvotes": {
                     "type": "integer"
                 },
+                "end_line_id": {
+                    "type": "string"
+                },
+                "end_line_key": {
+                    "type": "string"
+                },
                 "end_offset": {
                     "type": "integer"
                 },
@@ -38703,6 +38733,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "song_id": {
+                    "type": "string"
+                },
+                "start_line_key": {
                     "type": "string"
                 },
                 "start_offset": {
@@ -39426,6 +39459,9 @@ const docTemplate = `{
                 "body": {
                     "type": "string"
                 },
+                "end_line_key": {
+                    "type": "string"
+                },
                 "end_offset": {
                     "type": "integer"
                 },
@@ -39433,6 +39469,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "selected_text": {
+                    "type": "string"
+                },
+                "start_line_key": {
                     "type": "string"
                 },
                 "start_offset": {

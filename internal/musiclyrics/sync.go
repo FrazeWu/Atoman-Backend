@@ -150,9 +150,22 @@ func markInvalidAnchorsForRebind(tx *gorm.DB, actorID, songID uuid.UUID, lines [
 		return err
 	}
 	for _, annotation := range annotations {
-		line, exists := lineByID[annotation.LineID]
-		if exists && validAnchor(line.Text, annotation.StartOffset, annotation.EndOffset, annotation.SelectedText) {
-			continue
+		endLineID := annotation.LineID
+		if annotation.EndLineID != nil {
+			endLineID = *annotation.EndLineID
+		}
+		start, startOK := lineByID[annotation.LineID]
+		end, endOK := lineByID[endLineID]
+		if startOK && endOK && end.LineIndex >= start.LineIndex {
+			anchorLines := make([]model.MusicSongLyricLine, 0, end.LineIndex-start.LineIndex+1)
+			for _, candidate := range lines {
+				if candidate.LineIndex >= start.LineIndex && candidate.LineIndex <= end.LineIndex {
+					anchorLines = append(anchorLines, candidate)
+				}
+			}
+			if validAnchorRange(anchorLines, annotation.StartOffset, annotation.EndOffset, annotation.SelectedText) {
+				continue
+			}
 		}
 		if err := tx.Model(&annotation).Update("status", "needs_rebind").Error; err != nil {
 			return err
@@ -180,4 +193,42 @@ func validAnchor(text string, startOffset, endOffset int, selectedText string) b
 		}
 	}
 	return true
+}
+
+func validAnchorRange(lines []model.MusicSongLyricLine, startOffset, endOffset int, selectedText string) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	if len(lines) == 1 {
+		return validAnchor(lines[0].Text, startOffset, endOffset, selectedText)
+	}
+	firstUnits := utf16.Encode([]rune(lines[0].Text))
+	lastUnits := utf16.Encode([]rune(lines[len(lines)-1].Text))
+	if startOffset < 0 || startOffset > len(firstUnits) || endOffset < 0 || endOffset > len(lastUnits) ||
+		splitsUTF16SurrogatePair(firstUnits, startOffset) || splitsUTF16SurrogatePair(lastUnits, endOffset) {
+		return false
+	}
+	parts := make([]string, 0, len(lines))
+	parts = append(parts, string(utf16.Decode(firstUnits[startOffset:])))
+	for _, line := range lines[1 : len(lines)-1] {
+		parts = append(parts, line.Text)
+	}
+	parts = append(parts, string(utf16.Decode(lastUnits[:endOffset])))
+	anchorUnits := utf16.Encode([]rune(strings.Join(parts, "\n")))
+	selectedUnits := utf16.Encode([]rune(selectedText))
+	if len(anchorUnits) == 0 || len(anchorUnits) != len(selectedUnits) {
+		return false
+	}
+	for index := range anchorUnits {
+		if anchorUnits[index] != selectedUnits[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func splitsUTF16SurrogatePair(units []uint16, offset int) bool {
+	return offset > 0 && offset < len(units) &&
+		units[offset-1] >= 0xD800 && units[offset-1] <= 0xDBFF &&
+		units[offset] >= 0xDC00 && units[offset] <= 0xDFFF
 }

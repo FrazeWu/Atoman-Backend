@@ -17,6 +17,9 @@ func RunMusicLyricsMigration(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
+	if err := db.Exec("UPDATE music_lyric_annotations SET end_line_id = line_id WHERE end_line_id IS NULL").Error; err != nil {
+		return err
+	}
 	var legacyCount int64
 	if err := db.Model(&model.Song{}).
 		Where("TRIM(COALESCE(lyrics, '')) <> ''").
