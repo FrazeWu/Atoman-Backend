@@ -26,7 +26,7 @@ func TestDefaultSiteAccessDisablesBooksUntilLaunch(t *testing.T) {
 	}
 }
 
-func TestSaveLegacyPayloadKeepsBooksDisabled(t *testing.T) {
+func TestSaveLegacyPayloadAllowsEnablingBooks(t *testing.T) {
 	db := testdb.Open(t)
 	if err := db.AutoMigrate(&model.SiteSetting{}); err != nil {
 		t.Fatalf("migrate site settings: %v", err)
@@ -55,8 +55,39 @@ func TestSaveLegacyPayloadKeepsBooksDisabled(t *testing.T) {
 	if err := json.Unmarshal([]byte(setting.Value), &stored); err != nil {
 		t.Fatalf("decode stored site access: %v", err)
 	}
-	if stored.Modules["books"].Enabled == nil || *stored.Modules["books"].Enabled {
-		t.Fatal("books should remain disabled after legacy save")
+	if stored.Modules["books"].Enabled == nil || !*stored.Modules["books"].Enabled {
+		t.Fatal("books should be enabled after legacy save")
+	}
+}
+
+func TestSaveInputAllowsEnablingBooks(t *testing.T) {
+	db := testdb.Open(t)
+	if err := db.AutoMigrate(&model.SiteSetting{}); err != nil {
+		t.Fatalf("migrate site settings: %v", err)
+	}
+
+	svc := NewSiteAccessService(db)
+	if err := svc.SaveInput(DefaultSiteAccessMatrix().ToInput()); err != nil {
+		t.Fatalf("seed site access: %v", err)
+	}
+
+	matrix, err := svc.Load()
+	if err != nil {
+		t.Fatalf("load site access: %v", err)
+	}
+	enabled := true
+	input := matrix.ToInput()
+	input.Modules["books"] = SiteAccessModuleInput{Enabled: &enabled}
+	if err := svc.SaveInput(input); err != nil {
+		t.Fatalf("enable books: %v", err)
+	}
+
+	updated, err := svc.Load()
+	if err != nil {
+		t.Fatalf("reload site access: %v", err)
+	}
+	if updated.Modules["books"].Enabled == nil || !*updated.Modules["books"].Enabled {
+		t.Fatal("books should remain enabled after save")
 	}
 }
 

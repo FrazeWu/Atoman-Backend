@@ -121,10 +121,10 @@ func DefaultSiteAccessMatrix() SiteAccessMatrix {
 			"feed":     defaultAccessModule("subscription.manage"),
 			"media":    defaultAccessModule(),
 			"music":    defaultAccessModule("music.submit", "music.review"),
-			"blog":     defaultAccessModule("post.create", "channel.manage"),
+			"blog":     defaultAccessModule("post.create"),
 			"books":    disabledAccessModule("books.submit", "books.review", "books.publish_asset"),
 			"forum":    defaultAccessModule("topic.create", "category.request"),
-			"debate":   defaultAccessModule("debate.create", "debate.edit"),
+			"debate":   defaultAccessModule("debate.create", "argument.create"),
 			"timeline": defaultAccessModule("timeline.edit"),
 			"podcast":  defaultAccessModule("podcast.publish"),
 			"video":    defaultAccessModule("video.publish"),
@@ -170,7 +170,7 @@ func (s *SiteAccessService) Load() (SiteAccessMatrix, error) {
 	var setting model.SiteSetting
 	if err := s.db.First(&setting, "key = ?", SiteAccessSettingKey).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return forceBooksDisabled(matrix), nil
+			return matrix, nil
 		}
 		return matrix, err
 	}
@@ -183,7 +183,7 @@ func (s *SiteAccessService) Load() (SiteAccessMatrix, error) {
 		}
 		loaded.Revision = setting.Revision
 		loaded.UpdatedAt = &setting.UpdatedAt
-		return forceBooksDisabled(loaded), nil
+		return loaded, nil
 	}
 
 	var legacy legacySiteAccessMatrix
@@ -193,18 +193,7 @@ func (s *SiteAccessService) Load() (SiteAccessMatrix, error) {
 	loaded := mergeStoredLegacySiteAccess(matrix, legacy)
 	loaded.Revision = setting.Revision
 	loaded.UpdatedAt = &setting.UpdatedAt
-	return forceBooksDisabled(loaded), nil
-}
-
-func forceBooksDisabled(matrix SiteAccessMatrix) SiteAccessMatrix {
-	books, ok := matrix.Modules["books"]
-	if !ok {
-		return matrix
-	}
-	disabled := false
-	books.Enabled = &disabled
-	matrix.Modules["books"] = books
-	return matrix
+	return loaded, nil
 }
 
 func (s *SiteAccessService) Save(matrix SiteAccessMatrix) error {
@@ -226,7 +215,6 @@ func (s *SiteAccessService) SaveInput(input SiteAccessMatrixInput) error {
 	if err != nil {
 		return err
 	}
-	merged = forceBooksDisabled(merged)
 	if err := validateSiteAccess(merged); err != nil {
 		return err
 	}
@@ -288,7 +276,6 @@ func (s *SiteAccessService) SaveLegacyPayload(value []byte) error {
 	if err != nil {
 		return err
 	}
-	matrix = forceBooksDisabled(matrix)
 	if err := validateSiteAccess(matrix); err != nil {
 		return err
 	}
