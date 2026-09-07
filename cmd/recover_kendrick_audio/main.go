@@ -184,12 +184,67 @@ func chooseAudioCandidate(target trackCandidate, candidates []trackCandidate) (t
 		if len(titleMatches) > 1 {
 			return trackCandidate{}, false, "ambiguous"
 		}
+		similarMatches := make([]trackCandidate, 0, len(candidates))
+		seen = map[uuid.UUID]struct{}{}
+		for _, candidate := range candidates {
+			if candidate.ObjectKey == "" || levenshteinDistance(title, normalizeTrackTitle(candidate.Title)) > 1 {
+				continue
+			}
+			if _, ok := seen[candidate.ID]; ok {
+				continue
+			}
+			seen[candidate.ID] = struct{}{}
+			similarMatches = append(similarMatches, candidate)
+		}
+		if len(similarMatches) == 1 {
+			return similarMatches[0], true, "album_similar_title"
+		}
+		if len(similarMatches) > 1 {
+			return trackCandidate{}, false, "ambiguous"
+		}
 		return trackCandidate{}, false, "not_found"
 	}
 	if len(matches) > 1 {
 		return trackCandidate{}, false, "ambiguous"
 	}
 	return matches[0], true, "album_disc_track_title"
+}
+
+func levenshteinDistance(left, right string) int {
+	leftRunes, rightRunes := []rune(left), []rune(right)
+	if len(leftRunes) == 0 {
+		return len(rightRunes)
+	}
+	if len(rightRunes) == 0 {
+		return len(leftRunes)
+	}
+	previous := make([]int, len(rightRunes)+1)
+	current := make([]int, len(rightRunes)+1)
+	for index := range previous {
+		previous[index] = index
+	}
+	for leftIndex, leftRune := range leftRunes {
+		current[0] = leftIndex + 1
+		for rightIndex, rightRune := range rightRunes {
+			cost := 0
+			if leftRune != rightRune {
+				cost = 1
+			}
+			current[rightIndex+1] = minInt(current[rightIndex]+1, previous[rightIndex+1]+1, previous[rightIndex]+cost)
+		}
+		previous, current = current, previous
+	}
+	return previous[len(rightRunes)]
+}
+
+func minInt(values ...int) int {
+	minimum := values[0]
+	for _, value := range values[1:] {
+		if value < minimum {
+			minimum = value
+		}
+	}
+	return minimum
 }
 
 func normalizeAlbumTitle(raw string) string {

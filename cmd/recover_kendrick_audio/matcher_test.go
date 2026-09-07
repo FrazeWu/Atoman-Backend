@@ -67,3 +67,13 @@ func TestChooseAudioCandidateFallsBackToUniqueTitle(t *testing.T) {
 		t.Fatalf("expected unique title fallback, got match=%+v ok=%t reason=%q", match, ok, reason)
 	}
 }
+
+func TestChooseAudioCandidateFallsBackToUniqueSimilarTitle(t *testing.T) {
+	target := trackCandidate{Title: "Rigamortus", DiscNumber: 1, TrackNumber: 11}
+	candidate := trackCandidate{Title: "Rigamortis", DiscNumber: 1, TrackNumber: 12, ObjectKey: "rigamortis.mp3"}
+
+	match, ok, reason := chooseAudioCandidate(target, []trackCandidate{candidate})
+	if !ok || reason != "album_similar_title" || match.ObjectKey != candidate.ObjectKey {
+		t.Fatalf("expected similar-title fallback, got match=%+v ok=%t reason=%q", match, ok, reason)
+	}
+}
