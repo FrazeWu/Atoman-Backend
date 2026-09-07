@@ -2,6 +2,7 @@ package music
 
 import (
 	"net/http"
+	"strings"
 
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
@@ -17,6 +18,25 @@ type musicTagInput struct {
 
 type musicTagVoteInput struct {
 	Vote string `json:"vote"`
+}
+
+// searchMusicTags godoc
+// @Summary 搜索公共音乐标签
+// @Description 按标签类别搜索公共标签目录。
+// @Tags music
+// @Produce json
+// @Param kind query string true "标签类别" Enums(mood,type)
+// @Param q query string true "搜索关键词"
+// @Success 200 {array} MusicTagOptionDTO
+// @Failure 400 {object} handlers.ErrorResponse
+// @Router /api/v1/music/tags [get]
+func (h *Handler) searchMusicTags(c *gin.Context) {
+	tags, err := h.service.SearchMusicTags(c.Query("kind"), strings.TrimSpace(c.Query("q")))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, tags)
 }
 
 // listSongTags godoc

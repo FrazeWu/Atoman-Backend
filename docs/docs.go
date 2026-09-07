@@ -19727,6 +19727,55 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/tags": {
+            "get": {
+                "description": "按标签类别搜索公共标签目录。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "搜索公共音乐标签",
+                "parameters": [
+                    {
+                        "enum": [
+                            "mood",
+                            "type"
+                        ],
+                        "type": "string",
+                        "description": "标签类别",
+                        "name": "kind",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索关键词",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/music.MusicTagOptionDTO"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/uploads": {
             "post": {
                 "security": [
@@ -38785,6 +38834,20 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "viewer_vote": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicTagOptionDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }

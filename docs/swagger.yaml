@@ -7207,6 +7207,15 @@ definitions:
       viewer_vote:
         type: string
     type: object
+  music.MusicTagOptionDTO:
+    properties:
+      id:
+        type: string
+      kind:
+        type: string
+      name:
+        type: string
+    type: object
   music.PaginationMetaResponse:
     properties:
       has_more:
@@ -21160,6 +21169,39 @@ paths:
       summary: 审批音乐 Wiki 状态请求
       tags:
       - music-entry-state
+  /api/v1/music/tags:
+    get:
+      description: 按标签类别搜索公共标签目录。
+      parameters:
+      - description: 标签类别
+        enum:
+        - mood
+        - type
+        in: query
+        name: kind
+        required: true
+        type: string
+      - description: 搜索关键词
+        in: query
+        name: q
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/music.MusicTagOptionDTO'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 搜索公共音乐标签
+      tags:
+      - music
   /api/v1/music/uploads:
     post:
       consumes:

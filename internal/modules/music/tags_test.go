@@ -71,3 +71,49 @@ func TestMusicTagsSupportSongAlbumKindsAndVotes(t *testing.T) {
 		t.Fatalf("expected vote switch, got %#v", songTagEnvelope.Data)
 	}
 }
+
+func TestSearchMusicTagsFiltersByKindAndQuery(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	for _, tag := range []model.MusicTag{
+		{Name: "治愈", NormalizedName: "治愈", Kind: model.MusicTagKindMood, CreatedBy: user.ID},
+		{Name: "治愈系", NormalizedName: "治愈系", Kind: model.MusicTagKindMood, CreatedBy: user.ID},
+		{Name: "治愈现场", NormalizedName: "治愈现场", Kind: model.MusicTagKindType, CreatedBy: user.ID},
+	} {
+		if err := db.Create(&tag).Error; err != nil {
+			t.Fatalf("create tag: %v", err)
+		}
+	}
+
+	router := newMusicHTTPRouter(service, nil)
+	response := performMusicJSONRequest(t, router, http.MethodGet,
+		"/api/v1/music/tags?kind=mood&q=治愈", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected tag search 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data []MusicTagOptionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode tag search response: %v", err)
+	}
+	if len(payload.Data) != 2 {
+		t.Fatalf("expected two mood tags, got %#v", payload.Data)
+	}
+	for _, tag := range payload.Data {
+		if tag.Kind != model.MusicTagKindMood {
+			t.Fatalf("expected mood result, got %#v", tag)
+		}
+	}
+
+	typeResponse := performMusicJSONRequest(t, router, http.MethodGet,
+		"/api/v1/music/tags?kind=type&q=治愈", "")
+	if typeResponse.Code != http.StatusOK {
+		t.Fatalf("expected type tag search 200, got %d: %s", typeResponse.Code, typeResponse.Body.String())
+	}
+	if err := json.Unmarshal(typeResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode type tag search response: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].Kind != model.MusicTagKindType {
+		t.Fatalf("expected one type tag, got %#v", payload.Data)
+	}
+}

@@ -61,6 +61,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/artists", h.listArtists)
 	group.GET("/search", h.search)
 	group.POST("/search/interactions", h.recordSearchInteraction)
+	group.GET("/tags", h.searchMusicTags)
 	group.GET("/library", h.library)
 	group.POST("/artists", h.createArtist)
 	group.GET("/artists/:artistId/album-link-suggestions", h.albumLinkSuggestions)
