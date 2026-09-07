@@ -1,6 +1,7 @@
 package notification
 
 import (
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -11,6 +12,12 @@ import (
 )
 
 type Repo struct{ db *gorm.DB }
+
+type announcementRecord struct {
+	Notification model.Notification
+	PublishedAt  time.Time
+	Delivered    int64
+}
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
@@ -35,6 +42,87 @@ func (r *Repo) ListNotifications(recipientID uuid.UUID, query ListQuery) ([]mode
 		return nil, 0, err
 	}
 	return notifications, total, nil
+}
+
+func (r *Repo) ListAnnouncements(query ListAnnouncementsQuery) ([]announcementRecord, int64, error) {
+	base := r.db.Model(&model.Notification{}).
+		Where("source_type = ?", announcementNotificationType)
+	if search := strings.TrimSpace(query.Search); search != "" {
+		base = base.Where("CAST(meta AS TEXT) ILIKE ?", "%"+search+"%")
+	}
+	if status := strings.TrimSpace(query.Status); status != "" && status != "all" && status != "delivered" {
+		base = base.Where("1 = 0")
+	}
+
+	var total int64
+	if err := base.Distinct("source_id").Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	page := normalizedPage(query.Page)
+	pageSize := normalizedPageSize(query.PageSize)
+	var groups []struct {
+		SourceID    uuid.UUID
+		PublishedAt time.Time
+	}
+	if err := base.Select("source_id, MIN(created_at) AS published_at").
+		Group("source_id").
+		Order("published_at DESC").
+		Order("source_id DESC").
+		Limit(pageSize).Offset((page - 1) * pageSize).
+		Find(&groups).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(groups) == 0 {
+		return []announcementRecord{}, total, nil
+	}
+
+	sourceIDs := make([]uuid.UUID, 0, len(groups))
+	publishedAtBySource := make(map[uuid.UUID]time.Time, len(groups))
+	for _, group := range groups {
+		sourceIDs = append(sourceIDs, group.SourceID)
+		publishedAtBySource[group.SourceID] = group.PublishedAt
+	}
+
+	var representatives []model.Notification
+	if err := base.Where("source_id IN ?", sourceIDs).
+		Select("DISTINCT ON (source_id) *").
+		Preload("Actor").
+		Order("source_id, created_at ASC, id ASC").
+		Find(&representatives).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var counts []struct {
+		SourceID uuid.UUID
+		Count    int64
+	}
+	if err := base.Where("source_id IN ?", sourceIDs).
+		Select("source_id, COUNT(*) AS count").
+		Group("source_id").
+		Scan(&counts).Error; err != nil {
+		return nil, 0, err
+	}
+	countBySource := make(map[uuid.UUID]int64, len(counts))
+	for _, count := range counts {
+		countBySource[count.SourceID] = count.Count
+	}
+	representativeBySource := make(map[uuid.UUID]model.Notification, len(representatives))
+	for _, representative := range representatives {
+		representativeBySource[representative.SourceID] = representative
+	}
+
+	items := make([]announcementRecord, 0, len(groups))
+	for _, group := range groups {
+		if representative, ok := representativeBySource[group.SourceID]; ok {
+			items = append(items, announcementRecord{
+				Notification: representative,
+				PublishedAt:  publishedAtBySource[group.SourceID],
+				Delivered:    countBySource[group.SourceID],
+			})
+		}
+	}
+	return items, total, nil
 }
 
 func (r *Repo) CountUnreadNotifications(recipientID uuid.UUID) (int64, error) {

@@ -114,6 +114,44 @@ func (s *Service) PublishAnnouncement(user authctx.CurrentUser, input PublishAnn
 	return len(notifications), nil
 }
 
+func (s *Service) ListAnnouncements(user authctx.CurrentUser, query ListAnnouncementsQuery) ([]AnnouncementDTO, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return nil, 0, apperr.Forbidden("notification.announcement_forbidden", "Administrator access required")
+	}
+
+	query.Search = strings.TrimSpace(query.Search)
+	query.Status = strings.TrimSpace(query.Status)
+	records, total, err := s.repo.ListAnnouncements(query)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]AnnouncementDTO, 0, len(records))
+	for _, record := range records {
+		item := AnnouncementDTO{
+			SourceID:    record.Notification.SourceID.String(),
+			Title:       notificationMetaString(record.Notification.Meta, "title"),
+			Body:        notificationMetaString(record.Notification.Meta, "body"),
+			Path:        notificationMetaString(record.Notification.Meta, "path"),
+			PublishedAt: record.PublishedAt,
+			Delivered:   record.Delivered,
+			Status:      "delivered",
+		}
+		if record.Notification.Actor != nil {
+			item.Actor = &ActorDTO{
+				ID:          record.Notification.Actor.UUID.String(),
+				Username:    record.Notification.Actor.Username,
+				DisplayName: record.Notification.Actor.DisplayName,
+				AvatarURL:   record.Notification.Actor.AvatarURL,
+			}
+		}
+		items = append(items, item)
+	}
+	return items, total, nil
+}
+
 func (s *Service) ListNotifications(user authctx.CurrentUser, query ListQuery) ([]NotificationDTO, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
@@ -238,6 +276,14 @@ func (s *Service) CreateMute(user authctx.CurrentUser, input CreateMuteInput) (m
 
 func validAnnouncementPath(path string) bool {
 	return path == "" || (strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "//"))
+}
+
+func notificationMetaString(meta model.NotificationMeta, key string) string {
+	value, ok := meta[key].(string)
+	if !ok {
+		return ""
+	}
+	return value
 }
 
 func validNotificationCategory(category string) bool {

@@ -31,6 +31,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 func RegisterAdminRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.POST("/admin/announcements", h.publishAnnouncement)
+	group.GET("/admin/announcements", h.listAnnouncements)
 }
 
 // publishAnnouncement godoc
@@ -64,6 +65,42 @@ func (h *Handler) publishAnnouncement(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusCreated, PublishAnnouncementResponse{Delivered: delivered})
+}
+
+// listAnnouncements godoc
+// @Summary 获取公告记录
+// @Description 仅管理员可查看，按发布批次聚合公告通知。
+// @Tags notifications
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Param search query string false "搜索标题、正文或站内路径"
+// @Param status query string false "状态，支持 all 或 delivered"
+// @Success 200 {array} AnnouncementDTO
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/admin/announcements [get]
+func (h *Handler) listAnnouncements(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	query := ListAnnouncementsQuery{
+		Page:     normalizedPageFromQuery(c),
+		PageSize: normalizedPageSizeFromQuery(c),
+		Search:   strings.TrimSpace(c.Query("search")),
+		Status:   strings.TrimSpace(c.Query("status")),
+	}
+	items, total, err := h.service.ListAnnouncements(user, query)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, query.Page, query.PageSize, total)
 }
 
 // listPreferences godoc

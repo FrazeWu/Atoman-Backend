@@ -352,3 +352,53 @@ func TestAdminAnnouncementEndpointPublishesSystemNotifications(t *testing.T) {
 		t.Fatalf("expected two persisted announcements, got %d", count)
 	}
 }
+
+func TestAdminAnnouncementHistoryEndpointRequiresAdminAndReturnsPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{})
+	admin := model.User{Username: "announcement-history-admin", Email: "announcement-history-admin@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
+	user := model.User{Username: "announcement-history-user", Email: "announcement-history-user@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create([]*model.User{&admin, &user}).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	sourceID := uuid.New()
+	if err := db.Create(&model.Notification{RecipientID: user.UUID, ActorID: &admin.UUID, Type: announcementNotificationType, SourceType: announcementNotificationType, SourceID: sourceID, Meta: model.NotificationMeta{"title": "版本更新", "body": "今晚发布"}}).Error; err != nil {
+		t.Fatalf("create announcement: %v", err)
+	}
+
+	r := gin.New()
+	RegisterAdminRoutes(r.Group("/api/v1"), NewService(db))
+	unauthenticated := httptest.NewRecorder()
+	r.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/v1/admin/announcements", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", unauthenticated.Code, unauthenticated.Body.String())
+	}
+
+	r = gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: admin.UUID, Username: admin.Username, Role: admin.Role})
+		c.Next()
+	})
+	RegisterAdminRoutes(r.Group("/api/v1"), NewService(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/admin/announcements?page=1&page_size=10&search=%E7%89%88%E6%9C%AC", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data []AnnouncementDTO `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+			HasMore  bool  `json:"has_more"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode history response: %v", err)
+	}
+	if response.Meta.Page != 1 || response.Meta.PageSize != 10 || response.Meta.Total != 1 || response.Meta.HasMore || len(response.Data) != 1 || response.Data[0].SourceID != sourceID.String() {
+		t.Fatalf("unexpected history response: %#v", response)
+	}
+}

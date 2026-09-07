@@ -7584,6 +7584,25 @@ definitions:
       username:
         type: string
     type: object
+  notification.AnnouncementDTO:
+    properties:
+      actor:
+        $ref: '#/definitions/notification.ActorDTO'
+      body:
+        type: string
+      delivered:
+        type: integer
+      path:
+        type: string
+      published_at:
+        type: string
+      source_id:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+    type: object
   notification.CreateMuteInput:
     properties:
       reason:
@@ -8762,6 +8781,52 @@ info:
   version: "1.0"
 paths:
   /api/v1/admin/announcements:
+    get:
+      description: 仅管理员可查看，按发布批次聚合公告通知。
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      - description: 搜索标题、正文或站内路径
+        in: query
+        name: search
+        type: string
+      - description: 状态，支持 all 或 delivered
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/notification.AnnouncementDTO'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取公告记录
+      tags:
+      - notifications
     post:
       consumes:
       - application/json
