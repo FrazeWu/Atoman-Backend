@@ -3,8 +3,35 @@ package main
 import (
 	"testing"
 
+	"atoman/internal/model"
+
 	"github.com/google/uuid"
 )
+
+func TestCanRestoreDeletedSongSkipsActiveDuplicate(t *testing.T) {
+	albumID := uuid.MustParse("00000000-0000-0000-0000-000000000010")
+	active := model.Song{AlbumID: &albumID, Title: "Donda Chant"}
+	deleted := model.Song{AlbumID: &albumID, Title: "DONDA CHANT"}
+	occupied := map[string]struct{}{}
+	identity, ok := songRestoreIdentity(active)
+	if !ok {
+		t.Fatal("expected active song identity")
+	}
+	occupied[identity] = struct{}{}
+
+	if canRestoreDeletedSong(deleted, occupied) {
+		t.Fatal("expected duplicate deleted song to be skipped")
+	}
+}
+
+func TestCanRestoreDeletedSongAcceptsMissingTrack(t *testing.T) {
+	albumID := uuid.MustParse("00000000-0000-0000-0000-000000000011")
+	deleted := model.Song{AlbumID: &albumID, Title: "Donda Chant"}
+
+	if !canRestoreDeletedSong(deleted, map[string]struct{}{}) {
+		t.Fatal("expected deleted song with no active duplicate to be restored")
+	}
+}
 
 func TestChooseAudioCandidateNormalizesFeaturesAndApostrophes(t *testing.T) {
 	target := trackCandidate{Title: "Wesley's Theory", DiscNumber: 1, TrackNumber: 1}

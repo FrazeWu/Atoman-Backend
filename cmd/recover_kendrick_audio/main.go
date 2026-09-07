@@ -64,10 +64,22 @@ type repairStats struct {
 	Objects      int
 }
 
+type restoreStats struct {
+	ActiveAlbums     int
+	ActiveSongs      int
+	DeletedSongs     int
+	WithAudio        int
+	WithoutAudio     int
+	SkippedNoTitle   int
+	SkippedDuplicate int
+	Planned          int
+	Objects          int
+}
+
 func main() {
 	envFile := flag.String("env", ".env.prod", "environment file")
 	artistName := flag.String("artist", "Kendrick Lamar", "artist name")
-	apply := flag.Bool("apply", false, "write audio references to active songs")
+	apply := flag.Bool("apply", false, "restore deleted songs and write audio references")
 	flag.Parse()
 
 	if err := godotenv.Load(*envFile); err != nil {
@@ -86,15 +98,30 @@ func main() {
 		log.Fatalf("list audio objects: %v", err)
 	}
 
-	plans, stats, err := buildRepairPlan(db, strings.TrimSpace(*artistName), objects, objectsBySong)
+	restorePlans, restoreStats, err := buildRestorePlan(db, strings.TrimSpace(*artistName), objects, objectsBySong)
 	if err != nil {
-		log.Fatalf("build repair plan: %v", err)
+		log.Fatalf("build restore plan: %v", err)
 	}
-	printPlan(strings.TrimSpace(*artistName), plans, stats)
+	printRestorePlan(strings.TrimSpace(*artistName), restorePlans, restoreStats)
 	if !*apply {
-		log.Println("dry run only; rerun with -apply after reviewing the mapping")
+		plans, stats, err := buildRepairPlan(db, strings.TrimSpace(*artistName), objects, objectsBySong)
+		if err != nil {
+			log.Fatalf("build repair plan: %v", err)
+		}
+		printPlan(strings.TrimSpace(*artistName), plans, stats)
+		log.Println("dry run only; rerun with -apply after reviewing the restore and match mappings")
 		return
 	}
+	if err := applyRestorePlan(db, restorePlans); err != nil {
+		log.Fatalf("apply restore plan: %v", err)
+	}
+	log.Printf("deleted song recovery applied: restored=%d", len(restorePlans))
+
+	plans, stats, err := buildRepairPlan(db, strings.TrimSpace(*artistName), objects, objectsBySong)
+	if err != nil {
+		log.Fatalf("build repair plan after restore: %v", err)
+	}
+	printPlan(strings.TrimSpace(*artistName), plans, stats)
 	if err := applyRepairPlan(db, plans); err != nil {
 		log.Fatalf("apply repair plan: %v", err)
 	}
@@ -235,18 +262,113 @@ func albumIDFromAudioKey(key string) (uuid.UUID, bool) {
 	return uuid.Nil, false
 }
 
-func buildRepairPlan(db *gorm.DB, artistName string, objects map[string]objectInfo, objectsBySong map[uuid.UUID][]objectInfo) ([]repairItem, repairStats, error) {
-	debug := strings.TrimSpace(os.Getenv("RECOVER_MUSIC_DEBUG")) == "1"
+func loadArtistAndActiveAlbums(db *gorm.DB, artistName string) (model.Artist, []model.Album, error) {
 	var artist model.Artist
 	if err := db.Where("LOWER(name) = ? AND deleted_at IS NULL", strings.ToLower(artistName)).First(&artist).Error; err != nil {
-		return nil, repairStats{}, fmt.Errorf("find artist %q: %w", artistName, err)
+		return model.Artist{}, nil, fmt.Errorf("find artist %q: %w", artistName, err)
 	}
 
 	var activeAlbums []model.Album
 	if err := db.Model(&model.Album{}).
 		Where("id IN (?) AND deleted_at IS NULL AND lifecycle_status = ?", db.Table("album_artists").Select("album_id").Where("artist_id = ?", artist.ID), model.MusicLifecycleActive).
 		Order("release_date, title, id").Find(&activeAlbums).Error; err != nil {
-		return nil, repairStats{}, fmt.Errorf("load active albums: %w", err)
+		return model.Artist{}, nil, fmt.Errorf("load active albums: %w", err)
+	}
+	return artist, activeAlbums, nil
+}
+
+func songRestoreIdentity(song model.Song) (string, bool) {
+	if song.AlbumID == nil || strings.TrimSpace(song.Title) == "" {
+		return "", false
+	}
+	return song.AlbumID.String() + "\x00" + normalizeTrackTitle(song.Title), true
+}
+
+func canRestoreDeletedSong(song model.Song, occupied map[string]struct{}) bool {
+	identity, ok := songRestoreIdentity(song)
+	if !ok {
+		return false
+	}
+	_, exists := occupied[identity]
+	return !exists
+}
+
+func buildRestorePlan(db *gorm.DB, artistName string, objects map[string]objectInfo, objectsBySong map[uuid.UUID][]objectInfo) ([]repairItem, restoreStats, error) {
+	_, activeAlbums, err := loadArtistAndActiveAlbums(db, artistName)
+	if err != nil {
+		return nil, restoreStats{}, err
+	}
+
+	activeAlbumIDs := make([]uuid.UUID, 0, len(activeAlbums))
+	activeAlbumTitles := make(map[uuid.UUID]string, len(activeAlbums))
+	for _, album := range activeAlbums {
+		activeAlbumIDs = append(activeAlbumIDs, album.ID)
+		activeAlbumTitles[album.ID] = album.Title
+	}
+
+	var activeSongs []model.Song
+	if len(activeAlbumIDs) > 0 {
+		if err := db.Where("album_id IN ? AND deleted_at IS NULL AND lifecycle_status = ?", activeAlbumIDs, model.MusicLifecycleActive).
+			Find(&activeSongs).Error; err != nil {
+			return nil, restoreStats{}, fmt.Errorf("load active songs for restore: %w", err)
+		}
+	}
+
+	var deletedSongs []model.Song
+	if len(activeAlbumIDs) > 0 {
+		if err := db.Unscoped().Where("album_id IN ? AND deleted_at IS NOT NULL AND lifecycle_status = ?", activeAlbumIDs, model.MusicLifecycleActive).
+			Order("album_id, lower(title), disc_number, track_number, updated_at DESC, id").Find(&deletedSongs).Error; err != nil {
+			return nil, restoreStats{}, fmt.Errorf("load deleted songs for restore: %w", err)
+		}
+	}
+
+	occupied := make(map[string]struct{}, len(activeSongs)+len(deletedSongs))
+	for _, song := range activeSongs {
+		if identity, ok := songRestoreIdentity(song); ok {
+			occupied[identity] = struct{}{}
+		}
+	}
+
+	stats := restoreStats{
+		ActiveAlbums: len(activeAlbums),
+		ActiveSongs:  len(activeSongs),
+		DeletedSongs: len(deletedSongs),
+		Objects:      len(objects),
+	}
+	plans := make([]repairItem, 0)
+	for _, song := range deletedSongs {
+		objectKey := sourceObjectKey(song, objects, objectsBySong)
+		if objectKey == "" {
+			stats.WithoutAudio++
+			continue
+		}
+		stats.WithAudio++
+		if strings.TrimSpace(song.Title) == "" {
+			stats.SkippedNoTitle++
+			continue
+		}
+		if !canRestoreDeletedSong(song, occupied) {
+			stats.SkippedDuplicate++
+			continue
+		}
+		identity, _ := songRestoreIdentity(song)
+		occupied[identity] = struct{}{}
+		plans = append(plans, repairItem{
+			TargetID: song.ID, TargetAlbum: activeAlbumTitles[*song.AlbumID], TargetTitle: song.Title,
+			TargetDisc: song.DiscNumber, TargetTrack: song.TrackNumber, TargetAudioURL: song.AudioURL,
+			SourceID: song.ID, SourceAlbumID: *song.AlbumID, SourceTitle: song.Title, ObjectKey: objectKey,
+			PlaybackURL: buildPlaybackURL(objectKey), MatchReason: "deleted_song_r2_audio",
+		})
+		stats.Planned++
+	}
+	return plans, stats, nil
+}
+
+func buildRepairPlan(db *gorm.DB, artistName string, objects map[string]objectInfo, objectsBySong map[uuid.UUID][]objectInfo) ([]repairItem, repairStats, error) {
+	debug := strings.TrimSpace(os.Getenv("RECOVER_MUSIC_DEBUG")) == "1"
+	artist, activeAlbums, err := loadArtistAndActiveAlbums(db, artistName)
+	if err != nil {
+		return nil, repairStats{}, err
 	}
 
 	var activeSongs []model.Song
@@ -432,6 +554,30 @@ func applyRepairPlan(db *gorm.DB, plans []repairItem) error {
 		}
 		return nil
 	})
+}
+
+func applyRestorePlan(db *gorm.DB, plans []repairItem) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, item := range plans {
+			result := tx.Unscoped().Model(&model.Song{}).
+				Where("id = ? AND deleted_at IS NOT NULL AND audio_url = ?", item.TargetID, item.TargetAudioURL).
+				Updates(map[string]any{"deleted_at": nil, "audio_url": item.PlaybackURL, "audio_source": "s3"})
+			if result.Error != nil {
+				return fmt.Errorf("restore song %s: %w", item.TargetID, result.Error)
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("song %s changed or disappeared after dry run", item.TargetID)
+			}
+		}
+		return nil
+	})
+}
+
+func printRestorePlan(artistName string, plans []repairItem, stats restoreStats) {
+	fmt.Printf("restore artist=%s active_albums=%d active_songs=%d deleted_songs=%d objects=%d with_audio=%d without_audio=%d no_title=%d duplicate=%d planned=%d\n", artistName, stats.ActiveAlbums, stats.ActiveSongs, stats.DeletedSongs, stats.Objects, stats.WithAudio, stats.WithoutAudio, stats.SkippedNoTitle, stats.SkippedDuplicate, stats.Planned)
+	for _, item := range plans {
+		fmt.Printf("RESTORE %s | %d.%02d | %s -> source=%s | %s\n", item.TargetAlbum, normalizedDisc(item.TargetDisc), item.TargetTrack, item.TargetTitle, item.SourceID, item.ObjectKey)
+	}
 }
 
 func printPlan(artistName string, plans []repairItem, stats repairStats) {
