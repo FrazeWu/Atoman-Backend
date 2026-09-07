@@ -23,6 +23,12 @@ type MusicTagDTO struct {
 	CanDelete    bool      `json:"can_delete"`
 }
 
+type MusicTagOptionDTO struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	Kind string    `json:"kind"`
+}
+
 type SubmitEditRequest struct {
 	Type       string         `json:"type"`
 	EntityType string         `json:"entity_type"`

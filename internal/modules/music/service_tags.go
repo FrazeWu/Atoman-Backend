@@ -20,6 +20,7 @@ const (
 	musicTagEntityAlbum = "album"
 	maxMusicTagsPerItem = 12
 	maxMusicTagNameSize = 48
+	musicTagSearchLimit = 20
 )
 
 func normalizeMusicTagName(value string) (string, error) {
@@ -38,6 +39,33 @@ func validateMusicTagKind(kind string) error {
 		return apperr.BadRequest("music.invalid_tag_kind", "tag kind must be mood or type")
 	}
 	return nil
+}
+
+func (s *Service) SearchMusicTags(kind, rawQuery string) ([]MusicTagOptionDTO, error) {
+	if err := validateMusicTagKind(kind); err != nil {
+		return nil, err
+	}
+	query := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(rawQuery)), " "))
+	if query == "" {
+		return []MusicTagOptionDTO{}, nil
+	}
+	if utf8.RuneCountInString(query) > maxMusicTagNameSize {
+		return nil, apperr.BadRequest("music.invalid_tag_query", "tag search query is too long")
+	}
+
+	var tags []model.MusicTag
+	if err := s.db.Select("id, name, kind").
+		Where("kind = ? AND normalized_name LIKE ?", kind, "%"+query+"%").
+		Order("normalized_name ASC").
+		Limit(musicTagSearchLimit).
+		Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	result := make([]MusicTagOptionDTO, 0, len(tags))
+	for _, tag := range tags {
+		result = append(result, MusicTagOptionDTO{ID: tag.ID, Name: tag.Name, Kind: tag.Kind})
+	}
+	return result, nil
 }
 
 func (s *Service) validateMusicTagEntity(user *authctx.CurrentUser, entityType string, entityID uuid.UUID) error {
