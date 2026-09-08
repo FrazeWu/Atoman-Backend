@@ -1221,7 +1221,7 @@ func (s *Service) queryLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid
 		query = query.Where("a.id = ?", *annotationID)
 	}
 	err := query.
-		Group("a.id, l.line_key, el.id, el.line_key, u.uuid, u.username").
+		Group("a.id, l.id, l.line_key, el.id, el.line_key, u.uuid, u.username").
 		Order("(COALESCE(SUM(CASE WHEN v.vote = 'up' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN v.vote = 'down' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0)) DESC").
 		Order("upvotes DESC").Order("a.updated_at DESC").Order("a.created_at DESC").Scan(&rows).Error
 	if err != nil {
