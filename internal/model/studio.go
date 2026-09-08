@@ -23,6 +23,7 @@ type StudioModuleSettings struct {
 	DefaultVisibility    string     `json:"default_visibility" gorm:"not null;default:'public'"`
 	DefaultPublishStatus string     `json:"default_publish_status" gorm:"not null;default:'draft'"`
 	AutoplayEnabled      bool       `json:"autoplay_enabled" gorm:"not null;default:false"`
+	EditorMode           string     `json:"editor_mode" gorm:"type:varchar(16);not null;default:'markdown'"`
 }
 
 func (StudioModuleSettings) TableName() string { return "studio_module_settings" }

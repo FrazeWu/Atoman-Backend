@@ -148,6 +148,7 @@ type SettingsInput struct {
 	DefaultVisibility    *string    `json:"default_visibility"`
 	DefaultPublishStatus *string    `json:"default_publish_status"`
 	AutoplayEnabled      *bool      `json:"autoplay_enabled"`
+	EditorMode           *string    `json:"editor_mode"`
 }
 
 type SettingsResponse struct {
@@ -157,6 +158,7 @@ type SettingsResponse struct {
 	DefaultVisibility    string     `json:"default_visibility"`
 	DefaultPublishStatus string     `json:"default_publish_status"`
 	AutoplayEnabled      bool       `json:"autoplay_enabled"`
+	EditorMode           string     `json:"editor_mode"`
 }
 
 type InteractionQuery struct {

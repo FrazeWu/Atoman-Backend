@@ -83,6 +83,13 @@ func (s *Service) SaveSettings(user authctx.CurrentUser, module Module, input Se
 	} else if input.AutoplayEnabled != nil {
 		settings.AutoplayEnabled = *input.AutoplayEnabled
 	}
+	if input.EditorMode != nil {
+		mode := strings.TrimSpace(*input.EditorMode)
+		if mode != "markdown" && mode != "visual" {
+			return SettingsResponse{}, apperr.BadRequest("studio.invalid_editor_mode", "editor_mode must be markdown or visual")
+		}
+		settings.EditorMode = mode
+	}
 	if err := s.db.Save(&settings).Error; err != nil {
 		return SettingsResponse{}, err
 	}
@@ -93,6 +100,9 @@ func (s *Service) settingsRecord(userID, channelID uuid.UUID, module Module) (mo
 	var settings model.StudioModuleSettings
 	err := s.db.Where("channel_id = ? AND content_type = ?", channelID, module).First(&settings).Error
 	if err == nil {
+		if settings.EditorMode == "" {
+			settings.EditorMode = "markdown"
+		}
 		return settings, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -100,7 +110,7 @@ func (s *Service) settingsRecord(userID, channelID uuid.UUID, module Module) (mo
 	}
 	settings = model.StudioModuleSettings{
 		UserID: userID, ChannelID: channelID, ContentType: string(module),
-		DefaultVisibility: "public", DefaultPublishStatus: "draft",
+		DefaultVisibility: "public", DefaultPublishStatus: "draft", EditorMode: "markdown",
 	}
 	if err := s.db.Create(&settings).Error; err != nil {
 		return model.StudioModuleSettings{}, err
@@ -117,5 +127,6 @@ func settingsResponse(settings model.StudioModuleSettings, module Module) Settin
 		ChannelID: settings.ChannelID, Module: module, DefaultCollectionID: settings.DefaultCollectionID,
 		DefaultVisibility:    studioVisibilityFromDB(settings.DefaultVisibility),
 		DefaultPublishStatus: settings.DefaultPublishStatus, AutoplayEnabled: autoplay,
+		EditorMode:           settings.EditorMode,
 	}
 }

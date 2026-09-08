@@ -8426,6 +8426,8 @@ definitions:
         type: boolean
       channel_id:
         type: string
+      editor_mode:
+        type: string
       default_collection_id:
         type: string
       default_publish_status:
@@ -8438,6 +8440,8 @@ definitions:
       autoplay_enabled:
         type: boolean
       channel_id:
+        type: string
+      editor_mode:
         type: string
       default_collection_id:
         type: string

@@ -580,7 +580,7 @@ func TestStudioAnalyticsInteractionsSettingsAndShareRoutes(t *testing.T) {
 	if settings.Code != http.StatusOK {
 		t.Fatalf("expected settings 200, got %d: %s", settings.Code, settings.Body.String())
 	}
-	updatedSettings := studioRequest(t, fixture, fixture.owner, http.MethodPatch, "/api/v1/studio/blog/settings", `{"default_visibility":"subscribers","default_publish_status":"draft","autoplay_enabled":true}`)
+	updatedSettings := studioRequest(t, fixture, fixture.owner, http.MethodPatch, "/api/v1/studio/blog/settings", `{"default_visibility":"subscribers","default_publish_status":"draft","autoplay_enabled":true,"editor_mode":"visual"}`)
 	if updatedSettings.Code != http.StatusOK {
 		t.Fatalf("expected settings patch 200, got %d: %s", updatedSettings.Code, updatedSettings.Body.String())
 	}
@@ -590,7 +590,7 @@ func TestStudioAnalyticsInteractionsSettingsAndShareRoutes(t *testing.T) {
 	if err := json.Unmarshal(updatedSettings.Body.Bytes(), &settingsPayload); err != nil {
 		t.Fatal(err)
 	}
-	if settingsPayload.Data.DefaultVisibility != "subscribers" || settingsPayload.Data.DefaultPublishStatus != "draft" || settingsPayload.Data.AutoplayEnabled {
+	if settingsPayload.Data.DefaultVisibility != "subscribers" || settingsPayload.Data.DefaultPublishStatus != "draft" || settingsPayload.Data.AutoplayEnabled || settingsPayload.Data.EditorMode != "visual" {
 		t.Fatalf("unexpected blog settings: %#v", settingsPayload.Data)
 	}
 
