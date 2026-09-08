@@ -15,6 +15,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/musiclyrics"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/partialdate"
 )
@@ -221,7 +222,7 @@ func (s *RevisionService) CreateRevision(
 
 		// Detect conflicts if base != current
 		if baseRevision.VersionNumber != currentRevision.VersionNumber {
-			conflicts = s.DetectConflicts(&baseRevision, changes, &currentRevision)
+			conflicts = s.detectConflicts(tx, &baseRevision, changes, &currentRevision)
 		}
 
 		// If conflicts exist, return them without creating revision
@@ -239,7 +240,7 @@ func (s *RevisionService) CreateRevision(
 			return nil
 		}
 
-		snapshot, err := mergeRevisionChanges(contentType, currentRevision.ContentSnapshot, changes)
+		snapshot, err := mergeRevisionChangesWithDB(tx, contentType, currentRevision.ContentSnapshot, changes)
 		if err != nil {
 			return err
 		}
@@ -527,6 +528,42 @@ type albumRevisionChanges struct {
 }
 
 func mergeRevisionChanges(contentType string, current []byte, changes map[string]interface{}) ([]byte, error) {
+	return mergeRevisionChangesWithLiveSongs(contentType, current, changes, nil)
+}
+
+func mergeRevisionChangesWithDB(tx *gorm.DB, contentType string, current []byte, changes map[string]interface{}) ([]byte, error) {
+	if contentType != "album" {
+		return mergeRevisionChanges(contentType, current, changes)
+	}
+
+	var snapshot albumRevisionSnapshot
+	if err := json.Unmarshal(current, &snapshot); err != nil {
+		return nil, fmt.Errorf("failed to parse album snapshot: %w", err)
+	}
+	if snapshot.Album == nil {
+		return mergeRevisionChanges(contentType, current, changes)
+	}
+	albumID, err := uuid.Parse(strings.TrimSpace(snapshot.Album.ID))
+	if err != nil {
+		return mergeRevisionChanges(contentType, current, changes)
+	}
+
+	var liveSongs []model.Song
+	if err := tx.Where("album_id = ? AND COALESCE(status, 'open') <> ?", albumID, "closed").Find(&liveSongs).Error; err != nil {
+		return nil, fmt.Errorf("failed to load current album tracks: %w", err)
+	}
+	liveSongsByID := make(map[string]albumRevisionSong, len(liveSongs))
+	for _, song := range liveSongs {
+		liveSongsByID[song.ID.String()] = albumRevisionSong{
+			ID: song.ID.String(), Title: song.Title, TrackNumber: song.TrackNumber,
+			DiscNumber: song.DiscNumber, Lyrics: song.Lyrics, AudioURL: song.AudioURL,
+			CoverURL: song.CoverURL, Status: song.Status,
+		}
+	}
+	return mergeRevisionChangesWithLiveSongs(contentType, current, changes, liveSongsByID)
+}
+
+func mergeRevisionChangesWithLiveSongs(contentType string, current []byte, changes map[string]interface{}, liveSongs map[string]albumRevisionSong) ([]byte, error) {
 	if contentType == "artist" {
 		var snapshot map[string]interface{}
 		if err := json.Unmarshal(current, &snapshot); err != nil {
@@ -642,7 +679,11 @@ func mergeRevisionChanges(contentType string, current []byte, changes map[string
 			if track.Removed {
 				continue
 			}
-			existing, exists := currentSongs[strings.TrimSpace(track.ID)]
+			trackID := strings.TrimSpace(track.ID)
+			existing, exists := currentSongs[trackID]
+			if !exists {
+				existing, exists = liveSongs[trackID]
+			}
 			audioURL := existing.AudioURL
 			lyrics := existing.Lyrics
 			if track.Lyrics != nil {
@@ -651,14 +692,14 @@ func mergeRevisionChanges(contentType string, current []byte, changes map[string
 			if !exists {
 				audioURL = strings.TrimSpace(track.ResolvedAudioURL)
 				if audioURL == "" {
-					return nil, errors.New("new tracks require a completed local audio upload")
+					return nil, apperr.BadRequest("music.revision_track_audio_required", "new tracks require a completed local audio upload")
 				}
 			}
 			if err := validateRevisionCredits(track.ArtistCredits, false); err != nil {
 				return nil, err
 			}
 			songs = append(songs, albumRevisionSong{
-				ID: track.ID, Title: track.Title, TrackNumber: track.TrackNumber,
+				ID: trackID, Title: track.Title, TrackNumber: track.TrackNumber,
 				DiscNumber: track.DiscNumber, Lyrics: lyrics, AudioURL: audioURL,
 				CoverURL: track.CoverURL, Status: "open",
 				ArtistCredits: revisionCreditsFromInput(track.ArtistCredits),
@@ -885,8 +926,17 @@ func coverSourceForRevision(url string) string {
 	return "local"
 }
 
-// DetectConflicts performs 3-way merge conflict detection
+// DetectConflicts performs 3-way merge conflict detection.
 func (s *RevisionService) DetectConflicts(
+	baseRevision *model.Revision,
+	userChanges map[string]interface{},
+	currentRevision *model.Revision,
+) []model.EditConflict {
+	return s.detectConflicts(s.db, baseRevision, userChanges, currentRevision)
+}
+
+func (s *RevisionService) detectConflicts(
+	db *gorm.DB,
 	baseRevision *model.Revision,
 	userChanges map[string]interface{},
 	currentRevision *model.Revision,
@@ -901,7 +951,7 @@ func (s *RevisionService) DetectConflicts(
 	json.Unmarshal(currentRevision.ContentSnapshot, &currentData)
 	var userData map[string]interface{}
 	if baseRevision.ContentType == "album" {
-		if merged, err := mergeRevisionChanges("album", baseRevision.ContentSnapshot, userChanges); err == nil {
+		if merged, err := mergeRevisionChangesWithDB(db, "album", baseRevision.ContentSnapshot, userChanges); err == nil {
 			_ = json.Unmarshal(merged, &userData)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/service"
 	"atoman/internal/storage"
@@ -283,7 +284,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 		oldObjectKeys, newObjectKeys, consumedAssetIDs, err := promoteAlbumRevisionAssets(db, s3Client, albumID, editorUUID, input.Changes)
 		if err != nil {
 			storage.DeleteMusicObjects(s3Client, newObjectKeys)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			writeRevisionCreateError(c, err)
 			return
 		}
 
@@ -300,7 +301,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 
 		if err != nil {
 			storage.DeleteMusicObjects(s3Client, newObjectKeys)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			writeRevisionCreateError(c, err)
 			return
 		}
 
@@ -564,7 +565,7 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 		oldObjectKeys, newObjectKeys, err := promoteSongRevisionAssets(db, s3Client, songID, input.Changes)
 		if err != nil {
 			storage.DeleteMusicObjects(s3Client, newObjectKeys)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			writeRevisionCreateError(c, err)
 			return
 		}
 
@@ -580,7 +581,7 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 
 		if err != nil {
 			storage.DeleteMusicObjects(s3Client, newObjectKeys)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			writeRevisionCreateError(c, err)
 			return
 		}
 
@@ -599,6 +600,15 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 			"message": "Changes saved",
 		})
 	}
+}
+
+func writeRevisionCreateError(c *gin.Context, err error) {
+	var appErr *apperr.AppError
+	if errors.As(err, &appErr) {
+		c.JSON(appErr.HTTPStatus, gin.H{"code": appErr.Code, "error": appErr.Message})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 }
 
 func promoteAlbumRevisionAssets(db *gorm.DB, s3Client *s3.S3, albumID, editorID uuid.UUID, changes map[string]interface{}) ([]string, []string, []uuid.UUID, error) {
@@ -647,14 +657,14 @@ func promoteAlbumRevisionAssets(db *gorm.DB, s3Client *s3.S3, albumID, editorID 
 		if songID == "" {
 			parsedAssetID, err := uuid.Parse(assetID)
 			if err != nil {
-				return oldKeys, newKeys, consumedAssetIDs, errors.New("new tracks require a valid audio_asset_id")
+				return oldKeys, newKeys, consumedAssetIDs, apperr.BadRequest("music.revision_audio_asset_required", "new tracks require a valid audio_asset_id")
 			}
 			var audioAsset model.MediaAsset
 			if err := db.First(&audioAsset, "id = ? AND user_id = ? AND purpose = ?", parsedAssetID, editorID, "music.audio").Error; err != nil {
 				return oldKeys, newKeys, consumedAssetIDs, err
 			}
 			if !uploadPurposes["music.audio"].allowedContentType[audioAsset.ContentType] {
-				return oldKeys, newKeys, consumedAssetIDs, errors.New("audio_asset_id is not a supported audio asset")
+				return oldKeys, newKeys, consumedAssetIDs, apperr.BadRequest("music.revision_audio_asset_invalid", "audio_asset_id is not a supported audio asset")
 			}
 			songID = uuid.NewString()
 			track["id"] = songID
@@ -665,7 +675,7 @@ func promoteAlbumRevisionAssets(db *gorm.DB, s3Client *s3.S3, albumID, editorID 
 			consumedAssetIDs = append(consumedAssetIDs, audioAsset.ID)
 			track["resolved_audio_url"] = promotedURL
 		} else if assetID != "" {
-			return oldKeys, newKeys, consumedAssetIDs, errors.New("existing track audio must use the audio replacement endpoint")
+			return oldKeys, newKeys, consumedAssetIDs, apperr.BadRequest("music.revision_audio_replacement_required", "existing track audio must use the audio replacement endpoint")
 		}
 		delete(track, "audio_asset_id")
 		for _, media := range []struct {
