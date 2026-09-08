@@ -21335,6 +21335,29 @@ paths:
       summary: 搜索公共音乐标签
       tags:
       - music
+  /api/v1/music/tags/{tagId}:
+    get:
+      description: 根据标签 ID 获取标签名称和标签类别。
+      parameters:
+      - description: 标签 ID
+        in: path
+        name: tagId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicTagOptionDTO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取公共音乐标签详情
+      tags:
+      - music
   /api/v1/music/uploads:
     post:
       consumes:
