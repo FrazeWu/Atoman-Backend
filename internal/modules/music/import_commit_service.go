@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 	var out model.AlbumImportSession
 	oldObjectKeys := []string{}
 	newObjectKeys := []string{}
+	consumedAudioAssetIDs := []uuid.UUID{}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		session, err := loadAlbumImportSessionForUpdate(tx, id, user.ID)
 		if err != nil {
@@ -345,9 +347,34 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 		}
 		seenSongIDs := map[uuid.UUID]bool{}
+		seenAudioAssetIDs := map[uuid.UUID]bool{}
 		for _, track := range payload.Album.Tracks {
 			derived := matchDerivedTrackAudio(rawDerivedTracks, track, usedDerivedTrackIndexes)
 			audioURL := strings.TrimSpace(derived.AudioURL)
+			var uploadedAudioAsset *model.MediaAsset
+			audioAssetID := strings.TrimSpace(track.AudioAssetID)
+			if audioAssetID != "" {
+				assetID, err := uuid.Parse(audioAssetID)
+				if err != nil {
+					return apperr.BadRequest("validation.invalid_request", "invalid audio asset id")
+				}
+				if seenAudioAssetIDs[assetID] {
+					return apperr.BadRequest("validation.invalid_request", "audio asset cannot be reused")
+				}
+				var asset model.MediaAsset
+				if err := tx.First(&asset, "id = ? AND user_id = ? AND purpose = ?", assetID, user.ID, "music.audio").Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return apperr.NotFound("music.audio_asset_not_found", "Completed audio upload not found")
+					}
+					return err
+				}
+				if !isMusicAudioContentType(asset.ContentType) || strings.TrimSpace(asset.URL) == "" || strings.TrimSpace(asset.Key) == "" {
+					return apperr.Unprocessable("music.audio_asset_invalid", "Uploaded asset is not valid audio")
+				}
+				uploadedAudioAsset = &asset
+				audioURL = strings.TrimSpace(asset.URL)
+				seenAudioAssetIDs[asset.ID] = true
+			}
 			metadata := songAudioMetadataFromImportFile(importFilesByID[derived.FileID])
 			matchStatus, matchProvider, matchExternalID, matchSourceURL, matchConfidence, matchManualOverride := importTrackMatchState(track, derived)
 			var existingSong *model.Song
@@ -388,20 +415,26 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				audioCheckedAt := time.Now().UTC()
 				song.AudioCheckedAt = &audioCheckedAt
 				if strings.TrimSpace(audioURL) != "" && audioURL != song.AudioURL {
-					promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
+					promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteImportedTrackAsset(
 						audioURL,
 						storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), path.Ext(audioURL)),
 						id,
+						uploadedAudioAsset != nil,
 					)
 					if err != nil {
 						return err
 					}
-					if newAudioKey != "" {
+					if newAudioKey != "" || uploadedAudioAsset != nil {
 						song.AudioURL = promotedAudioURL
-						song.AudioSource = "s3"
-						oldObjectKeys = append(oldObjectKeys, oldAudioKey)
-						newObjectKeys = append(newObjectKeys, newAudioKey)
+						song.AudioSource = coverSourceFromURL(promotedAudioURL)
+						if newAudioKey != "" {
+							oldObjectKeys = append(oldObjectKeys, oldAudioKey)
+							newObjectKeys = append(newObjectKeys, newAudioKey)
+						}
 					}
+				}
+				if uploadedAudioAsset != nil {
+					consumedAudioAssetIDs = append(consumedAudioAssetIDs, uploadedAudioAsset.ID)
 				}
 				applySongAudioMetadata(&song, metadata)
 				if err := tx.Unscoped().Save(&song).Error; err != nil {
@@ -451,10 +484,11 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}); err != nil {
 				return err
 			}
-			promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
+			promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteImportedTrackAsset(
 				song.AudioURL,
 				storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), path.Ext(song.AudioURL)),
 				id,
+				uploadedAudioAsset != nil,
 			)
 			if err != nil {
 				return err
@@ -475,6 +509,14 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				return err
 			}
 			if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics, track.LyricsSource); err != nil {
+				return err
+			}
+			if uploadedAudioAsset != nil {
+				consumedAudioAssetIDs = append(consumedAudioAssetIDs, uploadedAudioAsset.ID)
+			}
+		}
+		for _, assetID := range consumedAudioAssetIDs {
+			if err := tx.Where("id = ? AND user_id = ? AND purpose = ?", assetID, user.ID, "music.audio").Delete(&model.MediaAsset{}).Error; err != nil {
 				return err
 			}
 		}
@@ -516,6 +558,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if sessionPayload == nil {
 			sessionPayload = map[string]any{}
 		}
+		sessionPayload["commit_request"] = input
 		sessionPayload["artist_source"] = strings.TrimSpace(input.ArtistSource)
 		sessionPayload["album_source"] = strings.TrimSpace(input.AlbumSource)
 		applyAlbumImportSessionState(&session, AlbumImportStatusCommitted, sessionPayload)
@@ -977,6 +1020,14 @@ func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importI
 	return urlPrefix + "/" + destinationKey, sourceKey, destinationKey, nil
 }
 
+func (s *Service) promoteImportedTrackAsset(rawURL, destinationKey string, importID uuid.UUID, uploadedAsset bool) (string, string, string, error) {
+	if uploadedAsset {
+		asset, err := storage.PromoteMusicUploadAsset(s.s3, rawURL, destinationKey)
+		return asset.URL, asset.SourceKey, asset.DestinationKey, err
+	}
+	return s.promoteAlbumImportAsset(rawURL, destinationKey, importID)
+}
+
 func isPromotableAlbumImportKey(key string, importID uuid.UUID) bool {
 	playbackPrefix := "music/album-imports/playback/sessions/" + importID.String() + "/"
 	return strings.Contains(key, "/uploads/") || strings.HasPrefix(key, playbackPrefix)
@@ -1055,6 +1106,9 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		}); audio.AudioURL != "" {
 			return audio
 		}
+	}
+	if songID != "" || audioKey != "" {
+		return derivedTrackAudio{}
 	}
 
 	title := strings.TrimSpace(track.Title)
@@ -1295,10 +1349,14 @@ func albumImportTracksFromDerived(payload map[string]any) []AlbumImportTrackPayl
 	if !ok {
 		return nil
 	}
+	deleted := albumImportDeletedTrackKeys(payload)
 	tracks := make([]AlbumImportTrackPayload, 0, len(rawTracks))
 	for index, raw := range rawTracks {
 		trackMap, ok := raw.(map[string]any)
 		if !ok {
+			continue
+		}
+		if importedTrackDeleted(trackMap, deleted) {
 			continue
 		}
 		title := strings.TrimSpace(stringValue(trackMap["title"]))
@@ -1310,9 +1368,16 @@ func albumImportTracksFromDerived(payload map[string]any) []AlbumImportTrackPayl
 			trackNumber = index + 1
 		}
 		track := AlbumImportTrackPayload{
-			SongID: stringValue(trackMap["song_id"]), Title: title,
+			SongID: stringValue(trackMap["song_id"]), FileID: stringValue(trackMap["file_id"]),
+			AudioKey: stringValue(trackMap["audio_key"]), Title: title,
 			DiscNumber: normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))), TrackNumber: trackNumber,
-			LyricsSource: stringValue(trackMap["lyrics_source"]),
+			OriginalTitle: stringValue(trackMap["original_title"]),
+			OriginalDisc:  int(int64Value(trackMap["original_disc_number"])),
+			OriginalTrack: int(int64Value(trackMap["original_track_number"])),
+			MatchStatus:   stringValue(trackMap["match_status"]), MatchProvider: stringValue(trackMap["match_provider"]),
+			MatchExternalID: stringValue(trackMap["match_external_id"]), MatchSourceURL: stringValue(trackMap["match_source_url"]),
+			MatchConfidence: floatValue(trackMap["match_confidence"]),
+			LyricsSource:    stringValue(trackMap["lyrics_source"]),
 		}
 		if lyricsMap, ok := trackMap["lyrics"].(map[string]any); ok {
 			track.Lyrics = &AlbumImportTrackLyricsPayload{
@@ -1324,6 +1389,48 @@ func albumImportTracksFromDerived(payload map[string]any) []AlbumImportTrackPayl
 		tracks = append(tracks, track)
 	}
 	return tracks
+}
+
+func albumImportDeletedTrackKeys(payload map[string]any) map[string]bool {
+	deleted := map[string]bool{}
+	read := func(raw any) {
+		values, ok := raw.([]any)
+		if !ok {
+			return
+		}
+		for _, value := range values {
+			if key := strings.TrimSpace(stringValue(value)); key != "" {
+				deleted[key] = true
+			}
+		}
+	}
+	read(payload["deleted_import_track_keys"])
+	if request, ok := payload["commit_request"].(map[string]any); ok {
+		read(request["deleted_import_track_keys"])
+	}
+	return deleted
+}
+
+func importedTrackDeleted(track map[string]any, deleted map[string]bool) bool {
+	if len(deleted) == 0 {
+		return false
+	}
+	disc := normalizedDiscNumber(int(int64Value(track["disc_number"])))
+	trackNumber := int(int64Value(track["track_number"]))
+	originalDisc := int(int64Value(track["original_disc_number"]))
+	originalTrack := int(int64Value(track["original_track_number"]))
+	keys := []string{
+		"file:" + strings.TrimSpace(stringValue(track["file_id"])),
+		"audio:" + strings.TrimSpace(stringValue(track["audio_key"])),
+		"position:" + strconv.Itoa(disc) + ":" + strconv.Itoa(trackNumber),
+		"position:" + strconv.Itoa(originalDisc) + ":" + strconv.Itoa(originalTrack),
+	}
+	for _, key := range keys {
+		if deleted[key] {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizedDiscNumber(value int) int {

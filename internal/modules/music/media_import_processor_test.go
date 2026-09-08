@@ -718,6 +718,49 @@ func TestPersistDerivedTracksKeepsOnlyMajorityAlbum(t *testing.T) {
 	}
 }
 
+func TestPersistDerivedMetadataResultPreservesLatestCommitRequest(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{
+		Status:      AlbumImportStatusAnalyzing,
+		Stage:       AlbumImportStageAnalyzing,
+		PayloadJSON: `{"derived_album_type":"single","derived_release_date":"2020-01-01","derived_cover":"https://old.test/cover.jpg"}`,
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	latestPayload := `{"commit_request":{"album":{"title":"用户改名","tracks":[{"title":"用户曲目","track_number":1}]}},"derived_album_type":"single","derived_release_date":"2020-01-01","derived_cover":"https://old.test/cover.jpg"}`
+	if err := db.Model(&session).Update("payload_json", latestPayload).Error; err != nil {
+		t.Fatal(err)
+	}
+	processor := NewMediaImportProcessor(db, &fakeMediaStore{}, &fakeMediaCommandRunner{}, "")
+	if err := processor.persistDerivedMetadataResult(context.Background(), &session, nil, AlbumImportMetadataResult{
+		Tracks: []AlbumImportDTOTrack{{Title: "Matched track", TrackNumber: 1, MatchStatus: "matched"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var reloaded model.AlbumImportSession
+	if err := db.First(&reloaded, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reloaded.PayloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	request, ok := payload["commit_request"].(map[string]any)
+	if !ok || request["album"].(map[string]any)["title"] != "用户改名" {
+		t.Fatalf("latest commit request was overwritten: %#v", payload)
+	}
+	if _, ok := payload["derived_album_type"]; ok {
+		t.Fatalf("stale album type was not cleared: %#v", payload)
+	}
+	if _, ok := payload["derived_release_date"]; ok {
+		t.Fatalf("stale release date was not cleared: %#v", payload)
+	}
+	if _, ok := payload["derived_cover"]; ok {
+		t.Fatalf("stale derived cover was not cleared: %#v", payload)
+	}
+}
+
 func TestAlbumImportTrackInfoFromFileNameIsConservative(t *testing.T) {
 	tests := []struct {
 		name      string

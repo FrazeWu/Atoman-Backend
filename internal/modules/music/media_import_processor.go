@@ -25,6 +25,7 @@ import (
 	"github.com/nwaples/rardecode"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -939,7 +940,7 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 			rawResult.Tracks[index].LyricsSource = "local"
 		}
 	}
-	if err := p.persistDerivedMetadataResult(ctx, &session, payload, files, rawResult); err != nil {
+	if err := p.persistDerivedMetadataResult(ctx, &session, files, rawResult); err != nil {
 		return err
 	}
 	if p.enricher == nil {
@@ -953,10 +954,13 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 		log.Printf("WARN: album import metadata enrichment failed: import_id=%s error=%v", sessionID, enrichErr)
 		return nil
 	}
-	return p.persistDerivedMetadataResult(ctx, &session, payload, files, result)
+	return p.persistDerivedMetadataResult(ctx, &session, files, result)
 }
 
-func (p *MediaImportProcessor) persistDerivedMetadataResult(ctx context.Context, session *model.AlbumImportSession, payload map[string]any, files []model.AlbumImportFile, result AlbumImportMetadataResult) error {
+func (p *MediaImportProcessor) persistDerivedMetadataResult(ctx context.Context, session *model.AlbumImportSession, files []model.AlbumImportFile, result AlbumImportMetadataResult) error {
+	if session == nil || p == nil || p.db == nil {
+		return errors.New("album import session is required")
+	}
 	derivedTracks := make([]map[string]any, 0, len(result.Tracks))
 	for _, track := range result.Tracks {
 		derived := map[string]any{
@@ -983,18 +987,45 @@ func (p *MediaImportProcessor) persistDerivedMetadataResult(ctx context.Context,
 		}
 		derivedTracks = append(derivedTracks, derived)
 	}
+	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var latest model.AlbumImportSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&latest, "id = ?", session.ID).Error; err != nil {
+			return err
+		}
+		payload, err := readAlbumImportPayloadMap(latest.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		mergeDerivedMetadataPayload(payload, derivedTracks, result)
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&latest).Update("payload_json", string(encoded)).Error
+	})
+}
+
+func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[string]any, result AlbumImportMetadataResult) {
 	payload["derived_tracks"] = derivedTracks
 	if result.AlbumTitle != "" {
 		payload["derived_album_title"] = result.AlbumTitle
+	} else {
+		delete(payload, "derived_album_title")
 	}
 	if result.ReleaseDate != "" {
 		payload["derived_release_date"] = result.ReleaseDate
+	} else {
+		delete(payload, "derived_release_date")
 	}
 	if result.AlbumType != "" {
 		payload["derived_album_type"] = result.AlbumType
+	} else {
+		delete(payload, "derived_album_type")
 	}
 	if result.CoverURL != "" && stringValue(payload["cover_key"]) == "" {
 		payload["derived_cover"] = result.CoverURL
+	} else {
+		delete(payload, "derived_cover")
 	}
 	if result.SourceURL != "" || result.MetadataSource != "" {
 		payload["metadata_source_url"] = result.SourceURL
@@ -1018,11 +1049,6 @@ func (p *MediaImportProcessor) persistDerivedMetadataResult(ctx context.Context,
 	} else {
 		delete(payload, "missing_artists")
 	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	return p.db.WithContext(ctx).Model(session).Update("payload_json", string(encoded)).Error
 }
 
 func albumImportFileAlbum(file model.AlbumImportFile) string {

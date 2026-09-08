@@ -1,19 +1,23 @@
 package music
 
 type AlbumImportTrackPayload struct {
-	SongID          string  `json:"song_id"`
-	AudioKey        string  `json:"audio_key"`
-	Title           string  `json:"title"`
-	DiscNumber      int     `json:"disc_number"`
-	TrackNumber     int     `json:"track_number"`
-	OriginalTitle   string  `json:"original_title,omitempty"`
-	OriginalDisc    int     `json:"original_disc_number,omitempty"`
-	OriginalTrack   int     `json:"original_track_number,omitempty"`
-	MatchStatus     string  `json:"match_status,omitempty"`
-	MatchProvider   string  `json:"match_provider,omitempty"`
-	MatchExternalID string  `json:"match_external_id,omitempty"`
-	MatchSourceURL  string  `json:"match_source_url,omitempty"`
-	MatchConfidence float64 `json:"match_confidence,omitempty"`
+	SongID             string  `json:"song_id"`
+	FileID             string  `json:"file_id,omitempty"`
+	AudioAssetID       string  `json:"audio_asset_id,omitempty"`
+	AudioKey           string  `json:"audio_key"`
+	Title              string  `json:"title"`
+	DiscNumber         int     `json:"disc_number"`
+	TrackNumber        int     `json:"track_number"`
+	OriginalTitle      string  `json:"original_title,omitempty"`
+	OriginalDisc       int     `json:"original_disc_number,omitempty"`
+	OriginalTrack      int     `json:"original_track_number,omitempty"`
+	MatchStatus        string  `json:"match_status,omitempty"`
+	MatchProvider      string  `json:"match_provider,omitempty"`
+	MatchExternalID    string  `json:"match_external_id,omitempty"`
+	MatchSourceURL     string  `json:"match_source_url,omitempty"`
+	MatchConfidence    float64 `json:"match_confidence,omitempty"`
+	TitleCustomized    bool    `json:"title_customized,omitempty"`
+	SequenceCustomized bool    `json:"sequence_customized,omitempty"`
 	// AudioURL is retained for internal processors and legacy tests only. Client JSON cannot set it.
 	AudioURL     string                         `json:"-"`
 	Lyrics       *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
@@ -83,14 +87,15 @@ type CreateAlbumImportSessionInput struct {
 }
 
 type CommitAlbumImportSessionInput struct {
-	ArtistID      string                         `json:"artist_id"`
-	Artist        AlbumImportArtistPayload       `json:"artist"`
-	Artists       []CommitAlbumImportArtistInput `json:"artists"`
-	ArtistSource  string                         `json:"artist_source"`
-	ArtistSources []Source                       `json:"artist_sources"`
-	Album         AlbumImportAlbumPayload        `json:"album"`
-	AlbumSource   string                         `json:"album_source"`
-	AlbumSources  []Source                       `json:"album_sources"`
+	ArtistID               string                         `json:"artist_id"`
+	Artist                 AlbumImportArtistPayload       `json:"artist"`
+	Artists                []CommitAlbumImportArtistInput `json:"artists"`
+	ArtistSource           string                         `json:"artist_source"`
+	ArtistSources          []Source                       `json:"artist_sources"`
+	Album                  AlbumImportAlbumPayload        `json:"album"`
+	DeletedImportTrackKeys []string                       `json:"deleted_import_track_keys,omitempty"`
+	AlbumSource            string                         `json:"album_source"`
+	AlbumSources           []Source                       `json:"album_sources"`
 }
 
 type CommitAlbumImportArtistInput struct {
