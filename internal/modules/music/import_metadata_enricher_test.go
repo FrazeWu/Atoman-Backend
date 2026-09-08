@@ -742,6 +742,7 @@ func testMusicBrainzRelease(tracks ...flattenedMusicBrainzTrack) musicBrainzRele
 			Title     string `json:"title"`
 			Length    int    `json:"length"`
 			Recording struct {
+				ID     string `json:"id"`
 				Title  string `json:"title"`
 				Length int    `json:"length"`
 			} `json:"recording"`
@@ -754,6 +755,7 @@ func testMusicBrainzRelease(tracks ...flattenedMusicBrainzTrack) musicBrainzRele
 			Title     string `json:"title"`
 			Length    int    `json:"length"`
 			Recording struct {
+				ID     string `json:"id"`
 				Title  string `json:"title"`
 				Length int    `json:"length"`
 			} `json:"recording"`
