@@ -20,6 +20,7 @@ func TestAlbumImportServiceOnlyOwnsCoreSessionAndSharedState(t *testing.T) {
 		"albumImportCommitSources":               true,
 		"albumImportSessionAlbumTitle":           true,
 		"stringValue":                            true,
+		"boolValue":                              true,
 		"floatValue":                             true,
 		"CreateAlbumImportSession":               true,
 		"deleteAlbumImportSessionObjectOrRecord": true,

@@ -11,6 +11,7 @@ func (fakeAlbumImportMetadataEnricher) Enrich(_ context.Context, input AlbumImpo
 	return AlbumImportMetadataResult{
 		AlbumTitle:           "IGOR",
 		MusicBrainzReleaseID: "igor-release",
+		MetadataSource:       "musicbrainz",
 		SourceURL:            "https://musicbrainz.org/release/igor-release",
 		Tracks: []AlbumImportDTOTrack{
 			{Title: "IGOR'S THEME", TrackNumber: 1},
