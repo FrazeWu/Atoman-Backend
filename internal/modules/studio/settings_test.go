@@ -42,15 +42,16 @@ func TestStudioSettingsAreScopedByChannelAndModule(t *testing.T) {
 	visibility := "subscribers"
 	publishStatus := "draft"
 	autoplay := true
+	editorMode := "visual"
 	blogCollection := fixture.collections[ModuleBlog]
 	saved, err := fixture.service.SaveSettings(fixture.user, ModuleBlog, SettingsInput{
 		ChannelID: fixture.channel.ID, DefaultCollectionID: &blogCollection.ID,
-		DefaultVisibility: &visibility, DefaultPublishStatus: &publishStatus, AutoplayEnabled: &autoplay,
+		DefaultVisibility: &visibility, DefaultPublishStatus: &publishStatus, AutoplayEnabled: &autoplay, EditorMode: &editorMode,
 	})
 	if err != nil {
 		t.Fatalf("save settings: %v", err)
 	}
-	if saved.DefaultVisibility != "subscribers" || saved.DefaultPublishStatus != "draft" || saved.AutoplayEnabled {
+	if saved.DefaultVisibility != "subscribers" || saved.DefaultPublishStatus != "draft" || saved.AutoplayEnabled || saved.EditorMode != "visual" {
 		t.Fatalf("unexpected saved blog settings: %#v", saved)
 	}
 	other, err := fixture.service.GetSettings(fixture.user, ModuleBlog, secondChannel.ID)
