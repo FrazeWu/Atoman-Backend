@@ -24,6 +24,7 @@ type AlbumImportMetadataTrack struct {
 	Title           string
 	Artist          string
 	Album           string
+	FileID          string
 	DiscNumber      int
 	TrackNumber     int
 	DurationSeconds float64
@@ -338,7 +339,7 @@ func baseMetadataTracks(tracks []AlbumImportMetadataTrack) []AlbumImportDTOTrack
 	result := make([]AlbumImportDTOTrack, 0, len(tracks))
 	for _, track := range tracks {
 		result = append(result, AlbumImportDTOTrack{
-			Title: track.Title, AudioKey: track.AudioKey, AudioURL: track.AudioURL, Origin: track.Origin,
+			FileID: track.FileID, Title: track.Title, AudioKey: track.AudioKey, AudioURL: track.AudioURL, Origin: track.Origin,
 			DiscNumber: track.DiscNumber, TrackNumber: track.TrackNumber,
 			OriginalTitle: track.Title, OriginalDisc: track.DiscNumber, OriginalTrack: track.TrackNumber,
 			MatchStatus: model.MusicMatchUnmatched,

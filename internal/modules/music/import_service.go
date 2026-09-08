@@ -118,6 +118,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			}
 			track := AlbumImportDTOTrack{
 				SongID:          stringValue(trackMap["song_id"]),
+				FileID:          stringValue(trackMap["file_id"]),
 				Title:           stringValue(trackMap["title"]),
 				AudioKey:        stringValue(trackMap["audio_key"]),
 				AudioURL:        stringValue(trackMap["audio_url"]),
