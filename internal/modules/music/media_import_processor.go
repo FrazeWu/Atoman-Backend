@@ -907,7 +907,7 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 		}
 		metadata := albumImportFileMetadata(file)
 		metadataTracks = append(metadataTracks, AlbumImportMetadataTrack{
-			Title: file.Title, Artist: stringValue(metadata["artist"]), Album: album,
+			Title: file.Title, Artist: stringValue(metadata["artist"]), Album: album, FileID: file.ID.String(),
 			DiscNumber: normalizedDiscNumber(file.DiscNumber), TrackNumber: file.TrackNumber,
 			DurationSeconds: file.DurationSeconds, Origin: file.RelativePath,
 			AudioKey: file.PlaybackKey, AudioURL: audioURL,
@@ -929,26 +929,34 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 			payload["derived_album_title"] = albumTitle
 		}
 	}
-	result := AlbumImportMetadataResult{
+	rawResult := AlbumImportMetadataResult{
 		AlbumTitle: albumTitle, Tracks: baseMetadataTracks(metadataTracks),
 		MatchStatus: model.MusicMatchUnmatched,
 	}
-	if p.enricher != nil {
-		if enriched, enrichErr := p.enricher.Enrich(ctx, AlbumImportMetadataInput{
-			AlbumTitle: result.AlbumTitle, Artist: artist, Tracks: metadataTracks, LocalLyrics: localLyrics,
-		}); enrichErr == nil {
-			result = enriched
-		} else {
-			log.Printf("WARN: album import metadata enrichment failed: import_id=%s error=%v", sessionID, enrichErr)
-		}
-	} else {
-		for index := range result.Tracks {
-			if lyrics, ok := findLocalLyrics(localLyrics, metadataTracks[index]); ok {
-				result.Tracks[index].Lyrics = &lyrics
-				result.Tracks[index].LyricsSource = "local"
-			}
+	for index := range rawResult.Tracks {
+		if lyrics, ok := findLocalLyrics(localLyrics, metadataTracks[index]); ok {
+			rawResult.Tracks[index].Lyrics = &lyrics
+			rawResult.Tracks[index].LyricsSource = "local"
 		}
 	}
+	if err := p.persistDerivedMetadataResult(ctx, &session, payload, files, rawResult); err != nil {
+		return err
+	}
+	if p.enricher == nil {
+		return nil
+	}
+
+	result, enrichErr := p.enricher.Enrich(ctx, AlbumImportMetadataInput{
+		AlbumTitle: rawResult.AlbumTitle, Artist: artist, Tracks: metadataTracks, LocalLyrics: localLyrics,
+	})
+	if enrichErr != nil {
+		log.Printf("WARN: album import metadata enrichment failed: import_id=%s error=%v", sessionID, enrichErr)
+		return nil
+	}
+	return p.persistDerivedMetadataResult(ctx, &session, payload, files, result)
+}
+
+func (p *MediaImportProcessor) persistDerivedMetadataResult(ctx context.Context, session *model.AlbumImportSession, payload map[string]any, files []model.AlbumImportFile, result AlbumImportMetadataResult) error {
 	derivedTracks := make([]map[string]any, 0, len(result.Tracks))
 	for _, track := range result.Tracks {
 		derived := map[string]any{
@@ -959,10 +967,14 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 			"match_external_id": track.MatchExternalID, "match_source_url": track.MatchSourceURL,
 			"match_confidence": track.MatchConfidence,
 		}
-		for _, file := range files {
-			if file.PlaybackKey == track.AudioKey {
-				derived["file_id"] = file.ID.String()
-				break
+		if track.FileID != "" {
+			derived["file_id"] = track.FileID
+		} else {
+			for _, file := range files {
+				if file.PlaybackKey == track.AudioKey {
+					derived["file_id"] = file.ID.String()
+					break
+				}
 			}
 		}
 		if track.Lyrics != nil {
@@ -1010,7 +1022,7 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	return p.db.WithContext(ctx).Model(&session).Update("payload_json", string(encoded)).Error
+	return p.db.WithContext(ctx).Model(session).Update("payload_json", string(encoded)).Error
 }
 
 func albumImportFileAlbum(file model.AlbumImportFile) string {

@@ -159,6 +159,7 @@ type CompleteAlbumImportMultipartPartInput struct {
 
 type AlbumImportDTOTrack struct {
 	SongID          string                         `json:"songId"`
+	FileID          string                         `json:"fileId"`
 	Title           string                         `json:"title"`
 	AudioKey        string                         `json:"audioKey"`
 	AudioURL        string                         `json:"audioUrl"`
