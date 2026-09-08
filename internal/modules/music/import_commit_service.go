@@ -337,7 +337,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		var existingSongs []model.Song
 		existingSongsByID := map[uuid.UUID]*model.Song{}
 		if isRepair {
-			if err := tx.Where("album_id = ?", album.ID).Order("disc_number ASC, track_number ASC, created_at ASC").Find(&existingSongs).Error; err != nil {
+			if err := tx.Unscoped().Where("album_id = ?", album.ID).Order("disc_number ASC, track_number ASC, created_at ASC").Find(&existingSongs).Error; err != nil {
 				return err
 			}
 			for index := range existingSongs {
@@ -364,16 +364,23 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 					return apperr.BadRequest("validation.invalid_request", "duplicate song id")
 				}
 				seenSongIDs[songID] = true
+			} else if isRepair {
+				existingSong = findRepairSong(existingSongs, seenSongIDs, track)
+				if existingSong != nil {
+					seenSongIDs[existingSong.ID] = true
+				}
 			}
 			if existingSong != nil {
 				song := *existingSong
-				if strings.TrimSpace(song.AudioURL) == "" {
+				if strings.TrimSpace(song.AudioURL) == "" && audioURL == "" {
 					return apperr.BadRequest("validation.invalid_request", "every track must have processed audio")
 				}
+				song.DeletedAt = gorm.DeletedAt{}
 				song.Title = strings.TrimSpace(track.Title)
 				song.TrackNumber = track.TrackNumber
 				song.DiscNumber = normalizedDiscNumber(track.DiscNumber)
 				song.Status = "open"
+				song.LifecycleStatus = model.MusicLifecycleActive
 				song.ReleaseDate = album.ReleaseDate
 				song.ReleaseDatePrecision = album.ReleaseDatePrecision
 				song.MetadataManualOverride = song.MetadataManualOverride || matchManualOverride
@@ -397,7 +404,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 					}
 				}
 				applySongAudioMetadata(&song, metadata)
-				if err := tx.Save(&song).Error; err != nil {
+				if err := tx.Unscoped().Save(&song).Error; err != nil {
 					return err
 				}
 				if err := upsertMusicMatchRecord(tx, "song", song.ID, matchProvider, matchExternalID, matchSourceURL, matchStatus, matchConfidence, song.MetadataManualOverride, map[string]any{
@@ -909,6 +916,44 @@ func (s *Service) syncExternalImportTarget(session model.AlbumImportSession) err
 	return s.db.Model(&model.MusicExternalImport{}).
 		Where("import_session_id = ?", session.ID).
 		Updates(updates).Error
+}
+
+func findRepairSong(existingSongs []model.Song, seenSongIDs map[uuid.UUID]bool, track AlbumImportTrackPayload) *model.Song {
+	discNumber := normalizedDiscNumber(track.DiscNumber)
+	if track.TrackNumber > 0 {
+		var positionMatches []*model.Song
+		for index := range existingSongs {
+			song := &existingSongs[index]
+			if seenSongIDs[song.ID] || song.DeletedAt.Valid || song.Status == "closed" || song.LifecycleStatus == model.MusicLifecycleRetired {
+				continue
+			}
+			if normalizedDiscNumber(song.DiscNumber) == discNumber && song.TrackNumber == track.TrackNumber {
+				positionMatches = append(positionMatches, song)
+			}
+		}
+		if len(positionMatches) == 1 {
+			return positionMatches[0]
+		}
+	}
+
+	title := strings.TrimSpace(track.Title)
+	if title == "" {
+		return nil
+	}
+	var titleMatches []*model.Song
+	for index := range existingSongs {
+		song := &existingSongs[index]
+		if seenSongIDs[song.ID] || song.DeletedAt.Valid || song.Status == "closed" || song.LifecycleStatus == model.MusicLifecycleRetired {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(song.Title), title) {
+			titleMatches = append(titleMatches, song)
+		}
+	}
+	if len(titleMatches) == 1 {
+		return titleMatches[0]
+	}
+	return nil
 }
 
 func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importID uuid.UUID) (string, string, string, error) {
