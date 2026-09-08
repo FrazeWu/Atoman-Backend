@@ -39,6 +39,29 @@ func (h *Handler) searchMusicTags(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, tags)
 }
 
+// getMusicTag godoc
+// @Summary 获取公共音乐标签详情
+// @Description 根据标签 ID 获取标签名称和标签类别。
+// @Tags music
+// @Produce json
+// @Param tagId path string true "标签 ID"
+// @Success 200 {object} MusicTagOptionDTO
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/music/tags/{tagId} [get]
+func (h *Handler) getMusicTag(c *gin.Context) {
+	tagID, err := parseMusicID(c.Param("tagId"), "tagId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	tag, err := h.service.GetMusicTag(tagID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, tag)
+}
+
 // listSongTags godoc
 // @Summary 获取歌曲标签
 // @Tags music

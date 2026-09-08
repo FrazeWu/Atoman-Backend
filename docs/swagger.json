@@ -19846,6 +19846,41 @@
                 }
             }
         },
+        "/api/v1/music/tags/{tagId}": {
+            "get": {
+                "description": "根据标签 ID 获取标签名称和标签类别。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取公共音乐标签详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "标签 ID",
+                        "name": "tagId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicTagOptionDTO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/uploads": {
             "post": {
                 "security": [

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"atoman/internal/model"
+
+	"github.com/google/uuid"
 )
 
 func TestMusicTagsSupportSongAlbumKindsAndVotes(t *testing.T) {
@@ -115,5 +117,39 @@ func TestSearchMusicTagsFiltersByKindAndQuery(t *testing.T) {
 	}
 	if len(payload.Data) != 1 || payload.Data[0].Kind != model.MusicTagKindType {
 		t.Fatalf("expected one type tag, got %#v", payload.Data)
+	}
+}
+
+func TestGetMusicTagReturnsPublicTagDetails(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	tag := model.MusicTag{
+		Name:           "治愈",
+		NormalizedName: "治愈",
+		Kind:           model.MusicTagKindMood,
+		CreatedBy:      user.ID,
+	}
+	if err := db.Create(&tag).Error; err != nil {
+		t.Fatalf("create tag: %v", err)
+	}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodGet,
+		"/api/v1/music/tags/"+tag.ID.String(), "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected tag detail 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data MusicTagOptionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode tag detail response: %v", err)
+	}
+	if payload.Data.ID != tag.ID || payload.Data.Name != tag.Name || payload.Data.Kind != tag.Kind {
+		t.Fatalf("unexpected tag detail: %#v", payload.Data)
+	}
+
+	missing := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodGet,
+		"/api/v1/music/tags/"+uuid.NewString(), "")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("expected missing tag 404, got %d: %s", missing.Code, missing.Body.String())
 	}
 }

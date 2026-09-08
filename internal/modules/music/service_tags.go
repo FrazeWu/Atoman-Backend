@@ -68,6 +68,17 @@ func (s *Service) SearchMusicTags(kind, rawQuery string) ([]MusicTagOptionDTO, e
 	return result, nil
 }
 
+func (s *Service) GetMusicTag(tagID uuid.UUID) (MusicTagOptionDTO, error) {
+	var tag model.MusicTag
+	if err := s.db.Select("id, name, kind").First(&tag, "id = ?", tagID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return MusicTagOptionDTO{}, apperr.NotFound("music.tag_not_found", "Tag not found")
+		}
+		return MusicTagOptionDTO{}, err
+	}
+	return MusicTagOptionDTO{ID: tag.ID, Name: tag.Name, Kind: tag.Kind}, nil
+}
+
 func (s *Service) validateMusicTagEntity(user *authctx.CurrentUser, entityType string, entityID uuid.UUID) error {
 	switch entityType {
 	case musicTagEntitySong:
