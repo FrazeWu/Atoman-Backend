@@ -43,21 +43,7 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 		playbackURLPrefix = strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
 	}
 	processor := NewMediaImportProcessor(db, mediaStore, NewSystemMediaCommandRunner(), playbackURLPrefix)
-	userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT"))
-	discogsKey := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_KEY"))
-	discogsSecret := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_SECRET"))
-	if userAgent != "" || (discogsKey != "" && discogsSecret != "") {
-		if userAgent == "" {
-			userAgent = "Atoman/1.0 (https://www.atoman.org)"
-		}
-		metadataEnricher := NewExternalAlbumMetadataEnricher(
-			&http.Client{Timeout: 10 * time.Second},
-			envOrDefault("MUSICBRAINZ_BASE_URL", "https://musicbrainz.org"),
-			envOrDefault("COVER_ART_ARCHIVE_BASE_URL", "https://coverartarchive.org"),
-			envOrDefault("LRCLIB_BASE_URL", "https://lrclib.net"),
-			userAgent,
-		)
-		metadataEnricher.WithDiscogs(envOrDefault("DISCOGS_BASE_URL", "https://api.discogs.com"), discogsKey, discogsSecret)
+	if metadataEnricher := newImportWorkerMetadataEnricher(); metadataEnricher != nil {
 		processor.WithMetadataEnricher(metadataEnricher)
 	} else {
 		log.Println("music metadata enrichment disabled: MUSICBRAINZ_USER_AGENT and Discogs credentials are empty")
@@ -118,6 +104,30 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 	}()
 
 	return done
+}
+
+func newImportWorkerMetadataEnricher() *ExternalAlbumMetadataEnricher {
+	userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT"))
+	discogsKey := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_KEY"))
+	discogsSecret := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_SECRET"))
+	if userAgent == "" && (discogsKey == "" || discogsSecret == "") {
+		return nil
+	}
+	if userAgent == "" {
+		userAgent = "Atoman/1.0 (https://www.atoman.org)"
+	}
+
+	return NewExternalAlbumMetadataEnricher(
+		&http.Client{Timeout: 10 * time.Second},
+		envOrDefault("MUSICBRAINZ_BASE_URL", "https://musicbrainz.org"),
+		envOrDefault("COVER_ART_ARCHIVE_BASE_URL", "https://coverartarchive.org"),
+		envOrDefault("LRCLIB_BASE_URL", "https://lrclib.net"),
+		userAgent,
+	).WithDiscogs(
+		envOrDefault("DISCOGS_BASE_URL", "https://api.discogs.com"),
+		discogsKey,
+		discogsSecret,
+	).WithDiscogsFirst()
 }
 
 func envOrDefault(key, fallback string) string {
