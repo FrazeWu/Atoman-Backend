@@ -16753,6 +16753,13 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: 是否已读
+        enum:
+        - "true"
+        - "false"
+        in: query
+        name: is_read
+        type: string
       produces:
       - application/json
       responses:

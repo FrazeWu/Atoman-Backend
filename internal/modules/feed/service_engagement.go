@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (s *Service) MarkRead(user authctx.CurrentUser, ids []uuid.UUID) error {
@@ -59,7 +60,10 @@ func (s *Service) MarkSubscriptionRead(user authctx.CurrentUser, subscriptionID 
 	if err != nil {
 		return err
 	}
-	return s.MarkShortNotesRead(user, shortNoteIDs)
+	if err := s.MarkShortNotesRead(user, shortNoteIDs); err != nil {
+		return err
+	}
+	return s.markSubscribedInternalContentRead(user, &subscriptionID)
 }
 
 func (s *Service) MarkSubscriptionUnread(user authctx.CurrentUser, subscriptionID uuid.UUID) error {
@@ -118,7 +122,7 @@ func (s *Service) MarkAllRead(user authctx.CurrentUser) error {
 		return err
 	}
 	if !s.db.Migrator().HasTable(&model.ShortNoteRead{}) {
-		return nil
+		return s.markSubscribedInternalContentRead(user, nil)
 	}
 	authorIDs, err := s.subscribedShortNoteAuthorIDs(user.ID)
 	if err != nil {
@@ -132,7 +136,123 @@ func (s *Service) MarkAllRead(user authctx.CurrentUser) error {
 	for _, note := range notes {
 		noteIDs = append(noteIDs, note.ID)
 	}
-	return s.MarkShortNotesRead(user, noteIDs)
+	if err := s.MarkShortNotesRead(user, noteIDs); err != nil {
+		return err
+	}
+	return s.markSubscribedInternalContentRead(user, nil)
+}
+
+func (s *Service) markSubscribedInternalContentRead(user authctx.CurrentUser, subscriptionID *uuid.UUID) error {
+	if user.ID == uuid.Nil || !s.db.Migrator().HasTable(&model.ContentLifecycleEvent{}) {
+		return nil
+	}
+
+	var subscriptions []model.Subscription
+	query := s.db.Preload("FeedSource").Where("user_id = ?", user.ID)
+	if subscriptionID != nil {
+		query = query.Where("id = ?", *subscriptionID)
+	}
+	if err := query.Find(&subscriptions).Error; err != nil {
+		return err
+	}
+	userIDs := make([]uuid.UUID, 0)
+	channelIDs := make([]uuid.UUID, 0)
+	collectionIDs := make([]uuid.UUID, 0)
+	for _, subscription := range subscriptions {
+		source := subscription.FeedSource
+		if source == nil || source.SourceID == nil {
+			continue
+		}
+		switch source.SourceType {
+		case "internal_user":
+			userIDs = append(userIDs, *source.SourceID)
+		case "internal_channel":
+			channelIDs = append(channelIDs, *source.SourceID)
+		case "internal_collection":
+			collectionIDs = append(collectionIDs, *source.SourceID)
+		}
+	}
+	userIDs = dedupeUUIDs(userIDs)
+	channelIDs = dedupeUUIDs(channelIDs)
+	collectionIDs = dedupeUUIDs(collectionIDs)
+
+	type readTarget struct {
+		module    string
+		contentID uuid.UUID
+		channelID uuid.UUID
+	}
+	targets := make(map[string]readTarget)
+	addTarget := func(module string, contentID uuid.UUID, channelID *uuid.UUID) {
+		if contentID == uuid.Nil || channelID == nil || *channelID == uuid.Nil {
+			return
+		}
+		key := module + ":" + contentID.String()
+		targets[key] = readTarget{module: module, contentID: contentID, channelID: *channelID}
+	}
+
+	for _, contentType := range []string{"blog", "podcast"} {
+		userPosts, err := s.repo.ListPublishedPostsByUserIDs(userIDs, contentType)
+		if err != nil {
+			return err
+		}
+		channelPosts, err := s.repo.ListPublishedPostsByChannelIDs(channelIDs, contentType)
+		if err != nil {
+			return err
+		}
+		collectionPosts, err := s.repo.ListPublishedPostsByCollectionIDs(collectionIDs, contentType)
+		if err != nil {
+			return err
+		}
+		posts := dedupePosts(append(append(userPosts, channelPosts...), collectionPosts...))
+		if contentType == "blog" {
+			for _, post := range posts {
+				addTarget("blog", post.ID, post.ChannelID)
+			}
+			continue
+		}
+		postIDs := make([]uuid.UUID, 0, len(posts))
+		for _, post := range posts {
+			postIDs = append(postIDs, post.ID)
+		}
+		episodes, err := s.repo.ListPodcastEpisodesByPostIDs(postIDs)
+		if err != nil {
+			return err
+		}
+		for _, episode := range episodes {
+			channelID := episode.ChannelID
+			addTarget("podcast", episode.ID, &channelID)
+		}
+	}
+
+	videos, err := s.repo.ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs, "video")
+	if err != nil {
+		return err
+	}
+	for _, video := range dedupeVideos(videos) {
+		addTarget("video", video.ID, video.ChannelID)
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	userID := user.ID
+	events := make([]model.ContentLifecycleEvent, 0, len(targets))
+	for _, target := range targets {
+		clientEventID := "subscription-inbox-read-" + uuid.NewSHA1(uuid.Nil, []byte(userID.String()+":"+target.module+":"+target.contentID.String())).String()
+		events = append(events, model.ContentLifecycleEvent{
+			UserID:        &userID,
+			ChannelID:     target.channelID,
+			ContentType:   target.module,
+			ContentID:     target.contentID,
+			Event:         "open",
+			Source:        "subscription_inbox",
+			ClientEventID: clientEventID,
+		})
+	}
+	return s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "client_event_id"}},
+		DoNothing: true,
+	}).Create(&events).Error
 }
 
 func (s *Service) MarkAllUnread(user authctx.CurrentUser) error {

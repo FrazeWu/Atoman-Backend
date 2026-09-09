@@ -66,6 +66,7 @@ type SubscriptionHubUpdatesQuery struct {
 	MembershipID     uuid.UUID
 	Page             int
 	PageSize         int
+	IsRead           *bool
 }
 
 func isSubscriptionHubType(value string) bool {
@@ -873,6 +874,7 @@ func (s *Service) GetSubscriptionHubUpdates(user authctx.CurrentUser, query Subs
 		Page:        normalizedPage(query.Page),
 		PageSize:    normalizedPageSize(query.PageSize),
 		ContentType: subscriptionHubContentType(query.SubscriptionType),
+		IsRead:      query.IsRead,
 	}
 	return s.getSubscriptionHubTimeline(user.ID, selected, feedQuery)
 }
@@ -974,6 +976,10 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 	if err != nil {
 		return nil, 0, err
 	}
+	contentRead, err := s.subscriptionContentReadMap(userID)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	items := make([]TimelineItemDTO, 0, len(posts)+len(videos)+len(feedItems)+len(shortNotes))
 	for i := range shortNotes {
@@ -987,13 +993,13 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 	for i := range posts {
 		if episode, ok := episodeByPostID[posts[i].ID]; ok {
 			episode.Post = &posts[i]
-			items = append(items, TimelineItemDTO{Type: "podcast_episode", PodcastEpisode: &episode, PublishedAt: postTimelinePublishedAt(posts[i])})
+			items = append(items, TimelineItemDTO{Type: "podcast_episode", PodcastEpisode: &episode, PublishedAt: postTimelinePublishedAt(posts[i]), IsRead: contentRead["podcast"][episode.ID]})
 			continue
 		}
-		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], engagementByPostID[posts[i].ID]), PublishedAt: postTimelinePublishedAt(posts[i])})
+		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], engagementByPostID[posts[i].ID]), PublishedAt: postTimelinePublishedAt(posts[i]), IsRead: contentRead["blog"][posts[i].ID]})
 	}
 	for i := range videos {
-		items = append(items, TimelineItemDTO{Type: "video", Video: &videos[i], PublishedAt: videos[i].CreatedAt})
+		items = append(items, TimelineItemDTO{Type: "video", Video: &videos[i], PublishedAt: videos[i].CreatedAt, IsRead: contentRead["video"][videos[i].ID]})
 	}
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{Type: timelineFeedItemType(&feedItems[i]), FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt, IsRead: feedItemClusterRead(feedItems[i], readMap)})
@@ -1003,4 +1009,33 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 	sortTimeline(items)
 	paged, total := paginateTimeline(items, normalizedPage(query.Page), normalizedPageSize(query.PageSize))
 	return paged, total, nil
+}
+
+func (s *Service) subscriptionContentReadMap(userID uuid.UUID) (map[string]map[uuid.UUID]bool, error) {
+	read := map[string]map[uuid.UUID]bool{
+		"blog":    {},
+		"podcast": {},
+		"video":   {},
+	}
+	if userID == uuid.Nil || !s.db.Migrator().HasTable(&model.ContentLifecycleEvent{}) {
+		return read, nil
+	}
+	type readRow struct {
+		ContentType string    `gorm:"column:content_type"`
+		ContentID   uuid.UUID `gorm:"column:content_id"`
+	}
+	var rows []readRow
+	if err := s.db.Model(&model.ContentLifecycleEvent{}).
+		Select("content_type, content_id").
+		Where("user_id = ? AND content_type IN ?", userID, []string{"blog", "podcast", "video"}).
+		Group("content_type, content_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if read[row.ContentType] == nil {
+			read[row.ContentType] = map[uuid.UUID]bool{}
+		}
+		read[row.ContentType][row.ContentID] = true
+	}
+	return read, nil
 }

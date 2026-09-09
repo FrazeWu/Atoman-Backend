@@ -2674,6 +2674,45 @@ func TestMarkAllReadSkipsHiddenFeedSources(t *testing.T) {
 	}
 }
 
+func TestMarkAllReadMarksSubscribedInternalContent(t *testing.T) {
+	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
+	blogPost, episode, video := seedUnifiedChannelUpdates(t, db, creator, channel)
+	testdb.Migrate(t, db, &model.ContentLifecycleEvent{})
+
+	source := model.FeedSource{
+		SourceType: "internal_channel",
+		SourceID:   &channel.ID,
+		Hash:       "mark-all-read-internal-channel",
+		Title:      channel.Name,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create internal source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatalf("create internal subscription: %v", err)
+	}
+
+	if err := service.MarkAllRead(viewer); err != nil {
+		t.Fatalf("mark all read: %v", err)
+	}
+	if err := service.MarkAllRead(viewer); err != nil {
+		t.Fatalf("mark all read repeatedly: %v", err)
+	}
+
+	var events []model.ContentLifecycleEvent
+	if err := db.Where("user_id = ? AND content_id IN ?", viewer.ID, []uuid.UUID{blogPost.ID, episode.ID, video.ID}).Find(&events).Error; err != nil {
+		t.Fatalf("load internal read events: %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("expected read events for blog, podcast, and video, got %d", len(events))
+	}
+	for _, event := range events {
+		if event.Event != "open" || event.Source != "subscription_inbox" {
+			t.Fatalf("unexpected internal read event: %#v", event)
+		}
+	}
+}
+
 func TestRemoveReadingListItemDeletesUserItem(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	var feedItem model.FeedItem

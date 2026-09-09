@@ -80,6 +80,7 @@ func (h *Handler) deleteSubscriptionHubSource(c *gin.Context) {
 // @Param membership_id query string false "订阅叶子 UUID"
 // @Param page query int false "页码"
 // @Param limit query int false "每页数量"
+// @Param is_read query string false "是否已读" Enums(true,false)
 // @Success 200 {object} TimelineListResponseDTO
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
@@ -129,6 +130,13 @@ func subscriptionHubUpdatesQueryFromContext(c *gin.Context) (SubscriptionHubUpda
 	}
 	if query.SubscriptionType == "" {
 		return SubscriptionHubUpdatesQuery{}, apperr.BadRequest("validation.invalid_request", "type is required")
+	}
+	if raw := strings.TrimSpace(c.Query("is_read")); raw != "" {
+		value := raw == "true"
+		query.IsRead = &value
+	} else if c.Query("unread_only") == "true" {
+		value := false
+		query.IsRead = &value
 	}
 	return query, nil
 }

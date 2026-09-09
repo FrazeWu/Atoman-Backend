@@ -296,6 +296,10 @@ func (s *Service) getSubscribedBlogFeed(
 	if err != nil {
 		return nil, 0, err
 	}
+	contentRead, err := s.subscriptionContentReadMap(userID)
+	if err != nil {
+		return nil, 0, err
+	}
 	postIDs := make([]uuid.UUID, 0, len(posts))
 	for i := range posts {
 		postIDs = append(postIDs, posts[i].ID)
@@ -314,7 +318,7 @@ func (s *Service) getSubscribedBlogFeed(
 			Type:        "post",
 			Post:        timelinePostDTO(posts[i], engagementByPostID[posts[i].ID]),
 			PublishedAt: postTimelinePublishedAt(posts[i]),
-			IsRead:      false,
+			IsRead:      contentRead["blog"][posts[i].ID],
 		})
 	}
 	for i := range shortNotes {
