@@ -73,6 +73,8 @@ func detectAlbumImportFileRole(fileName string) (string, string, error) {
 	audio := map[string]bool{
 		"mp3": true, "flac": true, "wav": true, "m4a": true, "aac": true, "ogg": true,
 		"opus": true, "aiff": true, "aif": true, "wma": true, "ape": true, "alac": true,
+		"mp4": true, "mov": true, "mkv": true, "webm": true, "avi": true, "m4v": true,
+		"mpg": true, "mpeg": true, "ts": true, "3gp": true,
 	}
 	covers := map[string]bool{
 		"jpg": true, "jpeg": true, "png": true, "webp": true, "avif": true,

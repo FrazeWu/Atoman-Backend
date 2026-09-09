@@ -1190,7 +1190,7 @@ func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.
 }
 
 func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack, filenameTrackHint int, knownDuration float64, rangeSeconds ...float64) error {
-	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,artist,album_artist,albumartist,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", sourcePath)
+	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,artist,album_artist,albumartist,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", sourcePath)
 	if err != nil {
 		return fmt.Errorf("ffprobe %s: %w", file.FileName, err)
 	}
@@ -1215,7 +1215,7 @@ func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID 
 		return fmt.Errorf("ffmpeg %s: %w", file.FileName, err)
 	}
 	if duration <= 0 || taggedTitle == "" || metadata.album == "" || metadata.artist == "" {
-		fallbackProbe, probeErr := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,artist,album_artist,albumartist,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", outputPath)
+		fallbackProbe, probeErr := p.runner.Run(ctx, "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,artist,album_artist,albumartist,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", outputPath)
 		if probeErr == nil {
 			fallback := parseAudioProbe(fallbackProbe)
 			metadata = mergeAudioProbeMetadata(metadata, fallback)
@@ -1446,7 +1446,7 @@ func mergeAudioProbeMetadata(primary, fallback audioProbeMetadata) audioProbeMet
 
 func isAlbumImportMediaExtension(extension string) bool {
 	switch strings.ToLower(extension) {
-	case ".aac", ".aiff", ".ape", ".flac", ".m4a", ".mka", ".mkv", ".mp3", ".mp4", ".ogg", ".oga", ".opus", ".wav", ".webm", ".wma", ".wv", ".cue", ".lrc", ".txt":
+	case ".aac", ".aiff", ".ape", ".avi", ".flac", ".m4a", ".m4v", ".mka", ".mkv", ".mov", ".mp3", ".mp4", ".mpg", ".mpeg", ".ogg", ".oga", ".opus", ".ts", ".wav", ".webm", ".wma", ".wv", ".3gp", ".cue", ".lrc", ".txt":
 		return true
 	default:
 		return false

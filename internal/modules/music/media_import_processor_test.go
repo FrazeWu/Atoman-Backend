@@ -773,6 +773,13 @@ func TestAlbumImportTrackInfoFromFileNameIsConservative(t *testing.T) {
 		{name: "03. Outro.flac", wantTitle: "Outro", wantTrack: 3},
 		{name: "01 Hidden Track.flac", wantTitle: "Hidden Track", wantTrack: 1},
 		{name: "03. A.D.H.D.mp3", wantTitle: "A.D.H.D", wantTrack: 3},
+		{name: "04 - Live.mov", wantTitle: "Live", wantTrack: 4},
+		{name: "05 - Session.avi", wantTitle: "Session", wantTrack: 5},
+		{name: "06 - Demo.m4v", wantTitle: "Demo", wantTrack: 6},
+		{name: "07 - Broadcast.mpg", wantTitle: "Broadcast", wantTrack: 7},
+		{name: "08 - Concert.mpeg", wantTitle: "Concert", wantTrack: 8},
+		{name: "09 - Tape.ts", wantTitle: "Tape", wantTrack: 9},
+		{name: "10 - Clip.3gp", wantTitle: "Clip", wantTrack: 10},
 		{name: "99 Problems.flac", wantTitle: "99 Problems", wantTrack: 99},
 		{name: "1979.flac", wantTitle: "1979"},
 	}
@@ -794,19 +801,19 @@ func TestTitleFromFileNameForTrackUsesArchiveSequenceForUnpaddedNumbers(t *testi
 		t.Fatalf("expected unmatched numeric title to be preserved, got %q", got)
 	}
 }
-func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T) {
+func TestMediaImportProcessorTranscodesUploadedVideoAudioStreamAndUpdatesFile(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatal(err)
 	}
-	file := model.AlbumImportFile{ImportID: session.ID, RelativePath: "Disc 1/01 - First.flac", FileName: "01 - First.flac", Role: AlbumImportFileRoleAudio, DetectedFormat: "flac", SourceKey: "source/first.flac", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+	file := model.AlbumImportFile{ImportID: session.ID, RelativePath: "Disc 1/01 - First.mp4", FileName: "01 - First.mp4", Role: AlbumImportFileRoleAudio, DetectedFormat: "mp4", SourceKey: "source/first.mp4", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
 	if err := db.Create(&file).Error; err != nil {
 		t.Fatal(err)
 	}
 	job := model.AlbumImportJob{ImportID: session.ID}
 	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe", "7zz": "/bin/7zz"}}
-	store := &fakeMediaStore{objects: map[string][]byte{file.SourceKey: []byte("audio")}, puts: map[string][]byte{}}
+	store := &fakeMediaStore{objects: map[string][]byte{file.SourceKey: []byte("video")}, puts: map[string][]byte{}}
 	processor := NewMediaImportProcessor(db, store, runner, "https://play.example/")
 
 	if err := processor.Process(context.Background(), job, func() error { return nil }); err != nil {
@@ -822,7 +829,7 @@ func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T)
 	if len(store.puts) != 1 || len(store.puts[got.PlaybackKey]) == 0 {
 		t.Fatalf("expected playback object at %q, got %#v", got.PlaybackKey, store.puts)
 	}
-	if len(runner.runs) != 4 || runner.runs[0][0] != "ffprobe" || runner.runs[1][0] != "ffmpeg" || !containsMediaArg(runner.runs[1], "320k") || runner.runs[2][0] != "ffprobe" || runner.runs[3][0] != "ffmpeg" {
+	if len(runner.runs) != 4 || runner.runs[0][0] != "ffprobe" || !containsMediaArg(runner.runs[0], "a:0") || runner.runs[1][0] != "ffmpeg" || !containsMediaArg(runner.runs[1], "0:a:0") || !containsMediaArg(runner.runs[1], "320k") || runner.runs[2][0] != "ffprobe" || runner.runs[3][0] != "ffmpeg" {
 		t.Fatalf("expected source probe, 320k transcode, playback probe, then waveform extraction, got %#v", runner.runs)
 	}
 	var storedSession model.AlbumImportSession
@@ -846,6 +853,45 @@ func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T)
 	}
 	if ffmpegs != 2 || len(store.puts) != 1 {
 		t.Fatalf("completed uploaded audio was reprocessed: ffmpegs=%d objects=%d", ffmpegs, len(store.puts))
+	}
+}
+
+func TestMediaImportProcessorTranscodesMultipleVideoSourcesIntoMultipleTracks(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	files := []model.AlbumImportFile{
+		{ImportID: session.ID, RelativePath: "01 - Intro.mp4", FileName: "01 - Intro.mp4", Role: AlbumImportFileRoleAudio, DetectedFormat: "mp4", SourceKey: "source/intro.mp4", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending},
+		{ImportID: session.ID, RelativePath: "02 - Song.mkv", FileName: "02 - Song.mkv", Role: AlbumImportFileRoleAudio, DetectedFormat: "mkv", SourceKey: "source/song.mkv", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending},
+	}
+	for index := range files {
+		if err := db.Create(&files[index]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	store := &fakeMediaStore{objects: map[string][]byte{
+		"source/intro.mp4": []byte("video-1"),
+		"source/song.mkv":  []byte("video-2"),
+	}, puts: map[string][]byte{}}
+	processor := NewMediaImportProcessor(db, store, runner, "")
+
+	if err := processor.Process(context.Background(), model.AlbumImportJob{ImportID: session.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var processed []model.AlbumImportFile
+	if err := db.Where("import_id = ? AND role = ?", session.ID, AlbumImportFileRoleAudio).Order("relative_path").Find(&processed).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(processed) != 2 {
+		t.Fatalf("expected two processed video tracks, got %#v", processed)
+	}
+	for _, file := range processed {
+		if file.ProcessingStatus != "completed" || file.PlaybackKey == "" {
+			t.Fatalf("video source was not converted to playback audio: %#v", file)
+		}
 	}
 }
 

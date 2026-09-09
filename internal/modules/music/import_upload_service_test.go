@@ -169,6 +169,10 @@ func TestDetectAlbumImportFileRoleSupportsConfiguredWhitelist(t *testing.T) {
 		"m4a": AlbumImportFileRoleAudio, "aac": AlbumImportFileRoleAudio, "ogg": AlbumImportFileRoleAudio,
 		"opus": AlbumImportFileRoleAudio, "aiff": AlbumImportFileRoleAudio, "aif": AlbumImportFileRoleAudio,
 		"wma": AlbumImportFileRoleAudio, "ape": AlbumImportFileRoleAudio, "alac": AlbumImportFileRoleAudio,
+		"mp4": AlbumImportFileRoleAudio, "mov": AlbumImportFileRoleAudio, "mkv": AlbumImportFileRoleAudio,
+		"webm": AlbumImportFileRoleAudio, "avi": AlbumImportFileRoleAudio, "m4v": AlbumImportFileRoleAudio,
+		"mpg": AlbumImportFileRoleAudio, "mpeg": AlbumImportFileRoleAudio, "ts": AlbumImportFileRoleAudio,
+		"3gp": AlbumImportFileRoleAudio,
 		"cue": AlbumImportFileRoleCue,
 		"lrc": AlbumImportFileRoleLyrics, "txt": AlbumImportFileRoleLyrics,
 		"jpg": AlbumImportFileRoleCover, "jpeg": AlbumImportFileRoleCover, "png": AlbumImportFileRoleCover,
@@ -189,6 +193,24 @@ func TestDetectAlbumImportFileRoleSupportsConfiguredWhitelist(t *testing.T) {
 	for _, extension := range []string{"tbz2", "txz"} {
 		if _, _, err := detectAlbumImportFileRole("album." + extension); err == nil {
 			t.Fatalf("expected unconfirmed alias .%s to fail", extension)
+		}
+	}
+}
+
+func TestNormalizeAlbumImportFilesAcceptsMultipleVideoSourcesAsTracks(t *testing.T) {
+	files, inputMode, err := normalizeAlbumImportFiles([]AlbumImportFileInput{
+		albumImportFileInput("01 - Intro.mp4", 1024),
+		albumImportFileInput("02 - Song.mkv", 2048),
+	}, albumImportUploadLimitsFromEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inputMode != AlbumImportInputModeFiles || len(files) != 2 {
+		t.Fatalf("unexpected normalized videos: mode=%q files=%#v", inputMode, files)
+	}
+	for index, file := range files {
+		if file.Role != AlbumImportFileRoleAudio {
+			t.Fatalf("video %d role = %q", index, file.Role)
 		}
 	}
 }
