@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/authsession"
 	"atoman/internal/testdb"
 
@@ -72,6 +73,48 @@ func TestUserRelationsRespectPrivacyAndIncludeChannelSubscriptions(t *testing.T)
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/"+target.UUID.String()+"/following", nil))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected private relations to return 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestFollowUserRejectsNewFollowToPrivateProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.UserSettings{}, &model.Follow{})
+	actor := model.User{Username: "private-follow-actor", Email: "private-follow-actor@example.com", Password: "hash", Role: "user", IsActive: true}
+	target := model.User{Username: "private-follow-target", Email: "private-follow-target@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&actor).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.UserSettings{UserID: target.UUID, PrivateProfile: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: actor.UUID, Username: actor.Username, Role: authctx.RoleUser})
+		c.Next()
+	})
+	r.POST("/users/:id/follow", FollowUser(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/users/"+target.UUID.String()+"/follow", nil))
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	var follow model.Follow
+	if err := db.Where("follower_id = ? AND following_id = ?", actor.UUID, target.UUID).First(&follow).Error; err == nil {
+		t.Fatal("private profile should not create a new follow")
+	}
+	if err := db.Create(&model.Follow{FollowerID: actor.UUID, FollowingID: target.UUID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/users/"+target.UUID.String()+"/follow", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("existing relationship should remain valid, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
