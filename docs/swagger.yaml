@@ -4525,6 +4525,8 @@ definitions:
         type: string
       lifecycle_status:
         type: string
+      metadata_manual_override:
+        type: boolean
       musicbrainz_matched:
         type: boolean
       other_versions:
@@ -5747,7 +5749,11 @@ definitions:
         items:
           $ref: '#/definitions/model.Artist'
         type: array
+      audio_checked_at:
+        type: string
       audio_source:
+        type: string
+      audio_status:
         type: string
       audio_url:
         type: string
@@ -5777,6 +5783,8 @@ definitions:
         type: string
       lyrics:
         type: string
+      metadata_manual_override:
+        type: boolean
       play_count:
         type: integer
       playback_bitrate_kbps:
@@ -6365,6 +6373,12 @@ definitions:
         type: string
       lastSyncedAt:
         type: string
+      metadataExternalId:
+        type: string
+      metadataMatchConfidence:
+        type: number
+      metadataMatchStatus:
+        type: string
       metadataMatched:
         type: boolean
       metadataSource:
@@ -6402,12 +6416,30 @@ definitions:
         type: string
       discNumber:
         type: integer
+      fileId:
+        type: string
       lyrics:
         $ref: '#/definitions/music.AlbumImportTrackLyricsPayload'
       lyricsSource:
         type: string
+      matchConfidence:
+        type: number
+      matchExternalId:
+        type: string
+      matchProvider:
+        type: string
+      matchSourceUrl:
+        type: string
+      matchStatus:
+        type: string
       origin:
         type: string
+      originalDiscNumber:
+        type: integer
+      originalTitle:
+        type: string
+      originalTrackNumber:
+        type: integer
       songId:
         type: string
       title:
@@ -6547,18 +6579,42 @@ definitions:
     type: object
   music.AlbumImportTrackPayload:
     properties:
+      audio_asset_id:
+        type: string
       audio_key:
         type: string
       disc_number:
         type: integer
+      file_id:
+        type: string
       lyrics:
         $ref: '#/definitions/music.AlbumImportTrackLyricsPayload'
       lyrics_source:
         type: string
+      match_confidence:
+        type: number
+      match_external_id:
+        type: string
+      match_provider:
+        type: string
+      match_source_url:
+        type: string
+      match_status:
+        type: string
+      original_disc_number:
+        type: integer
+      original_title:
+        type: string
+      original_track_number:
+        type: integer
+      sequence_customized:
+        type: boolean
       song_id:
         type: string
       title:
         type: string
+      title_customized:
+        type: boolean
       track_number:
         type: integer
     type: object
@@ -6758,6 +6814,10 @@ definitions:
       artists:
         items:
           $ref: '#/definitions/music.CommitAlbumImportArtistInput'
+        type: array
+      deleted_import_track_keys:
+        items:
+          type: string
         type: array
     type: object
   music.CompleteAlbumImportMultipartPartInput:
@@ -8426,13 +8486,13 @@ definitions:
         type: boolean
       channel_id:
         type: string
-      editor_mode:
-        type: string
       default_collection_id:
         type: string
       default_publish_status:
         type: string
       default_visibility:
+        type: string
+      editor_mode:
         type: string
     type: object
   studio.SettingsResponse:
@@ -8441,13 +8501,13 @@ definitions:
         type: boolean
       channel_id:
         type: string
-      editor_mode:
-        type: string
       default_collection_id:
         type: string
       default_publish_status:
         type: string
       default_visibility:
+        type: string
+      editor_mode:
         type: string
       module:
         $ref: '#/definitions/studio.Module'
@@ -25411,6 +25471,10 @@ paths:
             $ref: '#/definitions/handlers.MessageResponse'
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "404":

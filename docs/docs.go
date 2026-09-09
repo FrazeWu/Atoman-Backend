@@ -26611,6 +26611,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -34944,6 +34950,9 @@ const docTemplate = `{
                 "lifecycle_status": {
                     "type": "string"
                 },
+                "metadata_manual_override": {
+                    "type": "boolean"
+                },
                 "musicbrainz_matched": {
                     "type": "boolean"
                 },
@@ -36778,7 +36787,13 @@ const docTemplate = `{
                         "$ref": "#/definitions/model.Artist"
                     }
                 },
+                "audio_checked_at": {
+                    "type": "string"
+                },
                 "audio_source": {
+                    "type": "string"
+                },
+                "audio_status": {
                     "type": "string"
                 },
                 "audio_url": {
@@ -36822,6 +36837,9 @@ const docTemplate = `{
                 },
                 "lyrics": {
                     "type": "string"
+                },
+                "metadata_manual_override": {
+                    "type": "boolean"
                 },
                 "play_count": {
                     "type": "integer"
@@ -37705,6 +37723,15 @@ const docTemplate = `{
                 "lastSyncedAt": {
                     "type": "string"
                 },
+                "metadataExternalId": {
+                    "type": "string"
+                },
+                "metadataMatchConfidence": {
+                    "type": "number"
+                },
+                "metadataMatchStatus": {
+                    "type": "string"
+                },
                 "metadataMatched": {
                     "type": "boolean"
                 },
@@ -37761,14 +37788,41 @@ const docTemplate = `{
                 "discNumber": {
                     "type": "integer"
                 },
+                "fileId": {
+                    "type": "string"
+                },
                 "lyrics": {
                     "$ref": "#/definitions/music.AlbumImportTrackLyricsPayload"
                 },
                 "lyricsSource": {
                     "type": "string"
                 },
+                "matchConfidence": {
+                    "type": "number"
+                },
+                "matchExternalId": {
+                    "type": "string"
+                },
+                "matchProvider": {
+                    "type": "string"
+                },
+                "matchSourceUrl": {
+                    "type": "string"
+                },
+                "matchStatus": {
+                    "type": "string"
+                },
                 "origin": {
                     "type": "string"
+                },
+                "originalDiscNumber": {
+                    "type": "integer"
+                },
+                "originalTitle": {
+                    "type": "string"
+                },
+                "originalTrackNumber": {
+                    "type": "integer"
                 },
                 "songId": {
                     "type": "string"
@@ -37985,11 +38039,17 @@ const docTemplate = `{
         "music.AlbumImportTrackPayload": {
             "type": "object",
             "properties": {
+                "audio_asset_id": {
+                    "type": "string"
+                },
                 "audio_key": {
                     "type": "string"
                 },
                 "disc_number": {
                     "type": "integer"
+                },
+                "file_id": {
+                    "type": "string"
                 },
                 "lyrics": {
                     "$ref": "#/definitions/music.AlbumImportTrackLyricsPayload"
@@ -37997,11 +38057,41 @@ const docTemplate = `{
                 "lyrics_source": {
                     "type": "string"
                 },
+                "match_confidence": {
+                    "type": "number"
+                },
+                "match_external_id": {
+                    "type": "string"
+                },
+                "match_provider": {
+                    "type": "string"
+                },
+                "match_source_url": {
+                    "type": "string"
+                },
+                "match_status": {
+                    "type": "string"
+                },
+                "original_disc_number": {
+                    "type": "integer"
+                },
+                "original_title": {
+                    "type": "string"
+                },
+                "original_track_number": {
+                    "type": "integer"
+                },
+                "sequence_customized": {
+                    "type": "boolean"
+                },
                 "song_id": {
                     "type": "string"
                 },
                 "title": {
                     "type": "string"
+                },
+                "title_customized": {
+                    "type": "boolean"
                 },
                 "track_number": {
                     "type": "integer"
@@ -38305,6 +38395,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/music.CommitAlbumImportArtistInput"
+                    }
+                },
+                "deleted_import_track_keys": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
                     }
                 }
             }
@@ -40861,6 +40957,9 @@ const docTemplate = `{
                 },
                 "default_visibility": {
                     "type": "string"
+                },
+                "editor_mode": {
+                    "type": "string"
                 }
             }
         },
@@ -40880,6 +40979,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "default_visibility": {
+                    "type": "string"
+                },
+                "editor_mode": {
                     "type": "string"
                 },
                 "module": {
