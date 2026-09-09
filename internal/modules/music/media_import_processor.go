@@ -1446,7 +1446,7 @@ func mergeAudioProbeMetadata(primary, fallback audioProbeMetadata) audioProbeMet
 
 func isAlbumImportMediaExtension(extension string) bool {
 	switch strings.ToLower(extension) {
-	case ".aac", ".aiff", ".ape", ".flac", ".m4a", ".mka", ".mkv", ".mp3", ".mp4", ".ogg", ".oga", ".opus", ".wav", ".webm", ".wma", ".wv", ".cue", ".lrc", ".txt":
+	case ".aac", ".aiff", ".ape", ".avi", ".flac", ".m4a", ".m4v", ".mka", ".mkv", ".mov", ".mp3", ".mp4", ".mpg", ".mpeg", ".ogg", ".oga", ".opus", ".ts", ".wav", ".webm", ".wma", ".wv", ".3gp", ".cue", ".lrc", ".txt":
 		return true
 	default:
 		return false

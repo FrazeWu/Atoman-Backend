@@ -773,6 +773,13 @@ func TestAlbumImportTrackInfoFromFileNameIsConservative(t *testing.T) {
 		{name: "03. Outro.flac", wantTitle: "Outro", wantTrack: 3},
 		{name: "01 Hidden Track.flac", wantTitle: "Hidden Track", wantTrack: 1},
 		{name: "03. A.D.H.D.mp3", wantTitle: "A.D.H.D", wantTrack: 3},
+		{name: "04 - Live.mov", wantTitle: "Live", wantTrack: 4},
+		{name: "05 - Session.avi", wantTitle: "Session", wantTrack: 5},
+		{name: "06 - Demo.m4v", wantTitle: "Demo", wantTrack: 6},
+		{name: "07 - Broadcast.mpg", wantTitle: "Broadcast", wantTrack: 7},
+		{name: "08 - Concert.mpeg", wantTitle: "Concert", wantTrack: 8},
+		{name: "09 - Tape.ts", wantTitle: "Tape", wantTrack: 9},
+		{name: "10 - Clip.3gp", wantTitle: "Clip", wantTrack: 10},
 		{name: "99 Problems.flac", wantTitle: "99 Problems", wantTrack: 99},
 		{name: "1979.flac", wantTitle: "1979"},
 	}
