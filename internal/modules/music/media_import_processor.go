@@ -631,10 +631,10 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		case AlbumImportFileRoleLyrics:
 			if raw, readErr := os.ReadFile(path); readErr == nil && len(raw) <= 2*1024*1024 {
 				payload := lyricsPayloadFromFile(path, raw)
-				localLyrics[normalizedLyricName(relative)] = payload
+				mergeLocalLyrics(localLyrics, normalizedLyricName(relative), payload)
 				disc, track := discAndTrackFromPath(relative)
 				if track > 0 {
-					localLyrics[lyricSequenceKey(disc, track)] = payload
+					mergeLocalLyrics(localLyrics, lyricSequenceKey(disc, track), payload)
 				}
 			}
 		}
@@ -1079,10 +1079,10 @@ func (p *MediaImportProcessor) loadUploadedLyrics(ctx context.Context, sessionID
 		_ = reader.Close()
 		if readErr == nil && len(raw) <= 2*1024*1024 {
 			payload := lyricsPayloadFromFile(file.FileName, raw)
-			result[normalizedLyricName(file.RelativePath)] = payload
+			mergeLocalLyrics(result, normalizedLyricName(file.RelativePath), payload)
 			disc, track := discAndTrackFromPath(file.RelativePath)
 			if track > 0 {
-				result[lyricSequenceKey(disc, track)] = payload
+				mergeLocalLyrics(result, lyricSequenceKey(disc, track), payload)
 			}
 			_ = p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
 				"processing_status": "completed", "error_message": "",
@@ -1098,6 +1098,32 @@ func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayloa
 		format = "lrc"
 	}
 	return AlbumImportTrackLyricsPayload{Content: strings.TrimSpace(string(raw)), Format: format, EditSummary: "通过专辑导入添加歌词"}
+}
+
+func mergeLocalLyrics(lyrics map[string]AlbumImportTrackLyricsPayload, key string, candidate AlbumImportTrackLyricsPayload) {
+	key = strings.TrimSpace(key)
+	priority := localLyricsPriority(candidate)
+	if key == "" || priority == 0 {
+		return
+	}
+	current, exists := lyrics[key]
+	if !exists || priority > localLyricsPriority(current) {
+		lyrics[key] = candidate
+	}
+}
+
+func localLyricsPriority(payload AlbumImportTrackLyricsPayload) int {
+	if strings.TrimSpace(payload.Content) == "" {
+		return 0
+	}
+	if !strings.EqualFold(strings.TrimSpace(payload.Format), "lrc") {
+		return 1
+	}
+	lines, err := ParseLyricLines(payload.Content, payload.Translation, "lrc")
+	if err != nil || len(lines) == 0 {
+		return 0
+	}
+	return 2
 }
 
 func majorityMetadataValue(tracks []AlbumImportMetadataTrack, value func(AlbumImportMetadataTrack) string) string {

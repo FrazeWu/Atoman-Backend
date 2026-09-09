@@ -51,6 +51,31 @@ func TestFindLocalLyricsUsesDiscAndTrackBeforeFileName(t *testing.T) {
 	}
 }
 
+func TestMergeLocalLyricsPrefersValidLRCOverPlainText(t *testing.T) {
+	lyrics := map[string]AlbumImportTrackLyricsPayload{}
+	plain := AlbumImportTrackLyricsPayload{Content: "plain lyrics", Format: "plain"}
+	lrc := AlbumImportTrackLyricsPayload{Content: "[00:01.00]timed lyrics", Format: "lrc"}
+	invalidLRC := AlbumImportTrackLyricsPayload{Content: "untimed lyrics", Format: "lrc"}
+
+	mergeLocalLyrics(lyrics, "first song", plain)
+	mergeLocalLyrics(lyrics, "first song", lrc)
+	if got := lyrics["first song"]; got.Format != "lrc" || got.Content != lrc.Content {
+		t.Fatalf("expected valid LRC to replace plain lyrics, got %#v", got)
+	}
+
+	mergeLocalLyrics(lyrics, "first song", plain)
+	if got := lyrics["first song"]; got.Format != "lrc" || got.Content != lrc.Content {
+		t.Fatalf("expected plain lyrics not to replace valid LRC, got %#v", got)
+	}
+
+	lyrics = map[string]AlbumImportTrackLyricsPayload{}
+	mergeLocalLyrics(lyrics, "first song", invalidLRC)
+	mergeLocalLyrics(lyrics, "first song", plain)
+	if got := lyrics["first song"]; got.Format != "plain" || got.Content != plain.Content {
+		t.Fatalf("expected plain lyrics to replace invalid LRC, got %#v", got)
+	}
+}
+
 func TestExternalAlbumMetadataEnricherFallsBackToLRCLIB(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if writeMatchingMusicBrainzRelease(w, r) {
