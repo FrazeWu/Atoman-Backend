@@ -261,11 +261,20 @@ func TestRunMigrationsCleansEmptyLegacyDefaultChannel(t *testing.T) {
 
 func TestCleanupLegacyDefaultChannelsSkipsOrphanedState(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.UserStudioState{})
-	orphanedUserID := uuid.New()
-	channelID := uuid.New()
-	if err := db.Create(&model.UserStudioState{UserID: orphanedUserID, ChannelID: &channelID}).Error; err != nil {
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.UserStudioState{})
+	user := model.User{Username: "deleted-user", Email: "deleted-user@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	channel := model.Channel{UserID: &user.UUID, Name: user.Username, Slug: "deleted-user", Description: "默认合集"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := db.Create(&model.UserStudioState{UserID: user.UUID, ChannelID: &channel.ID}).Error; err != nil {
 		t.Fatalf("create orphaned studio state: %v", err)
+	}
+	if err := db.Delete(&user).Error; err != nil {
+		t.Fatalf("soft-delete user: %v", err)
 	}
 	if err := runMigrations(db); err != nil {
 		t.Fatalf("cleanup orphaned state: %v", err)

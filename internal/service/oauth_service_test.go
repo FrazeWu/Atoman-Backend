@@ -676,9 +676,9 @@ func TestOAuthServiceCompleteProfileCreatesUserWithPasswordAndDefaults(t *testin
 	if err := db.First(&settings, "user_id = ?", completed.User.UUID).Error; err != nil {
 		t.Fatalf("load user settings: %v", err)
 	}
-	var channel model.Channel
-	if err := db.First(&channel, "user_id = ?", completed.User.UUID).Error; err != nil {
-		t.Fatalf("load default channel: %v", err)
+	var channels int64
+	if err := db.Model(&model.Channel{}).Where("user_id = ?", completed.User.UUID).Count(&channels).Error; err != nil || channels != 0 {
+		t.Fatalf("expected OAuth account creation to defer channel creation, got %d err=%v", channels, err)
 	}
 
 	if _, err := svc.CompleteProfile(context.Background(), OAuthCompleteProfileInput{
