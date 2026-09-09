@@ -765,6 +765,115 @@ func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
 	}
 }
 
+func TestCaptureAlbumSnapshotUsesStructuredLyrics(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.SongArtist{},
+		&model.MusicSongLyric{},
+	)
+	actorID := createRevisionTestUser(t, db)
+	album := model.Album{Title: "Structured Album", AlbumType: "album", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	song := model.Song{Title: "Structured Track", AlbumID: &album.ID, Status: "open", AudioURL: "/track.mp3"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	content := "[00:01.00]hello"
+	lyric := model.MusicSongLyric{SongID: song.ID, Content: content, Format: "lrc", Version: 2, UpdatedBy: actorID}
+	if err := db.Create(&lyric).Error; err != nil {
+		t.Fatalf("create structured lyrics: %v", err)
+	}
+
+	raw, err := NewRevisionService(db).captureCurrentSnapshot(db, "album", album.ID)
+	if err != nil {
+		t.Fatalf("capture album snapshot: %v", err)
+	}
+	var snapshot albumRevisionSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatalf("decode album snapshot: %v", err)
+	}
+	if len(snapshot.Songs) != 1 || snapshot.Songs[0].Lyrics != content {
+		t.Fatalf("expected structured lyrics in snapshot, got %#v", snapshot.Songs)
+	}
+}
+
+func TestCreateAlbumRevisionPreservesStructuredLyricsWhenTrackPayloadOmitsLyrics(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.SongArtist{},
+		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.MusicMatchRecord{}, &model.Revision{}, &model.EditConflict{},
+	)
+	actorID := createRevisionTestUser(t, db)
+	album := model.Album{Title: "Before", AlbumType: "album", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	song := model.Song{Title: "Track", AlbumID: &album.ID, Status: "open", AudioURL: "/track.mp3"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	content := "[00:01.00]hello"
+	lyric := model.MusicSongLyric{SongID: song.ID, Content: content, Format: "lrc", Version: 2, UpdatedBy: actorID}
+	if err := db.Create(&lyric).Error; err != nil {
+		t.Fatalf("create structured lyrics: %v", err)
+	}
+	timeMS := 1000
+	if err := db.Create(&model.MusicSongLyricLine{LyricID: lyric.ID, LineKey: "lrc:1000:hello:0", LineIndex: 0, TimeMS: &timeMS, Text: "hello"}).Error; err != nil {
+		t.Fatalf("create structured lyric line: %v", err)
+	}
+	currentSnapshot, err := json.Marshal(albumRevisionSnapshot{
+		Album: &albumRevisionAlbum{ID: album.ID.String(), Title: album.Title, AlbumType: album.AlbumType},
+		Songs: []albumRevisionSong{{ID: song.ID.String(), Title: song.Title, AudioURL: song.AudioURL, Status: song.Status}},
+	})
+	if err != nil {
+		t.Fatalf("marshal current snapshot: %v", err)
+	}
+	current := model.Revision{
+		ContentType: "album", ContentID: album.ID, VersionNumber: 1, ContentSnapshot: currentSnapshot,
+		EditorID: actorID, EditType: "creation", Status: "approved", IsCurrent: true,
+	}
+	if err := db.Create(&current).Error; err != nil {
+		t.Fatalf("create current revision: %v", err)
+	}
+
+	if _, conflicts, err := NewRevisionService(db).CreateRevision(
+		"album", album.ID, actorID, map[string]interface{}{"title": "After"}, "rename", 1, true,
+	); err != nil {
+		t.Fatalf("create album revision: %v", err)
+	} else if len(conflicts) != 0 {
+		t.Fatalf("unexpected conflicts: %#v", conflicts)
+	}
+
+	var currentLyric model.MusicSongLyric
+	if err := db.First(&currentLyric, "song_id = ?", song.ID).Error; err != nil {
+		t.Fatalf("load structured lyrics: %v", err)
+	}
+	if currentLyric.Content != content || currentLyric.Format != "lrc" {
+		t.Fatalf("album revision cleared structured lyrics: %#v", currentLyric)
+	}
+	var lines []model.MusicSongLyricLine
+	if err := db.Where("lyric_id = ?", currentLyric.ID).Find(&lines).Error; err != nil {
+		t.Fatalf("load structured lyric lines: %v", err)
+	}
+	if len(lines) != 1 || lines[0].Text != "hello" {
+		t.Fatalf("album revision cleared lyric lines: %#v", lines)
+	}
+	var revised model.Revision
+	if err := db.Where("content_type = ? AND content_id = ? AND is_current = ?", "album", album.ID, true).First(&revised).Error; err != nil {
+		t.Fatalf("load revised snapshot: %v", err)
+	}
+	var snapshot albumRevisionSnapshot
+	if err := json.Unmarshal(revised.ContentSnapshot, &snapshot); err != nil {
+		t.Fatalf("decode revised snapshot: %v", err)
+	}
+	if len(snapshot.Songs) != 1 || snapshot.Songs[0].Lyrics != content {
+		t.Fatalf("revised snapshot lost structured lyrics: %#v", snapshot.Songs)
+	}
+}
+
 func TestRevertAlbumRevisionRestoresSoftDeletedSong(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
