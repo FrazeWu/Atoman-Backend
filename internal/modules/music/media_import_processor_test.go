@@ -941,3 +941,16 @@ func containsMediaArg(args []string, want string) bool {
 	}
 	return false
 }
+
+func TestMediaImportProcessorUsesCommittedArtistForMetadataMatching(t *testing.T) {
+	processor := &MediaImportProcessor{}
+	payload := map[string]any{
+		"commit_request": map[string]any{
+			"artist": map[string]any{"name": "Tyler, The Creator"},
+		},
+	}
+
+	if got := processor.albumImportArtistName(context.Background(), payload); got != "Tyler, The Creator" {
+		t.Fatalf("expected committed artist name, got %q", got)
+	}
+}

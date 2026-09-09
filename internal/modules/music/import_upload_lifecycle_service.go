@@ -48,6 +48,16 @@ func (s *Service) CompleteAlbumImportSession(user authctx.CurrentUser, sessionID
 		if !hasImportSource {
 			return apperr.BadRequest("validation.invalid_request", "Album import requires an archive or audio file")
 		}
+		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		if _, submitted := payload["commit_request"]; !submitted &&
+			strings.TrimSpace(stringValue(payload["artist_id"])) == "" &&
+			strings.TrimSpace(stringValue(payload["artist_name"])) == "" {
+			applyAlbumImportSessionState(&session, AlbumImportStatusUploaded, payload)
+			return tx.Save(&session).Error
+		}
 		if err := queueAlbumImportSession(tx, &session, true); err != nil {
 			return err
 		}

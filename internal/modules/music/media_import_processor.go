@@ -1123,6 +1123,24 @@ func (p *MediaImportProcessor) albumImportArtistName(ctx context.Context, payloa
 	if name := strings.TrimSpace(stringValue(payload["artist_name"])); name != "" {
 		return name
 	}
+	if request, ok := payload["commit_request"].(map[string]any); ok {
+		if artist, ok := request["artist"].(map[string]any); ok {
+			if name := strings.TrimSpace(stringValue(artist["name"])); name != "" {
+				return name
+			}
+		}
+		if artists, ok := request["artists"].([]any); ok {
+			for _, value := range artists {
+				artist, ok := value.(map[string]any)
+				if !ok {
+					continue
+				}
+				if name := strings.TrimSpace(stringValue(artist["name"])); name != "" {
+					return name
+				}
+			}
+		}
+	}
 	if p == nil || p.db == nil {
 		return ""
 	}
