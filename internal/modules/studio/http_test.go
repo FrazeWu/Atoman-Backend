@@ -385,6 +385,13 @@ func TestStudioChannelCreateBecomesCurrentWhenStateIsEmpty(t *testing.T) {
 	if state.ChannelID == nil || *state.ChannelID != payload.Data.ID {
 		t.Fatalf("expected current channel %s, got %#v", payload.Data.ID, state.ChannelID)
 	}
+	var collection model.ContentCollection
+	if err := fixture.db.Where("channel_id = ? AND is_default = ?", payload.Data.ID, true).First(&collection).Error; err != nil {
+		t.Fatalf("load default collection: %v", err)
+	}
+	if collection.Name != "First Studio" {
+		t.Fatalf("default collection name = %q, want channel-derived name", collection.Name)
+	}
 }
 
 func TestStudioChannelDeleteRejectsNonEmptyChannel(t *testing.T) {

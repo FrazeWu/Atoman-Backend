@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -18,10 +17,6 @@ import (
 const (
 	defaultSubscriptionGroupName = "默认分组"
 	defaultBookmarkFolderName    = "默认收藏夹"
-	defaultChannelDescription    = "默认合集"
-	defaultCollectionName        = "默认合集"
-	minChannelSlugLength         = 2
-	maxChannelSlugLength         = 30
 )
 
 type UserBootstrapService struct {
@@ -33,14 +28,6 @@ func NewUserBootstrapService(db *gorm.DB) *UserBootstrapService {
 }
 
 func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string) error {
-	channel, err := s.ensureStudioChannel(userID, username)
-	if err != nil {
-		return err
-	}
-	if err := s.ensureDefaultCollectionForChannel(userID, channel.ID); err != nil {
-		return err
-	}
-
 	group, err := s.ensureDefaultSubscriptionGroup(userID)
 	if err != nil {
 		return err
@@ -48,105 +35,7 @@ func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string)
 	if err := s.ensureSelfSubscription(userID, username, group.ID); err != nil {
 		return err
 	}
-	if err := s.ensureDefaultBookmarkFolder(userID); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *UserBootstrapService) ensureStudioChannel(userID uuid.UUID, username string) (*model.Channel, error) {
-	var state model.UserStudioState
-	if err := s.db.Preload("Channel").First(&state, "user_id = ?", userID).Error; err == nil {
-		if state.Channel != nil && state.Channel.UserID != nil && *state.Channel.UserID == userID {
-			return state.Channel, nil
-		}
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	var channel model.Channel
-	err := s.db.Where("user_id = ?", userID).Order("created_at ASC, id ASC").First(&channel).Error
-	if err == nil {
-		if err := s.saveStudioState(userID, channel.ID); err != nil {
-			return nil, err
-		}
-		return &channel, nil
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
-	baseName := strings.TrimSpace(username)
-	if baseName == "" {
-		baseName = defaultChannelDescription
-	}
-	slugBase := strings.TrimSpace(username)
-	if slugBase == "" {
-		slugBase = "channel"
-	}
-
-	name, err := s.uniqueChannelName(baseName)
-	if err != nil {
-		return nil, err
-	}
-	slug, err := s.uniqueChannelSlug(slugBase)
-	if err != nil {
-		return nil, err
-	}
-
-	channel = model.Channel{
-		UserID:      &userID,
-		Name:        name,
-		Slug:        slug,
-		Description: defaultChannelDescription,
-	}
-	if err := s.db.Create(&channel).Error; err != nil {
-		return nil, err
-	}
-	if err := s.saveStudioState(userID, channel.ID); err != nil {
-		return nil, err
-	}
-	return &channel, nil
-}
-
-func (s *UserBootstrapService) saveStudioState(userID, channelID uuid.UUID) error {
-	return s.db.Save(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
-}
-
-func (s *UserBootstrapService) ensureDefaultCollectionForChannel(userID, channelID uuid.UUID) error {
-	var collection model.ContentCollection
-	err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-
-	var softDeleted model.ContentCollection
-	softErr := s.db.Unscoped().Where(
-		"channel_id = ? AND (is_default = ? OR name = ?)",
-		channelID, true, defaultCollectionName,
-	).First(&softDeleted).Error
-	if softErr == nil && softDeleted.DeletedAt.Valid {
-		return s.db.Unscoped().Model(&softDeleted).Updates(map[string]any{
-			"deleted_at": nil,
-			"is_default": true,
-			"created_by": userID,
-		}).Error
-	}
-	if softErr != nil && !errors.Is(softErr, gorm.ErrRecordNotFound) {
-		return softErr
-	}
-
-	collection = model.ContentCollection{
-		ChannelID:   channelID,
-		CreatedBy:   &userID,
-		Name:        defaultCollectionName,
-		Description: defaultChannelDescription,
-		IsDefault:   true,
-	}
-	return s.db.Create(&collection).Error
+	return s.ensureDefaultBookmarkFolder(userID)
 }
 
 func (s *UserBootstrapService) ensureDefaultSubscriptionGroup(userID uuid.UUID) (*model.SubscriptionGroup, error) {
@@ -258,88 +147,4 @@ func buildUserBootstrapFeedSourceHash(sourceType string, sourceID uuid.UUID) str
 	raw := fmt.Sprintf("%s:%s", sourceType, sourceID.String())
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
-}
-
-func (s *UserBootstrapService) uniqueChannelSlug(base string) (string, error) {
-	baseSlug := slugifyChannelName(base)
-	candidate := baseSlug
-	counter := 2
-	namespace := NewSiteNamespaceService(s.db)
-	for {
-		err := namespace.ValidateChannelSlugAvailable(context.Background(), candidate, nil)
-		if err == nil {
-			return candidate, nil
-		}
-		if !errors.Is(err, ErrSiteHandleReserved) && !errors.Is(err, ErrSiteHandleTaken) {
-			return "", err
-		}
-		candidate = channelSlugWithSuffix(baseSlug, fmt.Sprintf("-%d", counter))
-		counter++
-	}
-}
-
-func (s *UserBootstrapService) uniqueChannelName(base string) (string, error) {
-	candidate := base
-	counter := 2
-	for {
-		var count int64
-		if err := s.db.Model(&model.Channel{}).Where("LOWER(name) = LOWER(?)", candidate).Count(&count).Error; err != nil {
-			return "", err
-		}
-		if count == 0 {
-			return candidate, nil
-		}
-		candidate = fmt.Sprintf("%s %d", base, counter)
-		counter++
-	}
-}
-
-func slugifyChannelName(value string) string {
-	slug := strings.ToLower(strings.TrimSpace(value))
-	var b strings.Builder
-	lastDash := false
-	hasNonASCII := false
-	for _, r := range slug {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-			lastDash = false
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-			lastDash = false
-		default:
-			if r > 127 {
-				hasNonASCII = true
-			}
-			if b.Len() == 0 || lastDash {
-				continue
-			}
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	result := strings.Trim(b.String(), "-")
-	if result == "" {
-		result = "channel"
-	}
-	if hasNonASCII {
-		sum := sha256.Sum256([]byte(slug))
-		suffix := hex.EncodeToString(sum[:])[:10]
-		return channelSlugWithSuffix(result, "-"+suffix)
-	}
-	return channelSlugWithSuffix(result, "")
-}
-
-func channelSlugWithSuffix(base, suffix string) string {
-	maxBaseLength := maxChannelSlugLength - len(suffix)
-	base = strings.TrimRight(base[:min(len(base), maxBaseLength)], "-")
-	if base == "" {
-		base = "channel"
-		base = base[:min(len(base), maxBaseLength)]
-	}
-	candidate := base + suffix
-	if len(candidate) < minChannelSlugLength {
-		candidate += "-channel"
-	}
-	return candidate
 }

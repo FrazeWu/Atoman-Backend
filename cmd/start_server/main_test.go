@@ -167,26 +167,13 @@ func TestBootstrapOwnerFromEnvCreatesOwnerWhenConfigured(t *testing.T) {
 	if !user.IsActive {
 		t.Fatal("expected owner to be active")
 	}
-	var channels []model.Channel
-	if err := db.Where("user_id = ?", user.UUID).Find(&channels).Error; err != nil {
-		t.Fatalf("find owner channels: %v", err)
+	var channels int64
+	if err := db.Model(&model.Channel{}).Where("user_id = ?", user.UUID).Count(&channels).Error; err != nil || channels != 0 {
+		t.Fatalf("expected owner creation to defer channel creation, got %d err=%v", channels, err)
 	}
-	if len(channels) != 1 {
-		t.Fatalf("expected one owner studio channel, got %d", len(channels))
-	}
-	var state model.UserStudioState
-	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
-		t.Fatalf("find owner studio state: %v", err)
-	}
-	if state.ChannelID == nil || *state.ChannelID != channels[0].ID {
-		t.Fatalf("expected current channel %s, got %#v", channels[0].ID, state.ChannelID)
-	}
-	var collections []model.ContentCollection
-	if err := db.Where("channel_id = ? AND is_default = ?", channels[0].ID, true).Find(&collections).Error; err != nil {
-		t.Fatalf("count default collection: %v", err)
-	}
-	if len(collections) != 1 {
-		t.Fatalf("expected one mixed-content default collection, got %d", len(collections))
+	var collections int64
+	if err := db.Model(&model.ContentCollection{}).Where("created_by = ?", user.UUID).Count(&collections).Error; err != nil || collections != 0 {
+		t.Fatalf("expected owner creation to defer collection creation, got %d err=%v", collections, err)
 	}
 }
 

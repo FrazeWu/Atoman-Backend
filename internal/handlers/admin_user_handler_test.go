@@ -139,11 +139,8 @@ func TestAdminCanCreateOnlyRegularUsers(t *testing.T) {
 		t.Fatalf("load user settings: %v", err)
 	}
 	var channels int64
-	if err := env.db.Model(&model.Channel{}).Where("user_id = ?", user.UUID).Count(&channels).Error; err != nil {
-		t.Fatalf("count default channels: %v", err)
-	}
-	if channels != 1 {
-		t.Fatalf("expected one default channel, got %d", channels)
+	if err := env.db.Model(&model.Channel{}).Where("user_id = ?", user.UUID).Count(&channels).Error; err != nil || channels != 0 {
+		t.Fatalf("expected admin-created user to defer channel creation, got %d err=%v", channels, err)
 	}
 	var groups int64
 	if err := env.db.Model(&model.SubscriptionGroup{}).Where("user_id = ?", user.UUID).Count(&groups).Error; err != nil {
