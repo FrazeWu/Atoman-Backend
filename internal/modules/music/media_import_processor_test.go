@@ -163,6 +163,51 @@ func TestProcessExtractedTreeFallsBackToEmbeddedAudioCover(t *testing.T) {
 	}
 }
 
+func TestProcessExtractedTreePrefersTimedLyricsOverDuplicatePlainLyrics(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"01 - First.flac": "audio",
+		"01 - First.lrc":  "[00:01.00]timed lyrics",
+		"01 - First.txt":  "plain lyrics",
+		"cover.jpg":       "cover",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	store := &fakeMediaStore{objects: map[string][]byte{}, puts: map[string][]byte{}}
+	if err := NewMediaImportProcessor(db, store, runner, "").processExtractedTree(context.Background(), session.ID, root, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stored.PayloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	tracks, ok := payload["derived_tracks"].([]any)
+	if !ok || len(tracks) != 1 {
+		t.Fatalf("expected one derived track, got %#v", payload["derived_tracks"])
+	}
+	track, ok := tracks[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected derived track: %#v", tracks[0])
+	}
+	lyrics, ok := track["lyrics"].(map[string]any)
+	if !ok || lyrics["format"] != "lrc" || lyrics["content"] != "[00:01.00]timed lyrics" {
+		t.Fatalf("expected timed local lyrics, got %#v", track["lyrics"])
+	}
+}
+
 func TestProcessExtractedTreePrefersExplicitCoverOverEmbeddedAudioCover(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
