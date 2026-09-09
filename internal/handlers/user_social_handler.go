@@ -59,6 +59,7 @@ func relationTargetID(c *gin.Context) (uuid.UUID, bool) {
 // @Success 200 {object} MessageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -85,6 +86,21 @@ func FollowUser(db *gorm.DB) gin.HandlerFunc {
 		if err := db.Where("uuid = ?", targetID).First(&targetUser).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
+		}
+		privateProfile, _ := publicUserPrivacy(db, targetID)
+		if privateProfile {
+			var existing model.Follow
+			err := db.Where("follower_id = ? AND following_id = ?", userID, targetID).First(&existing).Error
+			switch {
+			case err == nil:
+				// Existing relationships remain valid when the target becomes private.
+			case errors.Is(err, gorm.ErrRecordNotFound):
+				c.JSON(http.StatusForbidden, gin.H{"error": "User profile is private"})
+				return
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user privacy"})
+				return
+			}
 		}
 
 		follow := model.Follow{

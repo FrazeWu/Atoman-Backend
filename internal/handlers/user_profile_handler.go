@@ -98,6 +98,17 @@ func canViewPrivateProfile(c *gin.Context, userID uuid.UUID) bool {
 	return ok && viewer.ID == userID
 }
 
+func limitedPublicUser(user model.User, avatarURL string) gin.H {
+	return gin.H{
+		"id":              user.ID,
+		"uuid":            user.UUID,
+		"username":        user.Username,
+		"avatar_url":      avatarURL,
+		"private_profile": true,
+		"show_relations":  false,
+	}
+}
+
 // GetCurrentUser returns the authenticated user's own full profile
 // GetCurrentUser godoc
 // @Summary 获取当前用户
@@ -146,7 +157,10 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 		}
 		privateProfile, showRelations := publicUserPrivacy(db, user.UUID)
 		if privateProfile && !canViewPrivateProfile(c, user.UUID) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "User profile is private"})
+			c.JSON(http.StatusOK, gin.H{
+				"data":    limitedPublicUser(user, service.ResolveUserAvatarURL(db, user)),
+				"message": "ok",
+			})
 			return
 		}
 		avatarURL := service.ResolveUserAvatarURL(db, user)
@@ -207,7 +221,14 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 		}
 		privateProfile, showRelations := publicUserPrivacy(db, user.UUID)
 		if privateProfile && !canViewPrivateProfile(c, user.UUID) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "User profile is private"})
+			c.JSON(http.StatusOK, gin.H{
+				"data": gin.H{
+					"user":     limitedPublicUser(user, service.ResolveUserAvatarURL(db, user)),
+					"stats":    gin.H{},
+					"channels": []model.Channel{},
+				},
+				"message": "ok",
+			})
 			return
 		}
 		avatarURL := service.ResolveUserAvatarURL(db, user)

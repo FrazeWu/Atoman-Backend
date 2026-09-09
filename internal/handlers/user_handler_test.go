@@ -494,6 +494,142 @@ func TestGetUserByUsernameUsesLinkedIdentityAvatarWhenUserAvatarIsEmpty(t *testi
 	}
 }
 
+func TestGetUserByUsernameReturnsLimitedIdentityForPrivateProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.UserSettings{})
+	user := model.User{
+		Username: "private-profile-user", DisplayName: "Private Name", Bio: "private bio",
+		Email: "private-profile@example.com", Password: "hash", Role: "user", IsActive: true,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&model.UserSettings{UserID: user.UUID, PrivateProfile: true, ShowRelations: true}).Error; err != nil {
+		t.Fatalf("create settings: %v", err)
+	}
+
+	r := gin.New()
+	r.GET("/users/by-username/:username", GetUserByUsername(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/by-username/private-profile-user", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Username      string `json:"username"`
+			DisplayName   string `json:"display_name"`
+			Bio           string `json:"bio"`
+			Private       bool   `json:"private_profile"`
+			ShowRelations bool   `json:"show_relations"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.Username != user.Username || !response.Data.Private {
+		t.Fatalf("expected limited private identity, got %#v", response.Data)
+	}
+	if response.Data.DisplayName != "" || response.Data.Bio != "" || response.Data.ShowRelations {
+		t.Fatalf("private profile exposed restricted fields: %#v", response.Data)
+	}
+}
+
+func TestGetUserProfileReturnsLimitedIdentityForPrivateProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.UserSettings{}, &model.Channel{}, &model.ContentEntry{})
+	user := model.User{
+		Username: "private-detail-user", DisplayName: "Private Detail", Bio: "hidden bio",
+		Email: "private-detail@example.com", Password: "hash", Role: "user", IsActive: true,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&model.UserSettings{UserID: user.UUID, PrivateProfile: true, ShowRelations: true}).Error; err != nil {
+		t.Fatalf("create settings: %v", err)
+	}
+	channel := model.Channel{UserID: &user.UUID, Name: "Hidden channel", Slug: "hidden-channel"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	r := gin.New()
+	r.GET("/users/:id/profile", GetUserProfile(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/"+user.UUID.String()+"/profile", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			User struct {
+				Username      string `json:"username"`
+				DisplayName   string `json:"display_name"`
+				Bio           string `json:"bio"`
+				Private       bool   `json:"private_profile"`
+				ShowRelations bool   `json:"show_relations"`
+			} `json:"user"`
+			Stats    map[string]any  `json:"stats"`
+			Channels []model.Channel `json:"channels"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.User.Username != user.Username || !response.Data.User.Private {
+		t.Fatalf("expected limited private identity, got %#v", response.Data.User)
+	}
+	if response.Data.User.DisplayName != "" || response.Data.User.Bio != "" || response.Data.User.ShowRelations {
+		t.Fatalf("private profile exposed restricted fields: %#v", response.Data.User)
+	}
+	if len(response.Data.Stats) != 0 || len(response.Data.Channels) != 0 {
+		t.Fatalf("private profile exposed stats or channels: %#v", response.Data)
+	}
+}
+
+func TestGetUserProfileAllowsOwnerToViewPrivateProfile(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.UserSettings{}, &model.Channel{})
+	user := model.User{Username: "private-owner", DisplayName: "Owner Name", Email: "private-owner@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&model.UserSettings{UserID: user.UUID, PrivateProfile: true}).Error; err != nil {
+		t.Fatalf("create settings: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser})
+		c.Next()
+	})
+	r.GET("/users/:id/profile", GetUserProfile(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/"+user.UUID.String()+"/profile", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			User struct {
+				DisplayName string `json:"display_name"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.User.DisplayName != user.DisplayName {
+		t.Fatalf("owner should see full profile, got %#v", response.Data.User)
+	}
+}
+
 func TestGetUserByUsernameIncludesPublicReputationMetrics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
