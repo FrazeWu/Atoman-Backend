@@ -17,6 +17,39 @@ func TestMatchDerivedTrackAudioUsesAudioKeyAfterTrackRenameAndReorder(t *testing
 	}
 }
 
+func TestMatchDerivedTrackAudioUsesFileIDAfterTrackRename(t *testing.T) {
+	derivedTracks := []any{
+		map[string]any{
+			"file_id": "file-igor", "title": "IGOR'S THEME", "audio_url": "https://cdn.test/igor.mp3",
+		},
+	}
+
+	matched := matchDerivedTrackAudio(derivedTracks, AlbumImportTrackPayload{
+		FileID: "file-igor", Title: "用户改名", TrackNumber: 1,
+	}, map[int]bool{})
+
+	if matched.AudioURL != "https://cdn.test/igor.mp3" {
+		t.Fatalf("expected selected audio to follow file id, got %#v", matched)
+	}
+}
+
+func TestMatchDerivedTrackAudioNormalizesTrackTitle(t *testing.T) {
+	derivedTracks := []any{
+		map[string]any{
+			"title": "Alien Girl (Today w/ Her)", "track_number": 4, "disc_number": 1,
+			"audio_url": "https://cdn.test/alien-girl.mp3",
+		},
+	}
+
+	matched := matchDerivedTrackAudio(derivedTracks, AlbumImportTrackPayload{
+		Title: "Alien Girl (Today W_ Her)", TrackNumber: 4, DiscNumber: 1,
+	}, map[int]bool{})
+
+	if matched.AudioURL != "https://cdn.test/alien-girl.mp3" {
+		t.Fatalf("expected normalized title to select audio, got %#v", matched)
+	}
+}
+
 func TestMatchDerivedTrackAudioDoesNotFallBackToArrayPosition(t *testing.T) {
 	derivedTracks := []any{
 		map[string]any{"title": "IGOR'S THEME", "audio_key": "audio-igor", "audio_url": "https://cdn.test/igor.mp3"},

@@ -1099,6 +1099,15 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		}
 	}
 
+	fileID := strings.TrimSpace(track.FileID)
+	if fileID != "" {
+		if audio := tryMatch(func(trackMap map[string]any) bool {
+			return strings.TrimSpace(stringValue(trackMap["file_id"])) == fileID
+		}); audio.AudioURL != "" {
+			return audio
+		}
+	}
+
 	audioKey := strings.TrimSpace(track.AudioKey)
 	if audioKey != "" {
 		if audio := tryMatch(func(trackMap map[string]any) bool {
@@ -1107,14 +1116,14 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 			return audio
 		}
 	}
-	if songID != "" || audioKey != "" {
+	if songID != "" || fileID != "" || audioKey != "" {
 		return derivedTrackAudio{}
 	}
 
 	title := strings.TrimSpace(track.Title)
 	if track.TrackNumber > 0 {
 		if audio := tryMatch(func(trackMap map[string]any) bool {
-			return strings.TrimSpace(stringValue(trackMap["title"])) == title &&
+			return sameImportedTrackTitle(stringValue(trackMap["title"]), title) &&
 				normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))) == normalizedDiscNumber(track.DiscNumber) &&
 				int(int64Value(trackMap["track_number"])) == track.TrackNumber
 		}); audio.AudioURL != "" {
@@ -1122,7 +1131,7 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		}
 	}
 	if audio := tryMatch(func(trackMap map[string]any) bool {
-		return strings.TrimSpace(stringValue(trackMap["title"])) == title
+		return sameImportedTrackTitle(stringValue(trackMap["title"]), title)
 	}); audio.AudioURL != "" {
 		return audio
 	}
@@ -1130,6 +1139,21 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		return derivedTrackAudio{AudioURL: strings.TrimSpace(track.AudioURL)}
 	}
 	return derivedTrackAudio{}
+}
+
+func sameImportedTrackTitle(left, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return false
+	}
+	if left == right {
+		return true
+	}
+	if normalizedMusicText(left) == normalizedMusicText(right) {
+		return true
+	}
+	return compactMusicText(left) == compactMusicText(right)
 }
 
 func importTrackMatchState(track AlbumImportTrackPayload, derived derivedTrackAudio) (string, string, string, string, float64, bool) {
