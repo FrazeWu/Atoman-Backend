@@ -86,15 +86,16 @@ type albumRevisionCredit struct {
 }
 
 type albumRevisionSong struct {
-	ID            string                `json:"id,omitempty"`
-	Title         string                `json:"title"`
-	TrackNumber   int                   `json:"track_number"`
-	DiscNumber    int                   `json:"disc_number"`
-	Lyrics        string                `json:"lyrics"`
-	AudioURL      string                `json:"audio_url"`
-	CoverURL      string                `json:"cover_url"`
-	Status        string                `json:"status"`
-	ArtistCredits []albumRevisionCredit `json:"artist_credits"`
+	ID             string                `json:"id,omitempty"`
+	Title          string                `json:"title"`
+	TrackNumber    int                   `json:"track_number"`
+	DiscNumber     int                   `json:"disc_number"`
+	Lyrics         string                `json:"lyrics"`
+	LyricsExplicit bool                  `json:"lyrics_explicit,omitempty"`
+	AudioURL       string                `json:"audio_url"`
+	CoverURL       string                `json:"cover_url"`
+	Status         string                `json:"status"`
+	ArtistCredits  []albumRevisionCredit `json:"artist_credits"`
 }
 
 type songRevisionSnapshot struct {
@@ -356,6 +357,10 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 		if err := tx.Preload("ArtistCredits").Preload("Songs.ArtistCredits").First(&album, "id = ?", contentID).Error; err != nil {
 			return nil, fmt.Errorf("album not found: %w", err)
 		}
+		structuredLyrics, err := structuredSongLyrics(tx, album.Songs)
+		if err != nil {
+			return nil, err
+		}
 		snapshot := albumRevisionSnapshot{
 			Album: &albumRevisionAlbum{
 				ID:          album.ID.String(),
@@ -380,9 +385,13 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 			if song.Status == "closed" {
 				continue
 			}
+			lyrics := song.Lyrics
+			if content, ok := structuredLyrics[song.ID]; ok {
+				lyrics = content
+			}
 			snapshot.Songs = append(snapshot.Songs, albumRevisionSong{
 				ID: song.ID.String(), Title: song.Title, TrackNumber: song.TrackNumber,
-				DiscNumber: song.DiscNumber, Lyrics: song.Lyrics, AudioURL: song.AudioURL,
+				DiscNumber: song.DiscNumber, Lyrics: lyrics, LyricsExplicit: true, AudioURL: song.AudioURL,
 				CoverURL: song.CoverURL, Status: song.Status,
 				ArtistCredits: songCreditsSnapshot(song.ArtistCredits),
 			})
@@ -459,6 +468,30 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 	default:
 		return nil, fmt.Errorf("cannot create baseline for content type: %s", contentType)
 	}
+}
+
+func structuredSongLyrics(tx *gorm.DB, songs []model.Song) (map[uuid.UUID]string, error) {
+	lyricsBySongID := make(map[uuid.UUID]string)
+	if len(songs) == 0 || !tx.Migrator().HasTable(&model.MusicSongLyric{}) {
+		return lyricsBySongID, nil
+	}
+	songIDs := make([]uuid.UUID, 0, len(songs))
+	for _, song := range songs {
+		if song.ID != uuid.Nil {
+			songIDs = append(songIDs, song.ID)
+		}
+	}
+	if len(songIDs) == 0 {
+		return lyricsBySongID, nil
+	}
+	var lyrics []model.MusicSongLyric
+	if err := tx.Where("song_id IN ?", songIDs).Find(&lyrics).Error; err != nil {
+		return nil, fmt.Errorf("failed to load structured song lyrics: %w", err)
+	}
+	for _, lyric := range lyrics {
+		lyricsBySongID[lyric.SongID] = lyric.Content
+	}
+	return lyricsBySongID, nil
 }
 
 func songCreditsSnapshot(credits []model.SongArtist) []albumRevisionCredit {
@@ -552,15 +585,37 @@ func mergeRevisionChangesWithDB(tx *gorm.DB, contentType string, current []byte,
 	if err := tx.Where("album_id = ? AND COALESCE(status, 'open') <> ?", albumID, "closed").Find(&liveSongs).Error; err != nil {
 		return nil, fmt.Errorf("failed to load current album tracks: %w", err)
 	}
+	structuredLyrics, err := structuredSongLyrics(tx, liveSongs)
+	if err != nil {
+		return nil, err
+	}
 	liveSongsByID := make(map[string]albumRevisionSong, len(liveSongs))
 	for _, song := range liveSongs {
+		lyrics := song.Lyrics
+		if content, ok := structuredLyrics[song.ID]; ok {
+			lyrics = content
+		}
 		liveSongsByID[song.ID.String()] = albumRevisionSong{
 			ID: song.ID.String(), Title: song.Title, TrackNumber: song.TrackNumber,
-			DiscNumber: song.DiscNumber, Lyrics: song.Lyrics, AudioURL: song.AudioURL,
+			DiscNumber: song.DiscNumber, Lyrics: lyrics, LyricsExplicit: true, AudioURL: song.AudioURL,
 			CoverURL: song.CoverURL, Status: song.Status,
 		}
 	}
-	return mergeRevisionChangesWithLiveSongs(contentType, current, changes, liveSongsByID)
+	for index := range snapshot.Songs {
+		songID, err := uuid.Parse(strings.TrimSpace(snapshot.Songs[index].ID))
+		if err != nil {
+			continue
+		}
+		if content, ok := structuredLyrics[songID]; ok {
+			snapshot.Songs[index].Lyrics = content
+			snapshot.Songs[index].LyricsExplicit = true
+		}
+	}
+	hydratedCurrent, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hydrate album lyrics: %w", err)
+	}
+	return mergeRevisionChangesWithLiveSongs(contentType, hydratedCurrent, changes, liveSongsByID)
 }
 
 func mergeRevisionChangesWithLiveSongs(contentType string, current []byte, changes map[string]interface{}, liveSongs map[string]albumRevisionSong) ([]byte, error) {
@@ -686,8 +741,10 @@ func mergeRevisionChangesWithLiveSongs(contentType string, current []byte, chang
 			}
 			audioURL := existing.AudioURL
 			lyrics := existing.Lyrics
+			lyricsExplicit := existing.LyricsExplicit
 			if track.Lyrics != nil {
 				lyrics = *track.Lyrics
+				lyricsExplicit = true
 			}
 			if !exists {
 				audioURL = strings.TrimSpace(track.ResolvedAudioURL)
@@ -700,7 +757,7 @@ func mergeRevisionChangesWithLiveSongs(contentType string, current []byte, chang
 			}
 			songs = append(songs, albumRevisionSong{
 				ID: trackID, Title: track.Title, TrackNumber: track.TrackNumber,
-				DiscNumber: track.DiscNumber, Lyrics: lyrics, AudioURL: audioURL,
+				DiscNumber: track.DiscNumber, Lyrics: lyrics, LyricsExplicit: lyricsExplicit, AudioURL: audioURL,
 				CoverURL: track.CoverURL, Status: "open",
 				ArtistCredits: revisionCreditsFromInput(track.ArtistCredits),
 			})
@@ -1558,6 +1615,10 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 	if err := tx.Unscoped().Where("album_id = ?", albumID).Find(&existingSongs).Error; err != nil {
 		return err
 	}
+	structuredLyrics, err := structuredSongLyrics(tx, existingSongs)
+	if err != nil {
+		return err
+	}
 
 	existingByID := make(map[string]*model.Song, len(existingSongs))
 	for i := range existingSongs {
@@ -1583,11 +1644,19 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 
 		if songID != "" {
 			if existingSong, ok := existingByID[songID]; ok {
+				lyrics := songSnap.Lyrics
+				if !songSnap.LyricsExplicit && strings.TrimSpace(lyrics) == "" {
+					if content, exists := structuredLyrics[existingSong.ID]; exists && strings.TrimSpace(content) != "" {
+						lyrics = content
+					} else {
+						lyrics = existingSong.Lyrics
+					}
+				}
 				existingSong.DeletedAt = gorm.DeletedAt{}
 				existingSong.Title = title
 				existingSong.TrackNumber = songSnap.TrackNumber
 				existingSong.DiscNumber = songSnap.DiscNumber
-				existingSong.Lyrics = songSnap.Lyrics
+				existingSong.Lyrics = lyrics
 				existingSong.AudioURL = audioURL
 				if audioURL != "" {
 					existingSong.AudioStatus = "ready"
@@ -1610,8 +1679,10 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 						return err
 					}
 				}
-				if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, existingSong.ID, songSnap.Lyrics, "通过专辑版本更新歌词"); err != nil {
-					return err
+				if songSnap.LyricsExplicit || strings.TrimSpace(songSnap.Lyrics) != "" {
+					if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, existingSong.ID, lyrics, "通过专辑版本更新歌词"); err != nil {
+						return err
+					}
 				}
 				continue
 			}
