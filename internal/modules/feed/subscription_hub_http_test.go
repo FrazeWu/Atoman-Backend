@@ -12,6 +12,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestSubscriptionHubUpdatesQuerySupportsReadFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/v1/feed/subscription-hub/updates?type=all&is_read=false", nil)
+
+	query, err := subscriptionHubUpdatesQueryFromContext(context)
+	if err != nil {
+		t.Fatalf("parse subscription hub query: %v", err)
+	}
+	if query.IsRead == nil || *query.IsRead {
+		t.Fatalf("expected is_read=false, got %#v", query.IsRead)
+	}
+}
+
 func TestSubscriptionHubHandlersExposeTypeScopedTreeAndUpdates(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)

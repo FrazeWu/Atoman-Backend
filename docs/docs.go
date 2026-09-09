@@ -12560,6 +12560,16 @@ const docTemplate = `{
                         "description": "每页数量",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "true",
+                            "false"
+                        ],
+                        "type": "string",
+                        "description": "是否已读",
+                        "name": "is_read",
+                        "in": "query"
                     }
                 ],
                 "responses": {
