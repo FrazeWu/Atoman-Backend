@@ -1028,7 +1028,34 @@ func musicBrainzLookupAlbumTitle(value string) string {
 }
 
 func musicBrainzAlbumTitlesMatch(left, right string) bool {
-	return compactMusicText(musicBrainzLookupAlbumTitle(left)) == compactMusicText(musicBrainzLookupAlbumTitle(right))
+	leftTitles := musicAlbumTitleVariants(left)
+	rightTitles := musicAlbumTitleVariants(right)
+	for _, leftTitle := range leftTitles {
+		for _, rightTitle := range rightTitles {
+			if leftTitle == rightTitle {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func musicAlbumTitleVariants(value string) []string {
+	value = musicBrainzLookupAlbumTitle(value)
+	variants := make([]string, 0, 3)
+	seen := map[string]struct{}{}
+	for _, part := range strings.Split(value, "=") {
+		key := compactMusicText(strings.TrimSpace(part))
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		variants = append(variants, key)
+	}
+	return variants
 }
 
 func comparableMusicBrainzTrackTitle(value string) string {
