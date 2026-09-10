@@ -478,6 +478,55 @@ func (r *Repo) ListOwnedChannels(userID uuid.UUID) ([]model.Channel, error) {
 	return channels, err
 }
 
+// LoadParties resolves the display data for a set of DM parties in batches.
+// Keeping this lookup batched avoids one query per conversation in the inbox.
+func (r *Repo) LoadParties(refs ...TargetRef) (map[TargetRef]PartyDTO, error) {
+	parties := make(map[TargetRef]PartyDTO, len(refs))
+	userIDs := make([]uuid.UUID, 0, len(refs))
+	channelIDs := make([]uuid.UUID, 0, len(refs))
+	seenUsers := make(map[uuid.UUID]struct{}, len(refs))
+	seenChannels := make(map[uuid.UUID]struct{}, len(refs))
+	for _, ref := range refs {
+		switch ref.Type {
+		case model.DMPartyUser:
+			if ref.ID != uuid.Nil {
+				if _, seen := seenUsers[ref.ID]; !seen {
+					seenUsers[ref.ID] = struct{}{}
+					userIDs = append(userIDs, ref.ID)
+				}
+			}
+		case model.DMPartyChannel:
+			if ref.ID != uuid.Nil {
+				if _, seen := seenChannels[ref.ID]; !seen {
+					seenChannels[ref.ID] = struct{}{}
+					channelIDs = append(channelIDs, ref.ID)
+				}
+			}
+		}
+	}
+	if len(userIDs) > 0 {
+		var users []model.User
+		if err := r.db.Select("uuid", "username", "display_name", "avatar_url").Where("uuid IN ?", userIDs).Find(&users).Error; err != nil {
+			return nil, err
+		}
+		for _, user := range users {
+			ref := TargetRef{Type: model.DMPartyUser, ID: user.UUID}
+			parties[ref] = PartyDTO{Type: ref.Type, ID: ref.ID, Name: model.DisplayNameOrUsername(user.DisplayName, user.Username), AvatarURL: user.AvatarURL}
+		}
+	}
+	if len(channelIDs) > 0 {
+		var channels []model.Channel
+		if err := r.db.Select("id", "name", "cover_url").Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+			return nil, err
+		}
+		for _, channel := range channels {
+			ref := TargetRef{Type: model.DMPartyChannel, ID: channel.ID}
+			parties[ref] = PartyDTO{Type: ref.Type, ID: ref.ID, Name: channel.Name, AvatarURL: channel.CoverURL}
+		}
+	}
+	return parties, nil
+}
+
 func (r *Repo) AuthorizeMailbox(actorID uuid.UUID, mailbox TargetRef) error {
 	switch mailbox.Type {
 	case model.DMPartyUser:

@@ -33,6 +33,87 @@ func TestMailboxesIncludeUserAndOwnedChannels(t *testing.T) {
 	}
 }
 
+func TestConversationPartiesIncludeNamesAndAvatars(t *testing.T) {
+	db := testDB(t)
+	actor := model.User{UUID: uuid.New(), Username: "actor-user", Email: "actor@example.test", Password: "test", DisplayName: "Actor Name", AvatarURL: "/avatars/actor.png"}
+	other := model.User{UUID: uuid.New(), Username: "other-user", Email: "other@example.test", Password: "test", DisplayName: "Other Name", AvatarURL: "/avatars/other.png"}
+	owner := model.User{UUID: uuid.New(), Username: "channel-owner", Email: "owner@example.test", Password: "test", DisplayName: "Channel Owner", AvatarURL: "/avatars/owner.png"}
+	for _, user := range []*model.User{&actor, &other, &owner} {
+		if err := db.Create(user).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	channelID := uuid.New()
+	if err := db.Create(&model.Channel{Base: model.Base{ID: channelID}, UserID: &owner.UUID, Name: "Channel Name", Slug: "channel-name", CoverURL: "/covers/channel.png"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	userConversation := model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: actor.UUID, ParticipantBType: model.DMPartyUser, ParticipantB: other.UUID}
+	channelConversation := model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: actor.UUID, ParticipantBType: model.DMPartyChannel, ParticipantB: channelID}
+	for _, conversation := range []*model.DMConversation{&userConversation, &channelConversation} {
+		if err := db.Create(conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	service := NewService(NewRepo(db), nil, nil, nil)
+	mailboxes, err := service.ListMailboxes(context.Background(), authctx.CurrentUser{ID: actor.UUID, Username: actor.Username})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mailboxes[0].Party.Name != actor.DisplayName || mailboxes[0].Party.AvatarURL != actor.AvatarURL {
+		t.Fatalf("user mailbox party = %#v", mailboxes[0].Party)
+	}
+	if mailboxes[1].Party.Name != "Channel Name" || mailboxes[1].Party.AvatarURL != "/covers/channel.png" {
+		t.Fatalf("channel mailbox party = %#v", mailboxes[1].Party)
+	}
+
+	page, err := service.ListConversations(context.Background(), authctx.CurrentUser{ID: actor.UUID}, TargetRef{Type: model.DMPartyUser, ID: actor.UUID}, "", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("conversation count = %d", len(page.Items))
+	}
+	for _, conversation := range page.Items {
+		if conversation.ParticipantA.Name != actor.DisplayName || conversation.ParticipantA.AvatarURL != actor.AvatarURL {
+			t.Fatalf("participant A = %#v", conversation.ParticipantA)
+		}
+	}
+	if target, err := service.GetTargetConversation(context.Background(), actor.UUID, TargetRef{Type: model.DMPartyUser, ID: other.UUID}); err != nil {
+		t.Fatal(err)
+	} else if (target.ParticipantA.Name != other.DisplayName || target.ParticipantA.AvatarURL != other.AvatarURL) && (target.ParticipantB.Name != other.DisplayName || target.ParticipantB.AvatarURL != other.AvatarURL) {
+		t.Fatalf("target conversation participants = %#v", target)
+	}
+
+	channelPage, err := service.ListConversations(context.Background(), authctx.CurrentUser{ID: owner.UUID}, TargetRef{Type: model.DMPartyChannel, ID: channelID}, "", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channelPage.Items) != 1 || channelPage.Items[0].ParticipantB.Name != "Channel Name" || channelPage.Items[0].ParticipantB.AvatarURL != "/covers/channel.png" {
+		t.Fatalf("channel conversation = %#v", channelPage.Items)
+	}
+}
+
+func TestPartyNameFallsBackToUsername(t *testing.T) {
+	db := testDB(t)
+	actor := testUser(t, db)
+	other := model.User{UUID: uuid.New(), Username: "fallback-user", Email: "fallback@example.test", Password: "test"}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	conversation := model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: actor, ParticipantBType: model.DMPartyUser, ParticipantB: other.UUID}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	page, err := NewService(NewRepo(db), nil, nil, nil).ListConversations(context.Background(), authctx.CurrentUser{ID: actor}, TargetRef{Type: model.DMPartyUser, ID: actor}, "", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ParticipantB.Name != other.Username {
+		t.Fatalf("fallback party = %#v", page.Items)
+	}
+}
+
 func TestConversationCursorAndMailboxAccess(t *testing.T) {
 	db := testDB(t)
 	actor, other, third := testUser(t, db), testUser(t, db), testUser(t, db)
@@ -109,8 +190,8 @@ func TestConversationListLoadsUnreadAndBlockedStateWithFixedQueryCount(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if queryCount != 4 {
-		t.Fatalf("conversation list queries = %d, want 4", queryCount)
+	if queryCount != 6 {
+		t.Fatalf("conversation list queries = %d, want 6", queryCount)
 	}
 	if len(page.Items) != 2 {
 		t.Fatalf("conversation count = %d, want 2", len(page.Items))
