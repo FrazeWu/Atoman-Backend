@@ -41,21 +41,34 @@ func (s *Service) ListMailboxes(ctx context.Context, actor authctx.CurrentUser) 
 		return nil, ErrConversationForbidden
 	}
 	repo := NewRepo(s.repo.db.WithContext(ctx))
-	userUnread, err := repo.CountUnreadForMailbox(actor.ID, TargetRef{Type: model.DMPartyUser, ID: actor.ID})
-	if err != nil {
-		return nil, err
-	}
-	mailboxes := []MailboxDTO{{Party: PartyDTO{Type: model.DMPartyUser, ID: actor.ID, Name: actor.Username}, Unread: userUnread}}
 	channels, err := repo.ListOwnedChannels(actor.ID)
 	if err != nil {
 		return nil, err
 	}
+	partyRefs := make([]TargetRef, 0, len(channels)+1)
+	partyRefs = append(partyRefs, TargetRef{Type: model.DMPartyUser, ID: actor.ID})
+	for _, channel := range channels {
+		partyRefs = append(partyRefs, TargetRef{Type: model.DMPartyChannel, ID: channel.ID})
+	}
+	parties, err := repo.LoadParties(partyRefs...)
+	if err != nil {
+		return nil, err
+	}
+	userUnread, err := repo.CountUnreadForMailbox(actor.ID, TargetRef{Type: model.DMPartyUser, ID: actor.ID})
+	if err != nil {
+		return nil, err
+	}
+	userParty := partyForRef(parties, TargetRef{Type: model.DMPartyUser, ID: actor.ID})
+	if userParty.Name == "" {
+		userParty.Name = actor.Username
+	}
+	mailboxes := []MailboxDTO{{Party: userParty, Unread: userUnread}}
 	for _, channel := range channels {
 		unread, err := repo.CountUnreadForMailbox(actor.ID, TargetRef{Type: model.DMPartyChannel, ID: channel.ID})
 		if err != nil {
 			return nil, err
 		}
-		mailboxes = append(mailboxes, MailboxDTO{Party: PartyDTO{Type: model.DMPartyChannel, ID: channel.ID, Name: channel.Name, AvatarURL: channel.CoverURL}, Unread: unread})
+		mailboxes = append(mailboxes, MailboxDTO{Party: partyForRef(parties, TargetRef{Type: model.DMPartyChannel, ID: channel.ID}), Unread: unread})
 	}
 	return mailboxes, nil
 }
@@ -95,8 +108,16 @@ func (s *Service) ListConversations(ctx context.Context, actor authctx.CurrentUs
 	if err != nil {
 		return PageDTO[ConversationDTO]{}, err
 	}
+	partyRefs := make([]TargetRef, 0, len(conversations)*2)
 	for _, conversation := range conversations {
-		dto := conversationDTO(conversation)
+		partyRefs = append(partyRefs, conversationPartyRefs(conversation)...)
+	}
+	parties, err := repo.LoadParties(partyRefs...)
+	if err != nil {
+		return PageDTO[ConversationDTO]{}, err
+	}
+	for _, conversation := range conversations {
+		dto := conversationDTO(conversation, parties)
 		dto.Unread = unreadCounts[conversation.ID]
 		dto.Blocked = blockedStates[conversation.ID]
 		page.Items = append(page.Items, dto)
@@ -172,7 +193,11 @@ func (s *Service) MarkRead(ctx context.Context, actor authctx.CurrentUser, conve
 	}
 	result := ReadResultDTO{ConversationUnread: conversationUnread, MailboxUnread: mailboxUnread, DMUnread: dmUnread, TotalUnread: totalUnread}
 	if s.publish != nil {
-		s.publish.Push(actor.ID, "dm.message.read", MessageReadEventDTO{ConversationID: conversationID.String(), ReadAt: time.Now().UTC().Format(time.RFC3339Nano), Mailbox: MailboxDTO{Party: PartyDTO{Type: mailbox.Type, ID: mailbox.ID}, Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread})
+		parties, err := repo.LoadParties(mailbox)
+		if err != nil {
+			return ReadResultDTO{}, err
+		}
+		s.publish.Push(actor.ID, "dm.message.read", MessageReadEventDTO{ConversationID: conversationID.String(), ReadAt: time.Now().UTC().Format(time.RFC3339Nano), Mailbox: MailboxDTO{Party: partyForRef(parties, mailbox), Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread})
 	}
 	return result, nil
 }
@@ -335,7 +360,11 @@ func (s *Service) BlockConversation(ctx context.Context, actor authctx.CurrentUs
 		if err != nil {
 			return err
 		}
-		result = conversationDTO(access.Conversation)
+		parties, err := repo.LoadParties(conversationPartyRefs(access.Conversation)...)
+		if err != nil {
+			return err
+		}
+		result = conversationDTO(access.Conversation, parties)
 		result.Blocked = blocked
 		return nil
 	})
@@ -361,7 +390,11 @@ func (s *Service) UnblockConversation(ctx context.Context, actor authctx.Current
 		if err != nil {
 			return err
 		}
-		result = conversationDTO(access.Conversation)
+		parties, err := repo.LoadParties(conversationPartyRefs(access.Conversation)...)
+		if err != nil {
+			return err
+		}
+		result = conversationDTO(access.Conversation, parties)
 		result.Blocked = blocked
 		return nil
 	})
@@ -568,7 +601,11 @@ func (s *Service) GetTargetConversation(ctx context.Context, actorUserID uuid.UU
 	if err != nil {
 		return ConversationDTO{}, err
 	}
-	return conversationDTO(conversation), nil
+	parties, err := repo.LoadParties(conversationPartyRefs(conversation)...)
+	if err != nil {
+		return ConversationDTO{}, err
+	}
+	return conversationDTO(conversation, parties), nil
 }
 
 const maxDMImageSize = 10 * 1024 * 1024
@@ -699,7 +736,7 @@ func (s *Service) publishMessageCreated(ctx context.Context, message MessageDTO)
 	if err := repo.db.First(&conversation, "id = ?", message.ConversationID).Error; err != nil {
 		return
 	}
-	conversationDTO := conversationDTO(conversation)
+	partyRefs := conversationPartyRefs(conversation)
 	users := map[uuid.UUID]struct{}{message.SenderID: {}}
 	channelOwner := uuid.Nil
 	if conversation.ParticipantBType == model.DMPartyChannel {
@@ -710,9 +747,17 @@ func (s *Service) publishMessageCreated(ctx context.Context, message MessageDTO)
 		channelOwner = resolved.OwnerUserID
 		users[conversation.ParticipantA] = struct{}{}
 		users[channelOwner] = struct{}{}
+		partyRefs = append(partyRefs, TargetRef{Type: model.DMPartyUser, ID: channelOwner})
 	} else {
 		users[conversation.ParticipantA] = struct{}{}
 		users[conversation.ParticipantB] = struct{}{}
+	}
+	for userID := range users {
+		partyRefs = append(partyRefs, TargetRef{Type: model.DMPartyUser, ID: userID})
+	}
+	parties, err := repo.LoadParties(partyRefs...)
+	if err != nil {
+		return
 	}
 	for userID := range users {
 		mailbox := TargetRef{Type: model.DMPartyUser, ID: userID}
@@ -733,13 +778,28 @@ func (s *Service) publishMessageCreated(ctx context.Context, message MessageDTO)
 				totalUnread = value
 			}
 		}
-		payload := MessageCreatedEventDTO{Message: message, Conversation: conversationDTO, Mailbox: MailboxDTO{Party: PartyDTO{Type: mailbox.Type, ID: mailbox.ID}, Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread}
+		payload := MessageCreatedEventDTO{Message: message, Conversation: conversationDTO(conversation, parties), Mailbox: MailboxDTO{Party: partyForRef(parties, mailbox), Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread}
 		s.publish.Push(userID, "dm.message.created", payload)
 		s.publish.Push(userID, "dm.mailbox.updated", MailboxUpdatedEventDTO{Mailbox: payload.Mailbox, DMUnread: dmUnread, TotalUnread: totalUnread})
 	}
 }
-func conversationDTO(conversation model.DMConversation) ConversationDTO {
-	return ConversationDTO{ID: conversation.ID, ParticipantA: PartyDTO{Type: conversation.ParticipantAType, ID: conversation.ParticipantA}, ParticipantB: PartyDTO{Type: conversation.ParticipantBType, ID: conversation.ParticipantB}, LastMessageAt: conversation.LastMessageAt, LastMessagePreview: conversation.LastMessagePreview}
+func conversationPartyRefs(conversation model.DMConversation) []TargetRef {
+	return []TargetRef{
+		{Type: conversation.ParticipantAType, ID: conversation.ParticipantA},
+		{Type: conversation.ParticipantBType, ID: conversation.ParticipantB},
+	}
+}
+
+func partyForRef(parties map[TargetRef]PartyDTO, ref TargetRef) PartyDTO {
+	if party, ok := parties[ref]; ok {
+		return party
+	}
+	return PartyDTO{Type: ref.Type, ID: ref.ID, Name: ref.ID.String()}
+}
+
+func conversationDTO(conversation model.DMConversation, parties map[TargetRef]PartyDTO) ConversationDTO {
+	refs := conversationPartyRefs(conversation)
+	return ConversationDTO{ID: conversation.ID, ParticipantA: partyForRef(parties, refs[0]), ParticipantB: partyForRef(parties, refs[1]), LastMessageAt: conversation.LastMessageAt, LastMessagePreview: conversation.LastMessagePreview}
 }
 func truncateRunes(value string, limit int) string {
 	if utf8.RuneCountInString(value) <= limit {
