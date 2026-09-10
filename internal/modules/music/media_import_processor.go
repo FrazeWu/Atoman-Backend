@@ -965,6 +965,12 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 			payload["derived_album_title"] = albumTitle
 		}
 	}
+	if albumTitle == "" {
+		albumTitle = albumImportArchiveTitle(stringValue(payload["archive_name"]), artist)
+		if albumTitle != "" {
+			payload["derived_album_title"] = albumTitle
+		}
+	}
 	rawResult := AlbumImportMetadataResult{
 		AlbumTitle: albumTitle, Tracks: baseMetadataTracks(metadataTracks),
 		MatchStatus: model.MusicMatchUnmatched,
@@ -1089,6 +1095,30 @@ func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[str
 func albumImportFileAlbum(file model.AlbumImportFile) string {
 	metadata := albumImportFileMetadata(file)
 	return strings.TrimSpace(stringValue(metadata["album"]))
+}
+
+func albumImportArchiveTitle(archiveName, artist string) string {
+	title := strings.TrimSpace(filepath.Base(archiveName))
+	if title == "" {
+		return ""
+	}
+	if extension := filepath.Ext(title); extension != "" {
+		title = strings.TrimSpace(strings.TrimSuffix(title, extension))
+	}
+	title = regexp.MustCompile(`(?i)\s*\[(?:flac|mp3|wav|m4a|aac|alac|ogg|opus|ape|dsf|dff)\]\s*$`).ReplaceAllString(title, "")
+	title = strings.TrimSpace(title)
+
+	artist = strings.TrimSpace(artist)
+	if artist == "" {
+		return title
+	}
+	for _, separator := range []string{" - ", " – ", " — "} {
+		prefix := artist + separator
+		if len(title) >= len(prefix) && strings.EqualFold(title[:len(prefix)], prefix) {
+			return strings.TrimSpace(title[len(prefix):])
+		}
+	}
+	return title
 }
 
 func albumImportFileMetadata(file model.AlbumImportFile) map[string]any {

@@ -730,6 +730,12 @@ func TestAlbumImportPayloadAlbumTitleFallsBackToCommitRequest(t *testing.T) {
 	}
 }
 
+func TestAlbumImportArchiveTitleRemovesArtistAndFormatSuffix(t *testing.T) {
+	if got := albumImportArchiveTitle("郭顶 - 飞行器的执行周期[FLAC].rar", "郭顶"); got != "飞行器的执行周期" {
+		t.Fatalf("archive title = %q", got)
+	}
+}
+
 func TestMediaImportProcessorDoesNotRegressCanceledSession(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{
@@ -796,6 +802,49 @@ func TestPersistDerivedTracksKeepsOnlyMajorityAlbum(t *testing.T) {
 	}
 	if ignored.ProcessingStatus != "ignored" || ignored.ErrorMessage != "属于其他专辑：DAMN." {
 		t.Fatalf("unexpected ignored file: %#v", ignored)
+	}
+}
+
+func TestPersistDerivedTracksUsesArchiveNameWhenAudioHasNoAlbumTag(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{
+		Status:      AlbumImportStatusAnalyzing,
+		Stage:       AlbumImportStageAnalyzing,
+		PayloadJSON: `{"archive_name":"郭顶 - 飞行器的执行周期[FLAC].rar","artist_name":"郭顶"}`,
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	file := model.AlbumImportFile{
+		ImportID:         session.ID,
+		FileName:         "01 - 凄美地.flac",
+		RelativePath:     "01 - 凄美地.flac",
+		Role:             AlbumImportFileRoleAudio,
+		PlaybackKey:      "audio/01",
+		Title:            "凄美地",
+		TrackNumber:      1,
+		ProcessingStatus: AlbumImportFileProcessingStatusCompleted,
+		MetadataJSON:     `{}`,
+	}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	processor := NewMediaImportProcessor(db, &fakeMediaStore{}, &fakeMediaCommandRunner{}, "")
+	if err := processor.persistDerivedTracks(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var reloaded model.AlbumImportSession
+	if err := db.First(&reloaded, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reloaded.PayloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["derived_album_title"] != "飞行器的执行周期" {
+		t.Fatalf("derived album title = %#v", payload["derived_album_title"])
 	}
 }
 
