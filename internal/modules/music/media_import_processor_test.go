@@ -730,6 +730,35 @@ func TestAlbumImportPayloadAlbumTitleFallsBackToCommitRequest(t *testing.T) {
 	}
 }
 
+func TestMediaImportProcessorDoesNotRegressCanceledSession(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{
+		Status:      AlbumImportStatusCanceled,
+		Stage:       AlbumImportStageCanceled,
+		PayloadJSON: "{}",
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	processor := NewMediaImportProcessor(db, &fakeMediaStore{}, &fakeMediaCommandRunner{}, "")
+	err := processor.setSession(
+		context.Background(), session.ID, AlbumImportStatusExtracting,
+		AlbumImportStageExtracting, 1, 1,
+	)
+	if err == nil {
+		t.Fatal("expected progress update to reject canceled session")
+	}
+
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != AlbumImportStatusCanceled || stored.Stage != AlbumImportStageCanceled {
+		t.Fatalf("canceled session was regressed: %#v", stored)
+	}
+}
+
 func TestPersistDerivedTracksKeepsOnlyMajorityAlbum(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusAnalyzing, Stage: AlbumImportStageAnalyzing, PayloadJSON: `{}`}
