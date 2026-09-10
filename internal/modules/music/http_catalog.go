@@ -535,6 +535,10 @@ func (h *Handler) listAlbums(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if err := hydrateAlbumMatchStates(h.service.db, albums); err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	for i := range albums {
 		resolveAlbumMediaURLs(&albums[i])
 	}
@@ -587,6 +591,14 @@ func (h *Handler) getAlbum(c *gin.Context) {
 	}
 	album = albumRows[0]
 	if err := h.service.PopulateSongRatings(album.Songs, viewerUserID(viewerPtr)); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := hydrateAlbumMatchStates(h.service.db, []model.Album{album}); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := hydrateSongMatchStates(h.service.db, album.Songs); err != nil {
 		httpx.Error(c, err)
 		return
 	}

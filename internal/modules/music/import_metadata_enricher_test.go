@@ -51,6 +51,18 @@ func TestFindLocalLyricsUsesDiscAndTrackBeforeFileName(t *testing.T) {
 	}
 }
 
+func TestLocalLyricsPreferLRCOverPlainTextForSameTrack(t *testing.T) {
+	lyrics := map[string]AlbumImportTrackLyricsPayload{}
+	mergeLocalLyrics(lyrics, "disc:1:track:1", AlbumImportTrackLyricsPayload{Content: "plain", Format: "plain"})
+	mergeLocalLyrics(lyrics, "disc:1:track:1", AlbumImportTrackLyricsPayload{Content: "[00:01.00]synced", Format: "lrc"})
+	mergeLocalLyrics(lyrics, "disc:1:track:1", AlbumImportTrackLyricsPayload{Content: "later plain", Format: "plain"})
+
+	got, ok := findLocalLyrics(lyrics, AlbumImportMetadataTrack{DiscNumber: 1, TrackNumber: 1, Title: "Track"})
+	if !ok || got.Format != "lrc" || got.Content != "[00:01.00]synced" {
+		t.Fatalf("expected LRC to win over plain text, got %#v, ok=%v", got, ok)
+	}
+}
+
 func TestExternalAlbumMetadataEnricherFallsBackToLRCLIB(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if writeMatchingMusicBrainzRelease(w, r) {

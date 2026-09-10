@@ -130,6 +130,38 @@ func (h *Handler) listSongs(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if err := hydrateSongMatchStates(h.service.db, songs); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	albumRows := make([]model.Album, 0, len(songs))
+	albumIndexes := make(map[uuid.UUID]int)
+	for _, song := range songs {
+		if song.Album == nil {
+			continue
+		}
+		if _, exists := albumIndexes[song.Album.ID]; exists {
+			continue
+		}
+		albumIndexes[song.Album.ID] = len(albumRows)
+		albumRows = append(albumRows, *song.Album)
+	}
+	if err := hydrateAlbumMatchStates(h.service.db, albumRows); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	for _, album := range albumRows {
+		for index := range songs {
+			if songs[index].Album != nil && songs[index].Album.ID == album.ID {
+				songs[index].Album.MatchStatus = album.MatchStatus
+				songs[index].Album.MatchProvider = album.MatchProvider
+				songs[index].Album.MatchExternalID = album.MatchExternalID
+				songs[index].Album.MatchSourceURL = album.MatchSourceURL
+				songs[index].Album.MatchConfidence = album.MatchConfidence
+				songs[index].Album.MatchUserOverridden = album.MatchUserOverridden
+			}
+		}
+	}
 	for i := range songs {
 		resolveSongEffectiveSources(&songs[i])
 		songs[i].AudioURL = resolveMusicMediaURL(songs[i].AudioURL)
@@ -461,6 +493,23 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		return
 	}
 	result.Song = ratedSongs[0]
+	if err := hydrateSongMatchStates(h.service.db, []model.Song{result.Song}); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if result.Song.Album != nil {
+		album := *result.Song.Album
+		if err := hydrateAlbumMatchStates(h.service.db, []model.Album{album}); err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		result.Song.Album.MatchStatus = album.MatchStatus
+		result.Song.Album.MatchProvider = album.MatchProvider
+		result.Song.Album.MatchExternalID = album.MatchExternalID
+		result.Song.Album.MatchSourceURL = album.MatchSourceURL
+		result.Song.Album.MatchConfidence = album.MatchConfidence
+		result.Song.Album.MatchUserOverridden = album.MatchUserOverridden
+	}
 	resolveSongEffectiveSources(&result.Song)
 	if song.AlbumID != nil {
 		previous, next := loadAdjacentAlbumSongs(h.service.db, song, viewerPtr)

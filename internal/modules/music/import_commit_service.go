@@ -1005,7 +1005,7 @@ func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importI
 	}
 	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
 	urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
-	sourceKey, ok := musicAlbumImportObjectKey(rawURL, urlPrefix)
+	sourceKey, ok := musicAlbumImportSourceKey(rawURL)
 	if bucket == "" || urlPrefix == "" || !ok || !isPromotableAlbumImportKey(sourceKey, importID) {
 		return rawURL, "", "", nil
 	}
@@ -1040,6 +1040,19 @@ func musicAlbumImportObjectKey(rawURL, urlPrefix string) (string, bool) {
 	}
 	key, err := url.PathUnescape(strings.TrimPrefix(strings.TrimSpace(rawURL), prefix+"/"))
 	return strings.TrimLeft(key, "/"), err == nil && key != ""
+}
+
+func musicAlbumImportSourceKey(rawURL string) (string, bool) {
+	prefixes := []string{
+		strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/"),
+		strings.TrimRight(strings.TrimSpace(os.Getenv("MUSIC_PLAYBACK_URL_PREFIX")), "/"),
+	}
+	for _, prefix := range prefixes {
+		if key, ok := musicAlbumImportObjectKey(rawURL, prefix); ok {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 func (s *Service) deleteAlbumImportObjects(keys []string) {

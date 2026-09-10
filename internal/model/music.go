@@ -120,6 +120,12 @@ type Album struct {
 	RatingScore            float64       `json:"rating_score" gorm:"-"`
 	RatingCount            int64         `json:"rating_count" gorm:"-"`
 	ViewerRating           *int          `json:"viewer_rating,omitempty" gorm:"-"`
+	MatchStatus            string        `json:"match_status,omitempty" gorm:"-"`
+	MatchProvider          string        `json:"match_provider,omitempty" gorm:"-"`
+	MatchExternalID        string        `json:"match_external_id,omitempty" gorm:"-"`
+	MatchSourceURL         string        `json:"match_source_url,omitempty" gorm:"-"`
+	MatchConfidence        float64       `json:"match_confidence,omitempty" gorm:"-"`
+	MatchUserOverridden    bool          `json:"match_user_overridden,omitempty" gorm:"-"`
 }
 
 func (Album) TableName() string {
@@ -236,6 +242,12 @@ type Song struct {
 	RatingScore            float64         `json:"rating_score" gorm:"-"`
 	RatingCount            int64           `json:"rating_count" gorm:"-"`
 	ViewerRating           *int            `json:"viewer_rating,omitempty" gorm:"-"`
+	MatchStatus            string          `json:"match_status,omitempty" gorm:"-"`
+	MatchProvider          string          `json:"match_provider,omitempty" gorm:"-"`
+	MatchExternalID        string          `json:"match_external_id,omitempty" gorm:"-"`
+	MatchSourceURL         string          `json:"match_source_url,omitempty" gorm:"-"`
+	MatchConfidence        float64         `json:"match_confidence,omitempty" gorm:"-"`
+	MatchUserOverridden    bool            `json:"match_user_overridden,omitempty" gorm:"-"`
 }
 
 func (Song) TableName() string {

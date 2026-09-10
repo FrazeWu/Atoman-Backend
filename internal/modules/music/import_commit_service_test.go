@@ -2,6 +2,16 @@ package music
 
 import "testing"
 
+func TestMusicAlbumImportSourceKeyAcceptsPlaybackURLPrefix(t *testing.T) {
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
+	t.Setenv("MUSIC_PLAYBACK_URL_PREFIX", "https://playback.example.test")
+
+	key, ok := musicAlbumImportSourceKey("https://playback.example.test/music/album-imports/playback/sessions/import/track.mp3")
+	if !ok || key != "music/album-imports/playback/sessions/import/track.mp3" {
+		t.Fatalf("source key = %q, ok=%v", key, ok)
+	}
+}
+
 func TestMatchDerivedTrackAudioUsesAudioKeyAfterTrackRenameAndReorder(t *testing.T) {
 	derivedTracks := []any{
 		map[string]any{"title": "IGOR'S THEME", "audio_key": "audio-igor", "audio_url": "https://cdn.test/igor.mp3"},
