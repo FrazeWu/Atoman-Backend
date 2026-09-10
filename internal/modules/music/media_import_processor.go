@@ -1135,21 +1135,30 @@ func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayloa
 	return AlbumImportTrackLyricsPayload{Content: strings.TrimSpace(string(raw)), Format: format, EditSummary: "通过专辑导入添加歌词"}
 }
 
-func mergeLocalLyrics(lyrics map[string]AlbumImportTrackLyricsPayload, key string, incoming AlbumImportTrackLyricsPayload) {
-	if lyrics == nil || strings.TrimSpace(key) == "" || strings.TrimSpace(incoming.Content) == "" {
+func mergeLocalLyrics(lyrics map[string]AlbumImportTrackLyricsPayload, key string, candidate AlbumImportTrackLyricsPayload) {
+	key = strings.TrimSpace(key)
+	priority := localLyricsPriority(candidate)
+	if key == "" || priority == 0 {
 		return
 	}
 	current, exists := lyrics[key]
-	if !exists || lyricPayloadRank(incoming) > lyricPayloadRank(current) {
-		lyrics[key] = incoming
+	if !exists || priority > localLyricsPriority(current) {
+		lyrics[key] = candidate
 	}
 }
 
-func lyricPayloadRank(payload AlbumImportTrackLyricsPayload) int {
-	if strings.EqualFold(strings.TrimSpace(payload.Format), "lrc") {
-		return 2
+func localLyricsPriority(payload AlbumImportTrackLyricsPayload) int {
+	if strings.TrimSpace(payload.Content) == "" {
+		return 0
 	}
-	return 1
+	if !strings.EqualFold(strings.TrimSpace(payload.Format), "lrc") {
+		return 1
+	}
+	lines, err := ParseLyricLines(payload.Content, payload.Translation, "lrc")
+	if err != nil || len(lines) == 0 {
+		return 0
+	}
+	return 2
 }
 
 func majorityMetadataValue(tracks []AlbumImportMetadataTrack, value func(AlbumImportMetadataTrack) string) string {
