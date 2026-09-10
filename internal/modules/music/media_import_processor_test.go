@@ -106,6 +106,13 @@ func TestMediaImportProcessorExtractsArchiveInTempTreeAndKeepsDiscPath(t *testin
 	if len(files) != 1 || files[0].DiscNumber != 2 || files[0].PlaybackKey == "" || files[0].SourceKey != "" {
 		t.Fatalf("unexpected extracted file: %#v", files)
 	}
+	var processedArchive model.AlbumImportFile
+	if err := db.First(&processedArchive, "id = ?", archive.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if processedArchive.ProcessingStatus != AlbumImportFileProcessingStatusCompleted {
+		t.Fatalf("archive processing status = %q, want completed", processedArchive.ProcessingStatus)
+	}
 	if len(runner.runs) < 2 || runner.runs[0][0] != "7zz" || runner.runs[0][1] != "l" || runner.runs[1][0] != "7zz" || runner.runs[1][1] != "x" {
 		t.Fatalf("expected list then extract, got %#v", runner.runs)
 	}

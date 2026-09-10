@@ -352,7 +352,10 @@ func (p *MediaImportProcessor) processUploadedFiles(ctx context.Context, session
 	}
 	if len(files) == 0 {
 		if hasCompletedAudio {
-			return p.persistDerivedTracks(ctx, session.ID)
+			if err := p.persistDerivedTracks(ctx, session.ID); err != nil {
+				return err
+			}
+			return p.partialImportError(ctx, session.ID)
 		}
 		return errors.New("no uploaded audio files to process")
 	}
@@ -391,6 +394,9 @@ func (p *MediaImportProcessor) processUploadedFiles(ctx context.Context, session
 		return errors.New("no audio tracks were processed successfully")
 	}
 	if err := p.persistDerivedTracks(ctx, session.ID); err != nil {
+		return err
+	}
+	if err := p.partialImportError(ctx, session.ID); err != nil {
 		return err
 	}
 	return p.setSession(ctx, session.ID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(successes), total)
@@ -468,7 +474,10 @@ func (p *MediaImportProcessor) processArchive(ctx context.Context, session model
 		if err := extractRARArchive(archivePath, extracted); err != nil {
 			return fmt.Errorf("extract archive %s: %w", archive.FileName, err)
 		}
-		return p.processExtractedTree(ctx, session.ID, extracted, heartbeat)
+		if err := p.processExtractedTree(ctx, session.ID, extracted, heartbeat); err != nil {
+			return err
+		}
+		return p.completeArchiveProcessing(ctx, session.ID, archive.ID)
 	}
 	listing, err := p.runner.Run(ctx, "7zz", "l", "-slt", archivePath)
 	if err != nil {
@@ -481,7 +490,33 @@ func (p *MediaImportProcessor) processArchive(ctx context.Context, session model
 	if err != nil {
 		return fmt.Errorf("extract archive %s: %w", archive.FileName, mediaCommandError(err, output))
 	}
-	return p.processExtractedTree(ctx, session.ID, extracted, heartbeat)
+	if err := p.processExtractedTree(ctx, session.ID, extracted, heartbeat); err != nil {
+		return err
+	}
+	return p.completeArchiveProcessing(ctx, session.ID, archive.ID)
+}
+
+func (p *MediaImportProcessor) completeArchiveProcessing(ctx context.Context, sessionID, fileID uuid.UUID) error {
+	if err := p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", fileID).Updates(map[string]any{
+		"processing_status": AlbumImportFileProcessingStatusCompleted,
+		"error_message":     "",
+	}).Error; err != nil {
+		return err
+	}
+	return p.partialImportError(ctx, sessionID)
+}
+
+func (p *MediaImportProcessor) partialImportError(ctx context.Context, sessionID uuid.UUID) error {
+	var count int64
+	if err := p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).
+		Where("import_id = ? AND processing_status = ?", sessionID, AlbumImportFileProcessingStatusFailed).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	return &importNeedsAttentionError{message: fmt.Sprintf("%d imported file(s) need attention", count)}
 }
 
 func mediaCommandError(err error, output []byte) error {
@@ -631,10 +666,10 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		case AlbumImportFileRoleLyrics:
 			if raw, readErr := os.ReadFile(path); readErr == nil && len(raw) <= 2*1024*1024 {
 				payload := lyricsPayloadFromFile(path, raw)
-				localLyrics[normalizedLyricName(relative)] = payload
+				mergeLocalLyrics(localLyrics, normalizedLyricName(relative), payload)
 				disc, track := discAndTrackFromPath(relative)
 				if track > 0 {
-					localLyrics[lyricSequenceKey(disc, track)] = payload
+					mergeLocalLyrics(localLyrics, lyricSequenceKey(disc, track), payload)
 				}
 			}
 		}
@@ -1079,10 +1114,10 @@ func (p *MediaImportProcessor) loadUploadedLyrics(ctx context.Context, sessionID
 		_ = reader.Close()
 		if readErr == nil && len(raw) <= 2*1024*1024 {
 			payload := lyricsPayloadFromFile(file.FileName, raw)
-			result[normalizedLyricName(file.RelativePath)] = payload
+			mergeLocalLyrics(result, normalizedLyricName(file.RelativePath), payload)
 			disc, track := discAndTrackFromPath(file.RelativePath)
 			if track > 0 {
-				result[lyricSequenceKey(disc, track)] = payload
+				mergeLocalLyrics(result, lyricSequenceKey(disc, track), payload)
 			}
 			_ = p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
 				"processing_status": "completed", "error_message": "",
@@ -1098,6 +1133,23 @@ func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayloa
 		format = "lrc"
 	}
 	return AlbumImportTrackLyricsPayload{Content: strings.TrimSpace(string(raw)), Format: format, EditSummary: "通过专辑导入添加歌词"}
+}
+
+func mergeLocalLyrics(lyrics map[string]AlbumImportTrackLyricsPayload, key string, incoming AlbumImportTrackLyricsPayload) {
+	if lyrics == nil || strings.TrimSpace(key) == "" || strings.TrimSpace(incoming.Content) == "" {
+		return
+	}
+	current, exists := lyrics[key]
+	if !exists || lyricPayloadRank(incoming) > lyricPayloadRank(current) {
+		lyrics[key] = incoming
+	}
+}
+
+func lyricPayloadRank(payload AlbumImportTrackLyricsPayload) int {
+	if strings.EqualFold(strings.TrimSpace(payload.Format), "lrc") {
+		return 2
+	}
+	return 1
 }
 
 func majorityMetadataValue(tracks []AlbumImportMetadataTrack, value func(AlbumImportMetadataTrack) string) string {

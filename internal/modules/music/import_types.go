@@ -285,8 +285,9 @@ const (
 	AlbumImportFileUploadStatusUploaded   = "uploaded"
 	AlbumImportFileUploadStatusFailed     = "failed"
 
-	AlbumImportFileProcessingStatusPending = "pending"
-	AlbumImportFileProcessingStatusFailed  = "failed"
+	AlbumImportFileProcessingStatusPending   = "pending"
+	AlbumImportFileProcessingStatusCompleted = "completed"
+	AlbumImportFileProcessingStatusFailed    = "failed"
 
 	AlbumImportJobStatusQueued   = "queued"
 	AlbumImportJobStatusRunning  = "running"

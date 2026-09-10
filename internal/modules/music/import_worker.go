@@ -34,6 +34,17 @@ type ImportProcessor interface {
 	Process(context.Context, model.AlbumImportJob, func() error) error
 }
 
+type importNeedsAttentionError struct {
+	message string
+}
+
+func (e *importNeedsAttentionError) Error() string {
+	if e == nil || strings.TrimSpace(e.message) == "" {
+		return "music import needs attention"
+	}
+	return e.message
+}
+
 type ImportWorker struct {
 	db                   *gorm.DB
 	store                MusicImportObjectStore
@@ -260,6 +271,31 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 		var session model.AlbumImportSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status IN ?", job.ImportID, activeImportSessionStatuses).First(&session).Error; err != nil {
 			return errors.New("music import job is not held by this worker")
+		}
+		var needsAttention *importNeedsAttentionError
+		if errors.As(cause, &needsAttention) {
+			expires := now.Add(importWorkerRetention)
+			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ?", job.ID, AlbumImportJobStatusRunning, w.workerID).Updates(map[string]any{
+				"status": AlbumImportJobStatusFailed, "stage": AlbumImportStageFailed, "last_error": message,
+				"finished_at": now, "locked_by": "", "locked_at": nil, "heartbeat_at": nil,
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return errors.New("music import job is not held by this worker")
+			}
+			result = tx.Model(&model.AlbumImportSession{}).Where("id = ? AND status IN ?", session.ID, activeImportSessionStatuses).Updates(map[string]any{
+				"status": AlbumImportStatusNeedsAttention, "stage": AlbumImportStageFailed, "error_message": message, "expires_at": expires,
+			})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return errors.New("music import session is no longer active")
+			}
+			event, retried = "needs_attention", job
+			return nil
 		}
 		if job.Attempts >= job.MaxAttempts {
 			expires := now.Add(importWorkerRetention)

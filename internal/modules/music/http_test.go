@@ -49,6 +49,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicSearchInteraction{},
 		&model.MusicRecommendationEvent{},
 		&model.MusicCatalogLink{},
+		&model.MusicMatchRecord{},
 		&model.AlbumImportSession{},
 		&model.MusicAssetUploadSession{},
 		&model.AlbumImportFile{},
@@ -2944,6 +2945,75 @@ func TestRegisterRoutesAlbumDetailIncludesMusicBrainzMatchState(t *testing.T) {
 	}
 	if response["musicbrainz_matched"] != true {
 		t.Fatalf("expected MusicBrainz match state in album detail, got %s", encoded)
+	}
+}
+
+func TestRegisterRoutesCatalogDetailsUseUnifiedMusicMatchRecord(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	album := model.Album{Title: "Unified Match Album", Status: "open", EntryStatus: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	song := model.Song{Title: "Unified Match Song", AlbumID: &album.ID, AudioURL: "/song.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Create(&model.MusicMatchRecord{
+		EntityType: "album", EntityID: album.ID, Provider: "discogs", ExternalID: "release-1",
+		SourceURL: "https://www.discogs.com/release/1", Status: model.MusicMatchMatched, Confidence: 0.92,
+	}).Error; err != nil {
+		t.Fatalf("create album match: %v", err)
+	}
+	if err := db.Create(&model.MusicMatchRecord{
+		EntityType: "song", EntityID: song.ID, Provider: "musicbrainz", ExternalID: "recording-1",
+		SourceURL: "https://musicbrainz.org/recording/1", Status: model.MusicMatchManual, Confidence: 1, UserOverridden: true,
+	}).Error; err != nil {
+		t.Fatalf("create song match: %v", err)
+	}
+
+	var albumResponse struct {
+		Data struct {
+			MatchStatus   string `json:"match_status"`
+			MatchProvider string `json:"match_provider"`
+			MatchURL      string `json:"match_source_url"`
+			Songs         []struct {
+				MatchStatus   string `json:"match_status"`
+				MatchProvider string `json:"match_provider"`
+				MatchOverride bool   `json:"match_user_overridden"`
+			} `json:"songs"`
+		} `json:"data"`
+	}
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, &user), http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("get album: %d %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &albumResponse); err != nil {
+		t.Fatalf("decode album: %v", err)
+	}
+	if albumResponse.Data.MatchStatus != model.MusicMatchMatched || albumResponse.Data.MatchProvider != "discogs" || albumResponse.Data.MatchURL == "" {
+		t.Fatalf("unexpected album match state: %#v", albumResponse.Data)
+	}
+	if len(albumResponse.Data.Songs) != 1 || albumResponse.Data.Songs[0].MatchStatus != model.MusicMatchManual || !albumResponse.Data.Songs[0].MatchOverride {
+		t.Fatalf("unexpected song match state in album detail: %#v", albumResponse.Data.Songs)
+	}
+
+	var songResponse struct {
+		Data struct {
+			Song struct {
+				MatchProvider string `json:"match_provider"`
+				MatchOverride bool   `json:"match_user_overridden"`
+			} `json:"song"`
+		} `json:"data"`
+	}
+	response = performMusicJSONRequest(t, newMusicHTTPRouter(service, &user), http.MethodGet, "/api/v1/music/songs/"+song.ID.String(), "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("get song: %d %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &songResponse); err != nil {
+		t.Fatalf("decode song: %v", err)
+	}
+	if songResponse.Data.Song.MatchProvider != "musicbrainz" || !songResponse.Data.Song.MatchOverride {
+		t.Fatalf("unexpected song detail match state: %#v", songResponse.Data.Song)
 	}
 }
 

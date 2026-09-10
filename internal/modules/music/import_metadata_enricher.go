@@ -231,8 +231,8 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.MetadataSource = "discogs"
 		result.ExternalID = strconv.Itoa(discogsRelease.ID)
 		result.MatchStatus = model.MusicMatchMatched
-		result.MatchConfidence = 1
 		result.CoverURL = discogsReleaseCoverURL(discogsRelease)
+		result.MatchConfidence = externalTrackMatchConfidence(result.Tracks, flattenDiscogsTracks(discogsRelease), discogsMapping)
 		result.Tracks = applyDiscogsTracks(result.Tracks, discogsRelease, discogsMapping)
 		for index := range result.Tracks {
 			if result.Tracks[index].MatchStatus == model.MusicMatchMatched {
@@ -267,8 +267,8 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.MetadataSource = "musicbrainz"
 		result.ExternalID = release.ID
 		result.MatchStatus = model.MusicMatchMatched
-		result.MatchConfidence = 1
 		result.MusicBrainzReleaseID = release.ID
+		result.MatchConfidence = externalTrackMatchConfidence(result.Tracks, flattenMusicBrainzTracks(release), trackMapping)
 		result.MissingArtists = missingMusicBrainzArtists(release.ArtistCredit, uniqueMusicArtists(append([]string{input.Artist}, input.Artists...)))
 		if e.coverArtBase != "" {
 			result.CoverURL = e.coverArtBase + "/release/" + release.ID + "/front-500"
@@ -460,6 +460,7 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 		if err := e.discogsJSON(ctx, e.discogsBase+"/database/search?"+params.Encode(), &search); err != nil {
 			return discogsRelease{}, nil, err
 		}
+		best := discogsReleaseMatch{}
 		for _, candidate := range search.Results {
 			if candidate.ID <= 0 || !strings.EqualFold(candidate.Type, "release") {
 				continue
@@ -476,11 +477,84 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 			matchingRelease := discogsReleaseAsMusicBrainzRelease(release, remote)
 			mapping, ok := matchMusicBrainzTracks(matchingRelease, input.Tracks)
 			if ok {
-				return release, mapping, nil
+				candidate := discogsReleaseMatch{release: release, mapping: mapping}
+				candidate.exactTitles, candidate.positionMatches, candidate.durationDifference = scoreExternalTrackMatch(remote, input.Tracks, mapping)
+				if best.release.ID == 0 || betterDiscogsReleaseMatch(candidate, best) {
+					best = candidate
+				}
 			}
+		}
+		if best.release.ID > 0 {
+			return best.release, best.mapping, nil
 		}
 	}
 	return discogsRelease{}, nil, errors.New("Discogs candidates did not safely match uploaded tracks")
+}
+
+type discogsReleaseMatch struct {
+	release            discogsRelease
+	mapping            []int
+	exactTitles        int
+	positionMatches    int
+	durationDifference float64
+}
+
+func betterDiscogsReleaseMatch(left, right discogsReleaseMatch) bool {
+	if left.exactTitles != right.exactTitles {
+		return left.exactTitles > right.exactTitles
+	}
+	if left.positionMatches != right.positionMatches {
+		return left.positionMatches > right.positionMatches
+	}
+	if left.durationDifference != right.durationDifference {
+		return left.durationDifference < right.durationDifference
+	}
+	return left.release.ID < right.release.ID
+}
+
+func scoreExternalTrackMatch(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack, mapping []int) (int, int, float64) {
+	exactTitles := 0
+	positionMatches := 0
+	durationDifference := 0.0
+	for remoteIndex, uploadedIndex := range mapping {
+		if remoteIndex >= len(remote) || uploadedIndex < 0 || uploadedIndex >= len(uploaded) {
+			continue
+		}
+		remoteTrack := remote[remoteIndex]
+		uploadedTrack := uploaded[uploadedIndex]
+		if comparableMusicBrainzTrackTitle(remoteTrack.Title) == comparableMusicBrainzTrackTitle(uploadedTrack.Title) {
+			exactTitles++
+		}
+		if normalizedDiscNumber(uploadedTrack.DiscNumber) == remoteTrack.Disc && uploadedTrack.TrackNumber == remoteTrack.Position {
+			positionMatches++
+		}
+		if remoteTrack.DurationMS > 0 && uploadedTrack.DurationSeconds > 0 {
+			durationDifference += absFloat(float64(remoteTrack.DurationMS)/1000 - uploadedTrack.DurationSeconds)
+		}
+	}
+	return exactTitles, positionMatches, durationDifference
+}
+
+func externalTrackMatchConfidence(tracks []AlbumImportDTOTrack, remote []flattenedMusicBrainzTrack, mapping []int) float64 {
+	if len(remote) == 0 || len(mapping) != len(remote) {
+		return 0
+	}
+	exactTitles := 0
+	positionMatches := 0
+	for remoteIndex, uploadedIndex := range mapping {
+		if remoteIndex >= len(remote) || uploadedIndex < 0 || uploadedIndex >= len(tracks) {
+			continue
+		}
+		remoteTrack := remote[remoteIndex]
+		track := tracks[uploadedIndex]
+		if comparableMusicBrainzTrackTitle(remoteTrack.Title) == comparableMusicBrainzTrackTitle(track.Title) {
+			exactTitles++
+		}
+		if normalizedDiscNumber(track.DiscNumber) == remoteTrack.Disc && track.TrackNumber == remoteTrack.Position {
+			positionMatches++
+		}
+	}
+	return (float64(exactTitles)*0.75 + float64(positionMatches)*0.25) / float64(len(remote))
 }
 
 func (e *ExternalAlbumMetadataEnricher) discogsJSON(ctx context.Context, endpoint string, target any) error {
