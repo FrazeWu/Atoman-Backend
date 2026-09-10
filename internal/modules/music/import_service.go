@@ -525,7 +525,7 @@ func isAlbumImportStatusAllowed(status string) bool {
 
 func isAlbumImportActiveStatus(status string) bool {
 	switch status {
-	case AlbumImportStatusUploading, AlbumImportStatusQueued, AlbumImportStatusExtracting, AlbumImportStatusAnalyzing, AlbumImportStatusTranscoding:
+	case AlbumImportStatusUploaded, AlbumImportStatusUploading, AlbumImportStatusQueued, AlbumImportStatusExtracting, AlbumImportStatusAnalyzing, AlbumImportStatusTranscoding:
 		return true
 	default:
 		return false

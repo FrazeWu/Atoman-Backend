@@ -173,14 +173,16 @@ func refreshAlbumImportFileSet(tx *gorm.DB, session *model.AlbumImportSession) e
 }
 
 func queueSubmittedAlbumImportWhenUploadsComplete(tx *gorm.DB, session *model.AlbumImportSession) error {
-	if session.Status != AlbumImportStatusUploading {
+	if session.Status != AlbumImportStatusUploading && session.Status != AlbumImportStatusUploaded {
 		return nil
 	}
 	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
 	if err != nil {
 		return err
 	}
-	if _, submitted := payload["commit_request"]; !submitted {
+	if _, submitted := payload["commit_request"]; !submitted &&
+		strings.TrimSpace(stringValue(payload["artist_id"])) == "" &&
+		strings.TrimSpace(stringValue(payload["artist_name"])) == "" {
 		return nil
 	}
 	var total, incomplete int64

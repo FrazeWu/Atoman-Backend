@@ -651,6 +651,9 @@ func TestCompleteAlbumImportSessionQueuesOneJobIdempotently(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
 	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)})
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("payload_json", `{"artist_name":"Known Artist"}`).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Update("upload_status", AlbumImportFileUploadStatusUploaded).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -672,6 +675,34 @@ func TestCompleteAlbumImportSessionQueuesOneJobIdempotently(t *testing.T) {
 	}
 	if len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued || jobs[0].MaxAttempts != 3 {
 		t.Fatalf("expected one queued job, got %#v", jobs)
+	}
+}
+
+func TestCompleteAlbumImportSessionDefersMatchingUntilArtistIsProvided(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)})
+	if err := db.Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Update("upload_status", AlbumImportFileUploadStatusUploaded).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	uploaded, err := svc.CompleteAlbumImportSession(user, session.ID)
+	if err != nil {
+		t.Fatalf("complete upload without artist: %v", err)
+	}
+	if uploaded.Status != AlbumImportStatusUploaded || uploaded.Stage != AlbumImportStageUpload {
+		t.Fatalf("expected upload to wait for artist context, got %#v", uploaded)
+	}
+
+	queued, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Late Artist"},
+		Album:  AlbumImportAlbumPayload{Title: "Late Album"},
+	})
+	if err != nil {
+		t.Fatalf("start matching after artist input: %v", err)
+	}
+	if queued.Status != AlbumImportStatusQueued || queued.Stage != AlbumImportStageQueued {
+		t.Fatalf("expected matching to queue after artist input, got %#v", queued)
 	}
 }
 
