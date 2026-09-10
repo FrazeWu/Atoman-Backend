@@ -1,6 +1,7 @@
 package music
 
 import (
+	"atoman/internal/model"
 	"context"
 	"fmt"
 	"net/http"
@@ -252,6 +253,83 @@ func TestExternalAlbumMetadataEnricherCanPreferDiscogs(t *testing.T) {
 	}
 	if musicBrainzRequests.Load() != 0 {
 		t.Fatalf("MusicBrainz was called after Discogs matched")
+	}
+}
+
+func TestExternalAlbumMetadataEnricherMatchesDiscogsBilingualReleaseTitle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/database/search" {
+			if r.URL.Query().Get("artist") != "" {
+				_, _ = w.Write([]byte(`{"results":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"results":[{"id":24642644,"type":"release"}]}`))
+			return
+		}
+		if r.URL.Path == "/releases/24642644" {
+			_, _ = w.Write([]byte(`{"id":24642644,"title":"飞行器的执行周期 = The Silent Star Stone","artists":[{"name":"郭顶"}],"tracklist":[{"position":"1","title":"凄美地 = The Fog Space","duration":"4:10","type_":"track"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), "", "", "", "Atoman/test").
+		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
+	enricher.discogsWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "飞行器的执行周期",
+		Artist:     "郭顶",
+		SkipLyrics: true,
+		Tracks:     []AlbumImportMetadataTrack{{Title: "凄美地", DurationSeconds: 250}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MetadataSource != "discogs" || result.ExternalID != "24642644" || result.MatchStatus != model.MusicMatchMatched {
+		t.Fatalf("unexpected Discogs result: %#v", result)
+	}
+	if len(result.Tracks) != 1 || result.Tracks[0].Title != "凄美地 = The Fog Space" || result.Tracks[0].TrackNumber != 1 {
+		t.Fatalf("unexpected Discogs tracks: %#v", result.Tracks)
+	}
+}
+
+func TestExternalAlbumMetadataEnricherFallsBackToMusicBrainzWhenDiscogsMisses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/database/search":
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		case "/ws/2/release-group/":
+			_, _ = w.Write([]byte(`{"release-groups":[{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","title":"飞行器的执行周期"}]}`))
+		case "/ws/2/release":
+			if r.URL.Query().Get("release-group") == "" {
+				_, _ = w.Write([]byte(`{"releases":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"releases":[{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}]}`))
+		case "/ws/2/release/b808a48c-b38b-4c0f-8dd5-0720fe6b8f86":
+			_, _ = w.Write([]byte(`{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","date":"2016-11-25","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","title":"飞行器的执行周期","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), server.URL, "", "", "Atoman/test").
+		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
+	enricher.musicBrainzWait = 0
+	enricher.discogsWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "飞行器的执行周期",
+		Artist:     "郭顶",
+		SkipLyrics: true,
+		Tracks:     []AlbumImportMetadataTrack{{Title: "凄美地", DurationSeconds: 250}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MetadataSource != "musicbrainz" || result.ExternalID != "b808a48c-b38b-4c0f-8dd5-0720fe6b8f86" || result.MatchStatus != model.MusicMatchMatched {
+		t.Fatalf("unexpected MusicBrainz fallback result: %#v", result)
 	}
 }
 
