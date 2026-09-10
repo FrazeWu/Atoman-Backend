@@ -716,7 +716,12 @@ func (e *ExternalAlbumMetadataEnricher) findReleaseFromGroups(ctx context.Contex
 		return musicBrainzRelease{}, nil, err
 	}
 	for _, group := range search.ReleaseGroups {
-		if !musicBrainzAlbumTitlesMatch(group.Title, input.AlbumTitle) || (artistID == "" && !musicBrainzArtistMatches(group.ArtistCredit, artist)) {
+		if !musicBrainzAlbumTitlesMatch(group.Title, input.AlbumTitle) {
+			continue
+		}
+		// MusicBrainz search results omit artist-credit unless it is explicitly
+		// expanded. The artist/arid filter already constrains this result.
+		if artistID == "" && len(group.ArtistCredit) > 0 && !musicBrainzArtistMatches(group.ArtistCredit, artist) {
 			continue
 		}
 		var releases struct {

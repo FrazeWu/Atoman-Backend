@@ -282,6 +282,45 @@ func TestExternalAlbumMetadataEnricherMatchesDiscogsBilingualReleaseTitle(t *tes
 	}
 }
 
+func TestExternalAlbumMetadataEnricherFallsBackToMusicBrainzWhenDiscogsMisses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/database/search":
+			_, _ = w.Write([]byte(`{"results":[]}`))
+		case "/ws/2/release-group/":
+			_, _ = w.Write([]byte(`{"release-groups":[{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","title":"飞行器的执行周期"}]}`))
+		case "/ws/2/release":
+			if r.URL.Query().Get("release-group") == "" {
+				_, _ = w.Write([]byte(`{"releases":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"releases":[{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}]}`))
+		case "/ws/2/release/b808a48c-b38b-4c0f-8dd5-0720fe6b8f86":
+			_, _ = w.Write([]byte(`{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","date":"2016-11-25","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","title":"飞行器的执行周期","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), server.URL, "", "", "Atoman/test").
+		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
+	enricher.musicBrainzWait = 0
+	enricher.discogsWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "飞行器的执行周期",
+		Artist:     "郭顶",
+		SkipLyrics: true,
+		Tracks:     []AlbumImportMetadataTrack{{Title: "凄美地", DurationSeconds: 250}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MetadataSource != "musicbrainz" || result.ExternalID != "b808a48c-b38b-4c0f-8dd5-0720fe6b8f86" || result.MatchStatus != model.MusicMatchMatched {
+		t.Fatalf("unexpected MusicBrainz fallback result: %#v", result)
+	}
+}
+
 func TestExternalAlbumMetadataEnricherReordersShuffledTracks(t *testing.T) {
 	server := newMusicBrainzEnricherTestServer(t, `{"id":"release-id","title":"Canonical Album","date":"2020-02-03","release-group":{"primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"Intro","length":75000},{"position":2,"title":"What Would I Do","length":222000},{"position":3,"title":"God’s Gift","length":235000},{"position":4,"title":"Love Song","length":368000}]}]}`)
 	defer server.Close()
