@@ -1351,7 +1351,17 @@ func (p *MediaImportProcessor) failFile(ctx context.Context, id uuid.UUID, cause
 }
 
 func (p *MediaImportProcessor) setSession(ctx context.Context, id uuid.UUID, status, stage string, current, total int64) error {
-	return p.db.WithContext(ctx).Model(&model.AlbumImportSession{}).Where("id = ?", id).Updates(map[string]any{"status": status, "stage": stage, "progress_current": current, "progress_total": total}).Error
+	result := p.db.WithContext(ctx).
+		Model(&model.AlbumImportSession{}).
+		Where("id = ? AND status IN ?", id, activeImportSessionStatuses).
+		Updates(map[string]any{"status": status, "stage": stage, "progress_current": current, "progress_total": total})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("music import session is no longer active")
+	}
+	return nil
 }
 
 func safeMediaExtension(value string) string {
