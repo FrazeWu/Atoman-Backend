@@ -13,13 +13,19 @@ type AlbumImportMetadataPreviewInput struct {
 }
 
 type AlbumImportMetadataPreviewDTO struct {
-	Matched         bool                  `json:"matched"`
-	SourceURL       string                `json:"sourceUrl"`
-	MetadataSource  string                `json:"metadataSource,omitempty"`
-	ExternalID      string                `json:"externalId,omitempty"`
-	MatchStatus     string                `json:"matchStatus,omitempty"`
-	MatchConfidence float64               `json:"matchConfidence,omitempty"`
-	Tracks          []AlbumImportDTOTrack `json:"tracks"`
+	Matched         bool                              `json:"matched"`
+	AlbumTitle      string                            `json:"albumTitle,omitempty"`
+	ReleaseDate     string                            `json:"releaseDate,omitempty"`
+	CoverURL        string                            `json:"coverUrl,omitempty"`
+	AlbumType       string                            `json:"albumType,omitempty"`
+	SourceURL       string                            `json:"sourceUrl"`
+	MetadataSource  string                            `json:"metadataSource,omitempty"`
+	ExternalID      string                            `json:"externalId,omitempty"`
+	MatchStatus     string                            `json:"matchStatus,omitempty"`
+	MatchConfidence float64                           `json:"matchConfidence,omitempty"`
+	MetadataError   string                            `json:"metadataError,omitempty"`
+	MetadataSources []AlbumImportMetadataSourceResult `json:"sources,omitempty"`
+	Tracks          []AlbumImportDTOTrack             `json:"tracks"`
 }
 
 func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImportMetadataPreviewInput) (AlbumImportMetadataPreviewDTO, error) {
@@ -44,12 +50,15 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 		Tracks:     tracks,
 		SkipLyrics: true,
 	})
-	if err != nil || result.MetadataSource == "" {
-		return AlbumImportMetadataPreviewDTO{Tracks: baseMetadataTracks(tracks)}, nil
+	if err != nil {
+		return AlbumImportMetadataPreviewDTO{Tracks: baseMetadataTracks(tracks), MetadataError: err.Error()}, nil
 	}
 	return AlbumImportMetadataPreviewDTO{
-		Matched: true, SourceURL: result.SourceURL, MetadataSource: result.MetadataSource,
+		Matched: result.MetadataSource != "", AlbumTitle: result.AlbumTitle,
+		ReleaseDate: result.ReleaseDate, CoverURL: result.CoverURL, AlbumType: result.AlbumType,
+		SourceURL: result.SourceURL, MetadataSource: result.MetadataSource,
 		ExternalID: result.ExternalID, MatchStatus: result.MatchStatus,
-		MatchConfidence: result.MatchConfidence, Tracks: result.Tracks,
+		MatchConfidence: result.MatchConfidence, MetadataError: result.MetadataError,
+		MetadataSources: result.MetadataSources, Tracks: result.Tracks,
 	}, nil
 }

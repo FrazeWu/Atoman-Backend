@@ -12,6 +12,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// previewAlbumImportMetadata godoc
+// @Summary 预览专辑元信息匹配
+// @Description 并行核对 Discogs 与 MusicBrainz，并返回一个完整发行版的安全匹配结果。
+// @Tags music-imports
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param input body AlbumImportMetadataPreviewInput true "本地读取的专辑与曲目元信息"
+// @Success 200 {object} AlbumImportMetadataPreviewDTO
+// @Router /api/v1/music/imports/albums/metadata-preview [post]
 func (h *Handler) previewAlbumImportMetadata(c *gin.Context) {
 	if _, ok := authctx.Current(c); !ok {
 		httpx.Error(c, apperr.Unauthorized("Login required"))

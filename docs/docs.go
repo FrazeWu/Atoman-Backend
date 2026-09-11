@@ -16820,6 +16820,48 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/imports/albums/metadata-preview": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "并行核对 Discogs 与 MusicBrainz，并返回一个完整发行版的安全匹配结果。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-imports"
+                ],
+                "summary": "预览专辑元信息匹配",
+                "parameters": [
+                    {
+                        "description": "本地读取的专辑与曲目元信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumImportMetadataPreviewInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumImportMetadataPreviewDTO"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/imports/albums/{sessionId}": {
             "get": {
                 "security": [
@@ -34950,6 +34992,24 @@ const docTemplate = `{
                 "lifecycle_status": {
                     "type": "string"
                 },
+                "match_confidence": {
+                    "type": "number"
+                },
+                "match_external_id": {
+                    "type": "string"
+                },
+                "match_provider": {
+                    "type": "string"
+                },
+                "match_source_url": {
+                    "type": "string"
+                },
+                "match_status": {
+                    "type": "string"
+                },
+                "match_user_overridden": {
+                    "type": "boolean"
+                },
                 "metadata_manual_override": {
                     "type": "boolean"
                 },
@@ -36838,6 +36898,24 @@ const docTemplate = `{
                 "lyrics": {
                     "type": "string"
                 },
+                "match_confidence": {
+                    "type": "number"
+                },
+                "match_external_id": {
+                    "type": "string"
+                },
+                "match_provider": {
+                    "type": "string"
+                },
+                "match_source_url": {
+                    "type": "string"
+                },
+                "match_status": {
+                    "type": "string"
+                },
+                "match_user_overridden": {
+                    "type": "boolean"
+                },
                 "metadata_manual_override": {
                     "type": "boolean"
                 },
@@ -37944,6 +38022,105 @@ const docTemplate = `{
                 },
                 "meta": {
                     "$ref": "#/definitions/music.PaginationMetaResponse"
+                }
+            }
+        },
+        "music.AlbumImportMetadataPreviewDTO": {
+            "type": "object",
+            "properties": {
+                "albumTitle": {
+                    "type": "string"
+                },
+                "albumType": {
+                    "type": "string"
+                },
+                "coverUrl": {
+                    "type": "string"
+                },
+                "externalId": {
+                    "type": "string"
+                },
+                "matchConfidence": {
+                    "type": "number"
+                },
+                "matchStatus": {
+                    "type": "string"
+                },
+                "matched": {
+                    "type": "boolean"
+                },
+                "metadataError": {
+                    "type": "string"
+                },
+                "metadataSource": {
+                    "type": "string"
+                },
+                "releaseDate": {
+                    "type": "string"
+                },
+                "sourceUrl": {
+                    "type": "string"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumImportMetadataSourceResult"
+                    }
+                },
+                "tracks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumImportDTOTrack"
+                    }
+                }
+            }
+        },
+        "music.AlbumImportMetadataPreviewInput": {
+            "type": "object",
+            "properties": {
+                "albumTitle": {
+                    "type": "string"
+                },
+                "artist": {
+                    "type": "string"
+                },
+                "trackTitles": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "music.AlbumImportMetadataSourceResult": {
+            "type": "object",
+            "properties": {
+                "candidateCount": {
+                    "type": "integer"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "externalId": {
+                    "type": "string"
+                },
+                "matchConfidence": {
+                    "type": "number"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "selected": {
+                    "type": "boolean"
+                },
+                "selectedTitle": {
+                    "type": "string"
+                },
+                "sourceUrl": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
