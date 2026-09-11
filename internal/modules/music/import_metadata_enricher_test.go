@@ -254,9 +254,9 @@ func TestExternalAlbumMetadataEnricherCanPreferDiscogs(t *testing.T) {
 			_, _ = w.Write([]byte(`{"results":[{"id":123,"type":"release"}]}`))
 		case "/releases/123":
 			_, _ = w.Write([]byte(`{"id":123,"title":"Album","released":"2020-02-03","artists":[{"name":"Artist"}],"formats":[{"name":"Album"}],"tracklist":[{"position":"1","title":"First Song","duration":"3:20","type_":"track"}]}`))
-		case "/ws/2/release/":
+		case "/ws/2/release/preferred-id":
 			musicBrainzRequests.Add(1)
-			http.Error(w, "MusicBrainz must not be called after a Discogs match", http.StatusInternalServerError)
+			http.Error(w, "MusicBrainz does not match this fixture", http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
 		}
@@ -276,8 +276,14 @@ func TestExternalAlbumMetadataEnricherCanPreferDiscogs(t *testing.T) {
 	if result.MetadataSource != "discogs" || result.SourceURL != "https://www.discogs.com/release/123" {
 		t.Fatalf("unexpected Discogs result: %#v", result)
 	}
-	if musicBrainzRequests.Load() != 0 {
-		t.Fatalf("MusicBrainz was called after Discogs matched")
+	if musicBrainzRequests.Load() == 0 {
+		t.Fatal("expected parallel MusicBrainz lookup")
+	}
+	if len(result.MetadataSources) != 2 || !result.MetadataSources[0].Selected {
+		t.Fatalf("expected Discogs selection with both source decisions, got %#v", result.MetadataSources)
+	}
+	if result.MetadataSources[0].CandidateCount != 1 {
+		t.Fatalf("expected one retrieved Discogs candidate, got %#v", result.MetadataSources[0])
 	}
 }
 

@@ -4525,6 +4525,18 @@ definitions:
         type: string
       lifecycle_status:
         type: string
+      match_confidence:
+        type: number
+      match_external_id:
+        type: string
+      match_provider:
+        type: string
+      match_source_url:
+        type: string
+      match_status:
+        type: string
+      match_user_overridden:
+        type: boolean
       metadata_manual_override:
         type: boolean
       musicbrainz_matched:
@@ -5783,6 +5795,18 @@ definitions:
         type: string
       lyrics:
         type: string
+      match_confidence:
+        type: number
+      match_external_id:
+        type: string
+      match_provider:
+        type: string
+      match_source_url:
+        type: string
+      match_status:
+        type: string
+      match_user_overridden:
+        type: boolean
       metadata_manual_override:
         type: boolean
       play_count:
@@ -6519,6 +6543,71 @@ definitions:
         type: array
       meta:
         $ref: '#/definitions/music.PaginationMetaResponse'
+    type: object
+  music.AlbumImportMetadataPreviewDTO:
+    properties:
+      albumTitle:
+        type: string
+      albumType:
+        type: string
+      coverUrl:
+        type: string
+      externalId:
+        type: string
+      matchConfidence:
+        type: number
+      matchStatus:
+        type: string
+      matched:
+        type: boolean
+      metadataError:
+        type: string
+      metadataSource:
+        type: string
+      releaseDate:
+        type: string
+      sourceUrl:
+        type: string
+      sources:
+        items:
+          $ref: '#/definitions/music.AlbumImportMetadataSourceResult'
+        type: array
+      tracks:
+        items:
+          $ref: '#/definitions/music.AlbumImportDTOTrack'
+        type: array
+    type: object
+  music.AlbumImportMetadataPreviewInput:
+    properties:
+      albumTitle:
+        type: string
+      artist:
+        type: string
+      trackTitles:
+        items:
+          type: string
+        type: array
+    type: object
+  music.AlbumImportMetadataSourceResult:
+    properties:
+      candidateCount:
+        type: integer
+      error:
+        type: string
+      externalId:
+        type: string
+      matchConfidence:
+        type: number
+      provider:
+        type: string
+      selected:
+        type: boolean
+      selectedTitle:
+        type: string
+      sourceUrl:
+        type: string
+      status:
+        type: string
     type: object
   music.AlbumImportMultipartPartDTO:
     properties:
@@ -20095,6 +20184,31 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 开始修复已提交的专辑导入
+      tags:
+      - music-imports
+  /api/v1/music/imports/albums/metadata-preview:
+    post:
+      consumes:
+      - application/json
+      description: 并行核对 Discogs 与 MusicBrainz，并返回一个完整发行版的安全匹配结果。
+      parameters:
+      - description: 本地读取的专辑与曲目元信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.AlbumImportMetadataPreviewInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.AlbumImportMetadataPreviewDTO'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 预览专辑元信息匹配
       tags:
       - music-imports
   /api/v1/music/library:
