@@ -2,7 +2,9 @@ package music
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 )
 
 type fakeAlbumImportMetadataEnricher struct{}
@@ -29,6 +31,13 @@ func (fakeAlbumImportMetadataEnricher) Enrich(_ context.Context, input AlbumImpo
 	}, nil
 }
 
+type blockingAlbumImportMetadataEnricher struct{}
+
+func (blockingAlbumImportMetadataEnricher) Enrich(ctx context.Context, _ AlbumImportMetadataInput) (AlbumImportMetadataResult, error) {
+	<-ctx.Done()
+	return AlbumImportMetadataResult{}, ctx.Err()
+}
+
 func TestPreviewAlbumImportMetadataReturnsMatchedTrackOrder(t *testing.T) {
 	service := NewService(nil).WithAlbumImportMetadataEnricher(fakeAlbumImportMetadataEnricher{})
 
@@ -51,5 +60,25 @@ func TestPreviewAlbumImportMetadataReturnsMatchedTrackOrder(t *testing.T) {
 	}
 	if len(preview.MetadataSources) != 2 || !preview.MetadataSources[1].Selected {
 		t.Fatalf("expected source decisions, got %#v", preview.MetadataSources)
+	}
+}
+
+func TestPreviewAlbumImportMetadataKeepsLocalTracksWhenLookupTimesOut(t *testing.T) {
+	service := NewService(nil).WithAlbumImportMetadataEnricher(blockingAlbumImportMetadataEnricher{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+
+	preview, err := service.PreviewAlbumImportMetadata(ctx, AlbumImportMetadataPreviewInput{
+		AlbumTitle:  "IGOR",
+		TrackTitles: []string{"IGOR'S THEME"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Tracks) != 1 || preview.Tracks[0].Title != "IGOR'S THEME" {
+		t.Fatalf("expected local track fallback, got %#v", preview.Tracks)
+	}
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) || preview.MetadataError != "外部元数据匹配超时，请继续填写专辑信息后稍后重试" {
+		t.Fatalf("expected timeout fallback, got %#v", preview)
 	}
 }

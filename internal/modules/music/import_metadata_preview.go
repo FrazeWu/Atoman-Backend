@@ -2,8 +2,10 @@ package music
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type AlbumImportMetadataPreviewInput struct {
@@ -44,13 +46,24 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 	if s == nil || s.albumImportMetadataEnricher == nil || strings.TrimSpace(input.AlbumTitle) == "" || len(tracks) == 0 {
 		return AlbumImportMetadataPreviewDTO{Tracks: baseMetadataTracks(tracks)}, nil
 	}
-	result, err := s.albumImportMetadataEnricher.Enrich(ctx, AlbumImportMetadataInput{
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	metadataCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	result, err := s.albumImportMetadataEnricher.Enrich(metadataCtx, AlbumImportMetadataInput{
 		AlbumTitle: strings.TrimSpace(input.AlbumTitle),
 		Artist:     strings.TrimSpace(input.Artist),
 		Tracks:     tracks,
 		SkipLyrics: true,
 	})
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(metadataCtx.Err(), context.DeadlineExceeded) {
+			return AlbumImportMetadataPreviewDTO{
+				Tracks:        baseMetadataTracks(tracks),
+				MetadataError: "外部元数据匹配超时，请继续填写专辑信息后稍后重试",
+			}, nil
+		}
 		return AlbumImportMetadataPreviewDTO{Tracks: baseMetadataTracks(tracks), MetadataError: err.Error()}, nil
 	}
 	return AlbumImportMetadataPreviewDTO{
