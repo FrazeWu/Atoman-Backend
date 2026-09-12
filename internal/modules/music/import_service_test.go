@@ -92,6 +92,34 @@ func TestBuildAlbumImportDTOUsesDeferredCommitTitleAndSources(t *testing.T) {
 	}
 }
 
+func TestBuildAlbumImportDTOUsesDeferredCommitArtistID(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		wantID  string
+	}{
+		{
+			name:    "commit request artist",
+			payload: `{"commit_request":{"artist_id":"artist-request"}}`,
+			wantID:  "artist-request",
+		},
+		{
+			name:    "commit request contributor",
+			payload: `{"commit_request":{"artists":[{"artist_id":"artist-contributor"}]}}`,
+			wantID:  "artist-contributor",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dto := buildAlbumImportDTO(model.AlbumImportSession{PayloadJSON: test.payload})
+			if dto.ArtistID != test.wantID {
+				t.Fatalf("expected artist id %q, got %q", test.wantID, dto.ArtistID)
+			}
+		})
+	}
+}
+
 func TestBuildAlbumImportDTOFallsBackToArchiveName(t *testing.T) {
 	dto := buildAlbumImportDTO(model.AlbumImportSession{
 		Files: []model.AlbumImportFile{{Role: AlbumImportFileRoleArchive, FileName: "再想想.zip"}},
