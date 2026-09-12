@@ -42,6 +42,18 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	albumTitle := albumImportSessionAlbumTitle(session, payload)
 	artistSource, albumSource := albumImportCommitSources(payload)
 	commitRequest := albumImportCommitRequest(payload)
+	artistID := strings.TrimSpace(stringValue(payload["artist_id"]))
+	if artistID == "" && commitRequest != nil {
+		artistID = strings.TrimSpace(commitRequest.ArtistID)
+		if artistID == "" {
+			for _, artist := range commitRequest.Artists {
+				if candidate := strings.TrimSpace(artist.ArtistID); candidate != "" {
+					artistID = candidate
+					break
+				}
+			}
+		}
+	}
 	missingArtists := []string{}
 	if values, ok := payload["missing_artists"].([]any); ok {
 		for _, value := range values {
@@ -64,7 +76,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			}
 			return session.TargetSongID.String()
 		}(),
-		ArtistID:      stringValue(payload["artist_id"]),
+		ArtistID:      artistID,
 		ArtistSource:  artistSource,
 		CommitRequest: commitRequest,
 		AlbumTitle:    albumTitle,
