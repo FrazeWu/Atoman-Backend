@@ -91,6 +91,12 @@ func (s *Service) ConvertStandaloneSongToAlbum(user authctx.CurrentUser, songID 
 		if err := replaceStandaloneSongArtistCredits(tx, song.ID, input.ArtistCredits, user.ID); err != nil {
 			return err
 		}
+		if err := mergeMusicEntityRelationsBetween(tx, "song", song.ID, "album", album.ID); err != nil {
+			return err
+		}
+		if err := moveSongRatingsToAlbum(tx, song.ID, album.ID); err != nil {
+			return err
+		}
 		updates := map[string]any{
 			"title": strings.TrimSpace(input.Title), "description": strings.TrimSpace(input.Description),
 			"release_type": nil, "release_date": *releaseDate, "release_date_precision": precision,
@@ -189,6 +195,12 @@ func (s *Service) ConvertAlbumToStandaloneSong(user authctx.CurrentUser, albumID
 		if err := replaceStandaloneSongArtistCredits(tx, song.ID, input.ArtistCredits, user.ID); err != nil {
 			return err
 		}
+		if err := mergeMusicEntityRelationsBetween(tx, "album", album.ID, "song", song.ID); err != nil {
+			return err
+		}
+		if err := moveAlbumRatingsToSong(tx, album.ID, song.ID); err != nil {
+			return err
+		}
 		updates := map[string]any{
 			"title": strings.TrimSpace(input.Title), "description": strings.TrimSpace(input.Description),
 			"release_type": releaseType, "release_date": *releaseDate, "release_date_precision": precision,
@@ -237,6 +249,9 @@ func validateReleaseConversionProtection(tx *gorm.DB, entityType string, entityI
 }
 
 func removeStandaloneAlbumWrapper(tx *gorm.DB, albumID uuid.UUID) error {
+	if err := removeMusicEntityRelations(tx, "album", albumID); err != nil {
+		return err
+	}
 	if tx.Migrator().HasTable(&model.EditConflict{}) {
 		if err := tx.Unscoped().Where("content_type = ? AND content_id = ?", "album", albumID).Delete(&model.EditConflict{}).Error; err != nil {
 			return err

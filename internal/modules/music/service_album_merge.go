@@ -121,6 +121,9 @@ func (s *Service) MergeAlbums(user authctx.CurrentUser, targetAlbumID, sourceAlb
 		if err := mergeAlbumCredits(tx, sourceAlbumID, targetAlbumID); err != nil {
 			return err
 		}
+		if err := mergeMusicEntityRelations(tx, "album", sourceAlbumID, targetAlbumID); err != nil {
+			return err
+		}
 		for _, sourceSong := range preview.SourceAlbum.Songs {
 			if targetSongID, matched := validMatches[sourceSong.ID]; matched {
 				if err := mergeSongRelations(tx, sourceSong.ID, targetSongID); err != nil {
@@ -140,11 +143,6 @@ func (s *Service) MergeAlbums(user authctx.CurrentUser, targetAlbumID, sourceAlb
 		}
 		if err := tx.Model(&model.AlbumImportSession{}).Where("target_album_id = ?", sourceAlbumID).Update("target_album_id", targetAlbumID).Error; err != nil {
 			return err
-		}
-		if tx.Migrator().HasTable(&model.DiscussionTarget{}) {
-			if err := tx.Model(&model.DiscussionTarget{}).Where("kind = ? AND resource_id = ?", "music_album", sourceAlbumID).Updates(map[string]any{"resource_id": targetAlbumID, "resource_key": targetAlbumID.String()}).Error; err != nil {
-				return err
-			}
 		}
 		if err := tx.Model(&model.Album{}).Where("id = ?", sourceAlbumID).Updates(map[string]any{"entry_status": "closed", "status": "closed", "lifecycle_status": model.MusicLifecycleMerged, "redirect_to": targetAlbumID}).Error; err != nil {
 			return err
@@ -182,6 +180,9 @@ func mergeAlbumBookmarks(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 }
 
 func mergeSongRelations(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
+	if err := mergeMusicEntityRelations(tx, "song", sourceID, targetID); err != nil {
+		return err
+	}
 	var credits []model.SongArtist
 	if err := tx.Where("song_id = ?", sourceID).Find(&credits).Error; err != nil {
 		return err

@@ -112,6 +112,9 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 		if err := mergeArtistMemberRelations(tx, sourceArtistID, targetArtistID); err != nil {
 			return err
 		}
+		if err := mergeMusicEntityRelations(tx, "artist", sourceArtistID, targetArtistID); err != nil {
+			return err
+		}
 
 		var sourceAliases []model.ArtistAlias
 		if err := tx.Where("artist_id = ?", sourceArtistID).Find(&sourceAliases).Error; err != nil {
