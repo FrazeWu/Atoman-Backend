@@ -159,6 +159,7 @@ type musicBrainzRelease struct {
 }
 
 type musicBrainzArtist struct {
+	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Aliases []struct {
 		Name string `json:"name"`
@@ -503,17 +504,16 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 	}
 
 	artists := uniqueMusicArtists(append([]string{input.Artist}, input.Artists...))
-	firstArtist := ""
-	if len(artists) > 0 {
-		firstArtist = artists[0]
-	}
-	searches := []string{firstArtist}
-	if firstArtist == "" {
+	searches := append([]string(nil), artists...)
+	if len(searches) == 0 {
 		searches = []string{""}
 	} else {
 		searches = append(searches, "")
 	}
 	candidateCount := 0
+	best := discogsReleaseMatch{}
+	seenCandidates := map[int]bool{}
+	var lastErr error
 	for _, artist := range searches {
 		params := url.Values{
 			"release_title": {musicBrainzLookupAlbumTitle(input.AlbumTitle)},
@@ -525,14 +525,15 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 		}
 		var search discogsSearchResponse
 		if err := e.discogsJSON(ctx, e.discogsBase+"/database/search?"+params.Encode(), &search); err != nil {
-			return discogsRelease{}, nil, candidateCount, err
+			lastErr = err
+			continue
 		}
 		candidateCount += len(search.Results)
-		best := discogsReleaseMatch{}
 		for _, candidate := range search.Results {
-			if candidate.ID <= 0 || !strings.EqualFold(candidate.Type, "release") {
+			if candidate.ID <= 0 || seenCandidates[candidate.ID] || !strings.EqualFold(candidate.Type, "release") {
 				continue
 			}
+			seenCandidates[candidate.ID] = true
 			endpoint := fmt.Sprintf("%s/releases/%d", e.discogsBase, candidate.ID)
 			var release discogsRelease
 			if err := e.discogsJSON(ctx, endpoint, &release); err != nil {
@@ -552,9 +553,12 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 				}
 			}
 		}
-		if best.release.ID > 0 {
-			return best.release, best.mapping, candidateCount, nil
-		}
+	}
+	if best.release.ID > 0 {
+		return best.release, best.mapping, candidateCount, nil
+	}
+	if lastErr != nil {
+		return discogsRelease{}, nil, candidateCount, lastErr
 	}
 	return discogsRelease{}, nil, candidateCount, errors.New("Discogs candidates did not safely match uploaded tracks")
 }
@@ -873,7 +877,7 @@ func (e *ExternalAlbumMetadataEnricher) findReleaseFromGroups(ctx context.Contex
 		if err := e.musicBrainzJSON(ctx, lookupURL, &releases); err != nil {
 			continue
 		}
-		if release, mapping, ok := bestMusicBrainzRelease(releases.Releases, input.AlbumTitle, input.Tracks); ok {
+		if release, mapping, ok := bestMusicBrainzReleaseForArtist(releases.Releases, input.AlbumTitle, input.Tracks, artist, artistID); ok {
 			return release, mapping, nil
 		}
 	}
@@ -902,6 +906,9 @@ func (e *ExternalAlbumMetadataEnricher) findReleaseDirectly(ctx context.Context,
 		var detailed musicBrainzRelease
 		lookupURL := e.musicBrainzBase + "/ws/2/release/" + url.PathEscape(candidate.ID) + "?fmt=json&inc=recordings+release-groups+artist-credits"
 		if err := e.musicBrainzJSON(ctx, lookupURL, &detailed); err != nil {
+			continue
+		}
+		if !musicBrainzReleaseMatchesArtist(detailed, artist, artistID) {
 			continue
 		}
 		detailedCandidates = append(detailedCandidates, detailed)
@@ -954,6 +961,31 @@ func musicBrainzArtistMatches(credits []musicBrainzArtistCredit, artist string) 
 		}
 	}
 	return false
+}
+
+func musicBrainzReleaseMatchesArtist(release musicBrainzRelease, artist, artistID string) bool {
+	if strings.TrimSpace(artist) == "" && strings.TrimSpace(artistID) == "" {
+		return true
+	}
+	if strings.TrimSpace(artistID) != "" {
+		for _, credit := range release.ArtistCredit {
+			if strings.TrimSpace(credit.Artist.ID) == strings.TrimSpace(artistID) {
+				return true
+			}
+		}
+		return false
+	}
+	return musicBrainzArtistMatches(release.ArtistCredit, artist)
+}
+
+func bestMusicBrainzReleaseForArtist(candidates []musicBrainzRelease, albumTitle string, uploaded []AlbumImportMetadataTrack, artist, artistID string) (musicBrainzRelease, []int, bool) {
+	filtered := make([]musicBrainzRelease, 0, len(candidates))
+	for _, candidate := range candidates {
+		if musicBrainzReleaseMatchesArtist(candidate, artist, artistID) {
+			filtered = append(filtered, candidate)
+		}
+	}
+	return bestMusicBrainzRelease(filtered, albumTitle, uploaded)
 }
 
 func bestMusicBrainzRelease(candidates []musicBrainzRelease, albumTitle string, uploaded []AlbumImportMetadataTrack) (musicBrainzRelease, []int, bool) {

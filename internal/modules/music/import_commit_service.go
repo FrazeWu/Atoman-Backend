@@ -128,6 +128,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if len(payload.Album.Tracks) == 0 {
 			payload.Album.Tracks = albumImportTracksFromDerived(sessionPayload)
 		}
+		deletedImportTrackKeys := albumImportDeletedTrackKeys(sessionPayload)
 
 		coverURL := strings.TrimSpace(input.Album.CoverURL)
 		if coverURL == "" && sessionPayload != nil {
@@ -523,6 +524,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if isRepair {
 			for _, song := range existingSongs {
 				if seenSongIDs[song.ID] {
+					continue
+				}
+				if !songImportDeleted(song, deletedImportTrackKeys) {
 					continue
 				}
 				if err := tx.Model(&song).Updates(map[string]any{"status": "closed", "lifecycle_status": model.MusicLifecycleRetired}).Error; err != nil {
@@ -1457,10 +1461,27 @@ func importedTrackDeleted(track map[string]any, deleted map[string]bool) bool {
 	originalDisc := int(int64Value(track["original_disc_number"]))
 	originalTrack := int(int64Value(track["original_track_number"]))
 	keys := []string{
+		"song:" + strings.TrimSpace(stringValue(track["song_id"])),
 		"file:" + strings.TrimSpace(stringValue(track["file_id"])),
 		"audio:" + strings.TrimSpace(stringValue(track["audio_key"])),
 		"position:" + strconv.Itoa(disc) + ":" + strconv.Itoa(trackNumber),
 		"position:" + strconv.Itoa(originalDisc) + ":" + strconv.Itoa(originalTrack),
+	}
+	for _, key := range keys {
+		if deleted[key] {
+			return true
+		}
+	}
+	return false
+}
+
+func songImportDeleted(song model.Song, deleted map[string]bool) bool {
+	if len(deleted) == 0 {
+		return false
+	}
+	keys := []string{
+		"song:" + song.ID.String(),
+		"position:" + strconv.Itoa(normalizedDiscNumber(song.DiscNumber)) + ":" + strconv.Itoa(song.TrackNumber),
 	}
 	for _, key := range keys {
 		if deleted[key] {

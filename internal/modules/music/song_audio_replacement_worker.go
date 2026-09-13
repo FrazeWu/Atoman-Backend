@@ -14,6 +14,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const songAudioReplacementLease = 15 * time.Minute
+
 func RunSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID string) (bool, error) {
 	return runSongAudioReplacementOnce(ctx, db, workerID, nil)
 }
@@ -23,15 +25,17 @@ func runSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID stri
 		return false, nil
 	}
 	var candidate model.SongAudioReplacement
-	if err := db.WithContext(ctx).Where("status = ?", "pending").Order("created_at ASC").First(&candidate).Error; err != nil {
+	now := time.Now().UTC()
+	staleBefore := now.Add(-songAudioReplacementLease)
+	claimable := "(status = ? OR (status = ? AND (started_at IS NULL OR started_at < ?)))"
+	if err := db.WithContext(ctx).Where(claimable, "pending", "processing", staleBefore).Order("created_at ASC").First(&candidate).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return false, nil
 		}
 		return false, err
 	}
-	now := time.Now().UTC()
 	result := db.WithContext(ctx).Model(&model.SongAudioReplacement{}).
-		Where("id = ? AND status = ?", candidate.ID, "pending").
+		Where("id = ? AND "+claimable, candidate.ID, "pending", "processing", staleBefore).
 		Updates(map[string]any{"status": "processing", "locked_by": workerID, "started_at": now})
 	if result.Error != nil || result.RowsAffected == 0 {
 		return false, result.Error

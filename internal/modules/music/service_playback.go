@@ -3,6 +3,7 @@ package music
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -13,6 +14,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+func musicSongHasPlayableAudio(song model.Song) bool {
+	return song.AudioStatus == "ready" && strings.TrimSpace(song.AudioURL) != ""
+}
 
 func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
 	var viewer *authctx.CurrentUser
@@ -32,7 +37,7 @@ func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID) 
 	}
 
 	result := scopeVisibleMusicEntries(s.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewer, false).
-		Where(`"Songs".id = ? AND "Songs".audio_url <> ?`, songID, "")
+		Where(`"Songs".id = ? AND "Songs".audio_url <> ? AND "Songs".audio_status = ?`, songID, "", "ready")
 	var count int64
 	if err := result.Count(&count).Error; err != nil {
 		return err
@@ -86,7 +91,7 @@ func (s *Service) SavePlaybackProgress(user authctx.CurrentUser, input SavePlayb
 
 	var count int64
 	if err := scopeVisibleMusicEntries(s.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", &user, false).
-		Where(`"Songs".id = ? AND "Songs".audio_url <> ?`, input.SongID, "").
+		Where(`"Songs".id = ? AND "Songs".audio_url <> ? AND "Songs".audio_status = ?`, input.SongID, "", "ready").
 		Count(&count).Error; err != nil {
 		return model.MusicPlaybackProgress{}, err
 	}
@@ -266,7 +271,7 @@ func (s *Service) loadAvailablePlaybackSessionQueue(songIDs []uuid.UUID, viewer 
 	var songs []model.Song
 	query := scopeVisibleMusicEntries(s.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewer, false).
 		Preload("Album", visibleAlbumPreload(viewer)).Preload("Artists", visibleArtistPreload(viewer)).
-		Where(`"Songs".id IN ? AND "Songs".audio_url <> ?`, songIDs, "")
+		Where(`"Songs".id IN ? AND "Songs".audio_url <> ? AND "Songs".audio_status = ?`, songIDs, "", "ready")
 	if err := query.Find(&songs).Error; err != nil {
 		return nil, err
 	}

@@ -486,7 +486,7 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 			CustomRole: link.CustomRole, Position: link.Position,
 		})
 	}
-	result := songDetailResponse{Song: song, Artists: artists, Playable: strings.TrimSpace(song.AudioURL) != ""}
+	result := songDetailResponse{Song: song, Artists: artists, Playable: musicSongHasPlayableAudio(song)}
 	ratedSongs := []model.Song{result.Song}
 	if err := h.service.PopulateSongRatings(ratedSongs, viewerUserID(viewerPtr)); err != nil {
 		httpx.Error(c, err)
