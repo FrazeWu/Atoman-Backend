@@ -146,6 +146,24 @@ func TestIsTrustedWebOriginAcceptsConfiguredLocalDevelopmentPortsInProduction(t 
 	}
 }
 
+func TestIsTrustedWebOriginUsesConfiguredAllowedOrigins(t *testing.T) {
+	t.Setenv("ENV", "production")
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+	t.Setenv("ALLOWED_ORIGINS", "https://studio.example,*.atoman-frontend.pages.dev")
+
+	for _, origin := range []string{
+		"https://studio.example",
+		"https://preview.atoman-frontend.pages.dev",
+	} {
+		if !IsTrustedWebOrigin(origin) {
+			t.Fatalf("expected configured origin %q to be trusted", origin)
+		}
+	}
+	if IsTrustedWebOrigin("https://notatoman-frontend.pages.dev") {
+		t.Fatal("must reject a host that only ends with the wildcard suffix")
+	}
+}
+
 func TestStableAuthMiddlewareUsesStructuredErrorEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	SetAuthDB(newMiddlewareAuthTestDB(t))

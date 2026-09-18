@@ -115,6 +115,9 @@ func IsTrustedWebOrigin(rawOrigin string) bool {
 	if configured != "" && rawOrigin == configured {
 		return true
 	}
+	if isConfiguredAllowedOrigin(rawOrigin) {
+		return true
+	}
 	if rawOrigin == "https://www.atoman.org" || rawOrigin == "https://atoman.org" {
 		return true
 	}
@@ -130,6 +133,31 @@ func IsTrustedWebOrigin(rawOrigin string) bool {
 		return false
 	}
 	return parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1")
+}
+
+func isConfiguredAllowedOrigin(origin string) bool {
+	for _, allowed := range strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",") {
+		allowed = strings.TrimRight(strings.TrimSpace(allowed), "/")
+		if allowed == "" {
+			continue
+		}
+		if origin == allowed {
+			return true
+		}
+		if !strings.HasPrefix(allowed, "*.") {
+			continue
+		}
+		parsed, err := url.Parse(origin)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			continue
+		}
+		host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+		suffix := strings.TrimSuffix(strings.ToLower(strings.TrimPrefix(allowed, "*.")), ".")
+		if host != "" && suffix != "" && strings.HasSuffix(host, "."+suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func TrustedOriginMiddleware() gin.HandlerFunc {
