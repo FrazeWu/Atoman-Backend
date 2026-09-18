@@ -47,7 +47,7 @@ func RequireSiteFeature(db *gorm.DB, module, feature string) gin.HandlerFunc {
 			return
 		}
 		entry, ok := payload.Modules[module]
-		enabled := ok && (entry.Enabled == nil || *entry.Enabled) && (entry.Visible == nil || *entry.Visible) && entry.Features[feature]
+		enabled := ok && siteAccessModuleEnabled(module, entry) && entry.Features[feature]
 		if !enabled {
 			httpx.Error(c, apperr.Forbidden("site.feature_disabled", "This publishing feature is not available"))
 			c.Abort()
@@ -55,4 +55,16 @@ func RequireSiteFeature(db *gorm.DB, module, feature string) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func siteAccessModuleEnabled(module string, entry siteAccessModule) bool {
+	if entry.Enabled != nil {
+		return *entry.Enabled
+	}
+	if entry.Visible != nil {
+		return *entry.Visible
+	}
+	// Keep raw legacy payloads aligned with the service defaults. Modules that
+	// are not explicitly enabled must not accidentally open a gated feature.
+	return module != "books"
 }

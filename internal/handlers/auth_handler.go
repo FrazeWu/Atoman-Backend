@@ -260,8 +260,13 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 
 		// Check if user exists
 		var existingUser model.User
-		if err := db.Unscoped().Where("LOWER(username) = ? OR LOWER(email) = ?", input.Username, input.Email).First(&existingUser).Error; err == nil {
+		identityErr := db.Unscoped().Where("LOWER(username) = ? OR LOWER(email) = ?", input.Username, input.Email).First(&existingUser).Error
+		if identityErr == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "User already exists"})
+			return
+		}
+		if !errors.Is(identityErr, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check account"})
 			return
 		}
 

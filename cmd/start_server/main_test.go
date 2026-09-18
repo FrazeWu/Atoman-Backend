@@ -146,6 +146,17 @@ func TestCORSAllowsExplicitDevelopmentOriginsWithCredentials(t *testing.T) {
 	}
 }
 
+func TestOriginAllowedRejectsLookalikeWildcardHosts(t *testing.T) {
+	allowed := []string{"*.atoman-frontend.pages.dev"}
+
+	if !originAllowed("https://preview.atoman-frontend.pages.dev", allowed) {
+		t.Fatal("expected a real wildcard subdomain to be allowed")
+	}
+	if originAllowed("https://notatoman-frontend.pages.dev", allowed) {
+		t.Fatal("must reject a host that only ends with the wildcard suffix")
+	}
+}
+
 func TestBootstrapOwnerFromEnvCreatesOwnerWhenConfigured(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, ownerBootstrapModels()...)
