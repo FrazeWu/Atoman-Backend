@@ -225,12 +225,13 @@ func (h *Handler) listPublishedBookAssets(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "workId must be a valid UUID"))
 		return
 	}
-	items, total, err := h.service.ListPublishedBookAssets(c.Request.Context(), workID, uuid.Nil, 20, 0)
+	limit, offset := bookPagination(c)
+	items, total, err := h.service.ListPublishedBookAssets(c.Request.Context(), workID, uuid.Nil, limit, offset)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, PublishedBookAssetListResult{Items: items, Total: total, Limit: 20, Offset: 0})
+	httpx.OK(c, http.StatusOK, PublishedBookAssetListResult{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
 // getPublishedBookAsset godoc
