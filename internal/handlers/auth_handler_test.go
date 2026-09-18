@@ -840,6 +840,34 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	}
 }
 
+func TestRegisterHandlerReturnsServerErrorWhenIdentityCheckFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "development")
+	t.Setenv("GIN_MODE", gin.DebugMode)
+	t.Setenv("TURNSTILE_SECRET_KEY", "")
+
+	db := newAuthTestDB(t)
+	queryFailure := errors.New("identity lookup failed")
+	if err := db.Callback().Query().After("gorm:query").Register("test_identity_lookup_failure", func(tx *gorm.DB) {
+		if strings.Contains(strings.ToUpper(tx.Statement.SQL.String()), " OR ") {
+			tx.AddError(queryFailure)
+		}
+	}); err != nil {
+		t.Fatalf("register query callback: %v", err)
+	}
+
+	r := gin.New()
+	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"query-error-user","email":"query-error@example.com","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected identity lookup failure to return 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestRegisterHandlerDoesNotRequireSecondTurnstileVerification(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("ENV", "production")

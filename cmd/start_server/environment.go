@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 
@@ -104,11 +105,13 @@ func originAllowed(origin string, allowedOrigins []string) bool {
 			return true
 		}
 		if strings.HasPrefix(allowed, "*.") {
-			suffix := strings.TrimPrefix(allowed, "*.")
-			if strings.HasPrefix(origin, "https://") && strings.HasSuffix(strings.TrimPrefix(origin, "https://"), suffix) {
-				return true
+			parsed, err := url.Parse(origin)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+				continue
 			}
-			if strings.HasPrefix(origin, "http://") && strings.HasSuffix(strings.TrimPrefix(origin, "http://"), suffix) {
+			host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+			suffix := strings.TrimSuffix(strings.ToLower(strings.TrimPrefix(allowed, "*.")), ".")
+			if host != "" && suffix != "" && strings.HasSuffix(host, "."+suffix) {
 				return true
 			}
 		}
