@@ -9,11 +9,13 @@ import (
 	"atoman/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 type musicTagInput struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
+	Kind     string     `json:"kind"`
+	Name     string     `json:"name"`
+	ParentID *uuid.UUID `json:"parent_id"`
 }
 
 type musicTagVoteInput struct {
@@ -21,22 +23,64 @@ type musicTagVoteInput struct {
 }
 
 // searchMusicTags godoc
-// @Summary 搜索公共音乐标签
-// @Description 按标签类别搜索公共标签目录。
+// @Summary 浏览或搜索公共音乐标签
+// @Description 按标签类别、父级和关键词浏览公共标签目录。
 // @Tags music
 // @Produce json
-// @Param kind query string true "标签类别" Enums(mood,type)
-// @Param q query string true "搜索关键词"
+// @Param kind query string false "标签类别" Enums(mood,type,scene,theme,instrument)
+// @Param q query string false "搜索关键词"
+// @Param parent_id query string false "父级标签 ID"
+// @Param root query bool false "是否只返回根标签"
 // @Success 200 {array} MusicTagOptionDTO
 // @Failure 400 {object} handlers.ErrorResponse
 // @Router /api/v1/music/tags [get]
 func (h *Handler) searchMusicTags(c *gin.Context) {
-	tags, err := h.service.SearchMusicTags(c.Query("kind"), strings.TrimSpace(c.Query("q")))
+	kind := strings.TrimSpace(c.Query("kind"))
+	parentID, err := parseOptionalMusicTagParentID(c.Query("parent_id"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	tags, err := h.service.ListMusicTagOptions(kind, strings.TrimSpace(c.Query("q")), parentID, c.Query("root") == "true")
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
 	httpx.OK(c, http.StatusOK, tags)
+}
+
+// createMusicTag godoc
+// @Summary 创建公共音乐标签
+// @Description 在指定标签维度和父级下创建标签；同名标签会复用已有标签。
+// @Tags music
+// @Accept json
+// @Produce json
+// @Param input body musicTagInput true "标签"
+// @Success 200 {object} MusicTagOptionDTO
+// @Success 201 {object} MusicTagOptionDTO
+// @Failure 400 {object} handlers.ErrorResponse
+// @Router /api/v1/music/tags [post]
+func (h *Handler) createMusicTag(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var input musicTagInput
+	if err := bindJSON(c, &input); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	tag, created, err := h.service.CreateMusicTag(user, input.Kind, input.Name, input.ParentID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	httpx.OK(c, status, tag)
 }
 
 // getMusicTag godoc
@@ -145,7 +189,7 @@ func (h *Handler) addMusicTag(c *gin.Context, entityType string) {
 		httpx.Error(c, err)
 		return
 	}
-	tag, err := h.service.AddMusicTag(user, entityType, entityID, input.Kind, input.Name)
+	tag, err := h.service.AddMusicTag(user, entityType, entityID, input.Kind, input.Name, input.ParentID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -262,4 +306,16 @@ func entityIDParam(entityType string) string {
 		return "albumId"
 	}
 	return "songId"
+}
+
+func parseOptionalMusicTagParentID(raw string) (*uuid.UUID, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil, nil
+	}
+	parentID, err := parseMusicID(value, "parent_id")
+	if err != nil {
+		return nil, err
+	}
+	return &parentID, nil
 }

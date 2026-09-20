@@ -3,17 +3,23 @@ package model
 import "github.com/google/uuid"
 
 const (
-	MusicTagKindMood = "mood"
-	MusicTagKindType = "type"
+	MusicTagKindMood       = "mood"
+	MusicTagKindType       = "type"
+	MusicTagKindScene      = "scene"
+	MusicTagKindTheme      = "theme"
+	MusicTagKindInstrument = "instrument"
 )
 
 type MusicTag struct {
 	Base
-	Name           string    `json:"name" gorm:"type:varchar(48);not null"`
-	NormalizedName string    `json:"-" gorm:"type:varchar(48);not null;uniqueIndex:idx_music_tags_kind_name,priority:2"`
-	Kind           string    `json:"kind" gorm:"type:varchar(16);not null;uniqueIndex:idx_music_tags_kind_name,priority:1"`
-	CreatedBy      uuid.UUID `json:"created_by" gorm:"type:uuid;not null;index"`
-	CreatedByUser  *User     `json:"created_by_user,omitempty" gorm:"foreignKey:CreatedBy;references:UUID"`
+	Name           string     `json:"name" gorm:"type:varchar(48);not null"`
+	NormalizedName string     `json:"-" gorm:"type:varchar(48);not null;uniqueIndex:idx_music_tags_kind_name,priority:2"`
+	Kind           string     `json:"kind" gorm:"type:varchar(16);not null;uniqueIndex:idx_music_tags_kind_name,priority:1"`
+	ParentID       *uuid.UUID `json:"parent_id,omitempty" gorm:"type:uuid;index"`
+	Parent         *MusicTag  `json:"parent,omitempty" gorm:"foreignKey:ParentID;references:ID"`
+	Depth          int        `json:"depth" gorm:"not null;default:1"`
+	CreatedBy      uuid.UUID  `json:"created_by" gorm:"type:uuid;not null;index"`
+	CreatedByUser  *User      `json:"created_by_user,omitempty" gorm:"foreignKey:CreatedBy;references:UUID"`
 }
 
 func (MusicTag) TableName() string { return "music_tags" }
