@@ -1050,31 +1050,20 @@ func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[str
 	payload["derived_tracks"] = derivedTracks
 	if result.AlbumTitle != "" {
 		payload["derived_album_title"] = result.AlbumTitle
-	} else {
-		delete(payload, "derived_album_title")
 	}
 	if result.ReleaseDate != "" {
 		payload["derived_release_date"] = result.ReleaseDate
-	} else {
-		delete(payload, "derived_release_date")
 	}
 	if result.AlbumType != "" {
 		payload["derived_album_type"] = result.AlbumType
-	} else {
-		delete(payload, "derived_album_type")
 	}
 	if result.CoverURL != "" && stringValue(payload["cover_key"]) == "" {
 		payload["derived_cover"] = result.CoverURL
-	} else {
-		delete(payload, "derived_cover")
 	}
-	if result.SourceURL != "" || result.MetadataSource != "" {
+	if result.MetadataSource != "" {
 		payload["metadata_source_url"] = result.SourceURL
 		payload["metadata_source"] = result.MetadataSource
-		payload["metadata_matched"] = result.MetadataSource != ""
 		payload["metadata_external_id"] = result.ExternalID
-		payload["metadata_match_status"] = result.MatchStatus
-		payload["metadata_match_confidence"] = result.MatchConfidence
 		payload["musicbrainz_release_id"] = result.MusicBrainzReleaseID
 	} else {
 		delete(payload, "metadata_source_url")
@@ -1085,6 +1074,18 @@ func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[str
 		delete(payload, "metadata_match_confidence")
 		delete(payload, "musicbrainz_release_id")
 	}
+	payload["metadata_matched"] = result.MetadataSource != ""
+	payload["metadata_match_status"] = result.MatchStatus
+	payload["metadata_match_confidence"] = result.MatchConfidence
+	payload["metadata_error"] = result.MetadataError
+	payload["metadata_sources"] = result.MetadataSources
+	fieldSources := map[string]string{}
+	if result.MetadataSource != "" {
+		for _, field := range []string{"album_title", "release_date", "album_type", "cover"} {
+			fieldSources[field] = result.MetadataSource
+		}
+	}
+	payload["metadata_field_sources"] = fieldSources
 	if len(result.MissingArtists) > 0 {
 		payload["missing_artists"] = result.MissingArtists
 	} else {

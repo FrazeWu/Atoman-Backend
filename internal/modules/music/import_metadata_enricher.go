@@ -528,12 +528,12 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 			lastErr = err
 			continue
 		}
-		candidateCount += len(search.Results)
 		for _, candidate := range search.Results {
 			if candidate.ID <= 0 || seenCandidates[candidate.ID] || !strings.EqualFold(candidate.Type, "release") {
 				continue
 			}
 			seenCandidates[candidate.ID] = true
+			candidateCount++
 			endpoint := fmt.Sprintf("%s/releases/%d", e.discogsBase, candidate.ID)
 			var release discogsRelease
 			if err := e.discogsJSON(ctx, endpoint, &release); err != nil {
