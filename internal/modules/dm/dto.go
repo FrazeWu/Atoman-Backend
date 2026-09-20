@@ -22,6 +22,10 @@ type MailboxDTO struct {
 	Unread int64    `json:"unread"`
 }
 
+type PartyResponse struct {
+	Data PartyDTO `json:"data"`
+}
+
 func (m MailboxDTO) Key() string { return m.Party.Type + ":" + m.Party.ID.String() }
 
 type ConversationDTO struct {

@@ -73,6 +73,22 @@ func (s *Service) ListMailboxes(ctx context.Context, actor authctx.CurrentUser) 
 	return mailboxes, nil
 }
 
+func (s *Service) GetTargetParty(ctx context.Context, actorUserID uuid.UUID, target TargetRef) (PartyDTO, error) {
+	repo := NewRepo(s.repo.db.WithContext(ctx))
+	resolved, err := repo.ResolveTarget(target)
+	if err != nil {
+		return PartyDTO{}, err
+	}
+	if resolved.OwnerUserID == actorUserID {
+		return PartyDTO{}, ErrSelfTarget
+	}
+	parties, err := repo.LoadParties(resolved.Ref)
+	if err != nil {
+		return PartyDTO{}, err
+	}
+	return partyForRef(parties, resolved.Ref), nil
+}
+
 func (s *Service) ListConversations(ctx context.Context, actor authctx.CurrentUser, mailbox TargetRef, encodedCursor string, limit int) (PageDTO[ConversationDTO], error) {
 	repo := NewRepo(s.repo.db.WithContext(ctx))
 	if err := repo.AuthorizeMailbox(actor.ID, mailbox); err != nil {
@@ -794,7 +810,11 @@ func partyForRef(parties map[TargetRef]PartyDTO, ref TargetRef) PartyDTO {
 	if party, ok := parties[ref]; ok {
 		return party
 	}
-	return PartyDTO{Type: ref.Type, ID: ref.ID, Name: ref.ID.String()}
+	name := "未知用户"
+	if ref.Type == model.DMPartyChannel {
+		name = "未知频道"
+	}
+	return PartyDTO{Type: ref.Type, ID: ref.ID, Name: name}
 }
 
 func conversationDTO(conversation model.DMConversation, parties map[TargetRef]PartyDTO) ConversationDTO {

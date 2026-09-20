@@ -10665,6 +10665,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/dm/targets/{type}/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Get DM target party",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "target type",
+                        "name": "type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "target ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.PartyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/dm/targets/{type}/{id}/conversation": {
             "get": {
                 "security": [
@@ -19854,32 +19912,45 @@ const docTemplate = `{
         },
         "/api/v1/music/tags": {
             "get": {
-                "description": "按标签类别搜索公共标签目录。",
+                "description": "按标签类别、父级和关键词浏览公共标签目录。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "music"
                 ],
-                "summary": "搜索公共音乐标签",
+                "summary": "浏览或搜索公共音乐标签",
                 "parameters": [
                     {
                         "enum": [
                             "mood",
-                            "type"
+                            "type",
+                            "scene",
+                            "theme",
+                            "instrument"
                         ],
                         "type": "string",
                         "description": "标签类别",
                         "name": "kind",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     },
                     {
                         "type": "string",
                         "description": "搜索关键词",
                         "name": "q",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "父级标签 ID",
+                        "name": "parent_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "是否只返回根标签",
+                        "name": "root",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -19890,6 +19961,50 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/music.MusicTagOptionDTO"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "在指定标签维度和父级下创建标签；同名标签会复用已有标签。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "创建公共音乐标签",
+                "parameters": [
+                    {
+                        "description": "标签",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.musicTagInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicTagOptionDTO"
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicTagOptionDTO"
                         }
                     },
                     "400": {
@@ -30940,6 +31055,14 @@ const docTemplate = `{
                 }
             }
         },
+        "dm.PartyResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.PartyDTO"
+                }
+            }
+        },
         "dm.PermissionDTO": {
             "type": "object",
             "properties": {
@@ -39330,6 +39453,9 @@ const docTemplate = `{
                 "can_delete": {
                     "type": "boolean"
                 },
+                "depth": {
+                    "type": "integer"
+                },
                 "downvotes": {
                     "type": "integer"
                 },
@@ -39340,6 +39466,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "parent_id": {
                     "type": "string"
                 },
                 "score": {
@@ -39356,6 +39485,15 @@ const docTemplate = `{
         "music.MusicTagOptionDTO": {
             "type": "object",
             "properties": {
+                "assignment_count": {
+                    "type": "integer"
+                },
+                "child_count": {
+                    "type": "integer"
+                },
+                "depth": {
+                    "type": "integer"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -39363,6 +39501,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "parent_id": {
                     "type": "string"
                 }
             }
@@ -39871,6 +40012,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "parent_id": {
                     "type": "string"
                 }
             }

@@ -44,6 +44,24 @@ func TestServiceIdentity(t *testing.T) {
 	}
 }
 
+func TestGetTargetPartyReturnsDisplayNameWithoutConversation(t *testing.T) {
+	db := testDB(t)
+	actor := testUser(t, db)
+	target := model.User{UUID: uuid.New(), Username: "alice", DisplayName: "Alice", Email: uuid.NewString() + "@example.test", Password: "test"}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(NewRepo(db), nil, nil, nil)
+
+	party, err := service.GetTargetParty(context.Background(), actor, TargetRef{Type: model.DMPartyUser, ID: target.UUID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if party.Name != "Alice" || party.ID != target.UUID {
+		t.Fatalf("unexpected target party: %#v", party)
+	}
+}
+
 func TestSendIdempotency(t *testing.T) {
 	db := testDB(t)
 	actor, recipient := testUser(t, db), testUser(t, db)

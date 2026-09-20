@@ -23,6 +23,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	dm.Use(middleware.StableAuthMiddleware())
 	dm.GET("/mailboxes", h.listMailboxes)
 	dm.GET("/mailboxes/:type/:id/conversations", h.listConversations)
+	dm.GET("/targets/:type/:id", h.getTargetParty)
 	dm.GET("/targets/:type/:id/conversation", h.getTargetConversation)
 	dm.POST("/targets/:type/:id/messages", h.sendToTarget)
 	dm.POST("/conversations/:id/messages", h.sendInConversation)
@@ -169,6 +170,34 @@ func (h *Handler) getTargetConversation(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, 200, data)
+}
+
+// @Summary Get DM target party
+// @Tags dm
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param type path string true "target type"
+// @Param id path string true "target ID"
+// @Success 200 {object} PartyResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/dm/targets/{type}/{id} [get]
+func (h *Handler) getTargetParty(c *gin.Context) {
+	actor, ok := h.actor(c)
+	if !ok {
+		return
+	}
+	target, ok := parseTarget(c)
+	if !ok {
+		return
+	}
+	data, err := h.service.GetTargetParty(c.Request.Context(), actor.ID, target)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, data)
 }
 func (h *Handler) input(c *gin.Context) (SendInput, bool) {
 	var input SendInput
