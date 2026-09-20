@@ -12,21 +12,27 @@ import (
 type Source = model.MusicSource
 
 type MusicTagDTO struct {
-	ID           uuid.UUID `json:"id"`
-	AssignmentID uuid.UUID `json:"assignment_id"`
-	Name         string    `json:"name"`
-	Kind         string    `json:"kind"`
-	Upvotes      int64     `json:"upvotes"`
-	Downvotes    int64     `json:"downvotes"`
-	Score        int64     `json:"score"`
-	ViewerVote   string    `json:"viewer_vote"`
-	CanDelete    bool      `json:"can_delete"`
+	ID           uuid.UUID  `json:"id"`
+	AssignmentID uuid.UUID  `json:"assignment_id"`
+	Name         string     `json:"name"`
+	Kind         string     `json:"kind"`
+	ParentID     *uuid.UUID `json:"parent_id,omitempty"`
+	Depth        int        `json:"depth"`
+	Upvotes      int64      `json:"upvotes"`
+	Downvotes    int64      `json:"downvotes"`
+	Score        int64      `json:"score"`
+	ViewerVote   string     `json:"viewer_vote"`
+	CanDelete    bool       `json:"can_delete"`
 }
 
 type MusicTagOptionDTO struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
-	Kind string    `json:"kind"`
+	ID              uuid.UUID  `json:"id"`
+	Name            string     `json:"name"`
+	Kind            string     `json:"kind"`
+	ParentID        *uuid.UUID `json:"parent_id,omitempty"`
+	Depth           int        `json:"depth"`
+	AssignmentCount int64      `json:"assignment_count"`
+	ChildCount      int64      `json:"child_count"`
 }
 
 type SubmitEditRequest struct {

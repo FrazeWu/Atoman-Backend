@@ -153,3 +153,98 @@ func TestGetMusicTagReturnsPublicTagDetails(t *testing.T) {
 		t.Fatalf("expected missing tag 404, got %d: %s", missing.Code, missing.Body.String())
 	}
 }
+
+func TestMusicTagCatalogSupportsDimensionsAndTypeHierarchy(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	router := newMusicHTTPRouter(service, &user)
+
+	rootResponse := performMusicJSONRequest(t, router, http.MethodPost,
+		"/api/v1/music/tags", `{"kind":"type","name":"电子"}`)
+	if rootResponse.Code != http.StatusCreated {
+		t.Fatalf("expected root tag creation 201, got %d: %s", rootResponse.Code, rootResponse.Body.String())
+	}
+	var rootPayload struct {
+		Data MusicTagOptionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(rootResponse.Body.Bytes(), &rootPayload); err != nil {
+		t.Fatalf("decode root tag: %v", err)
+	}
+	if rootPayload.Data.Depth != 1 || rootPayload.Data.ParentID != nil {
+		t.Fatalf("unexpected root tag hierarchy: %#v", rootPayload.Data)
+	}
+
+	reusedRootResponse := performMusicJSONRequest(t, router, http.MethodPost,
+		"/api/v1/music/tags", `{"kind":"type","name":"电子"}`)
+	if reusedRootResponse.Code != http.StatusOK {
+		t.Fatalf("expected existing root tag to be reused with 200, got %d: %s", reusedRootResponse.Code, reusedRootResponse.Body.String())
+	}
+
+	childResponse := performMusicJSONRequest(t, router, http.MethodPost,
+		"/api/v1/music/tags", `{"kind":"type","name":"House","parent_id":"`+rootPayload.Data.ID.String()+`"}`)
+	if childResponse.Code != http.StatusCreated {
+		t.Fatalf("expected child tag creation 201, got %d: %s", childResponse.Code, childResponse.Body.String())
+	}
+	var childPayload struct {
+		Data MusicTagOptionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(childResponse.Body.Bytes(), &childPayload); err != nil {
+		t.Fatalf("decode child tag: %v", err)
+	}
+	if childPayload.Data.Depth != 2 || childPayload.Data.ParentID == nil || *childPayload.Data.ParentID != rootPayload.Data.ID {
+		t.Fatalf("unexpected child tag hierarchy: %#v", childPayload.Data)
+	}
+
+	grandchildResponse := performMusicJSONRequest(t, router, http.MethodPost,
+		"/api/v1/music/tags", `{"kind":"type","name":"Deep House","parent_id":"`+childPayload.Data.ID.String()+`"}`)
+	if grandchildResponse.Code != http.StatusCreated {
+		t.Fatalf("expected grandchild tag creation 201, got %d: %s", grandchildResponse.Code, grandchildResponse.Body.String())
+	}
+	var grandchildPayload struct {
+		Data MusicTagOptionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(grandchildResponse.Body.Bytes(), &grandchildPayload); err != nil {
+		t.Fatalf("decode grandchild tag: %v", err)
+	}
+	if grandchildPayload.Data.Depth != 3 {
+		t.Fatalf("expected third-level tag, got %#v", grandchildPayload.Data)
+	}
+
+	tooDeepResponse := performMusicJSONRequest(t, router, http.MethodPost,
+		"/api/v1/music/tags", `{"kind":"type","name":"Fourth Level","parent_id":"`+grandchildPayload.Data.ID.String()+`"}`)
+	if tooDeepResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected fourth-level tag creation to be rejected with 422, got %d: %s", tooDeepResponse.Code, tooDeepResponse.Body.String())
+	}
+
+	invalidMoodParentResponse := performMusicJSONRequest(t, router, http.MethodPost,
+		"/api/v1/music/tags", `{"kind":"mood","name":"治愈","parent_id":"`+rootPayload.Data.ID.String()+`"}`)
+	if invalidMoodParentResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected mood parent to be rejected with 400, got %d: %s", invalidMoodParentResponse.Code, invalidMoodParentResponse.Body.String())
+	}
+
+	for _, input := range []string{
+		`{"kind":"mood","name":"治愈"}`,
+		`{"kind":"scene","name":"夜晚"}`,
+		`{"kind":"theme","name":"爱情"}`,
+		`{"kind":"instrument","name":"钢琴"}`,
+	} {
+		response := performMusicJSONRequest(t, router, http.MethodPost, "/api/v1/music/tags", input)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("expected supported tag dimension creation 201, got %d: %s", response.Code, response.Body.String())
+		}
+	}
+
+	childrenResponse := performMusicJSONRequest(t, router, http.MethodGet,
+		"/api/v1/music/tags?kind=type&parent_id="+rootPayload.Data.ID.String(), "")
+	if childrenResponse.Code != http.StatusOK {
+		t.Fatalf("expected child catalog 200, got %d: %s", childrenResponse.Code, childrenResponse.Body.String())
+	}
+	var childrenPayload struct {
+		Data []MusicTagOptionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(childrenResponse.Body.Bytes(), &childrenPayload); err != nil {
+		t.Fatalf("decode child catalog: %v", err)
+	}
+	if len(childrenPayload.Data) != 1 || childrenPayload.Data[0].Name != "House" {
+		t.Fatalf("unexpected child catalog: %#v", childrenPayload.Data)
+	}
+}
