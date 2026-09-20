@@ -1,8 +1,10 @@
 package blog
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -345,6 +347,10 @@ func buildBlogDraftResponseFromCanonical(draft model.ContentBlogDraft) blogDraft
 		value := draft.CollectionID.String()
 		collectionID = &value
 	}
+	var tags []string
+	if strings.TrimSpace(draft.TagsJSON) != "" {
+		_ = json.Unmarshal([]byte(draft.TagsJSON), &tags)
+	}
 	return blogDraftResponse{
 		ID:              draft.ID,
 		UserID:          draft.UserID,
@@ -357,6 +363,7 @@ func buildBlogDraftResponseFromCanonical(draft model.ContentBlogDraft) blogDraft
 		Visibility:      draft.Visibility,
 		ChannelID:       channelID,
 		CollectionID:    collectionID,
+		Tags:            tags,
 		CreatedAt:       draft.CreatedAt,
 		UpdatedAt:       draft.UpdatedAt,
 	}

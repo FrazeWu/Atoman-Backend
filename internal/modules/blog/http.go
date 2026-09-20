@@ -63,16 +63,18 @@ type reorderCollectionPostsInput struct {
 }
 
 type blogDraftInput struct {
-	ContextKey      string `json:"context_key" binding:"required"`
-	SourceContentID string `json:"source_content_id"`
-	Title           string `json:"title"`
-	Content         string `json:"content"`
-	Summary         string `json:"summary"`
-	CoverURL        string `json:"cover_url"`
-	Visibility      string `json:"visibility"`
-	AllowComments   *bool  `json:"allow_comments"`
-	ChannelID       string `json:"channel_id"`
-	CollectionID    string `json:"collection_id"`
+	ContextKey      string   `json:"context_key" binding:"required"`
+	SourceContentID string   `json:"source_content_id"`
+	Title           string   `json:"title"`
+	Content         string   `json:"content"`
+	Summary         string   `json:"summary"`
+	CoverURL        string   `json:"cover_url"`
+	Visibility      string   `json:"visibility"`
+	AllowComments   *bool    `json:"allow_comments"`
+	ChannelID       string   `json:"channel_id"`
+	CollectionID    string   `json:"collection_id"`
+	Tags            []string `json:"tags"`
+	BaseUpdatedAt   string   `json:"base_updated_at"`
 }
 
 type blogDraftResponse struct {
@@ -87,6 +89,7 @@ type blogDraftResponse struct {
 	Visibility      string    `json:"visibility"`
 	ChannelID       *string   `json:"channel_id,omitempty"`
 	CollectionID    *string   `json:"collection_id,omitempty"`
+	Tags            []string  `json:"tags,omitempty"`
 	CreatedAt       any       `json:"created_at"`
 	UpdatedAt       any       `json:"updated_at"`
 }

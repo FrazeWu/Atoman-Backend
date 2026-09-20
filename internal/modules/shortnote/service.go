@@ -128,6 +128,44 @@ func (s *Service) Delete(user authctx.CurrentUser, id uuid.UUID) error {
 		if err := s.references.RemoveSource(tx, "short_note", note.ID); err != nil {
 			return err
 		}
+		if err := tx.Where("short_note_id = ?", note.ID).Delete(&model.ShortNoteMedia{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("short_note_id = ?", note.ID).Delete(&model.ShortNoteVote{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("short_note_id = ?", note.ID).Delete(&model.ShortNoteRead{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("target_type = ? AND target_id = ?", "short_note", note.ID).Delete(&model.Like{}).Error; err != nil {
+			return err
+		}
+		var targetIDs []uuid.UUID
+		if err := tx.Model(&model.DiscussionTarget{}).Where("kind = ? AND resource_id = ?", "short_note", note.ID).Pluck("id", &targetIDs).Error; err != nil {
+			return err
+		}
+		if len(targetIDs) > 0 {
+			var commentIDs []uuid.UUID
+			if err := tx.Model(&model.CommentEntry{}).Where("target_id IN ?", targetIDs).Pluck("id", &commentIDs).Error; err != nil {
+				return err
+			}
+			if len(commentIDs) > 0 {
+				for _, item := range []any{&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}} {
+					if err := tx.Where("comment_id IN ?", commentIDs).Delete(item).Error; err != nil {
+						return err
+					}
+				}
+				if err := tx.Where("target_id IN ?", targetIDs).Delete(&model.CommentEntry{}).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Where("target_id IN ?", targetIDs).Delete(&model.CommentPublishRecord{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("id IN ?", targetIDs).Delete(&model.DiscussionTarget{}).Error; err != nil {
+				return err
+			}
+		}
 		return tx.Delete(&note).Error
 	})
 }

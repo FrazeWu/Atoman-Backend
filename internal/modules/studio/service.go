@@ -214,6 +214,31 @@ func (s *Service) DeleteChannel(user authctx.CurrentUser, channelID uuid.UUID) e
 		}
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		var feedSourceIDs []uuid.UUID
+		if err := tx.Model(&model.FeedSource{}).Where("source_type = ? AND source_id = ?", "internal_channel", channel.ID).Pluck("id", &feedSourceIDs).Error; err != nil {
+			return err
+		}
+		if len(feedSourceIDs) > 0 {
+			if err := tx.Where("feed_source_id IN ?", feedSourceIDs).Delete(&model.Subscription{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("feed_source_id IN ?", feedSourceIDs).Delete(&model.FeedItem{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("id IN ?", feedSourceIDs).Delete(&model.FeedSource{}).Error; err != nil {
+				return err
+			}
+		}
+		for _, item := range []any{&model.ContentLifecycleEvent{}, &model.ContentProgress{}} {
+			if err := tx.Where("channel_id = ?", channel.ID).Delete(item).Error; err != nil {
+				return err
+			}
+		}
+		for _, item := range []any{&model.ContentNotificationPreference{}, &model.NotificationMute{}} {
+			if err := tx.Where("source_id = ?", channel.ID).Delete(item).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Delete(&channel).Error; err != nil {
 			return err
 		}

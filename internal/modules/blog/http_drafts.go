@@ -1,9 +1,11 @@
 package blog
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -108,7 +110,31 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid collection_id"))
 		return
 	}
+	var baseUpdatedAt *time.Time
+	if strings.TrimSpace(req.BaseUpdatedAt) != "" {
+		parsed, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(req.BaseUpdatedAt))
+		if parseErr != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid base_updated_at"))
+			return
+		}
+		baseUpdatedAt = &parsed
+	}
+	tagsJSON, err := json.Marshal(req.Tags)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
+		var existing model.ContentBlogDraft
+		existingErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND context_key = ?", user.ID, contextKey).First(&existing).Error
+		if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+			return existingErr
+		}
+		if baseUpdatedAt != nil {
+			if errors.Is(existingErr, gorm.ErrRecordNotFound) || !existing.UpdatedAt.Equal(baseUpdatedAt.UTC()) {
+				return apperr.Conflict("blog.draft_conflict", "Draft has changed, reload before saving")
+			}
+		}
 		var contentID *uuid.UUID
 		if sourceContentID != nil {
 			content, err := loadCanonicalBlogContent(tx, *sourceContentID)
@@ -136,10 +162,11 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 			Visibility:   normalizeBlogVisibility(req.Visibility),
 			ChannelID:    channelID,
 			CollectionID: collectionID,
+			TagsJSON:     string(tagsJSON),
 		}
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "user_id"}, {Name: "context_key"}},
-			DoUpdates: clause.AssignmentColumns([]string{"content_id", "title", "content", "summary", "cover_url", "visibility", "channel_id", "collection_id", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"content_id", "title", "content", "summary", "cover_url", "visibility", "channel_id", "collection_id", "tags_json", "updated_at"}),
 		}).Create(&draft).Error; err != nil {
 			return err
 		}

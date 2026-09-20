@@ -776,6 +776,9 @@ func (h *Handler) deletePost(c *gin.Context) {
 		if err := h.service.references.RemoveSource(tx, "post", post.ID); err != nil {
 			return err
 		}
+		if err := cleanupBlogContentRelations(tx, post.ID); err != nil {
+			return err
+		}
 		if err := tx.Where("content_id = ?", post.ID).Delete(&model.ContentMediaAsset{}).Error; err != nil {
 			return err
 		}
@@ -783,6 +786,9 @@ func (h *Handler) deletePost(c *gin.Context) {
 			return err
 		}
 		if err := tx.Delete(&model.ContentBlogExtension{}, "content_id = ?", post.ID).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&model.ContentPostExtension{}, "content_id = ?", post.ID).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&model.ContentEntry{}, "id = ?", post.ID).Error
@@ -799,6 +805,59 @@ func (h *Handler) deletePost(c *gin.Context) {
 func (h *Handler) publishPost(c *gin.Context) { h.updatePostStatus(c, "published") }
 
 func (h *Handler) unpublishPost(c *gin.Context) { h.updatePostStatus(c, "draft") }
+
+func cleanupBlogContentRelations(tx *gorm.DB, contentID uuid.UUID) error {
+	for _, query := range []struct {
+		model any
+		where string
+		args  []any
+	}{
+		{&model.ContentBlogTag{}, "content_id = ?", []any{contentID}},
+		{&model.ContentBlogVersion{}, "content_id = ?", []any{contentID}},
+		{&model.ContentBlogDraft{}, "content_id = ?", []any{contentID}},
+		{&model.Bookmark{}, "content_id = ?", []any{contentID}},
+		{&model.PostRating{}, "content_id = ?", []any{contentID}},
+		{&model.BlogRecommendationFeedback{}, "content_id = ?", []any{contentID}},
+		{&model.ContentLifecycleEvent{}, "content_type = ? AND content_id = ?", []any{"blog", contentID}},
+		{&model.ContentProgress{}, "content_type = ? AND content_id = ?", []any{"blog", contentID}},
+		{&model.ContentPublicationEvent{}, "content_type = ? AND content_id = ?", []any{"blog", contentID}},
+		{&model.BlogPublishSchedule{}, "content_id = ?", []any{contentID}},
+		{&model.ContentNotificationPreference{}, "source_type = ? AND source_id = ?", []any{"blog_post", contentID}},
+		{&model.Like{}, "target_type = ? AND target_id = ?", []any{"post", contentID}},
+		{&model.Notification{}, "source_type = ? AND source_id = ?", []any{"content_publication", contentID}},
+	} {
+		if err := tx.Where(query.where, query.args...).Delete(query.model).Error; err != nil {
+			return err
+		}
+	}
+	var targetIDs []uuid.UUID
+	if err := tx.Model(&model.DiscussionTarget{}).Where("kind = ? AND resource_id = ?", "blog_post", contentID).Pluck("id", &targetIDs).Error; err != nil {
+		return err
+	}
+	if len(targetIDs) > 0 {
+		var commentIDs []uuid.UUID
+		if err := tx.Model(&model.CommentEntry{}).Where("target_id IN ?", targetIDs).Pluck("id", &commentIDs).Error; err != nil {
+			return err
+		}
+		if len(commentIDs) > 0 {
+			for _, item := range []any{&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}} {
+				if err := tx.Where("comment_id IN ?", commentIDs).Delete(item).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Where("target_id IN ?", targetIDs).Delete(&model.CommentEntry{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("target_id IN ?", targetIDs).Delete(&model.CommentPublishRecord{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("id IN ?", targetIDs).Delete(&model.DiscussionTarget{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (h *Handler) pinPost(c *gin.Context) { h.updatePostPin(c, true) }
 
@@ -902,6 +961,9 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 			updates["published_at"] = time.Now().UTC()
 		}
 		if err := tx.Model(&model.ContentEntry{}).Where("id = ?", postID).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.BlogPublishSchedule{}).Where("content_id = ? AND status NOT IN ?", postID, []string{"published", "cancelled"}).Updates(map[string]any{"status": "cancelled", "cancelled_at": time.Now().UTC(), "lease_token": "", "lease_until": nil}).Error; err != nil {
 			return err
 		}
 		content, err := loadCanonicalBlogContent(tx, postID)
