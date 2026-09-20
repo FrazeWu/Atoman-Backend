@@ -299,6 +299,25 @@ func (s *Service) SaveNotificationPreference(user authctx.CurrentUser, input Not
 	if input.Mode != "feed_only" && input.Mode != "all" && input.Mode != "daily" {
 		return model.ContentNotificationPreference{}, apperr.BadRequest("lifecycle.invalid_notification_mode", "mode is invalid")
 	}
+	var exists int64
+	switch input.SourceType {
+	case "internal_user":
+		exists = 0
+		if err := s.db.Model(&model.User{}).Where("uuid = ?", input.SourceID).Count(&exists).Error; err != nil {
+			return model.ContentNotificationPreference{}, err
+		}
+	case "internal_channel":
+		if err := s.db.Model(&model.Channel{}).Where("id = ?", input.SourceID).Count(&exists).Error; err != nil {
+			return model.ContentNotificationPreference{}, err
+		}
+	case "internal_collection":
+		if err := s.db.Model(&model.ContentCollection{}).Where("id = ?", input.SourceID).Count(&exists).Error; err != nil {
+			return model.ContentNotificationPreference{}, err
+		}
+	}
+	if exists == 0 {
+		return model.ContentNotificationPreference{}, apperr.NotFound("lifecycle.source_not_found", "notification source not found")
+	}
 	record := model.ContentNotificationPreference{UserID: user.ID, SourceType: input.SourceType, SourceID: input.SourceID, Mode: input.Mode}
 	err := s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}, {Name: "source_type"}, {Name: "source_id"}},
@@ -581,8 +600,14 @@ func (s *Service) retryBlogSchedule(id uuid.UUID, token string, now time.Time, c
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&model.BlogPublishSchedule{}).Where("id = ? AND status = ? AND lease_token = ?", id, "processing", token).Updates(map[string]any{"status": status, "attempts": attempts, "next_run_at": nextRunAt, "last_error": cause.Error(), "lease_token": "", "lease_until": nil})
-		if result.Error != nil || result.RowsAffected != 1 || status != "failed" {
+		if result.Error != nil {
 			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("blog publish schedule lease lost")
+		}
+		if status != "failed" {
+			return nil
 		}
 		return tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", schedule.ContentID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
 	})
@@ -899,6 +924,9 @@ func (s *Service) resolveContent(module string, id uuid.UUID) (contentSummary, e
 		var extension model.ContentBlogExtension
 		if err := s.db.First(&extension, "content_id = ?", entry.ID).Error; err != nil {
 			return contentSummary{}, contentError(err)
+		}
+		if entry.AuthorID == nil {
+			return contentSummary{}, apperr.NotFound("lifecycle.content_not_found", "Content not found")
 		}
 		return contentSummary{Module: "blog", ContentID: id, ChannelID: entry.ChannelID, OwnerID: *entry.AuthorID, Title: entry.Title, Path: "/posts/post/" + id.String(), CoverURL: entry.CoverURL, Status: entry.Status, Visibility: entry.Visibility}, nil
 	case "podcast":

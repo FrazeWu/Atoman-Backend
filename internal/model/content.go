@@ -84,6 +84,7 @@ type ContentBlogDraft struct {
 	Visibility   string     `json:"visibility" gorm:"not null;default:'public'"`
 	ChannelID    *uuid.UUID `json:"channel_id,omitempty" gorm:"type:uuid;index"`
 	CollectionID *uuid.UUID `json:"collection_id,omitempty" gorm:"type:uuid;index"`
+	TagsJSON     string     `json:"-" gorm:"type:text"`
 }
 
 func (ContentBlogDraft) TableName() string { return "content_blog_drafts" }
