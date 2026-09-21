@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/service"
+	"atoman/internal/storage"
 )
 
 func main() {
@@ -53,15 +54,20 @@ func main() {
 	}
 	log.Println("Database connected successfully")
 
-	uploadsRoot, err := uploadsRootFromEnv()
+	if strings.TrimSpace(os.Getenv("S3_BUCKET")) == "" || strings.TrimSpace(os.Getenv("S3_URL_PREFIX")) == "" {
+		log.Fatal("S3_BUCKET and S3_URL_PREFIX are required for video_worker")
+	}
+	objectStore, err := storage.InitS3Client()
 	if err != nil {
-		log.Fatal("Invalid UPLOADS_ROOT: ", err)
+		log.Fatal("Failed to initialize R2 client: ", err)
 	}
 
 	worker := service.VideoPreviewWorker{
 		DB: db,
 		Generator: service.FFmpegPreviewGenerator{
-			UploadsRoot: uploadsRoot,
+			PublicBase: os.Getenv("S3_URL_PREFIX"),
+			Bucket:     os.Getenv("S3_BUCKET"),
+			Store:      objectStore,
 		},
 		MaxAttempts: 3,
 	}
@@ -77,6 +83,8 @@ func main() {
 	}
 }
 
+// uploadsRootFromEnv remains available for legacy deployments and unit tests.
+// The R2-backed worker no longer calls it during startup.
 func uploadsRootFromEnv() (string, error) {
 	root := strings.TrimSpace(os.Getenv("UPLOADS_ROOT"))
 	if root == "" {

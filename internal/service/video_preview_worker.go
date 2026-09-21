@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -36,7 +37,13 @@ func (w VideoPreviewWorker) ProcessNext() (bool, error) {
 
 	job, err := w.claimNext()
 	if err == gorm.ErrRecordNotFound {
-		return false, nil
+		if err := EnqueueMissingVideoPreviewJobs(w.DB, 20); err != nil {
+			return false, err
+		}
+		job, err = w.claimNext()
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
 	}
 	if err != nil {
 		return false, err
@@ -47,12 +54,17 @@ func (w VideoPreviewWorker) ProcessNext() (bool, error) {
 		return true, w.failJob(job, maxAttempts, err)
 	}
 
-	thumbnails, err := w.Generator.Generate(video)
+	result := VideoPreviewResult{}
+	if generator, ok := w.Generator.(VideoPreviewMetadataGenerator); ok {
+		result, err = generator.GenerateWithMetadata(video)
+	} else {
+		result.Thumbnails, err = w.Generator.Generate(video)
+	}
 	if err != nil {
 		return true, w.failJob(job, maxAttempts, err)
 	}
 
-	raw, err := json.Marshal(thumbnails)
+	raw, err := json.Marshal(result.Thumbnails)
 	if err != nil {
 		return true, w.failJob(job, maxAttempts, err)
 	}
@@ -63,11 +75,25 @@ func (w VideoPreviewWorker) ProcessNext() (bool, error) {
 		if err != nil {
 			return err
 		}
-		if err := tx.Model(&model.ContentVideoExtension{}).Where("content_id = ?", contentID).Updates(map[string]interface{}{
+		updates := map[string]interface{}{
 			"preview_thumbnails": json.RawMessage(raw),
 			"processing_status":  "ready",
 			"processing_error":   "",
-		}).Error; err != nil {
+		}
+		var extension model.ContentVideoExtension
+		if err := tx.First(&extension, "content_id = ?", contentID).Error; err != nil {
+			return err
+		}
+		if strings.TrimSpace(extension.ThumbnailURL) == "" && strings.TrimSpace(result.ThumbnailURL) != "" {
+			updates["thumbnail_url"] = result.ThumbnailURL
+			if err := tx.Model(&model.ContentEntry{}).Where("id = ?", contentID).Update("cover_url", result.ThumbnailURL).Error; err != nil {
+				return err
+			}
+		}
+		if extension.DurationSec <= 0 && result.DurationSec > 0 {
+			updates["duration_sec"] = result.DurationSec
+		}
+		if err := tx.Model(&model.ContentVideoExtension{}).Where("content_id = ?", contentID).Updates(updates).Error; err != nil {
 			return err
 		}
 
