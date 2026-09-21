@@ -18,7 +18,10 @@ import (
 	"unicode"
 
 	"atoman/internal/model"
+	"github.com/longbridgeapp/opencc"
 )
+
+var traditionalToSimplified, _ = opencc.New("t2s")
 
 type AlbumImportMetadataTrack struct {
 	Title           string
@@ -1194,7 +1197,7 @@ func uniqueMusicArtists(values []string) []string {
 }
 
 func musicBrainzLookupAlbumTitle(value string) string {
-	value = strings.TrimSpace(value)
+	value = strings.TrimSpace(toSimplifiedChinese(value))
 	for {
 		trimmed := strings.TrimSpace(strings.TrimRightFunc(value, func(r rune) bool { return r == ')' || r == ']' }))
 		lower := strings.ToLower(trimmed)
@@ -1776,12 +1779,24 @@ func normalizedMusicText(value string) string {
 }
 
 func compactMusicText(value string) string {
+	value = toSimplifiedChinese(value)
 	return strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			return unicode.ToLower(r)
 		}
 		return -1
 	}, value)
+}
+
+func toSimplifiedChinese(value string) string {
+	if traditionalToSimplified == nil || value == "" {
+		return value
+	}
+	converted, err := traditionalToSimplified.Convert(value)
+	if err != nil {
+		return value
+	}
+	return converted
 }
 
 func comparableMusicTitle(value string) string {
