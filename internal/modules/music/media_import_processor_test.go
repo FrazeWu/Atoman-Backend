@@ -931,6 +931,27 @@ func TestTitleFromFileNameForTrackUsesArchiveSequenceForUnpaddedNumbers(t *testi
 		t.Fatalf("expected unmatched numeric title to be preserved, got %q", got)
 	}
 }
+
+func TestNormalizeAlbumImportTrackTitleRemovesKnownArtistPrefixOrSuffix(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "artist prefix", input: "Artist - Song", want: "Song"},
+		{name: "artist suffix", input: "Song - Artist", want: "Song"},
+		{name: "unicode dash", input: "Artist – Song - Remix", want: "Song - Remix"},
+		{name: "unknown artist", input: "Unknown - Song", want: "Unknown - Song"},
+		{name: "hyphenated title", input: "Run - DMC", want: "Run - DMC"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := normalizeAlbumImportTrackTitle(test.input, "Artist"); got != test.want {
+				t.Fatalf("normalized title = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
 func TestMediaImportProcessorTranscodesUploadedVideoAudioStreamAndUpdatesFile(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}

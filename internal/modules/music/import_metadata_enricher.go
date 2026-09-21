@@ -22,6 +22,7 @@ import (
 
 type AlbumImportMetadataTrack struct {
 	Title           string
+	OriginalTitle   string
 	Artist          string
 	Album           string
 	FileID          string
@@ -445,7 +446,7 @@ func baseMetadataTracks(tracks []AlbumImportMetadataTrack) []AlbumImportDTOTrack
 		result = append(result, AlbumImportDTOTrack{
 			FileID: track.FileID, Title: track.Title, AudioKey: track.AudioKey, AudioURL: track.AudioURL, Origin: track.Origin,
 			DiscNumber: track.DiscNumber, TrackNumber: track.TrackNumber,
-			OriginalTitle: track.Title, OriginalDisc: track.DiscNumber, OriginalTrack: track.TrackNumber,
+			OriginalTitle: firstNonEmptyMusicValue(track.OriginalTitle, track.Title), OriginalDisc: track.DiscNumber, OriginalTrack: track.TrackNumber,
 			MatchStatus: model.MusicMatchUnmatched,
 		})
 	}

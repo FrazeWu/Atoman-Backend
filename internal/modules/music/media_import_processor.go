@@ -943,7 +943,7 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 		}
 		metadata := albumImportFileMetadata(file)
 		metadataTracks = append(metadataTracks, AlbumImportMetadataTrack{
-			Title: file.Title, Artist: stringValue(metadata["artist"]), Album: album, FileID: file.ID.String(),
+			Title: file.Title, OriginalTitle: file.Title, Artist: stringValue(metadata["artist"]), Album: album, FileID: file.ID.String(),
 			DiscNumber: normalizedDiscNumber(file.DiscNumber), TrackNumber: file.TrackNumber,
 			DurationSeconds: file.DurationSeconds, Origin: file.RelativePath,
 			AudioKey: file.PlaybackKey, AudioURL: audioURL,
@@ -957,6 +957,11 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 		if strings.TrimSpace(metadataTracks[index].Artist) == "" {
 			metadataTracks[index].Artist = artist
 		}
+		metadataTracks[index].Title = normalizeAlbumImportTrackTitle(
+			metadataTracks[index].Title,
+			metadataTracks[index].Artist,
+			artist,
+		)
 	}
 	albumTitle := strings.TrimSpace(stringValue(payload["derived_album_title"]))
 	if albumTitle == "" {
@@ -1613,6 +1618,40 @@ func titleFromFileNameForTrack(name string, expectedTrack int) string {
 		return strings.TrimSpace(matched[1])
 	}
 	return title
+}
+
+func normalizeAlbumImportTrackTitle(title string, artists ...string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	parts := regexp.MustCompile(`\s+(?:-|–|—)\s+`).Split(title, 2)
+	if len(parts) != 2 {
+		return title
+	}
+	left, right := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	for _, artist := range artists {
+		artist = strings.TrimSpace(artist)
+		if artist == "" {
+			continue
+		}
+		if compactMusicText(left) == compactMusicText(artist) {
+			return right
+		}
+		if compactMusicText(right) == compactMusicText(artist) {
+			return left
+		}
+	}
+	return title
+}
+
+func firstNonEmptyMusicValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func discAndTrackFromPath(relativePath string) (int, int) {
