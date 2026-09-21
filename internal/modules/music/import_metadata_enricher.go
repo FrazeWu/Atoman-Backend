@@ -239,7 +239,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	lyricsArtists := []string{}
 	applyDiscogs := func(discogsRelease discogsRelease, discogsMapping []int) {
 		releaseMatched = true
-		result.AlbumTitle = discogsRelease.Title
+		result.AlbumTitle = toSimplifiedChinese(discogsRelease.Title)
 		result.ReleaseDate = discogsRelease.Released
 		if result.ReleaseDate == "" && discogsRelease.Year > 0 {
 			result.ReleaseDate = strconv.Itoa(discogsRelease.Year)
@@ -262,7 +262,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	}
 	applyMusicBrainz := func(release musicBrainzRelease, trackMapping []int) {
 		releaseMatched = true
-		result.AlbumTitle = release.Title
+		result.AlbumTitle = toSimplifiedChinese(release.Title)
 		result.ReleaseDate = release.Date
 		result.AlbumType = normalizeMusicBrainzAlbumType(release.ReleaseGroup.PrimaryType)
 		result.SourceURL = e.musicBrainzBase + "/release/" + release.ID
@@ -329,7 +329,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 			source.Status = model.MusicMatchMatched
 			source.SourceURL = discogsReleaseURL(discogsMatch.release)
 			source.ExternalID = strconv.Itoa(discogsMatch.release.ID)
-			source.SelectedTitle = discogsMatch.release.Title
+			source.SelectedTitle = toSimplifiedChinese(discogsMatch.release.Title)
 			source.MatchConfidence = externalTrackMatchConfidence(result.Tracks, flattenDiscogsTracks(discogsMatch.release), discogsMatch.mapping)
 		} else if discogsMatch.err != nil {
 			source.Error = discogsMatch.err.Error()
@@ -342,7 +342,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 			source.Status = model.MusicMatchMatched
 			source.SourceURL = e.musicBrainzBase + "/release/" + musicBrainzMatch.release.ID
 			source.ExternalID = musicBrainzMatch.release.ID
-			source.SelectedTitle = musicBrainzMatch.release.Title
+			source.SelectedTitle = toSimplifiedChinese(musicBrainzMatch.release.Title)
 			source.MatchConfidence = externalTrackMatchConfidence(result.Tracks, flattenMusicBrainzTracks(musicBrainzMatch.release), musicBrainzMatch.mapping)
 		} else if musicBrainzMatch.err != nil {
 			source.Error = musicBrainzMatch.err.Error()
@@ -1486,7 +1486,7 @@ func applyMatchedExternalTracks(tracks []AlbumImportDTOTrack, remote []flattened
 		if track.OriginalTrack == 0 {
 			track.OriginalTrack = track.TrackNumber
 		}
-		track.Title = remote[remoteIndex].Title
+		track.Title = toSimplifiedChinese(remote[remoteIndex].Title)
 		track.DiscNumber = remote[remoteIndex].Disc
 		track.TrackNumber = remote[remoteIndex].Position
 		track.MatchStatus = model.MusicMatchMatched
