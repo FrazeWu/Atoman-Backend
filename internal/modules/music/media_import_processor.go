@@ -1635,14 +1635,26 @@ func normalizeAlbumImportTrackTitle(title string, artists ...string) string {
 		if artist == "" {
 			continue
 		}
-		if compactMusicText(left) == compactMusicText(artist) {
+		if musicArtistPrefixMatches(left, artist) {
 			return right
 		}
-		if compactMusicText(right) == compactMusicText(artist) {
+		if musicArtistPrefixMatches(right, artist) {
 			return left
 		}
 	}
 	return title
+}
+
+func musicArtistPrefixMatches(value, artist string) bool {
+	valueKey := compactMusicText(value)
+	artistKey := compactMusicText(artist)
+	if valueKey == "" || artistKey == "" {
+		return false
+	}
+	if valueKey == artistKey {
+		return true
+	}
+	return strings.HasPrefix(valueKey, artistKey) && len(valueKey) > len(artistKey)
 }
 
 func firstNonEmptyMusicValue(values ...string) string {

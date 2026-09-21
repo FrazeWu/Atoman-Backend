@@ -300,6 +300,20 @@ func TestDiscogsArtistMatchesANV(t *testing.T) {
 	}
 }
 
+func TestMatchPartialMusicBrainzTracksKeepsUnmatchedTracks(t *testing.T) {
+	remote := []flattenedMusicBrainzTrack{
+		{Title: "First", Disc: 1, Position: 1},
+		{Title: "Second", Disc: 1, Position: 2},
+		{Title: "Third", Disc: 1, Position: 3},
+		{Title: "Fourth", Disc: 1, Position: 4},
+	}
+	uploaded := []AlbumImportMetadataTrack{{Title: "First"}, {Title: "Second"}, {Title: "Third"}, {Title: "Typo"}}
+	mapping, ok := matchPartialMusicBrainzTracks(remote, uploaded)
+	if !ok || len(mapping) != 4 || mapping[0] != 0 || mapping[1] != 1 || mapping[2] != 2 || mapping[3] != -1 {
+		t.Fatalf("partial mapping = %#v, ok=%v", mapping, ok)
+	}
+}
+
 func TestExternalAlbumMetadataEnricherMatchesDiscogsBilingualReleaseTitle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/database/search" {

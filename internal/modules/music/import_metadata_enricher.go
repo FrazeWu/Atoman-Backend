@@ -583,10 +583,33 @@ func betterDiscogsReleaseMatch(left, right discogsReleaseMatch) bool {
 	if left.positionMatches != right.positionMatches {
 		return left.positionMatches > right.positionMatches
 	}
+	leftDate := normalizedReleaseDate(left.release.Released)
+	rightDate := normalizedReleaseDate(right.release.Released)
+	if leftDate != rightDate {
+		return earlierReleaseDate(leftDate, rightDate)
+	}
 	if left.durationDifference != right.durationDifference {
 		return left.durationDifference < right.durationDifference
 	}
 	return left.release.ID < right.release.ID
+}
+
+func normalizedReleaseDate(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 4 && regexp.MustCompile(`^\d{4}`).MatchString(value) {
+		if len(value) > 10 {
+			return value[:10]
+		}
+		return value
+	}
+	return ""
+}
+
+func earlierReleaseDate(left, right string) bool {
+	if left == "" {
+		return false
+	}
+	return right == "" || left < right
 }
 
 func scoreExternalTrackMatch(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack, mapping []int) (int, int, float64) {
@@ -1001,6 +1024,7 @@ func bestMusicBrainzRelease(candidates []musicBrainzRelease, albumTitle string, 
 	bestIndex := -1
 	bestMatchedTracks := 0
 	bestDurationDifference := 0.0
+	bestDate := ""
 	var bestMapping []int
 	for index, candidate := range candidates {
 		if candidate.ReleaseGroup.Title != "" && !musicBrainzAlbumTitlesMatch(candidate.ReleaseGroup.Title, albumTitle) && !musicBrainzAlbumTitlesMatch(candidate.Title, albumTitle) {
@@ -1010,17 +1034,17 @@ func bestMusicBrainzRelease(candidates []musicBrainzRelease, albumTitle string, 
 		if !ok {
 			continue
 		}
-		if len(flattenMusicBrainzTracks(candidate)) == len(uploaded) && musicBrainzMatchedTrackCount(mapping) != len(uploaded) {
-			continue
-		}
 		matchedTracks := musicBrainzMatchedTrackCount(mapping)
 		difference := musicBrainzDurationDifference(candidate, uploaded, mapping)
+		candidateDate := normalizedReleaseDate(candidate.Date)
 		if bestIndex < 0 || matchedTracks > bestMatchedTracks ||
 			(matchedTracks == bestMatchedTracks && musicBrainzReleaseStatusRank(candidate.Status) > musicBrainzReleaseStatusRank(candidates[bestIndex].Status)) ||
-			(matchedTracks == bestMatchedTracks && musicBrainzReleaseStatusRank(candidate.Status) == musicBrainzReleaseStatusRank(candidates[bestIndex].Status) && difference < bestDurationDifference) {
+			(matchedTracks == bestMatchedTracks && musicBrainzReleaseStatusRank(candidate.Status) == musicBrainzReleaseStatusRank(candidates[bestIndex].Status) && difference < bestDurationDifference) ||
+			(matchedTracks == bestMatchedTracks && musicBrainzReleaseStatusRank(candidate.Status) == musicBrainzReleaseStatusRank(candidates[bestIndex].Status) && difference == bestDurationDifference && earlierReleaseDate(candidateDate, bestDate)) {
 			bestIndex = index
 			bestMatchedTracks = matchedTracks
 			bestDurationDifference = difference
+			bestDate = candidateDate
 			bestMapping = mapping
 		}
 	}
@@ -1050,33 +1074,20 @@ func musicBrainzDurationDifference(release musicBrainzRelease, uploaded []AlbumI
 	return difference
 }
 
-// matchMusicBrainzTracks maps every remote track to exactly one uploaded audio track.
-// Incomplete mappings are rejected so a missing intro cannot shift the displayed order.
+// matchMusicBrainzTracks maps safely identified tracks and leaves uncertain tracks unmapped.
 func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
 	remote := flattenMusicBrainzTracks(release)
 	if len(remote) == 0 || len(uploaded) == 0 {
 		return nil, false
 	}
-	if len(remote) == len(uploaded) {
-		if mapping, ok := matchMusicBrainzTracksBySignals(remote, uploaded); ok {
-			return mapping, true
-		}
-		if mapping, ok := matchMusicBrainzTracksByPosition(remote, uploaded); ok {
-			return mapping, true
-		}
-		if mapping, ok := matchMusicBrainzTracksByDurationMajority(remote, uploaded); ok {
-			return mapping, true
-		}
-	} else if len(uploaded) < len(remote) {
-		if mapping, ok := matchPartialMusicBrainzTracks(remote, uploaded); ok {
-			return mapping, true
-		}
+	if mapping, ok := matchPartialMusicBrainzTracks(remote, uploaded); ok {
+		return mapping, true
 	}
 	return nil, false
 }
 
 func matchPartialMusicBrainzTracks(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
-	if len(uploaded) == 0 || len(uploaded) > len(remote) {
+	if len(uploaded) == 0 || len(remote) == 0 {
 		return nil, false
 	}
 	mapping := make([]int, len(remote))
@@ -1134,10 +1145,18 @@ func matchPartialMusicBrainzTracks(remote []flattenedMusicBrainzTrack, uploaded 
 		}
 	}
 
-	for _, isUsed := range used {
-		if !isUsed {
-			return nil, false
+	matched := 0
+	for _, uploadedIndex := range mapping {
+		if uploadedIndex >= 0 {
+			matched++
 		}
+	}
+	minimum := len(remote)
+	if len(uploaded) < minimum {
+		minimum = len(uploaded)
+	}
+	if minimum == 0 || matched*100/minimum < 70 {
+		return nil, false
 	}
 	return mapping, true
 }
@@ -1526,11 +1545,6 @@ func applyDiscogsTracks(tracks []AlbumImportDTOTrack, release discogsRelease, ma
 func applyMatchedExternalTracks(tracks []AlbumImportDTOTrack, remote []flattenedMusicBrainzTrack, mapping []int) []AlbumImportDTOTrack {
 	if len(mapping) != len(remote) {
 		return tracks
-	}
-	for _, uploadedIndex := range mapping {
-		if uploadedIndex < 0 {
-			return tracks
-		}
 	}
 	result := make([]AlbumImportDTOTrack, 0, len(tracks))
 	used := make([]bool, len(tracks))
