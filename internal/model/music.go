@@ -85,47 +85,48 @@ func (ArtistMember) TableName() string {
 
 type Album struct {
 	Base
-	Title                  string        `json:"title" gorm:"not null"`
-	Description            string        `json:"description" gorm:"type:text"`
-	Year                   int           `json:"year"`
-	ReleaseYear            int           `json:"release_year"`
-	ReleaseDate            time.Time     `json:"release_date" gorm:"type:date"`
-	ReleaseDatePrecision   string        `json:"release_date_precision,omitempty"`
-	CoverURL               string        `json:"cover_url"`
-	CoverSource            string        `json:"cover_source" gorm:"default:'local'"`
-	Status                 string        `json:"status" gorm:"default:'open'"`
-	AlbumType              string        `json:"album_type" gorm:"default:'album'"`
-	EditionType            string        `json:"edition_type" gorm:"default:'original'"`
-	MusicBrainzMatched     bool          `json:"musicbrainz_matched" gorm:"column:musicbrainz_matched;not null;default:false;index"`
-	MusicBrainzReleaseID   string        `json:"-" gorm:"column:musicbrainz_release_id;type:varchar(36);index"`
-	MusicBrainzMatchedAt   *time.Time    `json:"-" gorm:"column:musicbrainz_matched_at"`
-	MetadataManualOverride bool          `json:"metadata_manual_override" gorm:"not null;default:false;index"`
-	CanonicalAlbumID       *uuid.UUID    `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
-	HotScore               float64       `json:"hot_score" gorm:"default:0;index"`
-	EntryStatus            string        `json:"entry_status" gorm:"default:'open'"`
-	LifecycleStatus        string        `json:"lifecycle_status" gorm:"not null;default:'active';index;check:chk_albums_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
-	EditStatus             string        `json:"edit_status" gorm:"not null;default:'development';index;check:chk_albums_edit_status,edit_status IN ('development','locked','closed')"`
-	SourcesJSON            string        `json:"-" gorm:"type:jsonb;default:'[]'"`
-	Sources                []MusicSource `json:"sources,omitempty" gorm:"-"`
-	RedirectTo             *uuid.UUID    `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
-	UploadedBy             *uuid.UUID    `json:"uploaded_by" gorm:"type:uuid"`
-	User                   *User         `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
-	Artists                []Artist      `json:"artists,omitempty" gorm:"many2many:album_artists;"`
-	ArtistCredits          []AlbumArtist `json:"artist_credits,omitempty" gorm:"foreignKey:AlbumID"`
-	Songs                  []Song        `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
-	OtherVersions          []Album       `json:"other_versions,omitempty" gorm:"-"`
-	PlayCount              int64         `json:"play_count"`
-	SongCount              int64         `json:"song_count" gorm:"-"`
-	BookmarkCount          int64         `json:"bookmark_count" gorm:"-"`
-	RatingScore            float64       `json:"rating_score" gorm:"-"`
-	RatingCount            int64         `json:"rating_count" gorm:"-"`
-	ViewerRating           *int          `json:"viewer_rating,omitempty" gorm:"-"`
-	MatchStatus            string        `json:"match_status,omitempty" gorm:"-"`
-	MatchProvider          string        `json:"match_provider,omitempty" gorm:"-"`
-	MatchExternalID        string        `json:"match_external_id,omitempty" gorm:"-"`
-	MatchSourceURL         string        `json:"match_source_url,omitempty" gorm:"-"`
-	MatchConfidence        float64       `json:"match_confidence,omitempty" gorm:"-"`
-	MatchUserOverridden    bool          `json:"match_user_overridden,omitempty" gorm:"-"`
+	Title                  string          `json:"title" gorm:"not null"`
+	Description            string          `json:"description" gorm:"type:text"`
+	Year                   int             `json:"year"`
+	ReleaseYear            int             `json:"release_year"`
+	ReleaseDate            time.Time       `json:"release_date" gorm:"type:date"`
+	ReleaseDatePrecision   string          `json:"release_date_precision,omitempty"`
+	CoverURL               string          `json:"cover_url"`
+	CoverSource            string          `json:"cover_source" gorm:"default:'local'"`
+	Status                 string          `json:"status" gorm:"default:'open'"`
+	AlbumType              string          `json:"album_type" gorm:"default:'album'"`
+	EditionType            string          `json:"edition_type" gorm:"default:'original'"`
+	MusicBrainzMatched     bool            `json:"musicbrainz_matched" gorm:"column:musicbrainz_matched;not null;default:false;index"`
+	MusicBrainzReleaseID   string          `json:"-" gorm:"column:musicbrainz_release_id;type:varchar(36);index"`
+	MusicBrainzMatchedAt   *time.Time      `json:"-" gorm:"column:musicbrainz_matched_at"`
+	MetadataManualOverride bool            `json:"metadata_manual_override" gorm:"not null;default:false;index"`
+	CanonicalAlbumID       *uuid.UUID      `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
+	HotScore               float64         `json:"hot_score" gorm:"default:0;index"`
+	EntryStatus            string          `json:"entry_status" gorm:"default:'open'"`
+	LifecycleStatus        string          `json:"lifecycle_status" gorm:"not null;default:'active';index;check:chk_albums_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
+	EditStatus             string          `json:"edit_status" gorm:"not null;default:'development';index;check:chk_albums_edit_status,edit_status IN ('development','locked','closed')"`
+	SourcesJSON            string          `json:"-" gorm:"type:jsonb;default:'[]'"`
+	ExternalMetadataJSON   json.RawMessage `json:"external_metadata,omitempty" gorm:"type:jsonb;default:'{}'"`
+	Sources                []MusicSource   `json:"sources,omitempty" gorm:"-"`
+	RedirectTo             *uuid.UUID      `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
+	UploadedBy             *uuid.UUID      `json:"uploaded_by" gorm:"type:uuid"`
+	User                   *User           `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
+	Artists                []Artist        `json:"artists,omitempty" gorm:"many2many:album_artists;"`
+	ArtistCredits          []AlbumArtist   `json:"artist_credits,omitempty" gorm:"foreignKey:AlbumID"`
+	Songs                  []Song          `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
+	OtherVersions          []Album         `json:"other_versions,omitempty" gorm:"-"`
+	PlayCount              int64           `json:"play_count"`
+	SongCount              int64           `json:"song_count" gorm:"-"`
+	BookmarkCount          int64           `json:"bookmark_count" gorm:"-"`
+	RatingScore            float64         `json:"rating_score" gorm:"-"`
+	RatingCount            int64           `json:"rating_count" gorm:"-"`
+	ViewerRating           *int            `json:"viewer_rating,omitempty" gorm:"-"`
+	MatchStatus            string          `json:"match_status,omitempty" gorm:"-"`
+	MatchProvider          string          `json:"match_provider,omitempty" gorm:"-"`
+	MatchExternalID        string          `json:"match_external_id,omitempty" gorm:"-"`
+	MatchSourceURL         string          `json:"match_source_url,omitempty" gorm:"-"`
+	MatchConfidence        float64         `json:"match_confidence,omitempty" gorm:"-"`
+	MatchUserOverridden    bool            `json:"match_user_overridden,omitempty" gorm:"-"`
 }
 
 func (Album) TableName() string {

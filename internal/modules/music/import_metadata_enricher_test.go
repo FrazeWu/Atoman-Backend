@@ -287,6 +287,34 @@ func TestExternalAlbumMetadataEnricherCanPreferDiscogs(t *testing.T) {
 	}
 }
 
+func TestExternalAlbumMetadataEnricherReturnsDiscogsAlbumDetails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/database/search":
+			_, _ = w.Write([]byte(`{"results":[{"id":321,"type":"release"}]}`))
+		case "/releases/321":
+			_, _ = w.Write([]byte(`{"id":321,"title":"菊花夜行军","released":"2001-04-01","country":"China","genres":["Electronic"],"styles":["Ambient"],"labels":[{"name":"Modern Sky"}],"formats":[{"name":"CD"}],"artists":[{"name":"郭顶"}],"tracklist":[{"position":"1","title":"第一首","type_":"track"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), "", "", "", "Atoman/test").
+		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
+	enricher.discogsWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "菊花夜行军", Artist: "郭顶", SkipLyrics: true,
+		Tracks: []AlbumImportMetadataTrack{{Title: "第一首", TrackNumber: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Country != "China" || len(result.Genres) != 1 || result.Genres[0] != "Electronic" || len(result.Styles) != 1 || result.Styles[0] != "Ambient" || len(result.Labels) != 1 || result.Labels[0] != "Modern Sky" || len(result.Formats) != 1 || result.Formats[0] != "CD" {
+		t.Fatalf("unexpected album details: %#v", result)
+	}
+}
+
 func TestDiscogsArtistMatchesANV(t *testing.T) {
 	release := discogsRelease{
 		Artists: []struct {

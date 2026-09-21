@@ -197,6 +197,13 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			MusicBrainzMatchedAt:   musicBrainzMatchedAt,
 			MetadataManualOverride: albumMetadataManualOverride,
 		}
+		if payload.Album.Metadata != nil {
+			metadata, err := json.Marshal(payload.Album.Metadata)
+			if err != nil {
+				return err
+			}
+			album.ExternalMetadataJSON = metadata
+		}
 		if album.AlbumType == "" {
 			album.AlbumType = "album"
 		}
@@ -259,6 +266,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			existing.MusicBrainzReleaseID = album.MusicBrainzReleaseID
 			existing.MusicBrainzMatchedAt = album.MusicBrainzMatchedAt
 			existing.MetadataManualOverride = existing.MetadataManualOverride || album.MetadataManualOverride
+			existing.ExternalMetadataJSON = album.ExternalMetadataJSON
 			album = existing
 			if err := tx.Save(&album).Error; err != nil {
 				return err
