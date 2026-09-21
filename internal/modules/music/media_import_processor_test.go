@@ -921,6 +921,9 @@ func TestAlbumImportTrackInfoFromFileNameIsConservative(t *testing.T) {
 			}
 		})
 	}
+	if got := normalizeAlbumImportTrackTitle("Kendrick Lamar,SZA - Loved Ones", "Kendrick Lamar"); got != "Loved Ones" {
+		t.Fatalf("normalized collaborator title = %q", got)
+	}
 }
 
 func TestTitleFromFileNameForTrackUsesArchiveSequenceForUnpaddedNumbers(t *testing.T) {
@@ -950,6 +953,9 @@ func TestNormalizeAlbumImportTrackTitleRemovesKnownArtistPrefixOrSuffix(t *testi
 				t.Fatalf("normalized title = %q, want %q", got, test.want)
 			}
 		})
+	}
+	if got := normalizeAlbumImportTrackTitle("Kendrick Lamar,SZA - Loved Ones", "Kendrick Lamar"); got != "Loved Ones" {
+		t.Fatalf("normalized collaborator title = %q", got)
 	}
 }
 func TestMediaImportProcessorTranscodesUploadedVideoAudioStreamAndUpdatesFile(t *testing.T) {
