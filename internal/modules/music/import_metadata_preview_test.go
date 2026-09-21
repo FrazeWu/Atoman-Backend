@@ -75,6 +75,45 @@ func TestPreviewAlbumImportMetadataReturnsMatchedTrackOrder(t *testing.T) {
 	}
 }
 
+func TestPreviewAlbumImportMetadataPreservesTrackAudioIdentityWhenReordered(t *testing.T) {
+	service := NewService(nil).WithAlbumImportMetadataEnricher(albumImportMetadataReorderEnricher{})
+
+	preview, err := service.PreviewAlbumImportMetadata(context.Background(), AlbumImportMetadataPreviewInput{
+		AlbumTitle: "IGOR",
+		Artist:     "Tyler, The Creator",
+		Tracks: []AlbumImportMetadataPreviewTrack{
+			{Title: "EARFQUAKE", FileID: "file-earfquake", AudioKey: "audio-earfquake", TrackNumber: 1},
+			{Title: "IGOR'S THEME", FileID: "file-igor", AudioKey: "audio-igor", TrackNumber: 2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Tracks) != 2 {
+		t.Fatalf("expected two preview tracks, got %#v", preview.Tracks)
+	}
+	if preview.Tracks[0].Title != "IGOR'S THEME" || preview.Tracks[0].FileID != "file-igor" || preview.Tracks[0].AudioKey != "audio-igor" {
+		t.Fatalf("matched first track lost its audio identity: %#v", preview.Tracks[0])
+	}
+	if preview.Tracks[1].Title != "EARFQUAKE" || preview.Tracks[1].FileID != "file-earfquake" || preview.Tracks[1].AudioKey != "audio-earfquake" {
+		t.Fatalf("matched second track lost its audio identity: %#v", preview.Tracks[1])
+	}
+}
+
+type albumImportMetadataReorderEnricher struct{}
+
+func (albumImportMetadataReorderEnricher) Enrich(_ context.Context, input AlbumImportMetadataInput) (AlbumImportMetadataResult, error) {
+	return AlbumImportMetadataResult{
+		AlbumTitle:     input.AlbumTitle,
+		MetadataSource: "musicbrainz",
+		MatchStatus:    model.MusicMatchMatched,
+		Tracks: []AlbumImportDTOTrack{
+			{Title: "IGOR'S THEME", TrackNumber: 1, FileID: input.Tracks[1].FileID, AudioKey: input.Tracks[1].AudioKey},
+			{Title: "EARFQUAKE", TrackNumber: 2, FileID: input.Tracks[0].FileID, AudioKey: input.Tracks[0].AudioKey},
+		},
+	}, nil
+}
+
 func TestPreviewAlbumImportMetadataKeepsLocalTracksWhenLookupTimesOut(t *testing.T) {
 	service := NewService(nil).WithAlbumImportMetadataEnricher(blockingAlbumImportMetadataEnricher{})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)

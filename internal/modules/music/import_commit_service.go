@@ -600,7 +600,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		s.deleteAlbumImportObjects(newObjectKeys)
 		var appErr *apperr.AppError
 		if errors.As(err, &appErr) && appErr.HTTPStatus >= 400 && appErr.HTTPStatus < 500 {
-			failed, markErr := s.markAlbumImportNeedsAttention(user.ID, id, appErr.Message)
+			failed, markErr := s.markAlbumImportNeedsAttention(user.ID, id, appErr.Message, input)
 			if markErr == nil {
 				s.updateAlbumImportNotification(failed)
 				return failed, nil
@@ -871,7 +871,7 @@ func isAlbumImportValidationRetry(session model.AlbumImportSession) bool {
 	return json.Unmarshal([]byte(session.PayloadJSON), &payload) == nil && payload["commit_validation_failed"] == true
 }
 
-func (s *Service) markAlbumImportNeedsAttention(userID, importID uuid.UUID, message string) (model.AlbumImportSession, error) {
+func (s *Service) markAlbumImportNeedsAttention(userID, importID uuid.UUID, message string, commitRequest CommitAlbumImportSessionInput) (model.AlbumImportSession, error) {
 	var out model.AlbumImportSession
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		var session model.AlbumImportSession
@@ -887,6 +887,8 @@ func (s *Service) markAlbumImportNeedsAttention(userID, importID uuid.UUID, mess
 			}
 		}
 		payload["commit_validation_failed"] = true
+		payload["commit_validation_error"] = strings.TrimSpace(message)
+		payload["commit_request"] = commitRequest
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return err
@@ -1159,15 +1161,47 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 			if !ok || !predicate(trackMap) {
 				continue
 			}
+			matched := derivedTrackAudio{
+				AudioURL: stringValue(trackMap["audio_url"]), FileID: stringValue(trackMap["file_id"]),
+				MatchStatus: stringValue(trackMap["match_status"]), MatchProvider: stringValue(trackMap["match_provider"]),
+				MatchExternalID: stringValue(trackMap["match_external_id"]), MatchSourceURL: stringValue(trackMap["match_source_url"]),
+				MatchConfidence: floatValue(trackMap["match_confidence"]),
+			}
+			if matched.AudioURL == "" {
+				continue
+			}
 			used[i] = true
-			return derivedTrackAudio{
+			return matched
+		}
+		return derivedTrackAudio{}
+	}
+	tryUniqueMatch := func(predicate func(map[string]any) bool) derivedTrackAudio {
+		candidateIndex := -1
+		var candidate derivedTrackAudio
+		for i, rawTrack := range rawDerivedTracks {
+			if used[i] {
+				continue
+			}
+			trackMap, ok := rawTrack.(map[string]any)
+			if !ok || !predicate(trackMap) {
+				continue
+			}
+			if candidateIndex >= 0 {
+				return derivedTrackAudio{}
+			}
+			candidateIndex = i
+			candidate = derivedTrackAudio{
 				AudioURL: stringValue(trackMap["audio_url"]), FileID: stringValue(trackMap["file_id"]),
 				MatchStatus: stringValue(trackMap["match_status"]), MatchProvider: stringValue(trackMap["match_provider"]),
 				MatchExternalID: stringValue(trackMap["match_external_id"]), MatchSourceURL: stringValue(trackMap["match_source_url"]),
 				MatchConfidence: floatValue(trackMap["match_confidence"]),
 			}
 		}
-		return derivedTrackAudio{}
+		if candidateIndex < 0 || candidate.AudioURL == "" {
+			return derivedTrackAudio{}
+		}
+		used[candidateIndex] = true
+		return candidate
 	}
 
 	songID := strings.TrimSpace(track.SongID)
@@ -1196,13 +1230,9 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 			return audio
 		}
 	}
-	if songID != "" || fileID != "" || audioKey != "" {
-		return derivedTrackAudio{}
-	}
-
 	title := strings.TrimSpace(track.Title)
 	if track.TrackNumber > 0 {
-		if audio := tryMatch(func(trackMap map[string]any) bool {
+		if audio := tryUniqueMatch(func(trackMap map[string]any) bool {
 			return sameImportedTrackTitle(stringValue(trackMap["title"]), title) &&
 				normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))) == normalizedDiscNumber(track.DiscNumber) &&
 				int(int64Value(trackMap["track_number"])) == track.TrackNumber
@@ -1210,7 +1240,7 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 			return audio
 		}
 	}
-	if audio := tryMatch(func(trackMap map[string]any) bool {
+	if audio := tryUniqueMatch(func(trackMap map[string]any) bool {
 		return sameImportedTrackTitle(stringValue(trackMap["title"]), title)
 	}); audio.AudioURL != "" {
 		return audio

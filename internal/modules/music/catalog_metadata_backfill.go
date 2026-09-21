@@ -146,7 +146,12 @@ func backfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent, discog
 		Preload("ArtistCredits.Artist.Aliases").
 		Preload("Songs").Where("redirect_to IS NULL")
 	if unmatchedOnly {
-		query = query.Where("musicbrainz_matched = ?", false)
+		query = query.Where(`musicbrainz_matched = false AND NOT EXISTS (
+			SELECT 1 FROM music_match_records
+			WHERE music_match_records.entity_type = ?
+			  AND music_match_records.entity_id = "Albums".id
+			  AND music_match_records.status IN ?
+		)`, "album", []string{model.MusicMatchMatched, model.MusicMatchManual})
 	}
 	if len(options) > 0 && strings.TrimSpace(options[0]) != "" {
 		query = query.Where("id = ?", strings.TrimSpace(options[0]))

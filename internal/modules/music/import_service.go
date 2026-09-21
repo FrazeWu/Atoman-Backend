@@ -162,10 +162,14 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	}
 
 	if rawTracks, ok := payload["derived_tracks"].([]any); ok {
-		for _, rawTrack := range rawTracks {
+		for index, rawTrack := range rawTracks {
 			trackMap, ok := rawTrack.(map[string]any)
 			if !ok {
 				continue
+			}
+			trackNumber := int(int64Value(trackMap["track_number"]))
+			if trackNumber <= 0 {
+				trackNumber = index + 1
 			}
 			track := AlbumImportDTOTrack{
 				SongID:          stringValue(trackMap["song_id"]),
@@ -174,8 +178,8 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 				AudioKey:        stringValue(trackMap["audio_key"]),
 				AudioURL:        stringValue(trackMap["audio_url"]),
 				Origin:          stringValue(trackMap["origin"]),
-				DiscNumber:      int(int64Value(trackMap["disc_number"])),
-				TrackNumber:     int(int64Value(trackMap["track_number"])),
+				DiscNumber:      normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))),
+				TrackNumber:     trackNumber,
 				OriginalTitle:   stringValue(trackMap["original_title"]),
 				OriginalDisc:    int(int64Value(trackMap["original_disc_number"])),
 				OriginalTrack:   int(int64Value(trackMap["original_track_number"])),
