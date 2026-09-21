@@ -3,6 +3,7 @@ package music
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,10 @@ type AlbumImportMetadataPreviewDTO struct {
 }
 
 func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImportMetadataPreviewInput) (AlbumImportMetadataPreviewDTO, error) {
+	artist := strings.TrimSpace(input.Artist)
+	if artist == "" {
+		artist = inferCommonAlbumImportArtist(input.TrackTitles)
+	}
 	tracks := make([]AlbumImportMetadataTrack, 0, len(input.TrackTitles))
 	for index, title := range input.TrackTitles {
 		title = strings.TrimSpace(title)
@@ -38,9 +43,10 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 			continue
 		}
 		tracks = append(tracks, AlbumImportMetadataTrack{
-			Title:       title,
-			TrackNumber: index + 1,
-			Origin:      "local_preview:" + strconv.Itoa(index+1),
+			Title:         normalizeAlbumImportTrackTitle(title, artist),
+			OriginalTitle: title,
+			TrackNumber:   index + 1,
+			Origin:        "local_preview:" + strconv.Itoa(index+1),
 		})
 	}
 	if s == nil || s.albumImportMetadataEnricher == nil || strings.TrimSpace(input.AlbumTitle) == "" || len(tracks) == 0 {
@@ -53,7 +59,7 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 	defer cancel()
 	result, err := s.albumImportMetadataEnricher.Enrich(metadataCtx, AlbumImportMetadataInput{
 		AlbumTitle: strings.TrimSpace(input.AlbumTitle),
-		Artist:     strings.TrimSpace(input.Artist),
+		Artist:     artist,
 		Tracks:     tracks,
 		SkipLyrics: true,
 	})
@@ -74,4 +80,26 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 		MatchConfidence: result.MatchConfidence, MetadataError: result.MetadataError,
 		MetadataSources: result.MetadataSources, Tracks: result.Tracks,
 	}, nil
+}
+
+func inferCommonAlbumImportArtist(titles []string) string {
+	pattern := regexp.MustCompile(`^\s*(.+?)\s+(?:-|–|—)\s+.+$`)
+	prefixes := make([]string, 0, len(titles))
+	for _, title := range titles {
+		match := pattern.FindStringSubmatch(strings.TrimSpace(title))
+		if len(match) != 2 || strings.TrimSpace(match[1]) == "" {
+			return ""
+		}
+		prefixes = append(prefixes, strings.TrimSpace(match[1]))
+	}
+	if len(prefixes) < 2 {
+		return ""
+	}
+	key := compactMusicText(prefixes[0])
+	for _, prefix := range prefixes[1:] {
+		if compactMusicText(prefix) != key {
+			return ""
+		}
+	}
+	return prefixes[0]
 }
