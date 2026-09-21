@@ -989,3 +989,24 @@ func TestMusicMatchingNormalizesTraditionalChineseToSimplified(t *testing.T) {
 		t.Fatal("traditional and simplified track titles should match")
 	}
 }
+
+func TestMatchMusicBrainzTracksAcceptsSafePartialAlbum(t *testing.T) {
+	remoteTitles := []string{"县道184", "风神125", "愁上愁下", "两代人", "阿成想耕田", "菊花夜行军", "阿成下南洋", "阿芬懁人", "日久他乡是故乡", "嗷！"}
+	remote := make([]flattenedMusicBrainzTrack, len(remoteTitles))
+	for index, title := range remoteTitles {
+		remote[index] = flattenedMusicBrainzTrack{Title: title, Position: index + 1}
+	}
+	release := testMusicBrainzRelease(remote...)
+	localTitles := []string{"两代人", "县道184(卷首诗)", "嗷！(器乐曲)", "愁上愁下", "日久他乡是故乡", "阿成下南洋", "阿成想耕田", "阿芬擐人", "风神125"}
+	uploaded := make([]AlbumImportMetadataTrack, len(localTitles))
+	for index, title := range localTitles {
+		uploaded[index] = AlbumImportMetadataTrack{Title: title}
+	}
+	mapping, ok := matchMusicBrainzTracks(release, uploaded)
+	if !ok || len(mapping) != len(remote) {
+		t.Fatalf("partial album should match safely, mapping=%v, ok=%v", mapping, ok)
+	}
+	if mapping[5] != -1 || mapping[7] < 0 {
+		t.Fatalf("expected missing track 6 and matched track 8, mapping=%v", mapping)
+	}
+}

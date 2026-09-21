@@ -1067,8 +1067,16 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 		if mapping, ok := matchMusicBrainzTracksByDurationMajority(remote, uploaded); ok {
 			return mapping, true
 		}
+	} else if len(uploaded) < len(remote) {
+		if mapping, ok := matchPartialMusicBrainzTracks(remote, uploaded); ok {
+			return mapping, true
+		}
 	}
-	if len(remote) != len(uploaded) {
+	return nil, false
+}
+
+func matchPartialMusicBrainzTracks(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
+	if len(uploaded) == 0 || len(uploaded) > len(remote) {
 		return nil, false
 	}
 	mapping := make([]int, len(remote))
@@ -1077,8 +1085,7 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 	}
 	used := make([]bool, len(uploaded))
 
-	// Titles are the strongest signal. Compact normalization handles punctuation
-	// and spacing variants such as "God's Gift" and "Gods Gift".
+	// Exact titles are the strongest signal and are safe to resolve independently.
 	for remoteIndex := range remote {
 		candidates := unmatchedTrackCandidates(uploaded, used, func(track AlbumImportMetadataTrack) bool {
 			return comparableMusicBrainzTrackTitle(remote[remoteIndex].Title) == comparableMusicBrainzTrackTitle(track.Title)
@@ -1089,8 +1096,23 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 		}
 	}
 
-	// Repeated titles may still be resolved safely when only one remaining
-	// duration fits in both directions.
+	// Handle local annotations and small metadata transcription differences only
+	// when there is exactly one remaining candidate.
+	for remoteIndex := range remote {
+		if mapping[remoteIndex] >= 0 {
+			continue
+		}
+		candidates := unmatchedTrackCandidates(uploaded, used, func(track AlbumImportMetadataTrack) bool {
+			return musicTrackTitlesClose(remote[remoteIndex].Title, track.Title)
+		})
+		if len(candidates) == 1 {
+			mapping[remoteIndex] = candidates[0]
+			used[candidates[0]] = true
+		}
+	}
+
+	// Position and duration can resolve the remaining files when the archive
+	// contains track numbers or reliable audio durations.
 	for {
 		matched := false
 		for remoteIndex := range remote {
@@ -1112,14 +1134,10 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 		}
 	}
 
-	matched := 0
-	for _, uploadedIndex := range mapping {
-		if uploadedIndex >= 0 {
-			matched++
+	for _, isUsed := range used {
+		if !isUsed {
+			return nil, false
 		}
-	}
-	if matched != len(remote) {
-		return nil, false
 	}
 	return mapping, true
 }
@@ -1255,6 +1273,54 @@ func comparableMusicBrainzTrackTitle(value string) string {
 		}
 	}
 	return comparableMusicTitle(trimmed)
+}
+
+func musicTrackTitlesClose(left, right string) bool {
+	leftKey, rightKey := comparableMusicBrainzTrackTitle(left), comparableMusicBrainzTrackTitle(right)
+	if leftKey == rightKey {
+		return true
+	}
+	leftKey = comparableMusicTitle(stripMusicTrackAnnotation(left))
+	rightKey = comparableMusicTitle(stripMusicTrackAnnotation(right))
+	if leftKey == rightKey {
+		return true
+	}
+	leftRunes, rightRunes := []rune(leftKey), []rune(rightKey)
+	return len(leftRunes) >= 4 && len(rightRunes) >= 4 && musicTitleEditDistance(leftRunes, rightRunes) <= 1
+}
+
+func stripMusicTrackAnnotation(value string) string {
+	return regexp.MustCompile(`\s*[\(\[][^\)\]]+[\)\]]\s*$`).ReplaceAllString(strings.TrimSpace(value), "")
+}
+
+func musicTitleEditDistance(left, right []rune) int {
+	previous := make([]int, len(right)+1)
+	for index := range previous {
+		previous[index] = index
+	}
+	for leftIndex, leftRune := range left {
+		current := make([]int, len(right)+1)
+		current[0] = leftIndex + 1
+		for rightIndex, rightRune := range right {
+			cost := 0
+			if leftRune != rightRune {
+				cost = 1
+			}
+			current[rightIndex+1] = minMusicTitleDistance(current[rightIndex]+1, previous[rightIndex+1]+1, previous[rightIndex]+cost)
+		}
+		previous = current
+	}
+	return previous[len(right)]
+}
+
+func minMusicTitleDistance(values ...int) int {
+	minimum := values[0]
+	for _, value := range values[1:] {
+		if value < minimum {
+			minimum = value
+		}
+	}
+	return minimum
 }
 
 type musicBrainzTrackCandidate struct {
@@ -1458,7 +1524,7 @@ func applyDiscogsTracks(tracks []AlbumImportDTOTrack, release discogsRelease, ma
 }
 
 func applyMatchedExternalTracks(tracks []AlbumImportDTOTrack, remote []flattenedMusicBrainzTrack, mapping []int) []AlbumImportDTOTrack {
-	if len(mapping) != len(remote) || len(tracks) != len(remote) {
+	if len(mapping) != len(remote) {
 		return tracks
 	}
 	for _, uploadedIndex := range mapping {
