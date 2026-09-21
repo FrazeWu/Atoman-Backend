@@ -1231,11 +1231,11 @@ func matchPartialMusicBrainzTracks(remote []flattenedMusicBrainzTrack, uploaded 
 			matched++
 		}
 	}
-	minimum := len(remote)
-	if len(uploaded) < minimum {
-		minimum = len(uploaded)
+	total := len(remote)
+	if len(uploaded) > total {
+		total = len(uploaded)
 	}
-	if minimum == 0 || matched*100/minimum < 70 {
+	if total == 0 || matched*100/total < 70 {
 		return nil, false
 	}
 	return mapping, true

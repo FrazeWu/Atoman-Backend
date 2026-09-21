@@ -392,7 +392,7 @@ func TestExternalAlbumMetadataEnricherFallsBackToMusicBrainzWhenDiscogsMisses(t 
 				_, _ = w.Write([]byte(`{"releases":[]}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"releases":[{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}]}`))
+			_, _ = w.Write([]byte(`{"releases":[{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","primary-type":"Album"},"artist-credit":[{"artist":{"name":"郭顶"}}],"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}]}`))
 		case "/ws/2/release/b808a48c-b38b-4c0f-8dd5-0720fe6b8f86":
 			_, _ = w.Write([]byte(`{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","date":"2016-11-25","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","title":"飞行器的执行周期","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}`))
 		default:
@@ -584,7 +584,7 @@ func TestMatchMusicBrainzTracksMatches808s(t *testing.T) {
 	}
 }
 
-func TestMatchMusicBrainzTracksLeavesAmbiguousDurationTracksUnmatched(t *testing.T) {
+func TestMatchMusicBrainzTracksAcceptsMajorityWithAmbiguousDurationTracks(t *testing.T) {
 	release := testMusicBrainzRelease(
 		flattenedMusicBrainzTrack{Title: "Known One", DurationMS: 200000},
 		flattenedMusicBrainzTrack{Title: "Known Two", DurationMS: 210000},
@@ -594,7 +594,7 @@ func TestMatchMusicBrainzTracksLeavesAmbiguousDurationTracksUnmatched(t *testing
 		flattenedMusicBrainzTrack{Title: "Remote Six", DurationMS: 220000},
 		flattenedMusicBrainzTrack{Title: "Remote Seven", DurationMS: 220000},
 	)
-	_, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
+	mapping, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
 		{Title: "Known One", DurationSeconds: 200},
 		{Title: "Known Two", DurationSeconds: 210},
 		{Title: "Known Three", DurationSeconds: 212},
@@ -603,8 +603,8 @@ func TestMatchMusicBrainzTracksLeavesAmbiguousDurationTracksUnmatched(t *testing
 		{Title: "Local Six", DurationSeconds: 220},
 		{Title: "Local Seven", DurationSeconds: 220},
 	})
-	if ok {
-		t.Fatal("ambiguous tracks must cause the release to remain unmatched")
+	if !ok || len(mapping) != 7 || mapping[5] != -1 || mapping[6] != -1 {
+		t.Fatalf("majority match should keep ambiguous tracks unmatched: mapping=%#v ok=%v", mapping, ok)
 	}
 }
 
@@ -667,20 +667,20 @@ func TestBestMusicBrainzReleaseAcceptsOtherNonOfficialStatuses(t *testing.T) {
 	}
 }
 
-func TestMatchMusicBrainzTracksRejectsDifferentTrackCounts(t *testing.T) {
+func TestMatchMusicBrainzTracksAcceptsDifferentTrackCountsWithMajority(t *testing.T) {
 	release := testMusicBrainzRelease(
 		flattenedMusicBrainzTrack{Title: "One", DurationMS: 100000},
 		flattenedMusicBrainzTrack{Title: "Two", DurationMS: 120000},
 		flattenedMusicBrainzTrack{Title: "Three", DurationMS: 140000},
 	)
-	_, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
+	mapping, ok := matchMusicBrainzTracks(release, []AlbumImportMetadataTrack{
 		{Title: "Extra Local", DurationSeconds: 180},
 		{Title: "Three", DurationSeconds: 140},
 		{Title: "One", DurationSeconds: 100},
 		{Title: "Two", DurationSeconds: 120},
 	})
-	if ok {
-		t.Fatal("different track counts must not be accepted as a MusicBrainz match")
+	if !ok || len(mapping) != 3 || mapping[0] != 2 || mapping[1] != 3 || mapping[2] != 1 {
+		t.Fatalf("majority match should accept different track counts: mapping=%#v ok=%v", mapping, ok)
 	}
 }
 
@@ -780,7 +780,7 @@ func TestExternalAlbumMetadataEnricherRetriesWithExactArtistID(t *testing.T) {
 		case "/ws/2/artist/":
 			_, _ = w.Write([]byte(`{"artists":[{"id":"ye-id","name":"Ye","score":100,"aliases":[{"name":"Kanye West"}]}]}`))
 		case "/ws/2/release":
-			_, _ = w.Write([]byte(`{"releases":[{"id":"ye-release","title":"ye","status":"Official","release-group":{"title":"ye"},"media":[{"tracks":[{"position":1,"title":"Ghost Town","length":271000}]}]}]}`))
+			_, _ = w.Write([]byte(`{"releases":[{"id":"ye-release","title":"ye","status":"Official","release-group":{"title":"ye"},"artist-credit":[{"artist":{"id":"ye-id","name":"Kanye West"}}],"media":[{"tracks":[{"position":1,"title":"Ghost Town","length":271000}]}]}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -919,6 +919,12 @@ func TestExternalAlbumMetadataEnricherSkipsLRCLIBWhenMusicBrainzDoesNotMatch(t *
 
 func writeMatchingMusicBrainzRelease(w http.ResponseWriter, r *http.Request) bool {
 	switch r.URL.Path {
+	case "/ws/2/release-group/":
+		_, _ = w.Write([]byte(`{"release-groups":[{"id":"group-id","title":"Album","artist-credit":[{"artist":{"id":"artist-id","name":"Artist"}}]}]}`))
+		return true
+	case "/ws/2/release":
+		_, _ = w.Write([]byte(`{"releases":[{"id":"release-id","title":"Album","status":"Official","release-group":{"id":"group-id","title":"Album","primary-type":"Album"},"artist-credit":[{"artist":{"id":"artist-id","name":"Artist"}}],"media":[{"position":1,"tracks":[{"position":1,"title":"First Song","length":200000}]}]}]}`))
+		return true
 	case "/ws/2/release/":
 		_, _ = w.Write([]byte(`{"releases":[{"id":"release-id","title":"Album"}]}`))
 		return true
