@@ -63,13 +63,22 @@ type AlbumImportArtistPayload struct {
 }
 
 type AlbumImportAlbumPayload struct {
-	Title       string                    `json:"title"`
-	Description string                    `json:"description"`
-	AlbumType   string                    `json:"album_type"`
-	CoverURL    string                    `json:"cover_url"`
-	ReleaseDate string                    `json:"release_date"` // 支持完全未知日期 ----/--/--
-	ReleaseYear int                       `json:"release_year"`
-	Tracks      []AlbumImportTrackPayload `json:"tracks"`
+	Title       string                     `json:"title"`
+	Description string                     `json:"description"`
+	AlbumType   string                     `json:"album_type"`
+	CoverURL    string                     `json:"cover_url"`
+	ReleaseDate string                     `json:"release_date"` // 支持完全未知日期 ----/--/--
+	ReleaseYear int                        `json:"release_year"`
+	Metadata    *AlbumImportMetadataFields `json:"metadata,omitempty"`
+	Tracks      []AlbumImportTrackPayload  `json:"tracks"`
+}
+
+type AlbumImportMetadataFields struct {
+	Genres  []string `json:"genres,omitempty"`
+	Styles  []string `json:"styles,omitempty"`
+	Labels  []string `json:"labels,omitempty"`
+	Country string   `json:"country,omitempty"`
+	Formats []string `json:"formats,omitempty"`
 }
 
 type AlbumImportPayload struct {
@@ -249,6 +258,11 @@ type AlbumImportDTO struct {
 	MetadataError           string                            `json:"metadataError,omitempty"`
 	MetadataSources         []AlbumImportMetadataSourceResult `json:"metadataSources,omitempty"`
 	MetadataFieldSources    map[string]string                 `json:"metadataFieldSources,omitempty"`
+	MetadataGenres          []string                          `json:"metadataGenres,omitempty"`
+	MetadataStyles          []string                          `json:"metadataStyles,omitempty"`
+	MetadataLabels          []string                          `json:"metadataLabels,omitempty"`
+	MetadataCountry         string                            `json:"metadataCountry,omitempty"`
+	MetadataFormats         []string                          `json:"metadataFormats,omitempty"`
 	MissingArtists          []string                          `json:"missingArtists,omitempty"`
 	LastSyncedAt            string                            `json:"lastSyncedAt"`
 	ErrorMessage            string                            `json:"errorMessage"`
