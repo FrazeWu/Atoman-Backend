@@ -106,10 +106,31 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 		MetadataMatchStatus:     stringValue(payload["metadata_match_status"]),
 		MetadataMatchConfidence: floatValue(payload["metadata_match_confidence"]),
 		MetadataMatched:         boolValue(payload["metadata_matched"]),
+		MetadataError:           stringValue(payload["metadata_error"]),
 		MissingArtists:          missingArtists,
 		LastSyncedAt:            session.UpdatedAt.Format(time.RFC3339),
 		ErrorMessage:            errorMessage,
 		DerivedTracks:           []AlbumImportDTOTrack{},
+	}
+	if sources, ok := payload["metadata_sources"].([]any); ok {
+		for _, raw := range sources {
+			encoded, err := json.Marshal(raw)
+			if err != nil {
+				continue
+			}
+			var source AlbumImportMetadataSourceResult
+			if json.Unmarshal(encoded, &source) == nil {
+				dto.MetadataSources = append(dto.MetadataSources, source)
+			}
+		}
+	}
+	if fieldSources, ok := payload["metadata_field_sources"].(map[string]any); ok {
+		dto.MetadataFieldSources = map[string]string{}
+		for key, value := range fieldSources {
+			if source := stringValue(value); source != "" {
+				dto.MetadataFieldSources[key] = source
+			}
+		}
 	}
 	for _, file := range session.Files {
 		fileDTO := buildAlbumImportFileDTO(file)

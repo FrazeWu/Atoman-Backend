@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"atoman/internal/model"
 )
 
 type fakeAlbumImportMetadataEnricher struct{}
@@ -80,5 +82,33 @@ func TestPreviewAlbumImportMetadataKeepsLocalTracksWhenLookupTimesOut(t *testing
 	}
 	if !errors.Is(ctx.Err(), context.DeadlineExceeded) || preview.MetadataError != "外部元数据匹配超时，请继续填写专辑信息后稍后重试" {
 		t.Fatalf("expected timeout fallback, got %#v", preview)
+	}
+}
+
+func TestMergeDerivedMetadataPayloadKeepsProviderDiagnosticsWhenUnmatched(t *testing.T) {
+	payload := map[string]any{"metadata_source": "old", "metadata_matched": true}
+	result := AlbumImportMetadataResult{
+		AlbumTitle:    "Local album",
+		MatchStatus:   model.MusicMatchUnmatched,
+		MetadataError: "Discogs: no safe release; MusicBrainz: timeout",
+		MetadataSources: []AlbumImportMetadataSourceResult{
+			{Provider: "discogs", Status: model.MusicMatchUnmatched, CandidateCount: 3, Error: "no safe release"},
+			{Provider: "musicbrainz", Status: model.MusicMatchUnmatched, Error: "timeout"},
+		},
+	}
+
+	mergeDerivedMetadataPayload(payload, nil, result)
+
+	if _, ok := payload["metadata_sources"]; !ok {
+		t.Fatalf("expected provider diagnostics to be persisted: %#v", payload)
+	}
+	if payload["metadata_match_status"] != model.MusicMatchUnmatched {
+		t.Fatalf("metadata_match_status = %#v, want unmatched", payload["metadata_match_status"])
+	}
+	if payload["metadata_error"] != result.MetadataError {
+		t.Fatalf("metadata_error = %#v, want %q", payload["metadata_error"], result.MetadataError)
+	}
+	if _, ok := payload["metadata_source"]; ok {
+		t.Fatalf("stale selected source should be removed: %#v", payload)
 	}
 }
