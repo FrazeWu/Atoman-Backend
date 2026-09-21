@@ -194,6 +194,7 @@ type discogsRelease struct {
 	URI      string `json:"uri"`
 	Artists  []struct {
 		Name string `json:"name"`
+		ANV  string `json:"anv"`
 	} `json:"artists"`
 	Images []struct {
 		Type string `json:"type"`
@@ -776,7 +777,8 @@ func discogsArtistMatches(release discogsRelease, artists []string) bool {
 	}
 	for _, remote := range release.Artists {
 		for _, local := range artists {
-			if compactMusicText(remote.Name) == compactMusicText(local) {
+			if compactMusicText(remote.Name) == compactMusicText(local) ||
+				compactMusicText(remote.ANV) == compactMusicText(local) {
 				return true
 			}
 		}
@@ -809,6 +811,9 @@ func discogsReleaseArtistNames(release discogsRelease) []string {
 	artists := make([]string, 0, len(release.Artists))
 	for _, artist := range release.Artists {
 		artists = append(artists, artist.Name)
+		if strings.TrimSpace(artist.ANV) != "" {
+			artists = append(artists, artist.ANV)
+		}
 	}
 	return uniqueMusicArtists(artists)
 }

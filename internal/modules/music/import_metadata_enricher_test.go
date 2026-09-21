@@ -287,6 +287,19 @@ func TestExternalAlbumMetadataEnricherCanPreferDiscogs(t *testing.T) {
 	}
 }
 
+func TestDiscogsArtistMatchesANV(t *testing.T) {
+	release := discogsRelease{
+		Artists: []struct {
+			Name string `json:"name"`
+			ANV  string `json:"anv"`
+		}{{Name: "Labor Exchange Band", ANV: "交工乐队"}},
+	}
+
+	if !discogsArtistMatches(release, []string{"交工乐队"}) {
+		t.Fatal("expected Discogs artist ANV to match the local artist name")
+	}
+}
+
 func TestExternalAlbumMetadataEnricherMatchesDiscogsBilingualReleaseTitle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/database/search" {
