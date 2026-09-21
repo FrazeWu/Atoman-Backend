@@ -977,3 +977,15 @@ func TestMatchMusicBrainzTracksMatchesLateRegistrationByDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestMusicMatchingNormalizesTraditionalChineseToSimplified(t *testing.T) {
+	if got := toSimplifiedChinese("菊花夜行軍"); got != "菊花夜行军" {
+		t.Fatalf("simplified title = %q, want %q", got, "菊花夜行军")
+	}
+	if !musicBrainzAlbumTitlesMatch("菊花夜行軍", "菊花夜行军") {
+		t.Fatal("traditional and simplified album titles should match")
+	}
+	if comparableMusicBrainzTrackTitle("風神125") != comparableMusicBrainzTrackTitle("风神125") {
+		t.Fatal("traditional and simplified track titles should match")
+	}
+}
