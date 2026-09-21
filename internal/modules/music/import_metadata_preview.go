@@ -27,6 +27,12 @@ type AlbumImportMetadataPreviewDTO struct {
 	MatchStatus     string                            `json:"matchStatus,omitempty"`
 	MatchConfidence float64                           `json:"matchConfidence,omitempty"`
 	MetadataError   string                            `json:"metadataError,omitempty"`
+	Genres          []string                          `json:"genres,omitempty"`
+	Styles          []string                          `json:"styles,omitempty"`
+	Labels          []string                          `json:"labels,omitempty"`
+	Country         string                            `json:"country,omitempty"`
+	Formats         []string                          `json:"formats,omitempty"`
+	MissingArtists  []string                          `json:"missingArtists,omitempty"`
 	MetadataSources []AlbumImportMetadataSourceResult `json:"sources,omitempty"`
 	Tracks          []AlbumImportDTOTrack             `json:"tracks"`
 }
@@ -78,6 +84,8 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 		SourceURL: result.SourceURL, MetadataSource: result.MetadataSource,
 		ExternalID: result.ExternalID, MatchStatus: result.MatchStatus,
 		MatchConfidence: result.MatchConfidence, MetadataError: result.MetadataError,
+		Genres: result.Genres, Styles: result.Styles, Labels: result.Labels, Country: result.Country, Formats: result.Formats,
+		MissingArtists:  result.MissingArtists,
 		MetadataSources: result.MetadataSources, Tracks: result.Tracks,
 	}, nil
 }

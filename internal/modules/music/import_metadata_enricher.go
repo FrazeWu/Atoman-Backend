@@ -61,6 +61,11 @@ type AlbumImportMetadataResult struct {
 	MissingArtists       []string
 	MetadataError        string
 	MetadataSources      []AlbumImportMetadataSourceResult
+	Genres               []string
+	Styles               []string
+	Labels               []string
+	Country              string
+	Formats              []string
 	Tracks               []AlbumImportDTOTrack
 }
 
@@ -136,10 +141,15 @@ func (e *ExternalAlbumMetadataEnricher) WithDiscogsFirst() *ExternalAlbumMetadat
 }
 
 type musicBrainzRelease struct {
-	ID           string                    `json:"id"`
-	Title        string                    `json:"title"`
-	Date         string                    `json:"date"`
-	Status       string                    `json:"status"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Date      string `json:"date"`
+	Status    string `json:"status"`
+	Country   string `json:"country"`
+	Packaging string `json:"packaging"`
+	Tags      []struct {
+		Name string `json:"name"`
+	} `json:"tags"`
 	TrackCount   int                       `json:"track-count"`
 	ArtistCredit []musicBrainzArtistCredit `json:"artist-credit"`
 	ReleaseGroup struct {
@@ -204,6 +214,12 @@ type discogsRelease struct {
 		Type string `json:"type"`
 		URI  string `json:"uri"`
 	} `json:"images"`
+	Genres  []string `json:"genres"`
+	Styles  []string `json:"styles"`
+	Country string   `json:"country"`
+	Labels  []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
 	Formats []struct {
 		Name string `json:"name"`
 	} `json:"formats"`
@@ -250,6 +266,12 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.ExternalID = strconv.Itoa(discogsRelease.ID)
 		result.MatchStatus = model.MusicMatchMatched
 		result.CoverURL = discogsReleaseCoverURL(discogsRelease)
+		result.Genres = uniqueMetadataValues(discogsRelease.Genres)
+		result.Styles = uniqueMetadataValues(discogsRelease.Styles)
+		result.Country = strings.TrimSpace(discogsRelease.Country)
+		result.Formats = discogsFormatNames(discogsRelease)
+		result.Labels = discogsLabelNames(discogsRelease)
+		result.MissingArtists = missingExternalArtists(discogsReleaseArtistNames(discogsRelease), uniqueMusicArtists(append([]string{input.Artist}, input.Artists...)))
 		result.MatchConfidence = externalTrackMatchConfidence(result.Tracks, flattenDiscogsTracks(discogsRelease), discogsMapping)
 		result.Tracks = applyDiscogsTracks(result.Tracks, discogsRelease, discogsMapping)
 		for index := range result.Tracks {
@@ -270,6 +292,9 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.ExternalID = release.ID
 		result.MatchStatus = model.MusicMatchMatched
 		result.MusicBrainzReleaseID = release.ID
+		result.Genres = musicBrainzReleaseTags(release)
+		result.Country = strings.TrimSpace(release.Country)
+		result.Formats = uniqueMetadataValues([]string{release.Packaging})
 		result.MatchConfidence = externalTrackMatchConfidence(result.Tracks, flattenMusicBrainzTracks(release), trackMapping)
 		result.MissingArtists = missingMusicBrainzArtists(release.ArtistCredit, uniqueMusicArtists(append([]string{input.Artist}, input.Artists...)))
 		if e.coverArtBase != "" {
@@ -856,6 +881,61 @@ func discogsAlbumType(release discogsRelease) string {
 		}
 	}
 	return "album"
+}
+
+func uniqueMetadataValues(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func discogsLabelNames(release discogsRelease) []string {
+	labels := make([]string, 0, len(release.Labels))
+	for _, label := range release.Labels {
+		labels = append(labels, label.Name)
+	}
+	return uniqueMetadataValues(labels)
+}
+
+func discogsFormatNames(release discogsRelease) []string {
+	formats := make([]string, 0, len(release.Formats))
+	for _, format := range release.Formats {
+		formats = append(formats, format.Name)
+	}
+	return uniqueMetadataValues(formats)
+}
+
+func musicBrainzReleaseTags(release musicBrainzRelease) []string {
+	tags := make([]string, 0, len(release.Tags))
+	for _, tag := range release.Tags {
+		tags = append(tags, tag.Name)
+	}
+	return uniqueMetadataValues(tags)
+}
+
+func missingExternalArtists(names, local []string) []string {
+	known := make(map[string]struct{}, len(local))
+	for _, name := range local {
+		known[compactMusicText(name)] = struct{}{}
+	}
+	missing := make([]string, 0, len(names))
+	for _, name := range uniqueMusicArtists(names) {
+		if _, exists := known[compactMusicText(name)]; !exists {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 func (e *ExternalAlbumMetadataEnricher) findReleaseWithArtist(ctx context.Context, input AlbumImportMetadataInput, artist string) (musicBrainzRelease, []int, error) {

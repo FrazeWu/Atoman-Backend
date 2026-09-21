@@ -1084,9 +1084,14 @@ func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[str
 	payload["metadata_match_confidence"] = result.MatchConfidence
 	payload["metadata_error"] = result.MetadataError
 	payload["metadata_sources"] = result.MetadataSources
+	payload["metadata_genres"] = result.Genres
+	payload["metadata_styles"] = result.Styles
+	payload["metadata_labels"] = result.Labels
+	payload["metadata_country"] = result.Country
+	payload["metadata_formats"] = result.Formats
 	fieldSources := map[string]string{}
 	if result.MetadataSource != "" {
-		for _, field := range []string{"album_title", "release_date", "album_type", "cover"} {
+		for _, field := range []string{"album_title", "release_date", "album_type", "cover", "genres", "styles", "labels", "country", "formats"} {
 			fieldSources[field] = result.MetadataSource
 		}
 	}

@@ -24,6 +24,19 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	if strings.TrimSpace(session.PayloadJSON) != "" {
 		_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
 	}
+	stringSlice := func(value any) []string {
+		values, ok := value.([]any)
+		if !ok {
+			return nil
+		}
+		result := make([]string, 0, len(values))
+		for _, item := range values {
+			if value := strings.TrimSpace(stringValue(item)); value != "" {
+				result = append(result, value)
+			}
+		}
+		return result
+	}
 
 	inputMode := session.InputMode
 	if inputMode == "" {
@@ -107,6 +120,11 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 		MetadataMatchConfidence: floatValue(payload["metadata_match_confidence"]),
 		MetadataMatched:         boolValue(payload["metadata_matched"]),
 		MetadataError:           stringValue(payload["metadata_error"]),
+		MetadataGenres:          stringSlice(payload["metadata_genres"]),
+		MetadataStyles:          stringSlice(payload["metadata_styles"]),
+		MetadataLabels:          stringSlice(payload["metadata_labels"]),
+		MetadataCountry:         stringValue(payload["metadata_country"]),
+		MetadataFormats:         stringSlice(payload["metadata_formats"]),
 		MissingArtists:          missingArtists,
 		LastSyncedAt:            session.UpdatedAt.Format(time.RFC3339),
 		ErrorMessage:            errorMessage,
