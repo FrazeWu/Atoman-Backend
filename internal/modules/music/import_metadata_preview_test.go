@@ -3,6 +3,7 @@ package music
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -38,6 +39,15 @@ type blockingAlbumImportMetadataEnricher struct{}
 func (blockingAlbumImportMetadataEnricher) Enrich(ctx context.Context, _ AlbumImportMetadataInput) (AlbumImportMetadataResult, error) {
 	<-ctx.Done()
 	return AlbumImportMetadataResult{}, ctx.Err()
+}
+
+type capturingAlbumImportMetadataEnricher struct {
+	input AlbumImportMetadataInput
+}
+
+func (e *capturingAlbumImportMetadataEnricher) Enrich(_ context.Context, input AlbumImportMetadataInput) (AlbumImportMetadataResult, error) {
+	e.input = input
+	return AlbumImportMetadataResult{AlbumTitle: input.AlbumTitle, Tracks: baseMetadataTracks(input.Tracks)}, nil
 }
 
 func TestPreviewAlbumImportMetadataReturnsMatchedTrackOrder(t *testing.T) {
@@ -82,6 +92,39 @@ func TestPreviewAlbumImportMetadataKeepsLocalTracksWhenLookupTimesOut(t *testing
 	}
 	if !errors.Is(ctx.Err(), context.DeadlineExceeded) || preview.MetadataError != "外部元数据匹配超时，请继续填写专辑信息后稍后重试" {
 		t.Fatalf("expected timeout fallback, got %#v", preview)
+	}
+}
+
+func TestPreviewAlbumImportMetadataNormalizesKnownArtistPrefix(t *testing.T) {
+	enricher := &capturingAlbumImportMetadataEnricher{}
+	service := NewService(nil).WithAlbumImportMetadataEnricher(enricher)
+
+	_, err := service.PreviewAlbumImportMetadata(context.Background(), AlbumImportMetadataPreviewInput{
+		AlbumTitle:  "菊花夜行军",
+		Artist:      "交工乐队",
+		TrackTitles: []string{"交工乐队 - 两代人", "交工乐队 - 县道184(卷首诗)"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{enricher.input.Tracks[0].Title, enricher.input.Tracks[1].Title}; !reflect.DeepEqual(got, []string{"两代人", "县道184(卷首诗)"}) {
+		t.Fatalf("normalized preview tracks = %#v", got)
+	}
+}
+
+func TestPreviewAlbumImportMetadataInfersCommonArtistPrefix(t *testing.T) {
+	enricher := &capturingAlbumImportMetadataEnricher{}
+	service := NewService(nil).WithAlbumImportMetadataEnricher(enricher)
+
+	_, err := service.PreviewAlbumImportMetadata(context.Background(), AlbumImportMetadataPreviewInput{
+		AlbumTitle:  "菊花夜行军",
+		TrackTitles: []string{"交工乐队 - 两代人", "交工乐队 - 县道184(卷首诗)"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enricher.input.Artist != "交工乐队" || enricher.input.Tracks[0].Title != "两代人" {
+		t.Fatalf("inferred artist preview input = %#v", enricher.input)
 	}
 }
 
