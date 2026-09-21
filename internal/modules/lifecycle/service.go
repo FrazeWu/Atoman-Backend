@@ -724,7 +724,7 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, requir
 		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || video.CollectionID == nil || video.CollectionConflict {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Video title, source, and collection are required")
 		}
-		if requireProcessing && video.StorageType == "local" && strings.HasPrefix(video.VideoURL, "/uploads/") && video.ProcessingStatus != "ready" {
+		if requireProcessing && video.StorageType == "local" && strings.TrimSpace(video.VideoURL) != "" && video.ProcessingStatus != "ready" {
 			return apperr.Conflict("lifecycle.content_processing", "Video processing must finish before publishing")
 		}
 	default:

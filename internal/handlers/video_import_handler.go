@@ -19,6 +19,7 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
+	"atoman/internal/service"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -147,7 +148,7 @@ func registerVideoImportRoutes(group *gin.RouterGroup, db *gorm.DB, s3Client *s3
 // @Router /api/v1/videos/imports [post]
 func CreateVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if client == nil || strings.TrimSpace(os.Getenv("S3_BUCKET")) == "" {
+		if client == nil || strings.TrimSpace(os.Getenv("S3_BUCKET")) == "" || strings.TrimSpace(os.Getenv("S3_URL_PREFIX")) == "" {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "存储服务不可用"})
 			return
 		}
@@ -586,6 +587,24 @@ func RetryVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 		}
 		if session.PublishRequestedAt == nil {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "任务尚不能重试发布"})
+			return
+		}
+		if session.TargetVideoID != nil {
+			video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", *session.TargetVideoID))
+			if err != nil {
+				videoImportHTTPError(c, err)
+				return
+			}
+			if err := service.EnsureVideoPreviewJob(db, &video); err != nil {
+				videoImportHTTPError(c, err)
+				return
+			}
+			if err := db.Model(&session).Updates(map[string]any{"error_message": "", "status": videoImportPublished}).Error; err != nil {
+				videoImportHTTPError(c, err)
+				return
+			}
+			db.First(&session, "id = ?", session.ID)
+			c.JSON(http.StatusOK, videoImportDTO(session))
 			return
 		}
 		if err := finalizeVideoImport(db, session.ID, session.UserID); err != nil {
