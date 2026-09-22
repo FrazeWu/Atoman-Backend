@@ -70,7 +70,13 @@ type AlbumImportAlbumPayload struct {
 	ReleaseDate string                     `json:"release_date"` // 支持完全未知日期 ----/--/--
 	ReleaseYear int                        `json:"release_year"`
 	Metadata    *AlbumImportMetadataFields `json:"metadata,omitempty"`
+	Tags        []AlbumImportTagPayload    `json:"tags,omitempty"`
 	Tracks      []AlbumImportTrackPayload  `json:"tracks"`
+}
+
+type AlbumImportTagPayload struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 type AlbumImportMetadataFields struct {

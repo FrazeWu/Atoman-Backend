@@ -297,6 +297,11 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				return err
 			}
 		}
+		if input.Album.Tags != nil && !isStandaloneSong {
+			if err := replaceAlbumImportTags(tx, user.ID, album.ID, input.Album.Tags); err != nil {
+				return err
+			}
+		}
 		if err := upsertMusicMatchRecord(tx, "album", album.ID, metadataProvider, metadataExternalID, strings.TrimSpace(stringValue(sessionPayload["metadata_source_url"])), metadataMatchStatus, metadataMatchConfidence, album.MetadataManualOverride, map[string]any{
 			"album_title": payload.Album.Title,
 			"source":      metadataProvider,

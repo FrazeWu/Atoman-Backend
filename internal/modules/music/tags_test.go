@@ -74,6 +74,38 @@ func TestMusicTagsSupportSongAlbumKindsAndVotes(t *testing.T) {
 	}
 }
 
+func TestReplaceAlbumImportTagsReplacesAndDeduplicatesTags(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	album := model.Album{Title: "Imported Tags", LifecycleStatus: model.MusicLifecycleActive, Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := replaceAlbumImportTags(db, user.ID, album.ID, []AlbumImportTagPayload{
+		{Kind: model.MusicTagKindType, Name: "Hip Hop"},
+		{Kind: model.MusicTagKindType, Name: " hip  hop "},
+		{Kind: model.MusicTagKindMood, Name: "Dark"},
+	}); err != nil {
+		t.Fatalf("replace tags: %v", err)
+	}
+	var assignments []model.MusicTagAssignment
+	if err := db.Where("entity_type = ? AND entity_id = ?", musicTagEntityAlbum, album.ID).Find(&assignments).Error; err != nil {
+		t.Fatalf("load assignments: %v", err)
+	}
+	if len(assignments) != 2 {
+		t.Fatalf("expected two unique assignments, got %d", len(assignments))
+	}
+	if err := replaceAlbumImportTags(db, user.ID, album.ID, []AlbumImportTagPayload{{Kind: model.MusicTagKindScene, Name: "Night"}}); err != nil {
+		t.Fatalf("replace tags second time: %v", err)
+	}
+	if err := db.Where("entity_type = ? AND entity_id = ?", musicTagEntityAlbum, album.ID).Find(&assignments).Error; err != nil {
+		t.Fatalf("reload assignments: %v", err)
+	}
+	if len(assignments) != 1 {
+		t.Fatalf("expected replacement to leave one assignment, got %d", len(assignments))
+	}
+	_ = service
+}
+
 func TestSearchMusicTagsFiltersByKindAndQuery(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	for _, tag := range []model.MusicTag{
