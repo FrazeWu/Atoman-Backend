@@ -128,6 +128,39 @@ func TestPreviewAlbumImportMetadataInfersCommonArtistPrefix(t *testing.T) {
 	}
 }
 
+func TestPreviewAlbumImportMetadataInfersCommonArtistPrefixWithoutSpaces(t *testing.T) {
+	enricher := &capturingAlbumImportMetadataEnricher{}
+	service := NewService(nil).WithAlbumImportMetadataEnricher(enricher)
+
+	_, err := service.PreviewAlbumImportMetadata(context.Background(), AlbumImportMetadataPreviewInput{
+		AlbumTitle:  "菊花夜行军",
+		TrackTitles: []string{"交工乐队-两代人", "交工乐队—县道184"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enricher.input.Artist != "交工乐队" || enricher.input.Tracks[0].Title != "两代人" {
+		t.Fatalf("inferred artist preview input = %#v", enricher.input)
+	}
+}
+
+func TestPreviewAlbumImportMetadataNormalizesArtistPrefixWithoutSpaces(t *testing.T) {
+	enricher := &capturingAlbumImportMetadataEnricher{}
+	service := NewService(nil).WithAlbumImportMetadataEnricher(enricher)
+
+	_, err := service.PreviewAlbumImportMetadata(context.Background(), AlbumImportMetadataPreviewInput{
+		AlbumTitle:  "菊花夜行军",
+		Artist:      "交工樂隊",
+		TrackTitles: []string{"交工乐队-两代人", "交工乐队—县道184"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{enricher.input.Tracks[0].Title, enricher.input.Tracks[1].Title}; !reflect.DeepEqual(got, []string{"两代人", "县道184"}) {
+		t.Fatalf("normalized preview tracks = %#v", got)
+	}
+}
+
 func TestMergeDerivedMetadataPayloadKeepsProviderDiagnosticsWhenUnmatched(t *testing.T) {
 	payload := map[string]any{"metadata_source": "old", "metadata_matched": true}
 	result := AlbumImportMetadataResult{

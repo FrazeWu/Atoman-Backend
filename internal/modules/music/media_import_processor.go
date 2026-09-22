@@ -1630,7 +1630,7 @@ func normalizeAlbumImportTrackTitle(title string, artists ...string) string {
 	if title == "" {
 		return ""
 	}
-	parts := regexp.MustCompile(`\s+(?:-|–|—)\s+`).Split(title, 2)
+	parts := regexp.MustCompile(`\s*(?:-|–|—)\s*`).Split(title, 2)
 	if len(parts) != 2 {
 		return title
 	}

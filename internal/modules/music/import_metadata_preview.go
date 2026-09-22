@@ -91,11 +91,11 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 }
 
 func inferCommonAlbumImportArtist(titles []string) string {
-	pattern := regexp.MustCompile(`^\s*(.+?)\s+(?:-|–|—)\s+.+$`)
+	pattern := regexp.MustCompile(`^\s*(.+?)\s*(?:-|–|—)\s*(.+?)\s*$`)
 	prefixes := make([]string, 0, len(titles))
 	for _, title := range titles {
 		match := pattern.FindStringSubmatch(strings.TrimSpace(title))
-		if len(match) != 2 || strings.TrimSpace(match[1]) == "" {
+		if len(match) != 3 || strings.TrimSpace(match[1]) == "" || strings.TrimSpace(match[2]) == "" {
 			return ""
 		}
 		prefixes = append(prefixes, strings.TrimSpace(match[1]))
