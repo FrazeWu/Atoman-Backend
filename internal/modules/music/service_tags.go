@@ -421,6 +421,39 @@ func (s *Service) AddMusicTag(user authctx.CurrentUser, entityType string, entit
 	return s.musicTagDTO(&user, entityType, entityID, assignment.TagID)
 }
 
+func replaceAlbumImportTags(tx *gorm.DB, userID, albumID uuid.UUID, tags []AlbumImportTagPayload) error {
+	if err := tx.Where("entity_type = ? AND entity_id = ?", musicTagEntityAlbum, albumID).Delete(&model.MusicTagAssignment{}).Error; err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(tags))
+	for _, input := range tags {
+		if err := validateMusicTagKind(input.Kind); err != nil {
+			return err
+		}
+		name, err := normalizeMusicTagName(input.Name)
+		if err != nil {
+			return err
+		}
+		key := input.Kind + "\x00" + name
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		if len(seen) > maxMusicTagsPerItem {
+			return apperr.Unprocessable("music.tag_limit_reached", "an item can have at most 12 tags")
+		}
+		tag, err := findOrCreateMusicTag(tx, userID, input.Kind, input.Name, nil)
+		if err != nil {
+			return err
+		}
+		assignment := model.MusicTagAssignment{EntityType: musicTagEntityAlbum, EntityID: albumID, TagID: tag.ID, CreatedBy: userID}
+		if err := tx.Where("entity_type = ? AND entity_id = ? AND tag_id = ?", musicTagEntityAlbum, albumID, tag.ID).FirstOrCreate(&assignment).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) DeleteMusicTag(user authctx.CurrentUser, entityType string, entityID, tagID uuid.UUID) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
