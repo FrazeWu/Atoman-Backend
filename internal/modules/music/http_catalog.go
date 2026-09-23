@@ -227,7 +227,7 @@ func (h *Handler) listArtists(c *gin.Context) {
 		like := "%" + strings.ToLower(query) + "%"
 		db = db.
 			Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
-			Where("LOWER(\"Artists\".name) LIKE ? OR LOWER("+artistDisambiguationSearchExpression+") LIKE ? OR LOWER(COALESCE(\"Artists\".legal_name, '')) LIKE ? OR LOWER(COALESCE(artist_aliases.alias, '')) LIKE ?", like, like, like, like)
+			Where("LOWER(\"Artists\".name) LIKE ? OR LOWER("+artistDisambiguationSearchExpression+") LIKE ? OR LOWER(COALESCE(\"Artists\".legal_name, '')) LIKE ? OR LOWER(COALESCE(\"Artists\".stage_names_json, '')) LIKE ? OR LOWER(COALESCE(artist_aliases.alias, '')) LIKE ?", like, like, like, like, like)
 	}
 
 	var total int64

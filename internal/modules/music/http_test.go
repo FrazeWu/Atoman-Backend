@@ -1633,6 +1633,36 @@ func TestRegisterRoutesArtistSearchMatchesAliasAndReturnsPrimaryArtist(t *testin
 	}
 }
 
+func TestRegisterRoutesArtistSearchMatchesStageName(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{
+		Name:           "交工",
+		StageNamesJSON: `[{"name":"交工乐队","is_primary":true}]`,
+		EntryStatus:    "open",
+	}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/artists?q=交工乐队", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []model.Artist `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].ID != artist.ID {
+		t.Fatalf("expected stage-name search to return artist, got %#v", resp.Data)
+	}
+}
+
 func TestRegisterRoutesGetArtistReturnsGroupedMembersForGroupArtist(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	memberCurrent := model.Artist{Name: "Current Member", EntryStatus: "open"}
