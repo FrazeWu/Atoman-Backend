@@ -188,3 +188,20 @@ func TestMergeDerivedMetadataPayloadKeepsProviderDiagnosticsWhenUnmatched(t *tes
 		t.Fatalf("stale selected source should be removed: %#v", payload)
 	}
 }
+
+func TestMergeDerivedMetadataPayloadPersistsMatchedCoverWhenLocalCoverExists(t *testing.T) {
+	payload := map[string]any{
+		"cover_key": "music/album-imports/local-cover.webp",
+	}
+	result := AlbumImportMetadataResult{
+		CoverURL:       "https://cover.test/matched-cover.jpg",
+		MetadataSource: "discogs",
+		MatchStatus:    model.MusicMatchMatched,
+	}
+
+	mergeDerivedMetadataPayload(payload, nil, result)
+
+	if got := payload["derived_cover"]; got != result.CoverURL {
+		t.Fatalf("derived_cover = %#v, want %q", got, result.CoverURL)
+	}
+}
