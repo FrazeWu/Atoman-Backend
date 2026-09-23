@@ -487,7 +487,7 @@ func (e *ExternalAlbumMetadataEnricher) findRelease(ctx context.Context, input A
 	}
 	if input.PreferredReleaseID != "" {
 		var release musicBrainzRelease
-		lookupURL := e.musicBrainzBase + "/ws/2/release/" + url.PathEscape(input.PreferredReleaseID) + "?fmt=json&inc=recordings+release-groups+artist-credits"
+		lookupURL := e.musicBrainzBase + "/ws/2/release/" + url.PathEscape(input.PreferredReleaseID) + "?fmt=json&inc=recordings+release-groups+artist-credits+tags"
 		if err := e.musicBrainzJSON(ctx, lookupURL, &release); err != nil {
 			return musicBrainzRelease{}, nil, err
 		}
@@ -985,7 +985,7 @@ func (e *ExternalAlbumMetadataEnricher) findReleaseFromGroups(ctx context.Contex
 		var releases struct {
 			Releases []musicBrainzRelease `json:"releases"`
 		}
-		lookupURL := e.musicBrainzBase + "/ws/2/release?fmt=json&limit=100&release-group=" + url.QueryEscape(group.ID) + "&inc=recordings+release-groups+artist-credits"
+		lookupURL := e.musicBrainzBase + "/ws/2/release?fmt=json&limit=100&release-group=" + url.QueryEscape(group.ID) + "&inc=recordings+release-groups+artist-credits+tags"
 		if err := e.musicBrainzJSON(ctx, lookupURL, &releases); err != nil {
 			continue
 		}
@@ -1016,7 +1016,7 @@ func (e *ExternalAlbumMetadataEnricher) findReleaseDirectly(ctx context.Context,
 	detailedCandidates := make([]musicBrainzRelease, 0, len(search.Releases))
 	for _, candidate := range search.Releases {
 		var detailed musicBrainzRelease
-		lookupURL := e.musicBrainzBase + "/ws/2/release/" + url.PathEscape(candidate.ID) + "?fmt=json&inc=recordings+release-groups+artist-credits"
+		lookupURL := e.musicBrainzBase + "/ws/2/release/" + url.PathEscape(candidate.ID) + "?fmt=json&inc=recordings+release-groups+artist-credits+tags"
 		if err := e.musicBrainzJSON(ctx, lookupURL, &detailed); err != nil {
 			continue
 		}

@@ -392,9 +392,9 @@ func TestExternalAlbumMetadataEnricherFallsBackToMusicBrainzWhenDiscogsMisses(t 
 				_, _ = w.Write([]byte(`{"releases":[]}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"releases":[{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","primary-type":"Album"},"artist-credit":[{"artist":{"name":"郭顶"}}],"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}]}`))
+			_, _ = w.Write([]byte(`{"releases":[{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","status":"Official","tags":[{"name":"华语流行"}],"release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","primary-type":"Album"},"artist-credit":[{"artist":{"name":"郭顶"}}],"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}]}`))
 		case "/ws/2/release/b808a48c-b38b-4c0f-8dd5-0720fe6b8f86":
-			_, _ = w.Write([]byte(`{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","date":"2016-11-25","status":"Official","release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","title":"飞行器的执行周期","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}`))
+			_, _ = w.Write([]byte(`{"id":"b808a48c-b38b-4c0f-8dd5-0720fe6b8f86","title":"飞行器的执行周期","date":"2016-11-25","status":"Official","tags":[{"name":"华语流行"}],"release-group":{"id":"91373fa1-ce33-4472-a7f8-f1c2c29da540","title":"飞行器的执行周期","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"凄美地 (The Fog Space)","length":250000}]}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -416,6 +416,9 @@ func TestExternalAlbumMetadataEnricherFallsBackToMusicBrainzWhenDiscogsMisses(t 
 	}
 	if result.MetadataSource != "musicbrainz" || result.ExternalID != "b808a48c-b38b-4c0f-8dd5-0720fe6b8f86" || result.MatchStatus != model.MusicMatchMatched {
 		t.Fatalf("unexpected MusicBrainz fallback result: %#v", result)
+	}
+	if len(result.Genres) != 1 || result.Genres[0] != "华语流行" {
+		t.Fatalf("expected MusicBrainz release tags, got %#v", result.Genres)
 	}
 }
 
