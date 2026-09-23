@@ -1062,7 +1062,10 @@ func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[str
 	if result.AlbumType != "" {
 		payload["derived_album_type"] = result.AlbumType
 	}
-	if result.CoverURL != "" && stringValue(payload["cover_key"]) == "" {
+	// Keep the matched cover separately from a locally extracted cover. The
+	// client uses the matched value for the metadata result while retaining the
+	// local cover key for the uploaded asset.
+	if result.CoverURL != "" {
 		payload["derived_cover"] = result.CoverURL
 	}
 	if result.MetadataSource != "" {
