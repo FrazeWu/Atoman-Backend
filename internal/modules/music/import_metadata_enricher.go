@@ -542,6 +542,7 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 	}
 	candidateCount := 0
 	best := discogsReleaseMatch{}
+	bestAlbumMetadata := discogsReleaseMatch{}
 	seenCandidates := map[int]bool{}
 	var lastErr error
 	for _, artist := range searches {
@@ -574,6 +575,14 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 			}
 			remote := flattenDiscogsTracks(release)
 			matchingRelease := discogsReleaseAsMusicBrainzRelease(release, remote)
+			partialMapping, partialMatched := partialMusicBrainzTrackMapping(remote, input.Tracks)
+			if partialMatched {
+				candidate := discogsReleaseMatch{release: release, mapping: partialMapping}
+				candidate.exactTitles, candidate.positionMatches, candidate.durationDifference = scoreExternalTrackMatch(remote, input.Tracks, partialMapping)
+				if bestAlbumMetadata.release.ID == 0 || betterDiscogsReleaseMatch(candidate, bestAlbumMetadata) {
+					bestAlbumMetadata = candidate
+				}
+			}
 			mapping, ok := matchMusicBrainzTracks(matchingRelease, input.Tracks)
 			if ok {
 				candidate := discogsReleaseMatch{release: release, mapping: mapping}
@@ -586,6 +595,9 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 	}
 	if best.release.ID > 0 {
 		return best.release, best.mapping, candidateCount, nil
+	}
+	if bestAlbumMetadata.release.ID > 0 {
+		return bestAlbumMetadata.release, bestAlbumMetadata.mapping, candidateCount, nil
 	}
 	if lastErr != nil {
 		return discogsRelease{}, nil, candidateCount, lastErr
@@ -1167,6 +1179,25 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 }
 
 func matchPartialMusicBrainzTracks(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
+	mapping, matched := partialMusicBrainzTrackMapping(remote, uploaded)
+	if !matched {
+		return nil, false
+	}
+	total := len(remote)
+	if len(uploaded) > total {
+		total = len(uploaded)
+	}
+	if total == 0 || countMatchedMusicBrainzTracks(mapping)*100/total < 70 {
+		return nil, false
+	}
+	return mapping, true
+}
+
+// partialMusicBrainzTrackMapping only resolves signals that are independently
+// safe. It deliberately does not apply the album-level 70% threshold so a
+// trusted release can still provide cover/date/tags while uncertain tracks
+// remain local and editable.
+func partialMusicBrainzTrackMapping(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
 	if len(uploaded) == 0 || len(remote) == 0 {
 		return nil, false
 	}
@@ -1225,20 +1256,17 @@ func matchPartialMusicBrainzTracks(remote []flattenedMusicBrainzTrack, uploaded 
 		}
 	}
 
+	return mapping, countMatchedMusicBrainzTracks(mapping) > 0
+}
+
+func countMatchedMusicBrainzTracks(mapping []int) int {
 	matched := 0
 	for _, uploadedIndex := range mapping {
 		if uploadedIndex >= 0 {
 			matched++
 		}
 	}
-	total := len(remote)
-	if len(uploaded) > total {
-		total = len(uploaded)
-	}
-	if total == 0 || matched*100/total < 70 {
-		return nil, false
-	}
-	return mapping, true
+	return matched
 }
 
 func matchMusicBrainzTracksByDurationMajority(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
