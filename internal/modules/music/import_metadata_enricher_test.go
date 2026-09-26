@@ -315,6 +315,44 @@ func TestExternalAlbumMetadataEnricherReturnsDiscogsAlbumDetails(t *testing.T) {
 	}
 }
 
+func TestExternalAlbumMetadataEnricherKeepsDiscogsAlbumMetadataWithPartialTrackMatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/database/search":
+			_, _ = w.Write([]byte(`{"results":[{"id":322,"type":"release"}]}`))
+		case "/releases/322":
+			_, _ = w.Write([]byte(`{"id":322,"title":"菊花夜行军","released":"2001-04-01","images":[{"type":"primary","uri":"https://img.example/juhua.jpg"}],"genres":["Electronic"],"styles":["Ambient"],"labels":[{"name":"Modern Sky"}],"artists":[{"name":"郭顶"}],"tracklist":[{"position":"1","title":"第一首","type_":"track"},{"position":"2","title":"第二首","type_":"track"},{"position":"3","title":"第三首","type_":"track"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), "", "", "", "Atoman/test").
+		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
+	enricher.discogsWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "菊花夜行军", Artist: "郭顶", SkipLyrics: true,
+		Tracks: []AlbumImportMetadataTrack{
+			{Title: "第一首", TrackNumber: 1},
+			{Title: "本地未收录曲目", TrackNumber: 2},
+			{Title: "另一个本地标题", TrackNumber: 3},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MetadataSource != "discogs" || result.CoverURL != "https://img.example/juhua.jpg" || result.ReleaseDate != "2001-04-01" {
+		t.Fatalf("expected Discogs album metadata despite partial track match, got %#v", result)
+	}
+	if len(result.Genres) != 1 || len(result.Styles) != 1 || len(result.Labels) != 1 {
+		t.Fatalf("expected Discogs tags to be preserved, got %#v", result)
+	}
+	if len(result.Tracks) != 3 || result.Tracks[0].MatchStatus != model.MusicMatchMatched || result.Tracks[1].MatchStatus == model.MusicMatchMatched {
+		t.Fatalf("expected only confirmed tracks to be mapped, got %#v", result.Tracks)
+	}
+}
+
 func TestDiscogsArtistMatchesANV(t *testing.T) {
 	release := discogsRelease{
 		Artists: []struct {
