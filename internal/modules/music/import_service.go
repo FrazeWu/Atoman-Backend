@@ -328,6 +328,9 @@ func (s *Service) CreateAlbumImportSession(user authctx.CurrentUser, input Creat
 	if artistName := strings.TrimSpace(input.ArtistName); artistName != "" {
 		payload["artist_name"] = artistName
 	}
+	if archiveName := strings.TrimSpace(input.ArchiveName); archiveName != "" {
+		payload["archive_name"] = archiveName
+	}
 	applyAlbumImportSessionState(&session, status, payload)
 	payloadJSON, err = json.Marshal(payload)
 	if err != nil {
