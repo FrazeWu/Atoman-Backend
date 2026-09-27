@@ -976,6 +976,12 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 			payload["derived_album_title"] = albumTitle
 		}
 	}
+	if albumTitle == "" {
+		albumTitle = albumImportDirectoryTitle(files, artist)
+		if albumTitle != "" {
+			payload["derived_album_title"] = albumTitle
+		}
+	}
 	rawResult := AlbumImportMetadataResult{
 		AlbumTitle: albumTitle, Tracks: baseMetadataTracks(metadataTracks),
 		MatchStatus: model.MusicMatchUnmatched,
@@ -1133,6 +1139,35 @@ func albumImportArchiveTitle(archiveName, artist string) string {
 		}
 	}
 	return title
+}
+
+func albumImportDirectoryTitle(files []model.AlbumImportFile, artist string) string {
+	counts := map[string]int{}
+	names := map[string]string{}
+	for _, file := range files {
+		parts := strings.Split(strings.Trim(strings.ReplaceAll(file.RelativePath, "\\", "/"), "/"), "/")
+		if len(parts) < 2 {
+			continue
+		}
+		index := 0
+		if compactMusicText(parts[0]) == compactMusicText(artist) && len(parts) > 2 {
+			index = 1
+		}
+		name := albumImportArchiveTitle(parts[index], artist)
+		key := strings.ToLower(strings.Join(strings.Fields(name), " "))
+		if key == "" {
+			continue
+		}
+		counts[key]++
+		names[key] = name
+	}
+	bestKey := ""
+	for key, count := range counts {
+		if bestKey == "" || count > counts[bestKey] {
+			bestKey = key
+		}
+	}
+	return names[bestKey]
 }
 
 func albumImportFileMetadata(file model.AlbumImportFile) map[string]any {
