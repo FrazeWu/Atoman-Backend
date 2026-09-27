@@ -212,8 +212,9 @@ func TestCreateAlbumImportSessionStoresInputContext(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
 
 	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
-		ArtistID:  "artist-existing",
-		InputMode: AlbumImportInputModeFolder,
+		ArtistID:    "artist-existing",
+		ArchiveName: "菊花夜行军.zip",
+		InputMode:   AlbumImportInputModeFolder,
 	})
 	if err != nil {
 		t.Fatalf("create album import session: %v", err)
@@ -225,6 +226,13 @@ func TestCreateAlbumImportSessionStoresInputContext(t *testing.T) {
 	dto := buildAlbumImportDTO(session)
 	if dto.ArtistID != "artist-existing" {
 		t.Fatalf("expected artist id in DTO, got %q", dto.ArtistID)
+	}
+	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+	if err != nil {
+		t.Fatalf("read session payload: %v", err)
+	}
+	if payload["archive_name"] != "菊花夜行军.zip" {
+		t.Fatalf("expected archive name in payload, got %#v", payload["archive_name"])
 	}
 }
 

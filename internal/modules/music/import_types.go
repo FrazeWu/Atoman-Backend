@@ -94,11 +94,12 @@ type AlbumImportPayload struct {
 }
 
 type CreateAlbumImportSessionInput struct {
-	Status     string             `json:"status"`
-	ArtistID   string             `json:"artistId"`
-	ArtistName string             `json:"artistName"`
-	InputMode  string             `json:"inputMode"`
-	Payload    AlbumImportPayload `json:"payload"`
+	Status      string             `json:"status"`
+	ArtistID    string             `json:"artistId"`
+	ArtistName  string             `json:"artistName"`
+	ArchiveName string             `json:"archiveName"`
+	InputMode   string             `json:"inputMode"`
+	Payload     AlbumImportPayload `json:"payload"`
 }
 
 type CommitAlbumImportSessionInput struct {
