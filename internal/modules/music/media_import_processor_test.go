@@ -736,6 +736,16 @@ func TestAlbumImportArchiveTitleRemovesArtistAndFormatSuffix(t *testing.T) {
 	}
 }
 
+func TestAlbumImportDirectoryTitleUsesTopLevelAlbumFolder(t *testing.T) {
+	files := []model.AlbumImportFile{
+		{RelativePath: "菊花夜行军/交工乐队 - 两代人.mp3"},
+		{RelativePath: "菊花夜行军/交工乐队 - 县道184.mp3"},
+	}
+	if got := albumImportDirectoryTitle(files, "交工乐队"); got != "菊花夜行军" {
+		t.Fatalf("directory title = %q", got)
+	}
+}
+
 func TestMediaImportProcessorDoesNotRegressCanceledSession(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{
@@ -844,6 +854,49 @@ func TestPersistDerivedTracksUsesArchiveNameWhenAudioHasNoAlbumTag(t *testing.T)
 		t.Fatal(err)
 	}
 	if payload["derived_album_title"] != "飞行器的执行周期" {
+		t.Fatalf("derived album title = %#v", payload["derived_album_title"])
+	}
+}
+
+func TestPersistDerivedTracksUsesTopLevelDirectoryWhenAudioHasNoAlbumTag(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{
+		Status:      AlbumImportStatusAnalyzing,
+		Stage:       AlbumImportStageAnalyzing,
+		PayloadJSON: `{"artist_name":"交工乐队"}`,
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	file := model.AlbumImportFile{
+		ImportID:         session.ID,
+		FileName:         "交工乐队 - 两代人.mp3",
+		RelativePath:     "菊花夜行军/交工乐队 - 两代人.mp3",
+		Role:             AlbumImportFileRoleAudio,
+		PlaybackKey:      "audio/one",
+		Title:            "两代人",
+		TrackNumber:      1,
+		ProcessingStatus: AlbumImportFileProcessingStatusCompleted,
+		MetadataJSON:     `{}`,
+	}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	processor := NewMediaImportProcessor(db, &fakeMediaStore{}, &fakeMediaCommandRunner{}, "")
+	if err := processor.persistDerivedTracks(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var reloaded model.AlbumImportSession
+	if err := db.First(&reloaded, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reloaded.PayloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["derived_album_title"] != "菊花夜行军" {
 		t.Fatalf("derived album title = %#v", payload["derived_album_title"])
 	}
 }
