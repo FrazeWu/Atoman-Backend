@@ -22,6 +22,7 @@ import (
 )
 
 var traditionalToSimplified, _ = opencc.New("t2s")
+var simplifiedToTraditional, _ = opencc.New("s2t")
 
 type AlbumImportMetadataTrack struct {
 	Title           string
@@ -546,49 +547,51 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 	seenCandidates := map[int]bool{}
 	var lastErr error
 	for _, artist := range searches {
-		params := url.Values{
-			"release_title": {musicBrainzLookupAlbumTitle(input.AlbumTitle)},
-			"type":          {"release"},
-			"per_page":      {"5"},
-		}
-		if artist != "" {
-			params.Set("artist", artist)
-		}
-		var search discogsSearchResponse
-		if err := e.discogsJSON(ctx, e.discogsBase+"/database/search?"+params.Encode(), &search); err != nil {
-			lastErr = err
-			continue
-		}
-		for _, candidate := range search.Results {
-			if candidate.ID <= 0 || seenCandidates[candidate.ID] || !strings.EqualFold(candidate.Type, "release") {
+		for _, title := range discogsLookupTitleVariants(input.AlbumTitle) {
+			params := url.Values{
+				"release_title": {title},
+				"type":          {"release"},
+				"per_page":      {"5"},
+			}
+			if artist != "" {
+				params.Set("artist", artist)
+			}
+			var search discogsSearchResponse
+			if err := e.discogsJSON(ctx, e.discogsBase+"/database/search?"+params.Encode(), &search); err != nil {
+				lastErr = err
 				continue
 			}
-			seenCandidates[candidate.ID] = true
-			candidateCount++
-			endpoint := fmt.Sprintf("%s/releases/%d", e.discogsBase, candidate.ID)
-			var release discogsRelease
-			if err := e.discogsJSON(ctx, endpoint, &release); err != nil {
-				continue
-			}
-			if release.ID <= 0 || !musicBrainzAlbumTitlesMatch(release.Title, input.AlbumTitle) || !discogsArtistMatches(release, artists) {
-				continue
-			}
-			remote := flattenDiscogsTracks(release)
-			matchingRelease := discogsReleaseAsMusicBrainzRelease(release, remote)
-			partialMapping, partialMatched := partialMusicBrainzTrackMapping(remote, input.Tracks)
-			if partialMatched {
-				candidate := discogsReleaseMatch{release: release, mapping: partialMapping}
-				candidate.exactTitles, candidate.positionMatches, candidate.durationDifference = scoreExternalTrackMatch(remote, input.Tracks, partialMapping)
-				if bestAlbumMetadata.release.ID == 0 || betterDiscogsReleaseMatch(candidate, bestAlbumMetadata) {
-					bestAlbumMetadata = candidate
+			for _, candidate := range search.Results {
+				if candidate.ID <= 0 || seenCandidates[candidate.ID] || !strings.EqualFold(candidate.Type, "release") {
+					continue
 				}
-			}
-			mapping, ok := matchMusicBrainzTracks(matchingRelease, input.Tracks)
-			if ok {
-				candidate := discogsReleaseMatch{release: release, mapping: mapping}
-				candidate.exactTitles, candidate.positionMatches, candidate.durationDifference = scoreExternalTrackMatch(remote, input.Tracks, mapping)
-				if best.release.ID == 0 || betterDiscogsReleaseMatch(candidate, best) {
-					best = candidate
+				seenCandidates[candidate.ID] = true
+				candidateCount++
+				endpoint := fmt.Sprintf("%s/releases/%d", e.discogsBase, candidate.ID)
+				var release discogsRelease
+				if err := e.discogsJSON(ctx, endpoint, &release); err != nil {
+					continue
+				}
+				if release.ID <= 0 || !musicBrainzAlbumTitlesMatch(release.Title, input.AlbumTitle) || !discogsArtistMatches(release, artists) {
+					continue
+				}
+				remote := flattenDiscogsTracks(release)
+				matchingRelease := discogsReleaseAsMusicBrainzRelease(release, remote)
+				partialMapping, partialMatched := partialMusicBrainzTrackMapping(remote, input.Tracks)
+				if partialMatched {
+					candidate := discogsReleaseMatch{release: release, mapping: partialMapping}
+					candidate.exactTitles, candidate.positionMatches, candidate.durationDifference = scoreExternalTrackMatch(remote, input.Tracks, partialMapping)
+					if bestAlbumMetadata.release.ID == 0 || betterDiscogsReleaseMatch(candidate, bestAlbumMetadata) {
+						bestAlbumMetadata = candidate
+					}
+				}
+				mapping, ok := matchMusicBrainzTracks(matchingRelease, input.Tracks)
+				if ok {
+					candidate := discogsReleaseMatch{release: release, mapping: mapping}
+					candidate.exactTitles, candidate.positionMatches, candidate.durationDifference = scoreExternalTrackMatch(remote, input.Tracks, mapping)
+					if best.release.ID == 0 || betterDiscogsReleaseMatch(candidate, best) {
+						best = candidate
+					}
 				}
 			}
 		}
@@ -1377,7 +1380,11 @@ func musicAlbumTitleVariants(value string) []string {
 	value = musicBrainzLookupAlbumTitle(value)
 	variants := make([]string, 0, 3)
 	seen := map[string]struct{}{}
-	for _, part := range strings.Split(value, "=") {
+	parts := strings.Split(value, "=")
+	if open := strings.LastIndex(strings.TrimSpace(value), "("); open > 0 && strings.HasSuffix(strings.TrimSpace(value), ")") && containsHanMusicText(value[:open]) {
+		parts = append(parts, strings.TrimSpace(value[:open]))
+	}
+	for _, part := range parts {
 		key := compactMusicText(strings.TrimSpace(part))
 		if key == "" {
 			continue
@@ -1985,6 +1992,42 @@ func toSimplifiedChinese(value string) string {
 		return value
 	}
 	return converted
+}
+
+func discogsLookupTitleVariants(value string) []string {
+	variants := []string{}
+	seen := map[string]bool{}
+	for _, candidate := range []string{
+		strings.TrimSpace(value),
+		strings.TrimSpace(toSimplifiedChinese(value)),
+		strings.TrimSpace(toTraditionalChinese(value)),
+	} {
+		if candidate != "" && !seen[candidate] {
+			seen[candidate] = true
+			variants = append(variants, candidate)
+		}
+	}
+	return variants
+}
+
+func toTraditionalChinese(value string) string {
+	if simplifiedToTraditional == nil || value == "" {
+		return value
+	}
+	converted, err := simplifiedToTraditional.Convert(value)
+	if err != nil {
+		return value
+	}
+	return converted
+}
+
+func containsHanMusicText(value string) bool {
+	for _, r := range value {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
 }
 
 func comparableMusicTitle(value string) string {

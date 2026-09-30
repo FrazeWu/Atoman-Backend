@@ -418,6 +418,46 @@ func TestExternalAlbumMetadataEnricherMatchesDiscogsBilingualReleaseTitle(t *tes
 	}
 }
 
+func TestExternalAlbumMetadataEnricherFindsDiscogsWithTraditionalTitleFallback(t *testing.T) {
+	var searchRequests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/database/search" {
+			searchRequests = append(searchRequests, r.URL.RawQuery)
+			if r.URL.Query().Get("release_title") != "菊花夜行軍" || r.URL.Query().Get("artist") != "" {
+				_, _ = w.Write([]byte(`{"results":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"results":[{"id":2926685,"type":"release"}]}`))
+			return
+		}
+		if r.URL.Path == "/releases/2926685" {
+			_, _ = w.Write([]byte(`{"id":2926685,"title":"菊花夜行軍 (The Night March of the Chrysanthemums)","released":"2001","artists":[{"name":"Labor Exchange Band","anv":"交工樂隊"}],"tracklist":[{"position":"1","title":"縣道184","type_":"track"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), "", "", "", "Atoman/test").
+		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
+	enricher.discogsWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "菊花夜行军",
+		Artist:     "交工乐队",
+		SkipLyrics: true,
+		Tracks:     []AlbumImportMetadataTrack{{Title: "县道184", TrackNumber: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MetadataSource != "discogs" || result.ExternalID != "2926685" || result.MatchStatus != model.MusicMatchMatched {
+		t.Fatalf("expected Discogs traditional title fallback, got %#v", result)
+	}
+	if len(searchRequests) < 2 {
+		t.Fatalf("expected artist-constrained and title-only searches, got %#v", searchRequests)
+	}
+}
+
 func TestExternalAlbumMetadataEnricherFallsBackToMusicBrainzWhenDiscogsMisses(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
