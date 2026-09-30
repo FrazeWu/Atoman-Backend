@@ -269,7 +269,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.CoverURL = discogsReleaseCoverURL(discogsRelease)
 		result.Genres = uniqueMetadataValues(discogsRelease.Genres)
 		result.Styles = uniqueMetadataValues(discogsRelease.Styles)
-		result.Country = strings.TrimSpace(discogsRelease.Country)
+		result.Country = normalizeMetadataCountry(discogsRelease.Country)
 		result.Formats = discogsFormatNames(discogsRelease)
 		result.Labels = discogsLabelNames(discogsRelease)
 		result.MissingArtists = missingExternalArtists(discogsReleaseArtistNames(discogsRelease), uniqueMusicArtists(append([]string{input.Artist}, input.Artists...)))
@@ -294,7 +294,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.MatchStatus = model.MusicMatchMatched
 		result.MusicBrainzReleaseID = release.ID
 		result.Genres = musicBrainzReleaseTags(release)
-		result.Country = strings.TrimSpace(release.Country)
+		result.Country = normalizeMetadataCountry(release.Country)
 		result.Formats = uniqueMetadataValues([]string{release.Packaging})
 		result.MatchConfidence = externalTrackMatchConfidence(result.Tracks, flattenMusicBrainzTracks(release), trackMapping)
 		result.MissingArtists = missingMusicBrainzArtists(release.ArtistCredit, uniqueMusicArtists(append([]string{input.Artist}, input.Artists...)))
@@ -947,10 +947,30 @@ func missingExternalArtists(names, local []string) []string {
 	missing := make([]string, 0, len(names))
 	for _, name := range uniqueMusicArtists(names) {
 		if _, exists := known[compactMusicText(name)]; !exists {
-			missing = append(missing, name)
+			missing = append(missing, toSimplifiedChinese(name))
 		}
 	}
 	return missing
+}
+
+func normalizeMetadataCountry(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	key := strings.ToUpper(trimmed)
+	if country, ok := map[string]string{
+		"CN": "中国", "CHN": "中国", "CHINA": "中国",
+		"TW": "台湾", "TWN": "台湾", "TAIWAN": "台湾", "臺灣": "台湾",
+		"HK": "中国香港", "HKG": "中国香港", "HONG KONG": "中国香港",
+		"US": "美国", "USA": "美国", "UNITED STATES": "美国",
+		"GB": "英国", "GBR": "英国", "UNITED KINGDOM": "英国",
+		"JP": "日本", "JPN": "日本", "JAPAN": "日本",
+		"KR": "韩国", "KOR": "韩国", "SOUTH KOREA": "韩国",
+	}[key]; ok {
+		return country
+	}
+	return toSimplifiedChinese(trimmed)
 }
 
 func (e *ExternalAlbumMetadataEnricher) findReleaseWithArtist(ctx context.Context, input AlbumImportMetadataInput, artist string) (musicBrainzRelease, []int, error) {
@@ -1323,7 +1343,7 @@ func missingMusicBrainzArtists(credits []musicBrainzArtistCredit, localArtists [
 			name = strings.TrimSpace(credit.Name)
 		}
 		if name != "" && !local[compactMusicText(name)] {
-			missing = append(missing, name)
+			missing = append(missing, toSimplifiedChinese(name))
 		}
 	}
 	return missing

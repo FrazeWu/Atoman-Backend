@@ -310,7 +310,7 @@ func TestExternalAlbumMetadataEnricherReturnsDiscogsAlbumDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Country != "China" || len(result.Genres) != 1 || result.Genres[0] != "Electronic" || len(result.Styles) != 1 || result.Styles[0] != "Ambient" || len(result.Labels) != 1 || result.Labels[0] != "Modern Sky" || len(result.Formats) != 1 || result.Formats[0] != "CD" {
+	if result.Country != "中国" || len(result.Genres) != 1 || result.Genres[0] != "Electronic" || len(result.Styles) != 1 || result.Styles[0] != "Ambient" || len(result.Labels) != 1 || result.Labels[0] != "Modern Sky" || len(result.Formats) != 1 || result.Formats[0] != "CD" {
 		t.Fatalf("unexpected album details: %#v", result)
 	}
 }
@@ -1116,6 +1116,18 @@ func TestMusicMatchingNormalizesTraditionalChineseToSimplified(t *testing.T) {
 	}
 	if comparableMusicBrainzTrackTitle("風神125") != comparableMusicBrainzTrackTitle("风神125") {
 		t.Fatal("traditional and simplified track titles should match")
+	}
+}
+
+func TestMetadataArtistsAndCountryAreLocalized(t *testing.T) {
+	if got := missingExternalArtists([]string{"交工樂隊"}, nil); len(got) != 1 || got[0] != "交工乐队" {
+		t.Fatalf("missing artist = %#v, want simplified artist", got)
+	}
+	if got := missingMusicBrainzArtists([]musicBrainzArtistCredit{{Name: "交工樂隊"}}, nil); len(got) != 1 || got[0] != "交工乐队" {
+		t.Fatalf("MusicBrainz missing artist = %#v, want simplified artist", got)
+	}
+	if got := normalizeMetadataCountry("TW"); got != "台湾" {
+		t.Fatalf("country = %q, want 台湾", got)
 	}
 }
 
