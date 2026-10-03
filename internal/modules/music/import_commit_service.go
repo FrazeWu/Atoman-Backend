@@ -1,9 +1,13 @@
 package music
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -1017,6 +1021,9 @@ func findRepairSong(existingSongs []model.Song, seenSongIDs map[uuid.UUID]bool, 
 }
 
 func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importID uuid.UUID) (string, string, string, error) {
+	if remoteURL := strings.TrimSpace(rawURL); strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
+		return s.promoteRemoteAlbumAsset(remoteURL, destinationKey)
+	}
 	if s.s3 == nil || !strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
 		return rawURL, "", "", nil
 	}
@@ -1035,6 +1042,49 @@ func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importI
 		return "", "", "", err
 	}
 	return urlPrefix + "/" + destinationKey, sourceKey, destinationKey, nil
+}
+
+func (s *Service) promoteRemoteAlbumAsset(rawURL, destinationKey string) (string, string, string, error) {
+	if s.s3 == nil || !strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
+		return rawURL, "", "", nil
+	}
+	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	prefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
+	if bucket == "" || prefix == "" {
+		return rawURL, "", "", nil
+	}
+	client := s.remoteMediaHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	request, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return "", "", "", fmt.Errorf("create remote cover request: %w", err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", "", "", fmt.Errorf("download remote cover: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return "", "", "", fmt.Errorf("download remote cover: status %d", response.StatusCode)
+	}
+	const maxCoverBytes = 10 * 1024 * 1024
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxCoverBytes+1))
+	if err != nil {
+		return "", "", "", fmt.Errorf("read remote cover: %w", err)
+	}
+	if len(body) > maxCoverBytes {
+		return "", "", "", errors.New("remote cover exceeds 10 MB")
+	}
+	contentType := strings.TrimSpace(response.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+	if _, err := s.s3.PutObject(&s3.PutObjectInput{Bucket: aws.String(bucket), Key: aws.String(destinationKey), Body: bytes.NewReader(body), ContentType: aws.String(contentType)}); err != nil {
+		return "", "", "", fmt.Errorf("store remote cover: %w", err)
+	}
+	return prefix + "/" + destinationKey, "", destinationKey, nil
 }
 
 func (s *Service) promoteImportedTrackAsset(rawURL, destinationKey string, importID uuid.UUID, uploadedAsset bool) (string, string, string, error) {
