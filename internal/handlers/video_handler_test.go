@@ -368,6 +368,42 @@ func TestGetVideosPaginatesCurrentUsersSubscribedChannels(t *testing.T) {
 	}
 }
 
+func TestGetVideosSupportsPageResponseFormat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	owner := seedVideoUser(t, db)
+	for index := 0; index < 3; index++ {
+		video := seedVideo(t, db, owner.UUID)
+		require.NoError(t, db.Model(&video).Updates(map[string]any{
+			"status":     "published",
+			"visibility": "public",
+			"title":      fmt.Sprintf("Page video %d", index),
+		}).Error)
+	}
+
+	r := gin.New()
+	r.GET("/api/v1/videos", GetVideos(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/videos?format=page&limit=2&page=2", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var payload struct {
+		Data []model.Video `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+			HasMore  bool  `json:"has_more"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Len(t, payload.Data, 1)
+	require.Equal(t, 2, payload.Meta.Page)
+	require.Equal(t, 2, payload.Meta.PageSize)
+	require.Equal(t, int64(3), payload.Meta.Total)
+	require.False(t, payload.Meta.HasMore)
+}
+
 func TestGetVideosUsesStableUniqueOrderingAcrossPages(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)

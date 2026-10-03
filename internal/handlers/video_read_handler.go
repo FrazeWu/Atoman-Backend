@@ -148,6 +148,7 @@ func normalizeVideoRecommendationAuthority(video model.Video) float64 {
 // @Param sort query string false "排序方式" Enums(latest,popular)
 // @Param page query int false "页码" default(1)
 // @Param limit query int false "返回数量上限"
+// @Param format query string false "响应格式" Enums(array,page)
 // @Param subscribed query bool false "仅返回当前用户订阅频道的视频"
 // @Success 200 {array} model.Video
 // @Failure 500 {object} ErrorResponse
@@ -160,6 +161,7 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 		sort := c.DefaultQuery("sort", "latest")
 		page, _ := httpx.PageParams(c)
 		limit := boundedListLimit(c.Query("limit"), 40, 40)
+		pageResponse := strings.EqualFold(strings.TrimSpace(c.Query("format")), "page")
 		subscribedOnly := c.Query("subscribed") == "true"
 
 		viewerID := currentBlogViewerID(c)
@@ -227,9 +229,21 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 			q = q.Order("videos.created_at DESC, videos.video_id DESC")
 		}
 
+		var total int64
+		if pageResponse {
+			if err := q.Session(&gorm.Session{}).Distinct("videos.video_id").Count(&total).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
 		videos, err := contentmodule.LoadVideos(db, q.Offset(httpx.Offset(page, limit)).Limit(limit))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if pageResponse {
+			httpx.List(c, videos, page, limit, total)
 			return
 		}
 		c.JSON(http.StatusOK, videos)
