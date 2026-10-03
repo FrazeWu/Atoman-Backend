@@ -374,6 +374,7 @@ func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uu
 	if len(feedSourceIDs) == 0 {
 		return []TimelineItemDTO{}, 0, nil
 	}
+	query.sourceVisibleAfter = visibleAfter
 	if query.IsRead != nil {
 		return s.getSubscribedExternalFeedWithReadFilter(userID, feedSourceIDs, query)
 	}

@@ -2,6 +2,7 @@ package feed
 
 import (
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
@@ -459,5 +460,90 @@ func TestSubscriptionHubImportsSelfSubscriptionIntoAllContentTypes(t *testing.T)
 	}
 	if group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeRSS); group != nil {
 		t.Fatalf("self subscription must not be imported as RSS: %#v", group)
+	}
+}
+
+func TestSubscriptionHubOnlyOpenLifecycleEventsMarkContentRead(t *testing.T) {
+	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
+	blogPost, _, _ := seedUnifiedChannelUpdates(t, db, creator, channel)
+	testdb.Migrate(t, db, &model.ContentLifecycleEvent{}, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: "subscription-hub-impression-is-not-read", Title: channel.Name}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create channel source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{
+		UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title,
+		Base: model.Base{CreatedAt: time.Now().Add(-time.Hour), UpdatedAt: time.Now().Add(-time.Hour)},
+	}).Error; err != nil {
+		t.Fatalf("create channel subscription: %v", err)
+	}
+	if err := db.Create(&model.ContentLifecycleEvent{
+		UserID: &viewer.ID, ChannelID: channel.ID, ContentType: "blog", ContentID: blogPost.ID,
+		Event: "impression", Source: "direct", ClientEventID: "subscription-hub-impression-only",
+	}).Error; err != nil {
+		t.Fatalf("create impression event: %v", err)
+	}
+
+	tree, err := service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatalf("get subscription tree: %v", err)
+	}
+	group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeBlog)
+	if group == nil || len(group.Memberships) != 1 {
+		t.Fatalf("missing blog membership: %#v", group)
+	}
+	if group.Memberships[0].UnreadCount != 1 {
+		t.Fatalf("impression event must not mark content read, got unread=%d", group.Memberships[0].UnreadCount)
+	}
+}
+
+func TestSubscriptionHubUsesSubscriptionActivationAndResumeWindows(t *testing.T) {
+	service, db, viewer, _, _ := newUnifiedSubscriptionFixture(t)
+	testdb.Migrate(t, db, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+
+	source := model.FeedSource{
+		SourceType: "external_rss", RssURL: "https://example.com/subscription-window.xml",
+		Hash: "subscription-hub-subscription-window", Title: "Window RSS",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create RSS source: %v", err)
+	}
+	now := time.Now().UTC()
+	activatedAt := now.Add(-30 * time.Minute)
+	if err := db.Create(&model.Subscription{
+		UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title,
+		Base: model.Base{CreatedAt: activatedAt, UpdatedAt: activatedAt},
+	}).Error; err != nil {
+		t.Fatalf("create RSS subscription: %v", err)
+	}
+	items := []model.FeedItem{
+		{FeedSourceID: source.ID, GUID: "before-activation", Title: "Before activation", Link: "https://example.com/before", PublishedAt: activatedAt.Add(-time.Minute), FetchedAt: activatedAt},
+		{FeedSourceID: source.ID, GUID: "after-activation", Title: "After activation", Link: "https://example.com/after", PublishedAt: activatedAt.Add(time.Minute), FetchedAt: activatedAt.Add(2 * time.Minute)},
+	}
+	if err := db.Create(&items).Error; err != nil {
+		t.Fatalf("create RSS items: %v", err)
+	}
+
+	tree, err := service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatalf("get active subscription tree: %v", err)
+	}
+	group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeRSS)
+	if group == nil || len(group.Memberships) != 1 || group.Memberships[0].UnreadCount != 1 {
+		t.Fatalf("only post-activation item should be unread: %#v", group)
+	}
+
+	if err := db.Model(&model.Subscription{}).Where("user_id = ? AND feed_source_id = ?", viewer.ID, source.ID).Updates(map[string]any{
+		"is_paused": true,
+	}).Error; err != nil {
+		t.Fatalf("pause subscription: %v", err)
+	}
+	tree, err = service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatalf("get paused subscription tree: %v", err)
+	}
+	if group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeRSS); group != nil {
+		t.Fatalf("paused subscription must not remain in RSS tree: %#v", group)
 	}
 }

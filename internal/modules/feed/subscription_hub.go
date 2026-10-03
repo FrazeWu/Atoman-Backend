@@ -129,7 +129,7 @@ func subscriptionHubTypesForSource(source *model.FeedSource) []string {
 func (s *Service) subscriptionHubMemberships(userID uuid.UUID) ([]model.SubscriptionHubMembership, error) {
 	var subscriptions []model.Subscription
 	if err := s.db.Preload("FeedSource").Preload("SubscriptionGroup").
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND is_paused = ?", userID, false).
 		Order("position ASC, created_at ASC").
 		Find(&subscriptions).Error; err != nil {
 		return nil, err
@@ -153,6 +153,10 @@ func (s *Service) subscriptionHubMemberships(userID uuid.UUID) ([]model.Subscrip
 		if subscription.SubscriptionGroupID != nil {
 			groupID = *subscription.SubscriptionGroupID
 		}
+		activeAfter := subscription.CreatedAt
+		if subscription.ResumedAfter != nil && subscription.ResumedAfter.After(activeAfter) {
+			activeAfter = *subscription.ResumedAfter
+		}
 		for _, subscriptionType := range subscriptionHubTypesForSource(subscription.FeedSource) {
 			memberships = append(memberships, model.SubscriptionHubMembership{
 				Base:             subscription.Base,
@@ -163,6 +167,7 @@ func (s *Service) subscriptionHubMemberships(userID uuid.UUID) ([]model.Subscrip
 				FeedSource:       subscription.FeedSource,
 				Title:            firstNonBlank(subscription.Title, subscription.FeedSource.Title),
 				Position:         subscription.Position,
+				UnreadAfter:      &activeAfter,
 			})
 		}
 	}
@@ -597,7 +602,7 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		var rows []readRow
 		if err := s.db.Model(&model.ContentLifecycleEvent{}).
 			Select("content_type, content_id").
-			Where("user_id = ? AND content_type IN ?", userID, []string{"blog", "podcast", "video"}).
+			Where("user_id = ? AND event = ? AND content_type IN ?", userID, "open", []string{"blog", "podcast", "video"}).
 			Group("content_type, content_id").Scan(&rows).Error; err != nil {
 			return err
 		}
@@ -621,7 +626,7 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		}
 	}
 
-	markContent := func(subscriptionType, contentType string, contentID, ownerID uuid.UUID, channelID *uuid.UUID, collections []model.Collection) {
+	markContent := func(subscriptionType, contentType string, contentID, ownerID uuid.UUID, channelID *uuid.UUID, collections []model.Collection, publishedAt time.Time) {
 		for index := range memberships {
 			membership := &memberships[index]
 			source := membership.FeedSource
@@ -643,6 +648,9 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 				}
 			}
 			if !matches {
+				continue
+			}
+			if membership.UnreadAfter != nil && publishedAt.Before(*membership.UnreadAfter) {
 				continue
 			}
 			membership.HasContent = true
@@ -685,13 +693,13 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 			}
 			for _, episode := range episodes {
 				if post, ok := postByID[episode.PostID]; ok {
-					markContent(definition.subscriptionType, definition.contentType, episode.ID, post.UserID, post.ChannelID, post.Collections)
+					markContent(definition.subscriptionType, definition.contentType, episode.ID, post.UserID, post.ChannelID, post.Collections, postTimelinePublishedAt(post))
 				}
 			}
 			continue
 		}
 		for _, post := range posts {
-			markContent(definition.subscriptionType, definition.contentType, post.ID, post.UserID, post.ChannelID, post.Collections)
+			markContent(definition.subscriptionType, definition.contentType, post.ID, post.UserID, post.ChannelID, post.Collections, postTimelinePublishedAt(post))
 		}
 	}
 	shortNotes, err := s.repo.ListPublishedShortNotesByUserIDs(userIDs)
@@ -703,7 +711,7 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		}
 	}
 	for _, note := range shortNotes {
-		markContent(SubscriptionHubTypeBlog, "blog", note.ID, note.UserID, nil, nil)
+		markContent(SubscriptionHubTypeBlog, "blog", note.ID, note.UserID, nil, nil, note.CreatedAt)
 	}
 
 	videos, err := s.repo.ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs, "video")
@@ -711,7 +719,7 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		return err
 	}
 	for _, video := range dedupeVideos(videos) {
-		markContent(SubscriptionHubTypeVideo, "video", video.ID, video.UserID, video.ChannelID, video.Collections)
+		markContent(SubscriptionHubTypeVideo, "video", video.ID, video.UserID, video.ChannelID, video.Collections, video.CreatedAt)
 	}
 
 	if len(feedSourceIDs) == 0 {
@@ -723,7 +731,15 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		TotalCount   int64     `gorm:"column:total_count"`
 	}
 	var rows []unreadRow
-	if err := s.db.Table("feed_items").Select("feed_items.feed_source_id, COUNT(*) AS total_count, COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM feed_item_reads WHERE feed_item_reads.feed_item_id = feed_items.id AND feed_item_reads.user_id = ?)) AS count", userID).Where("feed_items.feed_source_id IN ?", feedSourceIDs).Group("feed_items.feed_source_id").Scan(&rows).Error; err != nil {
+	visibleAfter := subscriptionHubVisibleAfter(memberships)
+	query := s.db.Table("feed_items").
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Select("feed_items.feed_source_id, COUNT(*) AS total_count, COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM feed_item_reads WHERE feed_item_reads.feed_item_id = feed_items.id AND feed_item_reads.user_id = ?)) AS count", userID).
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false)
+	if clause, args := subscriptionHubVisibleAfterClause(visibleAfter); clause != "" {
+		query = query.Where(clause, args...)
+	}
+	if err := query.Group("feed_items.feed_source_id").Scan(&rows).Error; err != nil {
 		return err
 	}
 	counts := make(map[uuid.UUID]int64, len(rows))
@@ -739,6 +755,32 @@ func (s *Service) hydrateSubscriptionHubUnreadCounts(userID uuid.UUID, membershi
 		}
 	}
 	return nil
+}
+
+func subscriptionHubVisibleAfter(memberships []model.SubscriptionHubMembership) map[uuid.UUID]time.Time {
+	visibleAfter := make(map[uuid.UUID]time.Time)
+	for _, membership := range memberships {
+		if membership.FeedSource == nil || membership.FeedSource.SourceType != "external_rss" || membership.UnreadAfter == nil {
+			continue
+		}
+		if current, ok := visibleAfter[membership.FeedSourceID]; !ok || membership.UnreadAfter.After(current) {
+			visibleAfter[membership.FeedSourceID] = *membership.UnreadAfter
+		}
+	}
+	return visibleAfter
+}
+
+func subscriptionHubVisibleAfterClause(visibleAfter map[uuid.UUID]time.Time) (string, []any) {
+	if len(visibleAfter) == 0 {
+		return "", nil
+	}
+	clauses := make([]string, 0, len(visibleAfter))
+	args := make([]any, 0, len(visibleAfter)*2)
+	for sourceID, after := range visibleAfter {
+		clauses = append(clauses, "(feed_items.feed_source_id = ? AND feed_items.published_at >= ?)")
+		args = append(args, sourceID, after)
+	}
+	return "(" + strings.Join(clauses, " OR ") + ")", args
 }
 
 func (s *Service) hydrateSubscriptionHubSourceImages(memberships []model.SubscriptionHubMembership) error {
@@ -909,11 +951,9 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 	channelIDs = dedupeUUIDs(channelIDs)
 	collectionIDs = dedupeUUIDs(collectionIDs)
 	feedSourceIDs = dedupeUUIDs(feedSourceIDs)
-	if query.ContentType == "blog" {
-		return s.getSubscribedBlogFeed(userID, userIDs, channelIDs, collectionIDs, query)
-	}
+	visibleAfter := subscriptionHubVisibleAfter(memberships)
 	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates && strings.TrimSpace(query.Search) == "" {
-		return s.getSubscribedExternalFeed(userID, feedSourceIDs, query, map[uuid.UUID]time.Time{})
+		return s.getSubscribedExternalFeed(userID, feedSourceIDs, query, visibleAfter)
 	}
 
 	posts := make([]model.Post, 0)
@@ -936,11 +976,12 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 	posts = filterVisibleSubscribedPosts(posts, userID, userIDs, channelIDs, collectionIDs)
 	shortNotes := make([]model.ShortNote, 0)
 	shortNoteRead := make(map[uuid.UUID]bool)
-	if query.ContentType == "" {
+	if query.ContentType == "" || query.ContentType == "blog" {
 		shortNotes, shortNoteRead, err = s.listSubscribedShortNotes(userID, userIDs)
 		if err != nil {
 			return nil, 0, err
 		}
+		shortNotes = filterSubscriptionHubShortNotes(shortNotes, memberships)
 	}
 
 	postIDs := make([]uuid.UUID, 0, len(posts))
@@ -963,12 +1004,13 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 	for _, episode := range episodes {
 		episodeByPostID[episode.PostID] = episode
 	}
+	posts = filterSubscriptionHubPosts(posts, episodeByPostID, memberships)
 	videos, err := s.repo.ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs, query.ContentType)
 	if err != nil {
 		return nil, 0, err
 	}
-	videos = dedupeVideos(videos)
-	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs, map[uuid.UUID]time.Time{})
+	videos = filterSubscriptionHubVideos(dedupeVideos(videos), memberships)
+	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs, visibleAfter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1011,6 +1053,77 @@ func (s *Service) getSubscriptionHubTimeline(userID uuid.UUID, memberships []mod
 	return paged, total, nil
 }
 
+func subscriptionHubMembershipMatchesContent(membership model.SubscriptionHubMembership, subscriptionType string, ownerID uuid.UUID, channelID *uuid.UUID, collections []model.Collection, publishedAt time.Time) bool {
+	if membership.SubscriptionType != subscriptionType && membership.SubscriptionType != SubscriptionHubTypeAll {
+		return false
+	}
+	source := membership.FeedSource
+	if source == nil || source.SourceID == nil {
+		return false
+	}
+	matches := false
+	switch source.SourceType {
+	case "internal_user":
+		matches = *source.SourceID == ownerID
+	case "internal_channel":
+		matches = channelID != nil && *source.SourceID == *channelID
+	case "internal_collection":
+		for _, collection := range collections {
+			if collection.ID == *source.SourceID {
+				matches = true
+				break
+			}
+		}
+	}
+	if !matches || membership.UnreadAfter == nil {
+		return matches
+	}
+	return !publishedAt.Before(*membership.UnreadAfter)
+}
+
+func subscriptionHubContentActive(memberships []model.SubscriptionHubMembership, subscriptionType string, ownerID uuid.UUID, channelID *uuid.UUID, collections []model.Collection, publishedAt time.Time) bool {
+	for _, membership := range memberships {
+		if subscriptionHubMembershipMatchesContent(membership, subscriptionType, ownerID, channelID, collections, publishedAt) {
+			return true
+		}
+	}
+	return false
+}
+
+func filterSubscriptionHubPosts(posts []model.Post, episodes map[uuid.UUID]model.PodcastEpisode, memberships []model.SubscriptionHubMembership) []model.Post {
+	filtered := make([]model.Post, 0, len(posts))
+	for _, post := range posts {
+		subscriptionType := SubscriptionHubTypeBlog
+		if _, ok := episodes[post.ID]; ok {
+			subscriptionType = SubscriptionHubTypePodcast
+		}
+		if subscriptionHubContentActive(memberships, subscriptionType, post.UserID, post.ChannelID, post.Collections, postTimelinePublishedAt(post)) {
+			filtered = append(filtered, post)
+		}
+	}
+	return filtered
+}
+
+func filterSubscriptionHubShortNotes(notes []model.ShortNote, memberships []model.SubscriptionHubMembership) []model.ShortNote {
+	filtered := make([]model.ShortNote, 0, len(notes))
+	for _, note := range notes {
+		if subscriptionHubContentActive(memberships, SubscriptionHubTypeBlog, note.UserID, nil, nil, note.CreatedAt) {
+			filtered = append(filtered, note)
+		}
+	}
+	return filtered
+}
+
+func filterSubscriptionHubVideos(videos []model.Video, memberships []model.SubscriptionHubMembership) []model.Video {
+	filtered := make([]model.Video, 0, len(videos))
+	for _, video := range videos {
+		if subscriptionHubContentActive(memberships, SubscriptionHubTypeVideo, video.UserID, video.ChannelID, video.Collections, video.CreatedAt) {
+			filtered = append(filtered, video)
+		}
+	}
+	return filtered
+}
+
 func (s *Service) subscriptionContentReadMap(userID uuid.UUID) (map[string]map[uuid.UUID]bool, error) {
 	read := map[string]map[uuid.UUID]bool{
 		"blog":    {},
@@ -1027,7 +1140,7 @@ func (s *Service) subscriptionContentReadMap(userID uuid.UUID) (map[string]map[u
 	var rows []readRow
 	if err := s.db.Model(&model.ContentLifecycleEvent{}).
 		Select("content_type, content_id").
-		Where("user_id = ? AND content_type IN ?", userID, []string{"blog", "podcast", "video"}).
+		Where("user_id = ? AND event = ? AND content_type IN ?", userID, "open", []string{"blog", "podcast", "video"}).
 		Group("content_type, content_id").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
