@@ -104,6 +104,37 @@ func TestImportWorkerClaimDoesNotDuplicateJob(t *testing.T) {
 	}
 }
 
+func TestImportWorkerReconcilesUploadedSessionWithoutJob(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusUploaded, Stage: AlbumImportStageUpload, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	file := model.AlbumImportFile{ImportID: session.ID, FileName: "album.zip", Role: AlbumImportFileRoleArchive, UploadStatus: AlbumImportFileUploadStatusUploaded, SourceKey: "uploads/album.zip"}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+	var processedJob model.AlbumImportJob
+	worker := NewImportWorker(db, nil, "worker-a")
+	processed, err := worker.RunOnce(context.Background(), importProcessorFunc(func(_ context.Context, job model.AlbumImportJob, _ func() error) error {
+		processedJob = job
+		return nil
+	}))
+	if err != nil || !processed {
+		t.Fatalf("run worker: processed=%v err=%v", processed, err)
+	}
+	if processedJob.ImportID != session.ID {
+		t.Fatalf("processed import id = %s, want %s", processedJob.ImportID, session.ID)
+	}
+	var jobs []model.AlbumImportJob
+	if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].Status != "completed" {
+		t.Fatalf("unexpected reconciled jobs: %#v", jobs)
+	}
+}
+
 func TestImportWorkerFinalizesSubmittedImportAfterProcessing(t *testing.T) {
 	db := newImportWorkerTestDB(t)
 	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)

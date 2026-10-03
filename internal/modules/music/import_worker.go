@@ -415,6 +415,58 @@ func importRetryDelay(attempt int) time.Duration {
 	return delay
 }
 
+func (w *ImportWorker) ReconcileUploadedSessions(ctx context.Context) (int, error) {
+	if w.db == nil {
+		return 0, errors.New("music import worker database is required")
+	}
+	var sessions []model.AlbumImportSession
+	if err := w.db.WithContext(ctx).Where("status = ?", AlbumImportStatusUploaded).Where("NOT EXISTS (SELECT 1 FROM music_album_import_jobs WHERE music_album_import_jobs.import_id = music_album_import_sessions.id)").Order("updated_at ASC").Limit(50).Preload("Files").Find(&sessions).Error; err != nil {
+		return 0, err
+	}
+	reconciled := 0
+	for _, candidate := range sessions {
+		queued := false
+		err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var session model.AlbumImportSession
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", candidate.ID, AlbumImportStatusUploaded).Preload("Files").First(&session).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+			var jobCount int64
+			if err := tx.Model(&model.AlbumImportJob{}).Where("import_id = ?", session.ID).Count(&jobCount).Error; err != nil {
+				return err
+			}
+			if jobCount > 0 || len(session.Files) == 0 {
+				return nil
+			}
+			hasSource := false
+			for _, file := range session.Files {
+				if file.UploadStatus != AlbumImportFileUploadStatusUploaded {
+					return nil
+				}
+				hasSource = hasSource || file.Role == AlbumImportFileRoleArchive || file.Role == AlbumImportFileRoleAudio
+			}
+			if !hasSource {
+				return nil
+			}
+			if err := queueAlbumImportSession(tx, &session, true); err != nil {
+				return err
+			}
+			queued = true
+			return nil
+		})
+		if err != nil {
+			return reconciled, err
+		}
+		if queued {
+			reconciled++
+		}
+	}
+	return reconciled, nil
+}
+
 func (w *ImportWorker) RunOnce(ctx context.Context, processor ImportProcessor) (bool, error) {
 	if processed, err := runSongAudioReplacementOnce(ctx, w.db, w.workerID, w.mediaService); processed || err != nil {
 		return processed, err
@@ -425,9 +477,14 @@ func (w *ImportWorker) RunOnce(ctx context.Context, processor ImportProcessor) (
 	if _, err := w.CleanupCommitted(ctx); err != nil {
 		return false, err
 	}
+
 	if processor == nil {
 		return false, nil
 	}
+	if _, err := w.ReconcileUploadedSessions(ctx); err != nil {
+		return false, err
+	}
+
 	job, ok, err := w.Claim(ctx)
 	if err != nil || !ok {
 		return false, err

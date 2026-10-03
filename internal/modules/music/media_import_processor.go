@@ -1004,7 +1004,7 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	})
 	if enrichErr != nil {
 		log.Printf("WARN: album import metadata enrichment failed: import_id=%s error=%v", sessionID, enrichErr)
-		return nil
+		return fmt.Errorf("album metadata enrichment failed: %w", enrichErr)
 	}
 	return p.persistDerivedMetadataResult(ctx, &session, files, result)
 }

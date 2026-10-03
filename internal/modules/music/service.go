@@ -13,6 +13,7 @@ type Service struct {
 	db                          *gorm.DB
 	repo                        *Repo
 	s3                          *s3.S3
+	remoteMediaHTTPClient       *http.Client
 	albumImportMultipart        albumImportMultipartStore
 	assetUploadMultipart        albumImportMultipartStore
 	albumLinkSuggestions        AlbumLinkSuggestionProvider
@@ -28,6 +29,7 @@ func NewService(db *gorm.DB) *Service {
 		db:                     db,
 		repo:                   NewRepo(db),
 		applePreviewHTTPClient: &http.Client{Timeout: 8 * time.Second},
+		remoteMediaHTTPClient:  &http.Client{Timeout: 15 * time.Second},
 		applePreviewBaseURL:    "https://itunes.apple.com/lookup",
 	}
 }
