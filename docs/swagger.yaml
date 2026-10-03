@@ -26094,6 +26094,13 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: 响应格式；array 返回数组，page 返回 data/meta 分页对象
+        enum:
+        - array
+        - page
+        in: query
+        name: format
+        type: string
       - description: 仅返回当前用户订阅频道的视频
         in: query
         name: subscribed
