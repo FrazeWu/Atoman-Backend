@@ -1225,6 +1225,96 @@ func TestGetSubscribedBlogFeedExcludesExternalAndPodcastContent(t *testing.T) {
 	}
 }
 
+func TestSubscribedBlogFeedFiltersReadState(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	testdb.Migrate(t, db, &model.ContentLifecycleEvent{})
+
+	var post model.Post
+	if err := db.Where("title = ?", "Post item").First(&post).Error; err != nil {
+		t.Fatalf("find seeded post: %v", err)
+	}
+	if post.ChannelID == nil {
+		t.Fatal("seeded post has no channel")
+	}
+	if err := db.Create(&model.ContentLifecycleEvent{
+		UserID:        &user.ID,
+		ChannelID:     *post.ChannelID,
+		ContentType:   "blog",
+		ContentID:     post.ID,
+		Event:         "open",
+		ClientEventID: uuid.NewString(),
+	}).Error; err != nil {
+		t.Fatalf("mark post read: %v", err)
+	}
+
+	read := true
+	readItems, readTotal, err := service.GetSubscribedFeed(user, FeedQuery{ContentType: "blog", IsRead: &read, Page: 1, PageSize: 100})
+	if err != nil {
+		t.Fatalf("load read blog feed: %v", err)
+	}
+	if readTotal != 1 || len(readItems) != 1 || readItems[0].Post == nil || readItems[0].Post.ID != post.ID {
+		t.Fatalf("expected only the read post, total=%d items=%#v", readTotal, readItems)
+	}
+
+	unread := false
+	unreadItems, unreadTotal, err := service.GetSubscribedFeed(user, FeedQuery{ContentType: "blog", IsRead: &unread, Page: 1, PageSize: 100})
+	if err != nil {
+		t.Fatalf("load unread blog feed: %v", err)
+	}
+	if unreadTotal == 0 || int64(len(unreadItems)) != unreadTotal {
+		t.Fatalf("expected unread total to match items, total=%d items=%d", unreadTotal, len(unreadItems))
+	}
+	for _, item := range unreadItems {
+		if item.Post != nil && item.Post.ID == post.ID {
+			t.Fatalf("read post leaked into unread feed: %#v", item)
+		}
+		if item.IsRead {
+			t.Fatalf("read item leaked into unread feed: %#v", item)
+		}
+	}
+}
+
+func TestSubscribedBlogFeedExcludesPausedInternalUserSubscription(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	creator := model.User{Username: "paused-creator", Email: "paused-creator@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&creator).Error; err != nil {
+		t.Fatalf("create paused creator: %v", err)
+	}
+	channel := model.Channel{UserID: &creator.UUID, Name: "Paused Channel", Slug: "paused-channel"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create paused channel: %v", err)
+	}
+	post := model.Post{UserID: creator.UUID, ChannelID: &channel.ID, Title: "Paused creator post", Content: "body", Status: "published", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create paused creator post: %v", err)
+	}
+	source := model.FeedSource{SourceType: "internal_user", SourceID: &creator.UUID, Hash: "paused-creator-source", Title: creator.Username}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create paused creator source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: source.Title, IsPaused: true}).Error; err != nil {
+		t.Fatalf("create paused subscription: %v", err)
+	}
+	channelSource := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: "paused-channel-source", Title: channel.Name}
+	if err := db.Create(&channelSource).Error; err != nil {
+		t.Fatalf("create paused channel source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: channelSource.ID, Title: channelSource.Title, IsPaused: true}).Error; err != nil {
+		t.Fatalf("create paused channel subscription: %v", err)
+	}
+
+	items, _, err := service.GetSubscribedFeed(user, FeedQuery{ContentType: "blog", Page: 1, PageSize: 100})
+	if err != nil {
+		t.Fatalf("load blog feed with paused subscription: %v", err)
+	}
+	for _, item := range items {
+		if item.Post != nil && item.Post.ID == post.ID {
+			t.Fatalf("paused internal user post leaked into blog feed: %#v", item)
+		}
+	}
+}
+
 func TestSubscribedBlogFeedUsesCanonicalCollectionWithoutLegacyJoinTable(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	if err := db.Unscoped().Where("user_id = ?", user.ID).Delete(&model.Subscription{}).Error; err != nil {

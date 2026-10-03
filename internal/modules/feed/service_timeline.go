@@ -254,9 +254,6 @@ func (s *Service) getSubscribedBlogFeed(
 	collectionIDs []uuid.UUID,
 	query FeedQuery,
 ) ([]TimelineItemDTO, int64, error) {
-	if query.IsRead != nil && *query.IsRead {
-		return []TimelineItemDTO{}, 0, nil
-	}
 	allSubscriptions, err := s.repo.ListSubscriptionsWithSources(userID, FeedQuery{})
 	if err != nil {
 		return nil, 0, err
@@ -270,6 +267,9 @@ func (s *Service) getSubscribedBlogFeed(
 		}
 	}
 	for _, subscription := range allSubscriptions {
+		if subscription.IsPaused {
+			continue
+		}
 		if subscription.FeedSource == nil || subscription.FeedSource.SourceID == nil {
 			continue
 		}
@@ -295,6 +295,15 @@ func (s *Service) getSubscribedBlogFeed(
 	shortNotes, shortNoteRead, err := s.listSubscribedShortNotes(userID, shortNoteUserIDs)
 	if err != nil {
 		return nil, 0, err
+	}
+	if query.IsRead != nil {
+		filtered := make([]model.ShortNote, 0, len(shortNotes))
+		for _, note := range shortNotes {
+			if shortNoteRead[note.ID] == *query.IsRead {
+				filtered = append(filtered, note)
+			}
+		}
+		shortNotes = filtered
 	}
 	contentRead, err := s.subscriptionContentReadMap(userID)
 	if err != nil {
