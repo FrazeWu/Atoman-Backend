@@ -10,9 +10,23 @@ import (
 )
 
 type AlbumImportMetadataPreviewInput struct {
-	AlbumTitle  string   `json:"albumTitle"`
-	Artist      string   `json:"artist"`
-	TrackTitles []string `json:"trackTitles"`
+	AlbumTitle  string                            `json:"albumTitle"`
+	Artist      string                            `json:"artist"`
+	TrackTitles []string                          `json:"trackTitles"`
+	Tracks      []AlbumImportMetadataPreviewTrack `json:"tracks,omitempty"`
+}
+
+type AlbumImportMetadataPreviewTrack struct {
+	Title         string `json:"title"`
+	FileID        string `json:"fileId,omitempty"`
+	AudioKey      string `json:"audioKey,omitempty"`
+	AudioURL      string `json:"audioUrl,omitempty"`
+	Origin        string `json:"origin,omitempty"`
+	DiscNumber    int    `json:"discNumber,omitempty"`
+	TrackNumber   int    `json:"trackNumber,omitempty"`
+	OriginalTitle string `json:"originalTitle,omitempty"`
+	OriginalDisc  int    `json:"originalDiscNumber,omitempty"`
+	OriginalTrack int    `json:"originalTrackNumber,omitempty"`
 }
 
 type AlbumImportMetadataPreviewDTO struct {
@@ -42,18 +56,38 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 	if artist == "" {
 		artist = inferCommonAlbumImportArtist(input.TrackTitles)
 	}
-	tracks := make([]AlbumImportMetadataTrack, 0, len(input.TrackTitles))
-	for index, title := range input.TrackTitles {
-		title = strings.TrimSpace(title)
-		if title == "" {
-			continue
+	tracks := make([]AlbumImportMetadataTrack, 0, len(input.Tracks)+len(input.TrackTitles))
+	if len(input.Tracks) > 0 {
+		for index, previewTrack := range input.Tracks {
+			title := strings.TrimSpace(previewTrack.Title)
+			if title == "" {
+				continue
+			}
+			discNumber := previewTrack.DiscNumber
+			if discNumber <= 0 {
+				discNumber = 1
+			}
+			trackNumber := previewTrack.TrackNumber
+			if trackNumber <= 0 {
+				trackNumber = index + 1
+			}
+			tracks = append(tracks, AlbumImportMetadataTrack{
+				Title: normalizeAlbumImportTrackTitle(previewTrack.Title, artist), OriginalTitle: firstNonEmptyMusicValue(previewTrack.OriginalTitle, previewTrack.Title),
+				FileID: previewTrack.FileID, AudioKey: previewTrack.AudioKey, AudioURL: previewTrack.AudioURL,
+				Origin: previewTrack.Origin, DiscNumber: discNumber, TrackNumber: trackNumber,
+				OriginalDisc: previewTrack.OriginalDisc, OriginalTrack: previewTrack.OriginalTrack,
+			})
 		}
-		tracks = append(tracks, AlbumImportMetadataTrack{
-			Title:         normalizeAlbumImportTrackTitle(title, artist),
-			OriginalTitle: title,
-			TrackNumber:   index + 1,
-			Origin:        "local_preview:" + strconv.Itoa(index+1),
-		})
+	} else {
+		for index, title := range input.TrackTitles {
+			title = strings.TrimSpace(title)
+			if title == "" {
+				continue
+			}
+			tracks = append(tracks, AlbumImportMetadataTrack{
+				Title: normalizeAlbumImportTrackTitle(title, artist), OriginalTitle: title, TrackNumber: index + 1, Origin: "local_preview:" + strconv.Itoa(index+1),
+			})
+		}
 	}
 	if s == nil || s.albumImportMetadataEnricher == nil || strings.TrimSpace(input.AlbumTitle) == "" || len(tracks) == 0 {
 		return AlbumImportMetadataPreviewDTO{Tracks: baseMetadataTracks(tracks)}, nil

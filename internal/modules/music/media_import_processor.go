@@ -924,7 +924,7 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	}
 
 	metadataTracks := make([]AlbumImportMetadataTrack, 0, len(files))
-	for _, file := range files {
+	for index, file := range files {
 		album := albumImportFileAlbum(file)
 		albumKey := strings.ToLower(strings.Join(strings.Fields(album), " "))
 		if primaryAlbumKey != "" && albumKey != "" && albumKey != primaryAlbumKey {
@@ -942,9 +942,13 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 			audioURL = p.urlPrefix + "/" + strings.TrimLeft(file.PlaybackKey, "/")
 		}
 		metadata := albumImportFileMetadata(file)
+		trackNumber := file.TrackNumber
+		if trackNumber <= 0 {
+			trackNumber = index + 1
+		}
 		metadataTracks = append(metadataTracks, AlbumImportMetadataTrack{
 			Title: file.Title, OriginalTitle: file.Title, Artist: stringValue(metadata["artist"]), Album: album, FileID: file.ID.String(),
-			DiscNumber: normalizedDiscNumber(file.DiscNumber), TrackNumber: file.TrackNumber,
+			DiscNumber: normalizedDiscNumber(file.DiscNumber), TrackNumber: trackNumber,
 			DurationSeconds: file.DurationSeconds, Origin: file.RelativePath,
 			AudioKey: file.PlaybackKey, AudioURL: audioURL,
 		})

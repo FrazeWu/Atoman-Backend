@@ -90,6 +90,23 @@ func TestMatchDerivedTrackAudioDoesNotUseTitleWhenAudioKeyIsStale(t *testing.T) 
 	}
 }
 
+func TestMatchDerivedTrackAudioUsesUniqueTitleAndPositionWhenIdentityIsStale(t *testing.T) {
+	derivedTracks := []any{
+		map[string]any{
+			"title": "Unique title", "track_number": 2, "disc_number": 1,
+			"audio_key": "audio-current", "audio_url": "https://cdn.test/current.mp3",
+		},
+	}
+
+	matched := matchDerivedTrackAudio(derivedTracks, AlbumImportTrackPayload{
+		Title: "Unique title", TrackNumber: 2, DiscNumber: 1, AudioKey: "audio-stale",
+	}, map[int]bool{})
+
+	if matched.AudioURL != "https://cdn.test/current.mp3" {
+		t.Fatalf("expected unique title and position fallback, got %#v", matched)
+	}
+}
+
 func TestAlbumImportTracksFromDerivedKeepsStableFieldsAndDeletedKeys(t *testing.T) {
 	tracks := albumImportTracksFromDerived(map[string]any{
 		"commit_request": map[string]any{

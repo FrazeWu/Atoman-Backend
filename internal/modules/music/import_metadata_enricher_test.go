@@ -500,6 +500,41 @@ func TestExternalAlbumMetadataEnricherFallsBackToMusicBrainzWhenDiscogsMisses(t 
 	}
 }
 
+func TestExternalAlbumMetadataEnricherMatchesDiscogsMaster(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/database/search":
+			if r.URL.Query().Get("type") != "master" {
+				_, _ = w.Write([]byte(`{"results":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"results":[{"id":40401,"type":"master"}]}`))
+		case "/masters/40401":
+			_, _ = w.Write([]byte(`{"id":40401,"title":"This Week","uri":"https://www.discogs.com/master/40401-Jean-Grae-This-Week","artists":[{"name":"Jean Grae"}],"tracklist":[{"position":"1","title":"Intro","duration":"2:00","type_":"track"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), server.URL, "", "", "Atoman/test").
+		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
+	enricher.musicBrainzWait = 0
+	enricher.discogsWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "This Week",
+		Artist:     "Jean Grae",
+		Tracks:     []AlbumImportMetadataTrack{{Title: "Intro", TrackNumber: 1, DurationSeconds: 120}},
+		SkipLyrics: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MetadataSource != "discogs" || result.SourceURL != "https://www.discogs.com/master/40401-Jean-Grae-This-Week" {
+		t.Fatalf("expected Discogs master match, got %#v", result)
+	}
+}
+
 func TestExternalAlbumMetadataEnricherReordersShuffledTracks(t *testing.T) {
 	server := newMusicBrainzEnricherTestServer(t, `{"id":"release-id","title":"Canonical Album","date":"2020-02-03","release-group":{"primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"Intro","length":75000},{"position":2,"title":"What Would I Do","length":222000},{"position":3,"title":"God’s Gift","length":235000},{"position":4,"title":"Love Song","length":368000}]}]}`)
 	defer server.Close()
