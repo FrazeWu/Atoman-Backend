@@ -415,6 +415,19 @@ func (r *Repo) ListSubscribedBlogPosts(
 				like, like, like, like,
 			)
 		}
+		if query.IsRead != nil && query.viewerID != uuid.Nil {
+			if !r.db.Migrator().HasTable(&model.ContentLifecycleEvent{}) {
+				if *query.IsRead {
+					db = db.Where("1 = 0")
+				}
+			} else {
+				readEvent := "EXISTS"
+				if !*query.IsRead {
+					readEvent = "NOT EXISTS"
+				}
+				db = db.Where(readEvent+" (SELECT 1 FROM content_lifecycle_events lifecycle WHERE lifecycle.user_id = ? AND lifecycle.content_type = ? AND lifecycle.content_id = posts.id AND lifecycle.deleted_at IS NULL)", query.viewerID, "blog")
+			}
+		}
 		return db
 	}
 
