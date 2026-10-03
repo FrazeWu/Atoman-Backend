@@ -678,7 +678,7 @@ func TestCompleteAlbumImportSessionQueuesOneJobIdempotently(t *testing.T) {
 	}
 }
 
-func TestCompleteAlbumImportSessionDefersMatchingUntilArtistIsProvided(t *testing.T) {
+func TestCompleteAlbumImportSessionQueuesMatchingWithoutArtist(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
 	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)})
@@ -686,23 +686,19 @@ func TestCompleteAlbumImportSessionDefersMatchingUntilArtistIsProvided(t *testin
 		t.Fatal(err)
 	}
 
-	uploaded, err := svc.CompleteAlbumImportSession(user, session.ID)
+	queued, err := svc.CompleteAlbumImportSession(user, session.ID)
 	if err != nil {
 		t.Fatalf("complete upload without artist: %v", err)
 	}
-	if uploaded.Status != AlbumImportStatusUploaded || uploaded.Stage != AlbumImportStageUpload {
-		t.Fatalf("expected upload to wait for artist context, got %#v", uploaded)
-	}
-
-	queued, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Late Artist"},
-		Album:  AlbumImportAlbumPayload{Title: "Late Album"},
-	})
-	if err != nil {
-		t.Fatalf("start matching after artist input: %v", err)
-	}
 	if queued.Status != AlbumImportStatusQueued || queued.Stage != AlbumImportStageQueued {
-		t.Fatalf("expected matching to queue after artist input, got %#v", queued)
+		t.Fatalf("expected matching to queue without artist input, got %#v", queued)
+	}
+	var jobs []model.AlbumImportJob
+	if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued {
+		t.Fatalf("expected one queued job without artist input, got %#v", jobs)
 	}
 }
 

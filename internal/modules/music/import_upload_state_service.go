@@ -176,15 +176,6 @@ func queueSubmittedAlbumImportWhenUploadsComplete(tx *gorm.DB, session *model.Al
 	if session.Status != AlbumImportStatusUploading && session.Status != AlbumImportStatusUploaded {
 		return nil
 	}
-	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
-	if err != nil {
-		return err
-	}
-	if _, submitted := payload["commit_request"]; !submitted &&
-		strings.TrimSpace(stringValue(payload["artist_id"])) == "" &&
-		strings.TrimSpace(stringValue(payload["artist_name"])) == "" {
-		return nil
-	}
 	var total, incomplete int64
 	if err := tx.Model(&model.AlbumImportFile{}).Where("import_id = ?", session.ID).Count(&total).Error; err != nil {
 		return err
