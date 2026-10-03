@@ -27061,6 +27061,16 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "array",
+                            "page"
+                        ],
+                        "type": "string",
+                        "description": "响应格式；array 返回数组，page 返回 data/meta 分页对象",
+                        "name": "format",
+                        "in": "query"
+                    },
+                    {
                         "type": "boolean",
                         "description": "仅返回当前用户订阅频道的视频",
                         "name": "subscribed",
