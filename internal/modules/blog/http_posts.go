@@ -121,9 +121,9 @@ func (h *Handler) listPosts(c *gin.Context) {
 		query = query.Where("memberships.collection_id = ?", *canonicalCollectionID)
 		query = query.Order("memberships.position ASC")
 	} else if channelID != nil {
-		query = query.Order("blog_extensions.pinned DESC, posts.published_at DESC, posts.id DESC")
+		query = query.Order("blog_extensions.pinned DESC, COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC")
 	} else {
-		query = query.Order("posts.published_at DESC, posts.id DESC")
+		query = query.Order("COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC")
 	}
 	if q := strings.TrimSpace(c.Query("q")); q != "" {
 		searchLike := "%" + q + "%"

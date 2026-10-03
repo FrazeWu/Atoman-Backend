@@ -1612,8 +1612,10 @@ func TestRegisterRoutesListPostsOrdersLatestByFirstPublishedAt(t *testing.T) {
 	lateCreated := time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC)
 	earlyPublished := time.Date(2026, 7, 11, 8, 0, 0, 0, time.UTC)
 	latePublished := time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
+	legacyCreated := time.Date(2026, 6, 30, 8, 0, 0, 0, time.UTC)
 	first := model.Post{Base: model.Base{ID: uuid.New(), CreatedAt: earlyCreated}, UserID: user.ID, ChannelID: &channel.ID, Title: "Early created, late published", Content: "body", Status: "published", Visibility: "public", PublishedAt: &earlyPublished}
 	second := model.Post{Base: model.Base{ID: uuid.New(), CreatedAt: lateCreated}, UserID: user.ID, ChannelID: &channel.ID, Title: "Late created, early published", Content: "body", Status: "published", Visibility: "public", PublishedAt: &latePublished}
+	legacy := model.Post{Base: model.Base{ID: uuid.New(), CreatedAt: legacyCreated}, UserID: user.ID, ChannelID: &channel.ID, Title: "Legacy published", Content: "body", Status: "published", Visibility: "public"}
 	if err := db.Create(&first).Error; err != nil {
 		t.Fatalf("create first post: %v", err)
 	}
@@ -1622,6 +1624,10 @@ func TestRegisterRoutesListPostsOrdersLatestByFirstPublishedAt(t *testing.T) {
 		t.Fatalf("create second post: %v", err)
 	}
 	canonicalizeBlogTestPost(t, db, second)
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy post: %v", err)
+	}
+	canonicalizeBlogTestPost(t, db, legacy)
 
 	r := newBlogHTTPRouter(service, nil)
 	w := httptest.NewRecorder()
@@ -1635,7 +1641,7 @@ func TestRegisterRoutesListPostsOrdersLatestByFirstPublishedAt(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(response.Data) != 2 || response.Data[0].ID != first.ID {
+	if len(response.Data) != 3 || response.Data[0].ID != first.ID {
 		t.Fatalf("expected late-published post first, got %s", w.Body.String())
 	}
 }
