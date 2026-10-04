@@ -944,6 +944,38 @@ func TestPersistDerivedMetadataResultPreservesLatestCommitRequest(t *testing.T) 
 	}
 }
 
+func TestMergeDerivedMetadataPayloadPreservesLockedMetadata(t *testing.T) {
+	payload := map[string]any{
+		"metadata_match_locked": true,
+		"metadata_source":       "discogs",
+		"metadata_genres":       []any{"Electronic"},
+		"metadata_styles":       []any{"Ambient"},
+		"derived_cover":         "https://cover.test/matched.jpg",
+	}
+
+	mergeDerivedMetadataPayload(payload, []map[string]any{{"title": "Song"}}, AlbumImportMetadataResult{
+		MatchStatus:   model.MusicMatchUnmatched,
+		MetadataError: "worker fallback",
+	})
+
+	if payload["metadata_source"] != "discogs" || payload["derived_cover"] != "https://cover.test/matched.jpg" {
+		t.Fatalf("locked metadata was overwritten: %#v", payload)
+	}
+	if payload["metadata_genres"].([]any)[0] != "Electronic" || payload["metadata_styles"].([]any)[0] != "Ambient" {
+		t.Fatalf("locked tags were overwritten: %#v", payload)
+	}
+}
+
+func TestAlbumImportProcessingInfersArtistFromTrackFilenamePrefix(t *testing.T) {
+	if got := inferCommonAlbumImportArtist([]string{
+		"交工乐队 - 两代人",
+		"交工乐队 - 愁上愁下",
+		"交工乐队 - 风神125",
+	}); got != "交工乐队" {
+		t.Fatalf("inferred artist = %q, want 交工乐队", got)
+	}
+}
+
 func TestAlbumImportTrackInfoFromFileNameIsConservative(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -957,6 +957,13 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	if artist == "" {
 		artist = p.albumImportArtistName(ctx, payload)
 	}
+	if artist == "" {
+		titles := make([]string, 0, len(metadataTracks))
+		for _, track := range metadataTracks {
+			titles = append(titles, track.Title)
+		}
+		artist = inferCommonAlbumImportArtist(titles)
+	}
 	for index := range metadataTracks {
 		if strings.TrimSpace(metadataTracks[index].Artist) == "" {
 			metadataTracks[index].Artist = artist
@@ -1131,6 +1138,9 @@ func (p *MediaImportProcessor) persistDerivedMetadataResult(ctx context.Context,
 
 func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[string]any, result AlbumImportMetadataResult) {
 	payload["derived_tracks"] = derivedTracks
+	if locked, _ := payload["metadata_match_locked"].(bool); locked {
+		return
+	}
 	if result.AlbumTitle != "" {
 		payload["derived_album_title"] = result.AlbumTitle
 	}
