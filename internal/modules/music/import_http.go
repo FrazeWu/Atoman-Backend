@@ -129,9 +129,9 @@ func (h *Handler) listAlbumImportSessions(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	data := make([]AlbumImportDTO, 0, len(sessions))
+	data := make([]AlbumImportListDTO, 0, len(sessions))
 	for _, session := range sessions {
-		data = append(data, buildAlbumImportDTO(session))
+		data = append(data, buildAlbumImportListDTO(session))
 	}
 	httpx.List(c, data, page, pageSize, total)
 }

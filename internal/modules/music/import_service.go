@@ -208,6 +208,66 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	return dto
 }
 
+func buildAlbumImportListDTO(session model.AlbumImportSession) AlbumImportListDTO {
+	payload := map[string]any{}
+	if strings.TrimSpace(session.PayloadJSON) != "" {
+		_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
+	}
+	inputMode := session.InputMode
+	if inputMode == "" {
+		inputMode = AlbumImportInputModeAuto
+	}
+	stage := session.Stage
+	if stage == "" {
+		stage = AlbumImportStageUpload
+	}
+	errorMessage := session.ErrorMessage
+	if errorMessage == "" {
+		errorMessage = stringValue(payload["error_message"])
+	}
+	artistID := strings.TrimSpace(stringValue(payload["artist_id"]))
+	commitRequest := albumImportCommitRequest(payload)
+	if artistID == "" && commitRequest != nil {
+		artistID = strings.TrimSpace(commitRequest.ArtistID)
+		if artistID == "" {
+			for _, artist := range commitRequest.Artists {
+				if candidate := strings.TrimSpace(artist.ArtistID); candidate != "" {
+					artistID = candidate
+					break
+				}
+			}
+		}
+	}
+	trackCount := 0
+	if tracks, ok := payload["derived_tracks"].([]any); ok {
+		trackCount = len(tracks)
+	}
+	return AlbumImportListDTO{
+		ImportID: session.ID.String(),
+		TargetAlbumID: func() string {
+			if session.TargetAlbumID == nil {
+				return ""
+			}
+			return session.TargetAlbumID.String()
+		}(),
+		TargetSongID: func() string {
+			if session.TargetSongID == nil {
+				return ""
+			}
+			return session.TargetSongID.String()
+		}(),
+		ArtistID:   artistID,
+		AlbumTitle: albumImportSessionAlbumTitle(session, payload), Status: session.Status,
+		InputMode: inputMode, Stage: stage,
+		Progress:       AlbumImportProgressDTO{Current: session.ProgressCurrent, Total: session.ProgressTotal},
+		UploadProgress: floatValue(payload["upload_progress"]),
+		CoverURL:       resolveAlbumImportCoverURL(payload), DerivedCover: stringValue(payload["derived_cover"]),
+		ArchiveName: stringValue(payload["archive_name"]), TrackCount: trackCount,
+		LastSyncedAt: session.UpdatedAt.Format(time.RFC3339), ErrorMessage: errorMessage,
+		HasCommitRequest: commitRequest != nil,
+	}
+}
+
 func albumImportCommitSources(payload map[string]any) (artistSource, albumSource string) {
 	request := albumImportCommitRequest(payload)
 	if request == nil {
