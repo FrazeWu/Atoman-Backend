@@ -126,6 +126,22 @@ func TestMatchDerivedTrackAudioDoesNotUseTitleWhenAudioKeyIsStale(t *testing.T) 
 	}
 }
 
+func TestMatchDerivedTrackAudioUsesOnlyRemainingAudioWhenTitleIsUnmatched(t *testing.T) {
+	derivedTracks := []any{
+		map[string]any{"title": "Known", "audio_url": "https://cdn.test/known.mp3"},
+		map[string]any{"title": "Local spelling", "audio_url": "https://cdn.test/remaining.mp3"},
+	}
+	used := map[int]bool{}
+
+	if matched := matchDerivedTrackAudio(derivedTracks, AlbumImportTrackPayload{Title: "Known"}, used); matched.AudioURL == "" {
+		t.Fatal("expected the known track to match")
+	}
+	matched := matchDerivedTrackAudio(derivedTracks, AlbumImportTrackPayload{Title: "External spelling"}, used)
+	if matched.AudioURL != "https://cdn.test/remaining.mp3" {
+		t.Fatalf("expected the only remaining processed audio, got %#v", matched)
+	}
+}
+
 func TestMatchDerivedTrackAudioUsesUniqueTitleAndPositionWhenIdentityIsStale(t *testing.T) {
 	derivedTracks := []any{
 		map[string]any{
