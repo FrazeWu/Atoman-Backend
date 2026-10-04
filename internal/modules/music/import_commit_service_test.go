@@ -107,6 +107,28 @@ func TestMatchDerivedTrackAudioUsesUniqueTitleAndPositionWhenIdentityIsStale(t *
 	}
 }
 
+func TestMatchDerivedTrackAudioUsesOriginalPositionAndTitleBaseAfterMetadataReorder(t *testing.T) {
+	derivedTracks := []any{
+		map[string]any{
+			"title": "县道184(卷首诗)", "original_title": "县道184(卷首诗)",
+			"original_track_number": 1, "audio_url": "https://cdn.test/county.mp3",
+		},
+		map[string]any{
+			"title": "嗷！(器乐曲)", "original_title": "嗷！(器乐曲)",
+			"original_track_number": 2, "audio_url": "https://cdn.test/ao.mp3",
+		},
+	}
+
+	used := map[int]bool{}
+	matched := matchDerivedTrackAudio(derivedTracks, AlbumImportTrackPayload{
+		Title: "嗷！(ㄠˋ)", TrackNumber: 1, OriginalTrack: 2,
+	}, used)
+
+	if matched.AudioURL != "https://cdn.test/ao.mp3" {
+		t.Fatalf("expected original position to select audio after reorder, got %#v", matched)
+	}
+}
+
 func TestAlbumImportTracksFromDerivedKeepsStableFieldsAndDeletedKeys(t *testing.T) {
 	tracks := albumImportTracksFromDerived(map[string]any{
 		"commit_request": map[string]any{
