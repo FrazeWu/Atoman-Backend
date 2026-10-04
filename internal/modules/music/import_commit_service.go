@@ -1276,6 +1276,11 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 	}); audio.AudioURL != "" {
 		return audio
 	}
+	if audio := tryUniqueMatch(func(map[string]any) bool {
+		return true
+	}); audio.AudioURL != "" {
+		return audio
+	}
 	if track.AudioURL != "" {
 		return derivedTrackAudio{AudioURL: strings.TrimSpace(track.AudioURL)}
 	}
