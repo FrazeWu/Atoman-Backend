@@ -120,6 +120,44 @@ func TestBuildAlbumImportDTOUsesDeferredCommitArtistID(t *testing.T) {
 	}
 }
 
+func TestListAlbumImportSessionsPageForUserOnlyReturnsSubmittedImports(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+
+	submitted, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status:  AlbumImportStatusReady,
+		Payload: AlbumImportPayload{Album: AlbumImportAlbumPayload{Title: "Submitted"}},
+	})
+	if err != nil {
+		t.Fatalf("create submitted import: %v", err)
+	}
+	var submittedSession model.AlbumImportSession
+	if err := db.First(&submittedSession, "id = ?", submitted.ID).Error; err != nil {
+		t.Fatalf("load submitted import: %v", err)
+	}
+	if err := db.Model(&submittedSession).Update("payload_json", `{"commit_request":{"album":{"title":"Submitted"}},"derived_tracks":[{"title":"Track"}]}`).Error; err != nil {
+		t.Fatalf("save submitted payload: %v", err)
+	}
+
+	if _, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status:  AlbumImportStatusPendingUpload,
+		Payload: AlbumImportPayload{Album: AlbumImportAlbumPayload{Title: "Not submitted"}},
+	}); err != nil {
+		t.Fatalf("create unsubmitted import: %v", err)
+	}
+
+	sessions, total, err := svc.ListAlbumImportSessionsPageForUser(user, 1, 50)
+	if err != nil {
+		t.Fatalf("list imports: %v", err)
+	}
+	if total != 1 || len(sessions) != 1 || sessions[0].ID != submitted.ID {
+		t.Fatalf("expected one submitted import, total=%d sessions=%#v", total, sessions)
+	}
+	listDTO := buildAlbumImportListDTO(sessions[0])
+	if listDTO.TrackCount != 1 || !listDTO.HasCommitRequest {
+		t.Fatalf("unexpected list DTO: %#v", listDTO)
+	}
+}
+
 func TestBuildAlbumImportDTOFallsBackToArchiveName(t *testing.T) {
 	dto := buildAlbumImportDTO(model.AlbumImportSession{
 		Files: []model.AlbumImportFile{{Role: AlbumImportFileRoleArchive, FileName: "再想想.zip"}},

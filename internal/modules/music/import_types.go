@@ -280,8 +280,29 @@ type AlbumImportResponse struct {
 }
 
 type AlbumImportListResponse struct {
-	Data []AlbumImportDTO       `json:"data"`
+	Data []AlbumImportListDTO   `json:"data"`
 	Meta PaginationMetaResponse `json:"meta"`
+}
+
+// AlbumImportListDTO is the lightweight projection used by the import center.
+type AlbumImportListDTO struct {
+	ImportID         string                 `json:"importId"`
+	TargetAlbumID    string                 `json:"targetAlbumId"`
+	TargetSongID     string                 `json:"targetSongId"`
+	ArtistID         string                 `json:"artistId"`
+	AlbumTitle       string                 `json:"albumTitle"`
+	Status           string                 `json:"status"`
+	InputMode        string                 `json:"inputMode"`
+	Stage            string                 `json:"stage"`
+	Progress         AlbumImportProgressDTO `json:"progress"`
+	UploadProgress   float64                `json:"uploadProgress"`
+	CoverURL         string                 `json:"coverUrl"`
+	DerivedCover     string                 `json:"derivedCover"`
+	ArchiveName      string                 `json:"archiveName"`
+	TrackCount       int                    `json:"trackCount"`
+	LastSyncedAt     string                 `json:"lastSyncedAt"`
+	ErrorMessage     string                 `json:"errorMessage"`
+	HasCommitRequest bool                   `json:"hasCommitRequest"`
 }
 
 type AlbumImportFileResponse struct {

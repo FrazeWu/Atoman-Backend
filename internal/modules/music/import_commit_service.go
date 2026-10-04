@@ -610,6 +610,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				s.updateAlbumImportNotification(failed)
 				return failed, nil
 			}
+			// Preserve the actionable validation error when the session changed
+			// concurrently and its attention marker could not be saved.
+			return model.AlbumImportSession{}, appErr
 		}
 		return model.AlbumImportSession{}, err
 	}
