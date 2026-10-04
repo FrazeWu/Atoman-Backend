@@ -471,7 +471,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.BlogMarkdownImport{}, &model.BlogMarkdownImportDiagnostic{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
 		&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
 		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.StudioMetricEvent{}, &model.StudioInteractionState{}, &model.StudioReplyTemplate{}, &model.StudioGoalCycle{}, &model.StudioGoal{}, &model.StudioGoalAction{}, &model.StudioGoalReview{}, &model.ContentLifecycleEvent{},
-		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{}, &model.BlogPublishSchedule{}, &model.ContentBlogTag{}, &model.ContentBlogUserTag{}, &model.BlogRecommendationPreference{},
+		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{}, &model.BlogPublishSchedule{}, &model.ContentBlogTag{}, &model.ContentBlogUserTag{}, &model.BlogRecommendationPreference{}, &model.BlogPostReport{}, &model.BlogPostAppeal{},
 		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.BlogRecommendationFeedback{}, &model.ShortNote{},
 		&model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.ShortNoteRead{}, &model.Like{}, &model.PostRating{},
 		&model.ReputationRun{}, &model.BlogQualitySnapshot{}, &model.UserReputationSnapshot{},
