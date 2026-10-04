@@ -2700,6 +2700,35 @@ func TestRegisterRoutesPublishPostUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestBlogPublishContractMakesPostPublicAfterRefresh(t *testing.T) {
+	service, _, author := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, author, "Release contract")
+	post, err := service.CreatePost(author, CreatePostRequest{
+		ChannelID: channel.ID, CollectionID: collection.ID, Title: "Release contract post",
+		Content: "Published content", Status: "draft", Visibility: "public",
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	authorRouter := newBlogHTTPRouter(service, &author)
+	publishResponse := httptest.NewRecorder()
+	authorRouter.ServeHTTP(publishResponse, httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/publish", nil))
+	if publishResponse.Code != http.StatusOK {
+		t.Fatalf("expected publish 200, got %d: %s", publishResponse.Code, publishResponse.Body.String())
+	}
+	anonymousRouter := newBlogHTTPRouter(service, nil)
+	detailResponse := httptest.NewRecorder()
+	anonymousRouter.ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil))
+	if detailResponse.Code != http.StatusOK || !bytes.Contains(detailResponse.Body.Bytes(), []byte(post.ID.String())) {
+		t.Fatalf("expected public detail after publish, got %d: %s", detailResponse.Code, detailResponse.Body.String())
+	}
+	listResponse := httptest.NewRecorder()
+	anonymousRouter.ServeHTTP(listResponse, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts?page=1&page_size=20", nil))
+	if listResponse.Code != http.StatusOK || !bytes.Contains(listResponse.Body.Bytes(), []byte(post.ID.String())) {
+		t.Fatalf("expected published post in refreshed public list, got %d: %s", listResponse.Code, listResponse.Body.String())
+	}
+}
+
 func TestRegisterRoutesUnpublishPostUpdatesStatus(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
