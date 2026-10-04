@@ -80,45 +80,12 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	}
 
 	sourcePriorities := newSubscriptionPriorityIndex(subscriptions)
-	userIDs := append([]uuid.UUID(nil), followedUserIDs...)
-	channelIDs := make([]uuid.UUID, 0)
-	collectionIDs := make([]uuid.UUID, 0)
-	feedSourceIDs := make([]uuid.UUID, 0)
-	feedSourceVisibleAfter := make(map[uuid.UUID]time.Time)
-	for _, sub := range subscriptions {
-		if sub.IsPaused {
-			continue
-		}
-		if sub.FeedSource == nil {
-			continue
-		}
-		switch sub.FeedSource.SourceType {
-		case "internal_user":
-			if sub.FeedSource.SourceID != nil {
-				userIDs = append(userIDs, *sub.FeedSource.SourceID)
-			}
-		case "internal_channel":
-			if sub.FeedSource.SourceID != nil {
-				channelIDs = append(channelIDs, *sub.FeedSource.SourceID)
-			}
-		case "internal_collection":
-			if sub.FeedSource.SourceID != nil {
-				collectionIDs = append(collectionIDs, *sub.FeedSource.SourceID)
-			}
-		case "external_rss":
-			if query.ContentType != "blog" {
-				feedSourceIDs = append(feedSourceIDs, sub.FeedSource.ID)
-				if sub.ResumedAfter != nil {
-					feedSourceVisibleAfter[sub.FeedSource.ID] = *sub.ResumedAfter
-				}
-			}
-		}
-	}
-
-	userIDs = dedupeUUIDs(userIDs)
-	channelIDs = dedupeUUIDs(channelIDs)
-	collectionIDs = dedupeUUIDs(collectionIDs)
-	feedSourceIDs = dedupeUUIDs(feedSourceIDs)
+	sources := buildSubscribedFeedSources(subscriptions, followedUserIDs, query)
+	userIDs := sources.userIDs
+	channelIDs := sources.channelIDs
+	collectionIDs := sources.collectionIDs
+	feedSourceIDs := sources.feedSourceIDs
+	feedSourceVisibleAfter := sources.visibleAfter
 	if query.ContentType == "blog" {
 		return s.getSubscribedBlogFeed(user.ID, userIDs, channelIDs, collectionIDs, query)
 	}
