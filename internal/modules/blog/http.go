@@ -58,6 +58,10 @@ type blogRecommendationFeedbackInput struct {
 	Action    string    `json:"action" binding:"required"`
 }
 
+type blogRecommendationPreferenceInput struct {
+	Enabled bool `json:"enabled"`
+}
+
 type reorderCollectionPostsInput struct {
 	PostIDs []string `json:"post_ids"`
 }
@@ -114,6 +118,11 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PUT("/collections/:id", h.updateCollection)
 	group.DELETE("/collections/:id", h.deleteCollection)
 	group.GET("/posts/:id/likes/count", h.getPostLikesCount)
+	group.GET("/posts/:id/public-tags", h.getPublicBlogTags)
+	group.POST("/posts/:id/public-tags", h.createPublicBlogTag)
+	group.DELETE("/posts/:id/public-tags/:tag_id", h.deletePublicBlogTag)
+	group.POST("/posts/:id/reports", h.reportBlogPost)
+	group.POST("/posts/:id/appeals", h.appealBlogPost)
 	group.POST("/likes", h.createLike)
 	group.DELETE("/likes", h.deleteLike)
 	group.PUT("/posts/:id/rating", h.setPostRating)
@@ -127,6 +136,11 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/posts", h.listPosts)
 	group.GET("/search", h.searchBlogPosts)
 	group.GET("/recommend/posts", h.listRecommendedPosts)
+	group.GET("/recommendation-preference", h.getBlogRecommendationPreference)
+	group.PUT("/recommendation-preference", h.updateBlogRecommendationPreference)
+	group.DELETE("/recommendation-data", h.clearBlogRecommendationData)
+	group.GET("/admin/blog/post-reports", h.listBlogPostReports)
+	group.PUT("/admin/blog/post-reports/:report_id/moderation", h.moderateBlogPostReport)
 	group.POST("/recommendation-feedback", h.createBlogRecommendationFeedback)
 	group.DELETE("/recommendation-feedback/:id", h.deleteBlogRecommendationFeedback)
 	group.GET("/digest", h.getBlogDigest)

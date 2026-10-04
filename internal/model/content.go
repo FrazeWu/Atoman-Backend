@@ -54,6 +54,16 @@ type ContentBlogTag struct {
 
 func (ContentBlogTag) TableName() string { return "content_blog_tags" }
 
+// ContentBlogUserTag stores a reader-contributed topic label for a published blog post.
+type ContentBlogUserTag struct {
+	Base
+	ContentID uuid.UUID `json:"content_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_content_blog_user_tag,priority:1"`
+	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_content_blog_user_tag,priority:2"`
+	Name      string    `json:"name" gorm:"type:varchar(48);not null;uniqueIndex:idx_content_blog_user_tag,priority:3;index"`
+}
+
+func (ContentBlogUserTag) TableName() string { return "content_blog_user_tags" }
+
 type ContentBlogVersion struct {
 	Base
 	ContentID    uuid.UUID  `json:"content_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_content_blog_version,priority:1"`

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
+	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -151,4 +153,78 @@ func (h *Handler) getBlogDigest(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, result)
+}
+
+// getBlogRecommendationPreference godoc
+// @Summary 获取博客个性化推荐设置
+// @Tags blog
+// @Security BearerAuth
+// @Security CookieAuth
+// @Success 200 {object} model.BlogRecommendationPreference
+// @Router /api/v1/blog/recommendation-preference [get]
+func (h *Handler) getBlogRecommendationPreference(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	pref := model.BlogRecommendationPreference{UserID: user.ID, Enabled: true}
+	if err := h.service.db.Where("user_id = ?", user.ID).FirstOrCreate(&pref).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, pref)
+}
+
+// updateBlogRecommendationPreference godoc
+// @Summary 更新博客个性化推荐设置
+// @Tags blog
+// @Accept json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param input body blogRecommendationPreferenceInput true "个性化设置"
+// @Success 200 {object} model.BlogRecommendationPreference
+// @Router /api/v1/blog/recommendation-preference [put]
+func (h *Handler) updateBlogRecommendationPreference(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var input blogRecommendationPreferenceInput
+	if err := bindJSON(c, &input); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	pref := model.BlogRecommendationPreference{UserID: user.ID, Enabled: input.Enabled, UpdatedAt: time.Now().UTC()}
+	if err := h.service.db.Save(&pref).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, pref)
+}
+
+// clearBlogRecommendationData godoc
+// @Summary 清除博客推荐数据
+// @Tags blog
+// @Security BearerAuth
+// @Security CookieAuth
+// @Success 204
+// @Router /api/v1/blog/recommendation-data [delete]
+func (h *Handler) clearBlogRecommendationData(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND content_type = ?", user.ID, "blog").Delete(&model.ContentLifecycleEvent{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("user_id = ?", user.ID).Delete(&model.BlogRecommendationFeedback{}).Error
+	}); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

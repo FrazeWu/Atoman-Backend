@@ -33,18 +33,19 @@ type BlogSearchQuery struct {
 }
 
 type BlogSearchResultDTO struct {
-	ID           uuid.UUID                 `json:"id"`
-	Title        string                    `json:"title"`
-	Summary      string                    `json:"summary"`
-	Snippet      string                    `json:"snippet"`
-	MatchField   string                    `json:"match_field"`
-	CoverURL     string                    `json:"cover_url"`
-	PublishedAt  *time.Time                `json:"published_at,omitempty"`
-	CreatedAt    time.Time                 `json:"created_at"`
-	Channel      *RecommendationChannelDTO `json:"channel,omitempty"`
-	User         *RecommendationAuthorDTO  `json:"user,omitempty"`
-	CollectionID *uuid.UUID                `json:"collection_id,omitempty"`
-	TargetPath   string                    `json:"target_path"`
+	ID             uuid.UUID                 `json:"id"`
+	Title          string                    `json:"title"`
+	Summary        string                    `json:"summary"`
+	Snippet        string                    `json:"snippet"`
+	MatchField     string                    `json:"match_field"`
+	CoverURL       string                    `json:"cover_url"`
+	PublishedAt    *time.Time                `json:"published_at,omitempty"`
+	CreatedAt      time.Time                 `json:"created_at"`
+	Channel        *RecommendationChannelDTO `json:"channel,omitempty"`
+	User           *RecommendationAuthorDTO  `json:"user,omitempty"`
+	CollectionID   *uuid.UUID                `json:"collection_id,omitempty"`
+	TargetPath     string                    `json:"target_path"`
+	PublicTagCount int64                     `json:"public_tag_count"`
 }
 
 type BlogDigestItemDTO struct {
@@ -142,11 +143,15 @@ func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSear
 		if text == "" {
 			snippet, matchField = content.Summary, "tag"
 		}
+		var publicTagCount int64
+		if err := s.db.Model(&model.ContentBlogUserTag{}).Where("content_id = ?", content.ID).Count(&publicTagCount).Error; err != nil {
+			return nil, 0, err
+		}
 		items = append(items, BlogSearchResultDTO{
 			ID: content.ID, Title: content.Title, Summary: content.Summary, Snippet: snippet, MatchField: matchField,
 			CoverURL: content.CoverURL, PublishedAt: content.PublishedAt, CreatedAt: content.CreatedAt,
 			Channel: recommendationChannel(content.Channel), User: recommendationAuthor(content.User),
-			CollectionID: content.CollectionID, TargetPath: "/posts/post/" + content.ID.String(),
+			CollectionID: content.CollectionID, TargetPath: "/posts/post/" + content.ID.String(), PublicTagCount: publicTagCount,
 		})
 	}
 	return items, total, nil
