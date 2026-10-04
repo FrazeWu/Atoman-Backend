@@ -161,14 +161,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 
 	items := buildSubscribedTimelineItems(posts, videos, feedItems, shortNotes, shortNoteRead, engagementByPostID, episodeByPostID, readMap)
 
-	items = filterTimeline(items, query)
-	if priorityInboxMode {
-		applySubscriptionPriority(items, sourcePriorities)
-		priorityItems, total := priorityInbox(items)
-		return priorityItems, total, nil
-	}
-	sortTimeline(items)
-	paged, total := paginateTimeline(items, normalizedPage(query.Page), normalizedPageSize(query.PageSize))
+	paged, total := finalizeSubscribedTimeline(items, query, priorityInboxMode, sourcePriorities)
 	return paged, total, nil
 }
 
