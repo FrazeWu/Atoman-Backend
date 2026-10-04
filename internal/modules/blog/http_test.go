@@ -211,6 +211,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.ContentPostExtension{},
 		&model.ContentBlogExtension{},
 		&model.ContentBlogTag{},
+		&model.ContentBlogUserTag{},
 		&model.ContentBlogVersion{},
 		&model.ContentBlogDraft{},
 		&model.BlogMarkdownImport{},
@@ -318,6 +319,73 @@ func TestRegisterRoutesCreatePostRequiresCurrentUser(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPublicBlogTagsLifecycle(t *testing.T) {
+	service, db, author := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, author, "Public tags")
+	post, err := service.CreatePost(author, CreatePostRequest{ChannelID: channel.ID, CollectionID: collection.ID, Title: "Tagged", Content: "body", Status: "published", Visibility: "public"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := model.User{Username: "tag-reader", Email: "tag-reader@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&reader).Error; err != nil {
+		t.Fatal(err)
+	}
+	readerContext := authctx.CurrentUser{ID: reader.UUID, Username: reader.Username, Role: reader.Role}
+	router := newBlogHTTPRouter(service, &readerContext)
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/public-tags", bytes.NewBufferString(`{"name":"  Science  "}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"name":"science"`) {
+		t.Fatalf("expected public tag creation, got %d: %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/public-tags", bytes.NewBufferString(`{"name":"science"}`)))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate tag conflict, got %d: %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String()+"/public-tags", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"count":1`) || !strings.Contains(response.Body.String(), `"viewer_added":true`) {
+		t.Fatalf("expected tag list, got %d: %s", response.Code, response.Body.String())
+	}
+	var tag model.ContentBlogUserTag
+	if err := db.Where("content_id = ? AND user_id = ?", post.ID, reader.ID).First(&tag).Error; err != nil {
+		t.Fatal(err)
+	}
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/api/v1/blog/posts/"+post.ID.String()+"/public-tags/"+tag.ID.String(), nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected own tag removal, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestPublicBlogTagsAuthorCanRemoveAnyTag(t *testing.T) {
+	service, db, author := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, author, "Public tag moderation")
+	post, err := service.CreatePost(author, CreatePostRequest{ChannelID: channel.ID, CollectionID: collection.ID, Title: "Tagged", Content: "body", Status: "published", Visibility: "public"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := model.User{Username: "tag-reader-2", Email: "tag-reader-2@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&reader).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ContentBlogUserTag{ContentID: post.ID, UserID: reader.UUID, Name: "science"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var tag model.ContentBlogUserTag
+	if err := db.Where("content_id = ?", post.ID).First(&tag).Error; err != nil {
+		t.Fatal(err)
+	}
+	router := newBlogHTTPRouter(service, &author)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/api/v1/blog/posts/"+post.ID.String()+"/public-tags/"+tag.ID.String(), nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected author removal, got %d: %s", response.Code, response.Body.String())
 	}
 }
 
