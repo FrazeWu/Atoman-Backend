@@ -144,7 +144,7 @@ func (h *Handler) appealBlogPost(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Success 200 {array} model.BlogPostReport
-// @Router /api/v1/admin/blog/post-reports [get]
+// @Router /api/v1/blog/admin/post-reports [get]
 func (h *Handler) listBlogPostReports(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
@@ -168,7 +168,7 @@ func (h *Handler) listBlogPostReports(c *gin.Context) {
 // @Param report_id path string true "举报 UUID"
 // @Param input body blogPostModerationInput true "审核动作"
 // @Success 204
-// @Router /api/v1/admin/blog/post-reports/{report_id}/moderation [put]
+// @Router /api/v1/blog/admin/post-reports/{report_id}/moderation [put]
 func (h *Handler) moderateBlogPostReport(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
