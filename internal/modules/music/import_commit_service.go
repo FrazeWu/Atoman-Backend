@@ -1231,9 +1231,33 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		}
 	}
 	title := strings.TrimSpace(track.Title)
+	titleMatches := func(trackMap map[string]any) bool {
+		for _, candidate := range []string{
+			stringValue(trackMap["title"]),
+			stringValue(trackMap["original_title"]),
+		} {
+			if sameImportedTrackTitle(candidate, title) || sameImportedTrackTitle(candidate, track.OriginalTitle) {
+				return true
+			}
+		}
+		return false
+	}
+	if track.OriginalTrack > 0 {
+		if audio := tryUniqueMatch(func(trackMap map[string]any) bool {
+			if int(int64Value(trackMap["original_track_number"])) != track.OriginalTrack {
+				return false
+			}
+			if track.OriginalDisc <= 0 {
+				return true
+			}
+			return normalizedDiscNumber(int(int64Value(trackMap["original_disc_number"]))) == normalizedDiscNumber(track.OriginalDisc)
+		}); audio.AudioURL != "" {
+			return audio
+		}
+	}
 	if track.TrackNumber > 0 {
 		if audio := tryUniqueMatch(func(trackMap map[string]any) bool {
-			return sameImportedTrackTitle(stringValue(trackMap["title"]), title) &&
+			return titleMatches(trackMap) &&
 				normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))) == normalizedDiscNumber(track.DiscNumber) &&
 				int(int64Value(trackMap["track_number"])) == track.TrackNumber
 		}); audio.AudioURL != "" {
@@ -1241,7 +1265,7 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		}
 	}
 	if audio := tryUniqueMatch(func(trackMap map[string]any) bool {
-		return sameImportedTrackTitle(stringValue(trackMap["title"]), title)
+		return titleMatches(trackMap)
 	}); audio.AudioURL != "" {
 		return audio
 	}
@@ -1263,7 +1287,20 @@ func sameImportedTrackTitle(left, right string) bool {
 	if normalizedMusicText(left) == normalizedMusicText(right) {
 		return true
 	}
-	return compactMusicText(left) == compactMusicText(right)
+	if compactMusicText(left) == compactMusicText(right) {
+		return true
+	}
+	return compactMusicText(importedTrackTitleBase(left)) == compactMusicText(importedTrackTitleBase(right))
+}
+
+func importedTrackTitleBase(value string) string {
+	value = strings.TrimSpace(value)
+	for index, r := range value {
+		if r == '(' || r == '[' || r == '（' || r == '【' {
+			return strings.TrimSpace(value[:index])
+		}
+	}
+	return value
 }
 
 func importTrackMatchState(track AlbumImportTrackPayload, derived derivedTrackAudio) (string, string, string, string, float64, bool) {
