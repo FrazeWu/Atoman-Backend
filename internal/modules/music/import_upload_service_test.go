@@ -647,6 +647,32 @@ func TestCompleteAlbumImportSessionRejectsProcessingAndTerminalStatuses(t *testi
 	}
 }
 
+func TestCompleteAlbumImportSessionQueuesUploadedSessionIdempotently(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)})
+	if err := db.Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Update("upload_status", AlbumImportFileUploadStatusUploaded).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Updates(map[string]any{"status": AlbumImportStatusUploaded, "stage": AlbumImportStageUpload}).Error; err != nil {
+		t.Fatal(err)
+	}
+	queued, err := svc.CompleteAlbumImportSession(user, session.ID)
+	if err != nil {
+		t.Fatalf("complete uploaded session: %v", err)
+	}
+	if queued.Status != AlbumImportStatusQueued || queued.Stage != AlbumImportStageQueued {
+		t.Fatalf("expected uploaded session to queue, got %#v", queued)
+	}
+	var jobs []model.AlbumImportJob
+	if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued {
+		t.Fatalf("expected one queued job, got %#v", jobs)
+	}
+}
+
 func TestCompleteAlbumImportSessionQueuesOneJobIdempotently(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
