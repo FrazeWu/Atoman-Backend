@@ -537,18 +537,10 @@ func (r *Repo) buildFeedItemsBySourceIDsQuery(feedSourceIDs []uuid.UUID, query F
 		}
 		db = db.Where(readClause+" (SELECT 1 FROM feed_item_reads WHERE feed_item_reads.feed_item_id = feed_items.id AND feed_item_reads.user_id = ?)", query.viewerID)
 	}
-	if search := strings.TrimSpace(query.Search); search != "" {
-		like := escapedContainsPattern(search)
-		db = db.Where(
-			`(LOWER(feed_items.title) LIKE ? ESCAPE '\' OR
-			 LOWER(feed_items.summary) LIKE ? ESCAPE '\' OR
-			 LOWER(feed_items.reader_html) LIKE ? ESCAPE '\' OR
-			 LOWER(feed_items.full_text_html) LIKE ? ESCAPE '\' OR
-			 LOWER(feed_sources.title) LIKE ? ESCAPE '\' OR
-			 LOWER(feed_sources.rss_url) LIKE ? ESCAPE '\')`,
-			like, like, like, like, like, like,
-		)
-	}
+	db = applyRecommendationSearchFilter(db, []string{
+		"feed_items.title", "feed_items.summary", "feed_items.reader_html",
+		"feed_items.full_text_html", "feed_sources.title", "feed_sources.rss_url",
+	}, query.Search)
 	return db
 }
 
@@ -1083,24 +1075,7 @@ func (r *Repo) buildExploreFeedItemsQuery(query FeedQuery) *gorm.DB {
 		}
 		db = db.Where(readClause+" (SELECT 1 FROM feed_item_reads WHERE feed_item_reads.feed_item_id = feed_items.id AND feed_item_reads.user_id = ?)", query.viewerID)
 	}
-	if search := strings.TrimSpace(query.Search); search != "" {
-		like := escapedContainsPattern(search)
-		db = db.Where(`feed_items.id IN (
-			SELECT matched_items.id
-			FROM feed_items AS matched_items
-			JOIN feed_sources AS matched_sources ON matched_sources.id = matched_items.feed_source_id
-			WHERE matched_sources.hidden = false
-			  AND matched_items.deleted_at IS NULL
-			  AND (LOWER(matched_items.title) LIKE ? ESCAPE '\' OR LOWER(matched_items.summary) LIKE ? ESCAPE '\')
-			UNION
-			SELECT matched_items.id
-			FROM feed_items AS matched_items
-			JOIN feed_sources AS matched_sources ON matched_sources.id = matched_items.feed_source_id
-			WHERE matched_sources.hidden = false
-			  AND matched_items.deleted_at IS NULL
-			  AND (LOWER(matched_sources.title) LIKE ? ESCAPE '\' OR LOWER(matched_sources.rss_url) LIKE ? ESCAPE '\')
-		)`, like, like, like, like)
-	}
+	db = applyRecommendationFeedItemSearchFilter(db, query.Search)
 	return db
 }
 
