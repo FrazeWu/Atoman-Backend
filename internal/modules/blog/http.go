@@ -58,6 +58,10 @@ type blogRecommendationFeedbackInput struct {
 	Action    string    `json:"action" binding:"required"`
 }
 
+type blogRecommendationPreferenceInput struct {
+	Enabled bool `json:"enabled"`
+}
+
 type reorderCollectionPostsInput struct {
 	PostIDs []string `json:"post_ids"`
 }
@@ -130,6 +134,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/posts", h.listPosts)
 	group.GET("/search", h.searchBlogPosts)
 	group.GET("/recommend/posts", h.listRecommendedPosts)
+	group.GET("/recommendation-preference", h.getBlogRecommendationPreference)
+	group.PUT("/recommendation-preference", h.updateBlogRecommendationPreference)
+	group.DELETE("/recommendation-data", h.clearBlogRecommendationData)
 	group.POST("/recommendation-feedback", h.createBlogRecommendationFeedback)
 	group.DELETE("/recommendation-feedback/:id", h.deleteBlogRecommendationFeedback)
 	group.GET("/digest", h.getBlogDigest)

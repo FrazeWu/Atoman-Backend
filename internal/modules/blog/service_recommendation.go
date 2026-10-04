@@ -12,6 +12,7 @@ import (
 	"atoman/internal/platform/apperr"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -71,6 +72,15 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	personalized := viewerID != nil
+	if viewerID != nil && s.db.Migrator().HasTable(&model.BlogRecommendationPreference{}) {
+		var preference model.BlogRecommendationPreference
+		if err := s.db.Where("user_id = ?", *viewerID).First(&preference).Error; err == nil {
+			personalized = preference.Enabled
+		} else if err != nil && err != gorm.ErrRecordNotFound {
+			return nil, 0, err
+		}
+	}
 
 	var hiddenContentIDs []uuid.UUID
 	if viewerID != nil && s.db.Migrator().HasTable(&model.BlogRecommendationFeedback{}) {
@@ -117,7 +127,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		(SELECT COUNT(*) FROM subscriptions JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id
 			 WHERE feed_sources.source_type = 'internal_channel' AND feed_sources.source_id = posts.channel_id
 			 AND subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL) AS channel_followers_count`)
-	if len(hiddenContentIDs) > 0 {
+	if personalized && len(hiddenContentIDs) > 0 {
 		query = query.Where("posts.id NOT IN ?", hiddenContentIDs)
 	}
 	if searchQuery := strings.TrimSpace(queryText); searchQuery != "" {
@@ -212,13 +222,18 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		publishedAt := blogContentPublishedAt(row.BlogContent)
 		_, subscribed := subscribedChannels[uuidValue(row.ChannelID)]
 		score := composite
-		switch mode {
-		case recommendation.ModeHot:
-			score = blogHotScore(composite, publishedAt, now)
-		case recommendation.ModeFeatured:
-			score = blogRecommendedScore(composite, subscribed, publishedAt, now)
-		case recommendation.ModeDiscover:
-			score = blogRecommendedScore(composite, subscribed, publishedAt, now) + 0.10*(1-signals.Reads)
+		if !personalized {
+			score = float64(publishedAt.UnixNano())
+		}
+		if personalized {
+			switch mode {
+			case recommendation.ModeHot:
+				score = blogHotScore(composite, publishedAt, now)
+			case recommendation.ModeFeatured:
+				score = blogRecommendedScore(composite, subscribed, publishedAt, now)
+			case recommendation.ModeDiscover:
+				score = blogRecommendedScore(composite, subscribed, publishedAt, now) + 0.10*(1-signals.Reads)
+			}
 		}
 		ranked = append(ranked, blogRankedPost{
 			ID: row.ID.String(), ChannelID: blogContentRecommendationSourceKey(row.BlogContent), Score: score,
@@ -233,7 +248,9 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		}
 		return ranked[i].Score > ranked[j].Score
 	})
-	ranked = rerankBlogDiversity(ranked, 2)
+	if personalized {
+		ranked = rerankBlogDiversity(ranked, 2)
+	}
 
 	items := make([]RecommendationItemDTO, 0, len(ranked))
 	for _, rankedItem := range ranked {

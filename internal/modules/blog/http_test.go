@@ -212,6 +212,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.ContentBlogExtension{},
 		&model.ContentBlogTag{},
 		&model.ContentBlogUserTag{},
+		&model.BlogRecommendationPreference{},
 		&model.ContentBlogVersion{},
 		&model.ContentBlogDraft{},
 		&model.BlogMarkdownImport{},
@@ -386,6 +387,38 @@ func TestPublicBlogTagsAuthorCanRemoveAnyTag(t *testing.T) {
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/api/v1/blog/posts/"+post.ID.String()+"/public-tags/"+tag.ID.String(), nil))
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("expected author removal, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestBlogRecommendationPreferenceAndDataReset(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	router := newBlogHTTPRouter(service, &user)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/recommendation-preference", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"enabled":true`) {
+		t.Fatalf("expected default recommendation preference, got %d: %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/blog/recommendation-preference", bytes.NewBufferString(`{"enabled":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"enabled":false`) {
+		t.Fatalf("expected updated recommendation preference, got %d: %s", response.Code, response.Body.String())
+	}
+	if err := db.Create(&model.ContentLifecycleEvent{UserID: &user.ID, ChannelID: uuid.New(), ContentType: "blog", ContentID: uuid.New(), Event: "open", ClientEventID: uuid.NewString()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.BlogRecommendationFeedback{UserID: user.ID, ContentID: uuid.New(), Action: "hide"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/api/v1/blog/recommendation-data", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("expected recommendation data reset, got %d: %s", response.Code, response.Body.String())
+	}
+	var events int64
+	if err := db.Model(&model.ContentLifecycleEvent{}).Where("user_id = ?", user.ID).Count(&events).Error; err != nil || events != 0 {
+		t.Fatalf("expected blog lifecycle events cleared, count=%d err=%v", events, err)
 	}
 }
 
