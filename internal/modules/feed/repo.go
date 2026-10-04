@@ -1303,15 +1303,18 @@ func (r *Repo) ListCuratedExploreSources(limit int, languageCode string) ([]Expl
 		Select(`
 			feed_sources.id, feed_sources.title, feed_sources.rss_url, feed_sources.canonical_url,
 			feed_sources.cover_url, feed_sources.category,
-			COUNT(DISTINCT subscriptions.id) AS subscription_count,
-			COUNT(DISTINCT feed_items.id) AS recent_item_count,
-			MAX(feed_items.published_at) AS last_published_at`).
-		Joins("LEFT JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id AND subscriptions.deleted_at IS NULL").
-		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id AND feed_items.deleted_at IS NULL").
+			(SELECT COUNT(*) FROM subscriptions AS source_subscriptions
+			 WHERE source_subscriptions.feed_source_id = feed_sources.id
+			   AND source_subscriptions.deleted_at IS NULL) AS subscription_count,
+			(SELECT COUNT(*) FROM feed_items AS source_items
+			 WHERE source_items.feed_source_id = feed_sources.id
+			   AND source_items.deleted_at IS NULL) AS recent_item_count,
+			(SELECT MAX(source_items.published_at) FROM feed_items AS source_items
+			 WHERE source_items.feed_source_id = feed_sources.id
+			   AND source_items.deleted_at IS NULL) AS last_published_at`).
 		Where("feed_sources.source_type = ? AND feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL", "external_rss", false).
 		Where("LOWER(TRIM(feed_sources.title)) IN ?", normalizedTitles).
-		Group("feed_sources.id").
-		Having("COUNT(DISTINCT feed_items.id) > 0").
+		Where("EXISTS (SELECT 1 FROM feed_items AS source_items WHERE source_items.feed_source_id = feed_sources.id AND source_items.deleted_at IS NULL)").
 		Order("subscription_count DESC, last_published_at DESC NULLS LAST, feed_sources.created_at DESC").
 		Limit(limit * 2).
 		Scan(&rawRows).Error; err != nil {
