@@ -1,6 +1,11 @@
 package music
 
-import "testing"
+import (
+	"testing"
+
+	"atoman/internal/model"
+	"github.com/google/uuid"
+)
 
 func TestMusicAlbumImportSourceKeyAcceptsPlaybackURLPrefix(t *testing.T) {
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
@@ -24,6 +29,37 @@ func TestMatchDerivedTrackAudioUsesAudioKeyAfterTrackRenameAndReorder(t *testing
 
 	if matched.AudioURL != "https://cdn.test/earfquake.mp3" {
 		t.Fatalf("expected selected audio to follow audio key, got %#v", matched)
+	}
+}
+
+func TestMatchDerivedTrackAudioUsesPlaybackKeyWhenAudioURLIsMissing(t *testing.T) {
+	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
+
+	matched := matchDerivedTrackAudio([]any{
+		map[string]any{"title": "Track", "audio_key": "music/imports/track.mp3"},
+	}, AlbumImportTrackPayload{
+		Title: "Track", AudioKey: "music/imports/track.mp3",
+	}, map[int]bool{})
+
+	if matched.AudioURL != "https://cdn.example.test/music/imports/track.mp3" {
+		t.Fatalf("expected playback key to resolve to audio URL, got %#v", matched)
+	}
+}
+
+func TestHydrateDerivedTrackAudioUsesProcessedFileByID(t *testing.T) {
+	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
+	fileID := uuid.New()
+	rawTracks := []any{map[string]any{"file_id": fileID.String(), "title": "Track"}}
+
+	hydrateDerivedTrackAudio(rawTracks, map[string]model.AlbumImportFile{
+		fileID.String(): {Base: model.Base{ID: fileID}, PlaybackKey: "music/imports/track.mp3"},
+	}, nil)
+	matched := matchDerivedTrackAudio(rawTracks, AlbumImportTrackPayload{FileID: fileID.String()}, map[int]bool{})
+
+	if matched.AudioURL != "https://cdn.example.test/music/imports/track.mp3" {
+		t.Fatalf("expected processed file to restore audio URL, got %#v", matched)
 	}
 }
 
