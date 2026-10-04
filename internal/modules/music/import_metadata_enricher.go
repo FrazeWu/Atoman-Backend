@@ -204,12 +204,13 @@ type musicBrainzReleaseGroup struct {
 }
 
 type discogsRelease struct {
-	ID       int    `json:"id"`
-	Title    string `json:"title"`
-	Released string `json:"released"`
-	Year     int    `json:"year"`
-	URI      string `json:"uri"`
-	Artists  []struct {
+	ID         int    `json:"id"`
+	Title      string `json:"title"`
+	Released   string `json:"released"`
+	Year       int    `json:"year"`
+	URI        string `json:"uri"`
+	CoverImage string `json:"-"`
+	Artists    []struct {
 		Name string `json:"name"`
 		ANV  string `json:"anv"`
 	} `json:"artists"`
@@ -239,6 +240,7 @@ type discogsSearchResult struct {
 	ResourceURL string `json:"resource_url"`
 	Title       string `json:"title"`
 	Type        string `json:"type"`
+	CoverImage  string `json:"cover_image"`
 }
 
 type discogsSearchResponse struct {
@@ -587,6 +589,7 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 					if err := e.discogsJSON(ctx, endpoint, &release); err != nil {
 						continue
 					}
+					release.CoverImage = strings.TrimSpace(candidate.CoverImage)
 					if resultType == "master" && strings.TrimSpace(release.URI) == "" {
 						release.URI = fmt.Sprintf("https://www.discogs.com/master/%d", candidate.ID)
 					}
@@ -890,7 +893,7 @@ func discogsReleaseCoverURL(release discogsRelease) string {
 			return strings.TrimSpace(image.URI)
 		}
 	}
-	return ""
+	return strings.TrimSpace(release.CoverImage)
 }
 
 func discogsReleaseArtistNames(release discogsRelease) []string {

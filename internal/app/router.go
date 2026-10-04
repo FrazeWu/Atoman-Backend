@@ -88,10 +88,14 @@ func RegisterV1Routes(
 		if musicBrainzBaseURL == "" {
 			musicBrainzBaseURL = "https://musicbrainz.org"
 		}
+		coverArtBaseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("COVER_ART_ARCHIVE_BASE_URL")), "/")
+		if coverArtBaseURL == "" {
+			coverArtBaseURL = "https://coverartarchive.org"
+		}
 		metadataEnricher := music.NewExternalAlbumMetadataEnricher(
 			&http.Client{Timeout: 5 * time.Second},
 			musicBrainzBaseURL,
-			"",
+			coverArtBaseURL,
 			"",
 			userAgent,
 		)
@@ -99,7 +103,7 @@ func RegisterV1Routes(
 		if discogsBaseURL == "" {
 			discogsBaseURL = "https://api.discogs.com"
 		}
-		metadataEnricher.WithDiscogs(discogsBaseURL, discogsKey, discogsSecret)
+		metadataEnricher.WithDiscogs(discogsBaseURL, discogsKey, discogsSecret).WithDiscogsFirst()
 		musicService.WithAlbumLinkSuggestionProvider(metadataEnricher).WithAlbumImportMetadataEnricher(metadataEnricher)
 	}
 	music.RegisterRoutes(musicGroup, musicService)

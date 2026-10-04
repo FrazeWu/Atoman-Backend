@@ -353,6 +353,34 @@ func TestExternalAlbumMetadataEnricherKeepsDiscogsAlbumMetadataWithPartialTrackM
 	}
 }
 
+func TestExternalAlbumMetadataEnricherUsesDiscogsSearchCoverWhenReleaseHasNoImages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/database/search":
+			_, _ = w.Write([]byte(`{"results":[{"id":322,"type":"release","cover_image":"https://img.example/search-cover.jpg"}]}`))
+		case "/releases/322":
+			_, _ = w.Write([]byte(`{"id":322,"title":"菊花夜行军","released":"2001-04-01","artists":[{"name":"交工乐队"}],"tracklist":[{"position":"1","title":"第一首","type_":"track"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), "", "", "", "Atoman/test").
+		WithDiscogs(server.URL, "consumer-key", "consumer-secret").WithDiscogsFirst()
+	enricher.discogsWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "菊花夜行军", Artist: "交工乐队", SkipLyrics: true,
+		Tracks: []AlbumImportMetadataTrack{{Title: "第一首", TrackNumber: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MetadataSource != "discogs" || result.CoverURL != "https://img.example/search-cover.jpg" {
+		t.Fatalf("expected Discogs search cover fallback, got %#v", result)
+	}
+}
+
 func TestDiscogsArtistMatchesANV(t *testing.T) {
 	release := discogsRelease{
 		Artists: []struct {
