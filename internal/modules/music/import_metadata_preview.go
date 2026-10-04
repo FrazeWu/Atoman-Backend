@@ -2,11 +2,20 @@ package music
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authctx"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type AlbumImportMetadataPreviewInput struct {
@@ -49,6 +58,74 @@ type AlbumImportMetadataPreviewDTO struct {
 	MissingArtists  []string                          `json:"missingArtists,omitempty"`
 	MetadataSources []AlbumImportMetadataSourceResult `json:"sources,omitempty"`
 	Tracks          []AlbumImportDTOTrack             `json:"tracks"`
+}
+
+// MatchAlbumImportMetadata performs the one authoritative external lookup for
+// an import session and persists its result before audio processing completes.
+func (s *Service) MatchAlbumImportMetadata(ctx context.Context, user authctx.CurrentUser, sessionID uuid.UUID, input AlbumImportMetadataPreviewInput) (model.AlbumImportSession, error) {
+	if user.ID == uuid.Nil {
+		return model.AlbumImportSession{}, apperr.Unauthorized("Login required")
+	}
+	if s == nil || s.db == nil {
+		return model.AlbumImportSession{}, errors.New("music import database is required")
+	}
+	var session model.AlbumImportSession
+	if err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", sessionID, user.ID).First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.AlbumImportSession{}, apperr.NotFound("music.import_not_found", "Import session not found")
+		}
+		return model.AlbumImportSession{}, err
+	}
+	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	locked, _ := payload["metadata_match_locked"].(bool)
+	if locked {
+		return loadAlbumImportSession(s.db, sessionID, &user.ID)
+	}
+	preview, err := s.PreviewAlbumImportMetadata(ctx, input)
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	result := AlbumImportMetadataResult{
+		AlbumTitle: preview.AlbumTitle, ReleaseDate: preview.ReleaseDate, CoverURL: preview.CoverURL,
+		AlbumType: preview.AlbumType, SourceURL: preview.SourceURL, MetadataSource: preview.MetadataSource,
+		ExternalID: preview.ExternalID, MatchStatus: preview.MatchStatus, MatchConfidence: preview.MatchConfidence,
+		MetadataError: preview.MetadataError, Genres: preview.Genres, Styles: preview.Styles, Labels: preview.Labels,
+		Country: preview.Country, Formats: preview.Formats, MissingArtists: preview.MissingArtists,
+		MetadataSources: preview.MetadataSources, Tracks: preview.Tracks,
+	}
+	if result.MatchStatus == "" {
+		result.MatchStatus = model.MusicMatchUnmatched
+	}
+	if err := s.persistAlbumImportMetadataMatch(ctx, &session, result); err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	return loadAlbumImportSession(s.db, sessionID, &user.ID)
+}
+
+func (s *Service) persistAlbumImportMetadataMatch(ctx context.Context, session *model.AlbumImportSession, result AlbumImportMetadataResult) error {
+	if err := (&MediaImportProcessor{db: s.db}).persistDerivedMetadataResult(ctx, session, nil, result); err != nil {
+		return err
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var latest model.AlbumImportSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&latest, "id = ?", session.ID).Error; err != nil {
+			return err
+		}
+		payload, err := readAlbumImportPayloadMap(latest.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		payload["metadata_match_started"] = true
+		payload["metadata_match_locked"] = true
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&latest).Update("payload_json", string(encoded)).Error
+	})
 }
 
 func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImportMetadataPreviewInput) (AlbumImportMetadataPreviewDTO, error) {

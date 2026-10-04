@@ -41,6 +41,35 @@ func (h *Handler) previewAlbumImportMetadata(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, preview)
 }
 
+// matchAlbumImportMetadata godoc
+// @Summary 保存专辑导入匹配结果
+// @Tags music-imports
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param sessionId path string true "导入会话 UUID"
+// @Param input body AlbumImportMetadataPreviewInput true "本地读取的专辑与曲目元信息"
+// @Success 200 {object} AlbumImportResponse
+// @Router /api/v1/music/imports/albums/{sessionId}/metadata-match [post]
+func (h *Handler) matchAlbumImportMetadata(c *gin.Context) {
+	user, sessionID, ok := albumImportSessionRouteUser(c)
+	if !ok {
+		return
+	}
+	var req AlbumImportMetadataPreviewInput
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	session, err := h.service.MatchAlbumImportMetadata(c.Request.Context(), user, sessionID, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, buildAlbumImportDTO(session))
+}
+
 // createAlbumImportSession godoc
 // @Summary 创建专辑导入会话
 // @Tags music-imports
