@@ -8,11 +8,17 @@ import (
 )
 
 type Service struct {
-	db         *gorm.DB
-	repo       *Repo
-	syncSource func(*gorm.DB, model.FeedSource) (legacyfeed.RSSSyncResult, error)
+	db                  *gorm.DB
+	repo                *Repo
+	syncSource          func(*gorm.DB, model.FeedSource) (legacyfeed.RSSSyncResult, error)
+	recommendationCache recommendationCache
 }
 
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db, repo: NewRepo(db), syncSource: legacyfeed.SyncSingleRSSWithResult}
+	return &Service{
+		db:                  db,
+		repo:                NewRepo(db),
+		syncSource:          legacyfeed.SyncSingleRSSWithResult,
+		recommendationCache: newRecommendationCacheFromEnv(),
+	}
 }

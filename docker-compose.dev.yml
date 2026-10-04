@@ -27,6 +27,20 @@ services:
       timeout: 5s
       retries: 20
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - atoman-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   db-init:
     image: postgres:16-alpine
     depends_on:
@@ -76,4 +90,5 @@ services:
 
 volumes:
   atoman-postgres-data:
+  atoman-redis-data:
   atoman-minio-data:
