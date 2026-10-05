@@ -40,6 +40,7 @@ type CatalogBook struct {
 	ISBN13            string
 	PublishedYear     int
 	PageCount         int
+	Binding           string
 	CoverURL          string
 	WorkSourceURL     string
 	EditionSourceURL  string

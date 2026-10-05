@@ -244,6 +244,7 @@ func findOrCreateBookEdition(tx *gorm.DB, record CatalogBook, workID uuid.UUID) 
 		Language:        strings.TrimSpace(record.Language),
 		PublishedDate:   publishedDate,
 		PageCount:       record.PageCount,
+		Binding:         strings.TrimSpace(record.Binding),
 		CoverURL:        strings.TrimSpace(record.CoverURL),
 		CoverSource:     sourceURL,
 		LifecycleStatus: model.BookLifecycleStatusDraft,
