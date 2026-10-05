@@ -15770,6 +15770,15 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "艺术家专辑关系",
+                        "name": "artist_relation",
+                        "in": "query",
+                        "enum": [
+                            "participating"
+                        ]
+                    },
+                    {
+                        "type": "string",
                         "description": "标签 ID",
                         "name": "tag_id",
                         "in": "query"

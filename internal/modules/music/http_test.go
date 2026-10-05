@@ -346,6 +346,49 @@ func TestRegisterRoutesAlbumListReturnsOnlyAlbumEntities(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesAlbumListReturnsParticipatingGroupAlbums(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	member := model.Artist{Name: "Band Member", EntryStatus: "open"}
+	group := model.Artist{Name: "The Group", ArtistForm: "group", EntryStatus: "open"}
+	if err := db.Create(&member).Error; err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := db.Create(&model.ArtistMember{GroupArtistID: group.ID, MemberArtistID: member.ID}).Error; err != nil {
+		t.Fatalf("create artist membership: %v", err)
+	}
+	participating := model.Album{Title: "Group Album", AlbumType: "album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&participating).Error; err != nil {
+		t.Fatalf("create participating album: %v", err)
+	}
+	if err := db.Create(&model.AlbumArtist{AlbumID: participating.ID, ArtistID: group.ID, Role: "primary", Position: 1}).Error; err != nil {
+		t.Fatalf("create group album artist: %v", err)
+	}
+
+	response := httptest.NewRecorder()
+	path := "/api/v1/music/albums?artist_id=" + member.ID.String() + "&artist_relation=participating"
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected participating album list to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			Title string `json:"title"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode participating albums: %v", err)
+	}
+	if payload.Meta.Total != 1 || len(payload.Data) != 1 || payload.Data[0].Title != participating.Title {
+		t.Fatalf("unexpected participating albums: %#v", payload)
+	}
+}
+
 func TestRegisterRoutesSongListIncludesAlbumTracksForFeaturedArtist(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	primary := model.Artist{Name: "Primary Artist", EntryStatus: "open"}

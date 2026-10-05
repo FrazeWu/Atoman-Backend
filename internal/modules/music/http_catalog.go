@@ -431,6 +431,7 @@ func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 // @Produce json
 // @Param q query string false "搜索关键词"
 // @Param artist_id query string false "艺术家 ID"
+// @Param artist_relation query string false "艺术家专辑关系" Enums(participating)
 // @Param tag_id query string false "标签 ID"
 // @Param sort query string false "排序方式"
 // @Param page query int false "页码"
@@ -442,7 +443,12 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	query := strings.TrimSpace(c.Query("q"))
 	artistIDRaw := strings.TrimSpace(c.Query("artist_id"))
+	artistRelation := strings.ToLower(strings.TrimSpace(c.Query("artist_relation")))
 	sort := strings.TrimSpace(c.Query("sort"))
+	if artistRelation != "" && artistRelation != "participating" {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "artist_relation must be participating"))
+		return
+	}
 
 	cursorRaw, useCursor := c.GetQuery("cursor")
 	cursor, err := parseMusicCreatedAtCursor(strings.TrimSpace(cursorRaw))
@@ -474,11 +480,28 @@ func (h *Handler) listAlbums(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
-		artistVisibility, artistArgs := musicEntryVisibilityCondition("filter_artists", "created_by", viewerPtr, true)
-		db = db.Joins("JOIN album_artists AS filter_album_artists ON filter_album_artists.album_id = \"Albums\".id").
-			Joins("JOIN \"Artists\" AS filter_artists ON filter_artists.id = filter_album_artists.artist_id AND "+artistVisibility, artistArgs...).
-			Where("filter_album_artists.artist_id = ?", artistID)
-		joinedArtists = true
+		if artistRelation == "participating" {
+			groupVisibility, groupArgs := musicEntryVisibilityCondition("participating_groups", "created_by", viewerPtr, true)
+			whereArgs := append([]any{artistID}, groupArgs...)
+			db = db.Where(`EXISTS (
+				SELECT 1
+				FROM album_artists AS participating_album_artists
+				JOIN artist_members AS participating_members
+				  ON participating_members.group_artist_id = participating_album_artists.artist_id
+				 AND participating_members.member_artist_id = ?
+				 AND participating_members.deleted_at IS NULL
+				JOIN "Artists" AS participating_groups
+				  ON participating_groups.id = participating_album_artists.artist_id
+				 AND `+groupVisibility+`
+				WHERE participating_album_artists.album_id = "Albums".id
+			)`, whereArgs...)
+		} else {
+			artistVisibility, artistArgs := musicEntryVisibilityCondition("filter_artists", "created_by", viewerPtr, true)
+			db = db.Joins("JOIN album_artists AS filter_album_artists ON filter_album_artists.album_id = \"Albums\".id").
+				Joins("JOIN \"Artists\" AS filter_artists ON filter_artists.id = filter_album_artists.artist_id AND "+artistVisibility, artistArgs...).
+				Where("filter_album_artists.artist_id = ?", artistID)
+			joinedArtists = true
+		}
 	}
 	if tagIDRaw := strings.TrimSpace(c.Query("tag_id")); tagIDRaw != "" {
 		tagID, err := parseMusicID(tagIDRaw, "tag_id")

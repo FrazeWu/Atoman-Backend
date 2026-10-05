@@ -18926,6 +18926,12 @@ paths:
         in: query
         name: artist_id
         type: string
+      - description: 艺术家专辑关系
+        enum:
+        - participating
+        in: query
+        name: artist_relation
+        type: string
       - description: 标签 ID
         in: query
         name: tag_id
