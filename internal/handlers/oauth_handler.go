@@ -85,7 +85,7 @@ func configuredOAuthFrontendURL() string {
 }
 
 func RegisterOAuthRoutes(group *gin.RouterGroup, oauthService *service.OAuthService, frontendURL string) {
-	handler := &OAuthHandler{service: oauthService, frontendURL: strings.TrimRight(frontendURL, "/"), pendingRate: ratelimit.New()}
+	handler := &OAuthHandler{service: oauthService, frontendURL: strings.TrimRight(frontendURL, "/"), pendingRate: ratelimit.NewFromEnv()}
 	group.GET("/oauth/providers", handler.providers)
 	group.GET("/oauth/:provider/start", middleware.OptionalAuthMiddleware(), handler.start)
 	group.GET("/oauth/:provider/callback", handler.callback)

@@ -11,14 +11,20 @@ import (
 
 	"atoman/internal/modules/recommendation"
 
+	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 )
 
 const recommendationCacheTTL = 2 * time.Minute
+const curatedSourceCacheTTL = 10 * time.Minute
 
 type recommendationCacheEntry struct {
 	Items []RecommendationItemDTO `json:"items"`
 	Total int64                   `json:"total"`
+}
+
+type curatedSourceCacheEntry struct {
+	Sources []ExploreSourceRow `json:"sources"`
 }
 
 type recommendationCache interface {
@@ -61,6 +67,11 @@ func recommendationCacheKey(kind string, mode recommendation.Mode, category, the
 	)
 }
 
+func curatedSourceCacheKey(language string) string {
+	language = strings.ToLower(strings.TrimSpace(language))
+	return "atoman:feed:recommendation:sources:v1:" + url.QueryEscape(language)
+}
+
 func marshalRecommendationCacheEntry(entry recommendationCacheEntry) (string, error) {
 	payload, err := json.Marshal(entry)
 	if err != nil {
@@ -73,6 +84,22 @@ func unmarshalRecommendationCacheEntry(payload string) (recommendationCacheEntry
 	var entry recommendationCacheEntry
 	if err := json.Unmarshal([]byte(payload), &entry); err != nil {
 		return recommendationCacheEntry{}, err
+	}
+	return entry, nil
+}
+
+func marshalCuratedSourceCacheEntry(entry curatedSourceCacheEntry) (string, error) {
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
+}
+
+func unmarshalCuratedSourceCacheEntry(payload string) (curatedSourceCacheEntry, error) {
+	var entry curatedSourceCacheEntry
+	if err := json.Unmarshal([]byte(payload), &entry); err != nil {
+		return curatedSourceCacheEntry{}, err
 	}
 	return entry, nil
 }
@@ -105,4 +132,54 @@ func (s *Service) writeRecommendationCache(key string, entry recommendationCache
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
 	_ = s.recommendationCache.Set(ctx, key, payload, recommendationCacheTTL)
+}
+
+func (s *Service) readCuratedSourceCache(language string) ([]ExploreSourceRow, bool) {
+	if s.recommendationCache == nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+	payload, err := s.recommendationCache.Get(ctx, curatedSourceCacheKey(language))
+	if err != nil {
+		return nil, false
+	}
+	entry, err := unmarshalCuratedSourceCacheEntry(payload)
+	if err != nil {
+		return nil, false
+	}
+	return entry.Sources, true
+}
+
+func (s *Service) writeCuratedSourceCache(language string, sources []ExploreSourceRow) {
+	if s.recommendationCache == nil {
+		return
+	}
+	payload, err := marshalCuratedSourceCacheEntry(curatedSourceCacheEntry{Sources: sources})
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+	_ = s.recommendationCache.Set(ctx, curatedSourceCacheKey(language), payload, curatedSourceCacheTTL)
+}
+
+func (s *Service) listCuratedRecommendationSources(language string) ([]ExploreSourceRow, error) {
+	if cached, ok := s.readCuratedSourceCache(language); ok {
+		return cached, nil
+	}
+	sources, err := s.repo.ListCuratedExploreSources(recommendationFeaturedSourceLimit, language)
+	if err != nil {
+		return nil, err
+	}
+	s.writeCuratedSourceCache(language, sources)
+	return sources, nil
+}
+
+func curatedSourceIDList(sources []ExploreSourceRow) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(sources))
+	for _, source := range sources {
+		ids = append(ids, source.ID)
+	}
+	return ids
 }

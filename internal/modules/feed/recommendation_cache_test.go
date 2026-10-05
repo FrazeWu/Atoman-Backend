@@ -2,8 +2,10 @@ package feed
 
 import (
 	"testing"
+	"time"
 
 	"atoman/internal/modules/recommendation"
+	"github.com/google/uuid"
 )
 
 func TestRecommendationCacheKeyIncludesPublicFilters(t *testing.T) {
@@ -19,6 +21,37 @@ func TestRecommendationCacheKeyIncludesPublicFilters(t *testing.T) {
 		if variant == base {
 			t.Fatalf("cache key does not include all recommendation filters: %q", base)
 		}
+	}
+}
+
+func TestCuratedSourceCacheKeyIncludesLanguage(t *testing.T) {
+	zh := curatedSourceCacheKey("zh")
+	en := curatedSourceCacheKey("en")
+	if zh == en {
+		t.Fatalf("curated source cache key must include language: %q", zh)
+	}
+}
+
+func TestCuratedSourceCacheEntryRoundTrip(t *testing.T) {
+	publishedAt := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	want := curatedSourceCacheEntry{Sources: []ExploreSourceRow{{
+		ID:              uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+		Title:           "Example",
+		LanguageCode:    "zh",
+		LastPublishedAt: &publishedAt,
+		RecentItems:     []ExploreSourceRecentItem{{Title: "Recent"}},
+	}}}
+
+	payload, err := marshalCuratedSourceCacheEntry(want)
+	if err != nil {
+		t.Fatalf("marshal curated source cache entry: %v", err)
+	}
+	got, err := unmarshalCuratedSourceCacheEntry(payload)
+	if err != nil {
+		t.Fatalf("unmarshal curated source cache entry: %v", err)
+	}
+	if len(got.Sources) != 1 || got.Sources[0].Title != "Example" || got.Sources[0].LastPublishedAt == nil || len(got.Sources[0].RecentItems) != 1 {
+		t.Fatalf("curated source cache round trip mismatch: %#v", got)
 	}
 }
 func TestRecommendationCacheEntryRoundTrip(t *testing.T) {

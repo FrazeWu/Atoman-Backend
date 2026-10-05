@@ -1,8 +1,30 @@
 package ratelimit
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
 	"sync"
 	"time"
+
+	redis "github.com/redis/go-redis/v9"
+)
+
+const redisWindowScript = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+local ttl = redis.call('PTTL', KEYS[1])
+return {count, ttl}
+`
+
+type redisAllowFunc func(context.Context, string, int, time.Duration) (bool, time.Duration, error)
+
+var (
+	sharedRedisClientOnce sync.Once
+	sharedRedisClient     *redis.Client
 )
 
 type window struct {
@@ -11,17 +33,47 @@ type window struct {
 }
 
 type Limiter struct {
-	mu        sync.Mutex
-	windows   map[string]window
-	now       func() time.Time
-	cleanupAt time.Time
+	mu         sync.Mutex
+	windows    map[string]window
+	now        func() time.Time
+	cleanupAt  time.Time
+	redisAllow redisAllowFunc
 }
 
 func New() *Limiter {
 	return &Limiter{windows: make(map[string]window), now: time.Now}
 }
 
+// NewFromEnv enables a shared Redis window when REDIS_URL is configured.
+// Redis failures fall back to the existing process-local limiter.
+func NewFromEnv() *Limiter {
+	limiter := New()
+	client := sharedRedisClientFromEnv()
+	if client != nil {
+		limiter.redisAllow = redisAllowWithClient(client)
+	}
+	return limiter
+}
+
+func newWithRedisAllow(allow redisAllowFunc) *Limiter {
+	limiter := New()
+	limiter.redisAllow = allow
+	return limiter
+}
+
 func (limiter *Limiter) Allow(key string, limit int, duration time.Duration) (bool, time.Duration) {
+	if limiter.redisAllow != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+		allowed, retryAfter, err := limiter.redisAllow(ctx, key, limit, duration)
+		cancel()
+		if err == nil {
+			return allowed, retryAfter
+		}
+	}
+	return limiter.allowLocal(key, limit, duration)
+}
+
+func (limiter *Limiter) allowLocal(key string, limit int, duration time.Duration) (bool, time.Duration) {
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
 
@@ -45,4 +97,60 @@ func (limiter *Limiter) Allow(key string, limit int, duration time.Duration) (bo
 	current.count++
 	limiter.windows[key] = current
 	return true, 0
+}
+
+func sharedRedisClientFromEnv() *redis.Client {
+	sharedRedisClientOnce.Do(func() {
+		rawURL := os.Getenv("REDIS_URL")
+		if rawURL == "" {
+			return
+		}
+		options, err := redis.ParseURL(rawURL)
+		if err != nil {
+			return
+		}
+		options.DialTimeout = 100 * time.Millisecond
+		options.ReadTimeout = 100 * time.Millisecond
+		options.WriteTimeout = 100 * time.Millisecond
+		sharedRedisClient = redis.NewClient(options)
+	})
+	return sharedRedisClient
+}
+
+func redisAllowWithClient(client *redis.Client) redisAllowFunc {
+	return func(ctx context.Context, key string, limit int, duration time.Duration) (bool, time.Duration, error) {
+		if duration <= 0 {
+			duration = time.Second
+		}
+		result, err := client.Eval(ctx, redisWindowScript, []string{redisWindowKey(key)}, duration.Milliseconds()).Result()
+		if err != nil {
+			return false, 0, err
+		}
+		values, ok := result.([]interface{})
+		if !ok || len(values) != 2 {
+			return false, 0, redis.Nil
+		}
+		count, ok := redisInt64(values[0])
+		if !ok {
+			return false, 0, redis.Nil
+		}
+		if count <= int64(limit) {
+			return true, 0, nil
+		}
+		ttl, ok := redisInt64(values[1])
+		if !ok || ttl < 0 {
+			return false, 0, redis.Nil
+		}
+		return false, time.Duration(ttl) * time.Millisecond, nil
+	}
+}
+
+func redisInt64(value interface{}) (int64, bool) {
+	parsed, ok := value.(int64)
+	return parsed, ok
+}
+
+func redisWindowKey(key string) string {
+	digest := sha256.Sum256([]byte(key))
+	return "atoman:ratelimit:v1:" + hex.EncodeToString(digest[:])
 }
