@@ -339,7 +339,6 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			resolved.Artist.SourcesJSON = artistSourcesJSON
 		}
 
-		usedDerivedTrackIndexes := map[int]bool{}
 		rawDerivedTracks := []any(nil)
 		if sessionPayload != nil {
 			if derivedTracks, ok := sessionPayload["derived_tracks"].([]any); ok {
@@ -369,10 +368,11 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				existingSongsByID[existingSongs[index].ID] = &existingSongs[index]
 			}
 		}
+		resolvedAudio := resolveCommitDerivedTrackAudio(rawDerivedTracks, payload.Album.Tracks)
 		seenSongIDs := map[uuid.UUID]bool{}
 		seenAudioAssetIDs := map[uuid.UUID]bool{}
-		for _, track := range payload.Album.Tracks {
-			derived := matchDerivedTrackAudio(rawDerivedTracks, track, usedDerivedTrackIndexes)
+		for trackIndex, track := range payload.Album.Tracks {
+			derived := resolvedAudio[trackIndex]
 			audioURL := strings.TrimSpace(derived.AudioURL)
 			var uploadedAudioAsset *model.MediaAsset
 			audioAssetID := strings.TrimSpace(track.AudioAssetID)
@@ -1160,18 +1160,11 @@ type derivedTrackAudio struct {
 }
 
 func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, used map[int]bool) derivedTrackAudio {
-	fromMap := func(trackMap map[string]any) derivedTrackAudio {
-		audioURL := strings.TrimSpace(stringValue(trackMap["audio_url"]))
-		if audioURL == "" {
-			audioURL = resolveMusicMediaURL(stringValue(trackMap["audio_key"]))
-		}
-		return derivedTrackAudio{
-			AudioURL: audioURL, FileID: stringValue(trackMap["file_id"]),
-			MatchStatus: stringValue(trackMap["match_status"]), MatchProvider: stringValue(trackMap["match_provider"]),
-			MatchExternalID: stringValue(trackMap["match_external_id"]), MatchSourceURL: stringValue(trackMap["match_source_url"]),
-			MatchConfidence: floatValue(trackMap["match_confidence"]),
-		}
-	}
+	return matchDerivedTrackAudioWithFallback(rawDerivedTracks, track, used, true)
+}
+
+func matchDerivedTrackAudioWithFallback(rawDerivedTracks []any, track AlbumImportTrackPayload, used map[int]bool, allowFallback bool) derivedTrackAudio {
+	fromMap := derivedTrackAudioFromMap
 	tryMatch := func(predicate func(map[string]any) bool) derivedTrackAudio {
 		for i, rawTrack := range rawDerivedTracks {
 			if used[i] {
@@ -1279,15 +1272,62 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 	}); audio.AudioURL != "" {
 		return audio
 	}
-	if audio := tryUniqueMatch(func(map[string]any) bool {
-		return true
-	}); audio.AudioURL != "" {
-		return audio
+	if allowFallback {
+		if audio := tryUniqueMatch(func(map[string]any) bool {
+			return true
+		}); audio.AudioURL != "" {
+			return audio
+		}
 	}
 	if track.AudioURL != "" {
 		return derivedTrackAudio{AudioURL: strings.TrimSpace(track.AudioURL)}
 	}
 	return derivedTrackAudio{}
+}
+
+func derivedTrackAudioFromMap(trackMap map[string]any) derivedTrackAudio {
+	audioURL := strings.TrimSpace(stringValue(trackMap["audio_url"]))
+	if audioURL == "" {
+		audioURL = resolveMusicMediaURL(stringValue(trackMap["audio_key"]))
+	}
+	return derivedTrackAudio{
+		AudioURL: audioURL, FileID: stringValue(trackMap["file_id"]),
+		MatchStatus: stringValue(trackMap["match_status"]), MatchProvider: stringValue(trackMap["match_provider"]),
+		MatchExternalID: stringValue(trackMap["match_external_id"]), MatchSourceURL: stringValue(trackMap["match_source_url"]),
+		MatchConfidence: floatValue(trackMap["match_confidence"]),
+	}
+}
+
+func resolveCommitDerivedTrackAudio(rawDerivedTracks []any, tracks []AlbumImportTrackPayload) []derivedTrackAudio {
+	resolved := make([]derivedTrackAudio, len(tracks))
+	used := map[int]bool{}
+	unmatched := make([]int, 0)
+	for index, track := range tracks {
+		resolved[index] = matchDerivedTrackAudioWithFallback(rawDerivedTracks, track, used, false)
+		if resolved[index].AudioURL == "" {
+			unmatched = append(unmatched, index)
+		}
+	}
+	remaining := make([]derivedTrackAudio, 0)
+	for index, rawTrack := range rawDerivedTracks {
+		if used[index] {
+			continue
+		}
+		trackMap, ok := rawTrack.(map[string]any)
+		if !ok {
+			continue
+		}
+		candidate := derivedTrackAudioFromMap(trackMap)
+		if candidate.AudioURL != "" {
+			remaining = append(remaining, candidate)
+		}
+	}
+	if len(unmatched) == len(remaining) {
+		for index, trackIndex := range unmatched {
+			resolved[trackIndex] = remaining[index]
+		}
+	}
+	return resolved
 }
 
 func hydrateDerivedTrackAudio(rawDerivedTracks []any, filesByID, filesByPlaybackKey map[string]model.AlbumImportFile) {
