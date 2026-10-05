@@ -58,6 +58,7 @@ type planner struct {
 
 func main() {
 	apply := flag.Bool("apply", false, "copy media, update database references, and delete unreferenced temporary objects")
+	allowMissingReferences := flag.Bool("allow-missing-references", false, "continue deleting unreferenced temporary objects even when existing database references are missing")
 	envFile := flag.String("env", ".env.prod", "environment file")
 	flag.Parse()
 
@@ -87,8 +88,11 @@ func main() {
 		log.Println("dry run only; rerun with -apply after reviewing the plan")
 		return
 	}
-	if len(plan.MissingReferences) > 0 {
+	if len(plan.MissingReferences) > 0 && !*allowMissingReferences {
 		log.Fatalf("refusing cleanup: %d database media references point to missing objects", len(plan.MissingReferences))
+	}
+	if len(plan.MissingReferences) > 0 {
+		log.Printf("continuing with unreferenced temporary cleanup despite missing references: %d", len(plan.MissingReferences))
 	}
 	if err := applyCopies(client, bucket, plan.Copies); err != nil {
 		log.Fatalf("copy media: %v", err)
