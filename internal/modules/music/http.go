@@ -24,7 +24,7 @@ type Handler struct {
 const artistDisambiguationSearchExpression = `COALESCE(to_jsonb("Artists")->>'disambiguation', '')`
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
-	h := &Handler{service: service, playLimiter: ratelimit.New()}
+	h := &Handler{service: service, playLimiter: ratelimit.NewFromEnv()}
 	group.Use(musicOperationLog())
 	group.POST("/uploads", h.createMusicAssetUpload)
 	group.GET("/uploads/:uploadId", h.getMusicAssetUpload)

@@ -18,6 +18,7 @@ require (
 	github.com/longbridgeapp/opencc v0.3.13
 	github.com/nwaples/rardecode v1.1.3
 	github.com/oschwald/geoip2-golang v1.13.0
+	github.com/redis/go-redis/v9 v9.17.2
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.8
 	golang.org/x/crypto v0.46.0
@@ -85,7 +86,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
-	github.com/redis/go-redis/v9 v9.17.2 // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect

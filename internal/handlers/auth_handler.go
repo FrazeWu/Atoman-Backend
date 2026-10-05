@@ -224,8 +224,8 @@ func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.Emai
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/register [post]
 func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.HandlerFunc {
-	emailLimiter := ratelimit.New()
-	ipLimiter := ratelimit.New()
+	emailLimiter := ratelimit.NewFromEnv()
+	ipLimiter := ratelimit.NewFromEnv()
 	return func(c *gin.Context) {
 		var input RegisterInput
 		requestInfo := requestmeta.FromGin(c)
@@ -390,8 +390,8 @@ func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/login [post]
 func LoginHandler(db *gorm.DB) gin.HandlerFunc {
-	accountLimiter := ratelimit.New()
-	ipLimiter := ratelimit.New()
+	accountLimiter := ratelimit.NewFromEnv()
+	ipLimiter := ratelimit.NewFromEnv()
 	return func(c *gin.Context) {
 		var input LoginInput
 		requestInfo := requestmeta.FromGin(c)
@@ -486,8 +486,8 @@ func allowAuthRequest(c *gin.Context, limiter *ratelimit.Limiter, key string, li
 // @Failure 429 {object} ErrorResponse
 // @Router /api/v1/auth/token [post]
 func TokenLoginHandler(db *gorm.DB) gin.HandlerFunc {
-	accountLimiter := ratelimit.New()
-	ipLimiter := ratelimit.New()
+	accountLimiter := ratelimit.NewFromEnv()
+	ipLimiter := ratelimit.NewFromEnv()
 	return func(c *gin.Context) {
 		var input LoginInput
 		requestInfo := requestmeta.FromGin(c)
@@ -608,8 +608,8 @@ func CheckUsernameHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/send-verification [post]
 func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc {
-	emailLimiter := ratelimit.New()
-	ipLimiter := ratelimit.New()
+	emailLimiter := ratelimit.NewFromEnv()
+	ipLimiter := ratelimit.NewFromEnv()
 	return func(c *gin.Context) {
 		var input SendVerificationInput
 
@@ -651,8 +651,8 @@ func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/verify-email [post]
 func VerifyEmailHandler(emailService *service.EmailService) gin.HandlerFunc {
-	emailLimiter := ratelimit.New()
-	ipLimiter := ratelimit.New()
+	emailLimiter := ratelimit.NewFromEnv()
+	ipLimiter := ratelimit.NewFromEnv()
 	return func(c *gin.Context) {
 		var input VerifyEmailInput
 
@@ -694,8 +694,8 @@ func VerifyEmailHandler(emailService *service.EmailService) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/password-reset/send-code [post]
 func PasswordResetSendCodeHandler(db *gorm.DB, emailService *service.EmailService) gin.HandlerFunc {
-	emailLimiter := ratelimit.New()
-	ipLimiter := ratelimit.New()
+	emailLimiter := ratelimit.NewFromEnv()
+	ipLimiter := ratelimit.NewFromEnv()
 	return func(c *gin.Context) {
 		var input PasswordResetSendCodeInput
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -739,8 +739,8 @@ func PasswordResetSendCodeHandler(db *gorm.DB, emailService *service.EmailServic
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/password-reset [post]
 func PasswordResetHandler(db *gorm.DB) gin.HandlerFunc {
-	emailLimiter := ratelimit.New()
-	ipLimiter := ratelimit.New()
+	emailLimiter := ratelimit.NewFromEnv()
+	ipLimiter := ratelimit.NewFromEnv()
 	return func(c *gin.Context) {
 		var input PasswordResetInput
 		if err := c.ShouldBindJSON(&input); err != nil {

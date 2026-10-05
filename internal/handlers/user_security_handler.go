@@ -42,8 +42,8 @@ type SendEmailChangeCodeInput struct {
 }
 
 func SendEmailChangeCode(db *gorm.DB) gin.HandlerFunc {
-	emailLimiter := ratelimit.New()
-	ipLimiter := ratelimit.New()
+	emailLimiter := ratelimit.NewFromEnv()
+	ipLimiter := ratelimit.NewFromEnv()
 	return func(c *gin.Context) {
 		var input SendEmailChangeCodeInput
 		if err := c.ShouldBindJSON(&input); err != nil {
