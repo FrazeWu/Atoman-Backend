@@ -142,6 +142,26 @@ func TestMatchDerivedTrackAudioUsesOnlyRemainingAudioWhenTitleIsUnmatched(t *tes
 	}
 }
 
+func TestResolveCommitDerivedTrackAudioDefersRemainingAudioUntilAllTitlesAreChecked(t *testing.T) {
+	derived := []any{
+		map[string]any{"title": "两代人", "audio_url": "https://cdn.test/1.mp3"},
+		map[string]any{"title": "县道184(卷首诗)", "audio_url": "https://cdn.test/2.mp3"},
+		map[string]any{"title": "嗷！(器乐曲)", "audio_url": "https://cdn.test/3.mp3"},
+		map[string]any{"title": "愁上愁下", "audio_url": "https://cdn.test/4.mp3"},
+	}
+	tracks := []AlbumImportTrackPayload{
+		{Title: "县道184", TrackNumber: 1},
+		{Title: "愁上愁下", TrackNumber: 2},
+		{Title: "阿芬懁人", TrackNumber: 3},
+		{Title: "嗷！(ㄠˋ)", TrackNumber: 4},
+	}
+
+	resolved := resolveCommitDerivedTrackAudio(derived, tracks)
+	if resolved[2].AudioURL != "https://cdn.test/1.mp3" {
+		t.Fatalf("expected unmatched title to receive the only remaining audio, got %#v", resolved)
+	}
+}
+
 func TestMatchDerivedTrackAudioUsesUniqueTitleAndPositionWhenIdentityIsStale(t *testing.T) {
 	derivedTracks := []any{
 		map[string]any{
