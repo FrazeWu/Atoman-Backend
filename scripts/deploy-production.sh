@@ -121,7 +121,7 @@ check_prerequisites() {
   require_file "$NGINX_REAL_IP_SOURCE"
   require_file "$NGINX_SITE_SOURCE"
 
-  for required_env in DATABASE_TYPE DATABASE_URL AUTH_CODE_SECRET BASE_URL S3_BUCKET POSTGRES_PASSWORD; do
+  for required_env in DATABASE_TYPE DATABASE_URL AUTH_CODE_SECRET BASE_URL S3_BUCKET POSTGRES_PASSWORD REDIS_URL; do
     grep -q "^${required_env}=" "$ENV_FILE" || die "$ENV_FILE is missing $required_env"
   done
   validate_database_credentials
@@ -163,10 +163,27 @@ wait_for_postgres() {
   die "PostgreSQL did not become healthy"
 }
 
+wait_for_redis() {
+  local container_id state
+  container_id="$(run_compose ps -q redis)"
+  [[ -n "$container_id" ]] || die "Redis container was not created"
+
+  for _ in {1..30}; do
+    state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")"
+    if [[ "$state" == "healthy" || "$state" == "running" ]]; then
+      log "Redis is $state"
+      return 0
+    fi
+    sleep 2
+  done
+  die "Redis did not become healthy"
+}
+
 start_postgres() {
-  log "Starting local PostgreSQL"
-  run_compose up -d postgres db-init
+  log "Starting local PostgreSQL and Redis"
+  run_compose up -d postgres redis db-init
   wait_for_postgres
+  wait_for_redis
 }
 
 build_backend() {
