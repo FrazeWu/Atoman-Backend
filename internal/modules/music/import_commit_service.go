@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -1069,30 +1068,36 @@ func (s *Service) promoteRemoteAlbumAsset(rawURL, destinationKey string) (string
 	}
 	request, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return "", "", "", fmt.Errorf("create remote cover request: %w", err)
+		log.Printf("WARN: keep remote music asset URL after request creation failed: url=%s error=%v", rawURL, err)
+		return rawURL, "", "", nil
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return "", "", "", fmt.Errorf("download remote cover: %w", err)
+		log.Printf("WARN: keep remote music asset URL after download failed: url=%s error=%v", rawURL, err)
+		return rawURL, "", "", nil
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return "", "", "", fmt.Errorf("download remote cover: status %d", response.StatusCode)
+		log.Printf("WARN: keep remote music asset URL after download returned status: url=%s status=%d", rawURL, response.StatusCode)
+		return rawURL, "", "", nil
 	}
 	const maxCoverBytes = 10 * 1024 * 1024
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxCoverBytes+1))
 	if err != nil {
-		return "", "", "", fmt.Errorf("read remote cover: %w", err)
+		log.Printf("WARN: keep remote music asset URL after response read failed: url=%s error=%v", rawURL, err)
+		return rawURL, "", "", nil
 	}
 	if len(body) > maxCoverBytes {
-		return "", "", "", errors.New("remote cover exceeds 10 MB")
+		log.Printf("WARN: keep remote music asset URL after response exceeded 10 MB: url=%s", rawURL)
+		return rawURL, "", "", nil
 	}
 	contentType := strings.TrimSpace(response.Header.Get("Content-Type"))
 	if contentType == "" {
 		contentType = "image/jpeg"
 	}
 	if _, err := s.s3.PutObject(&s3.PutObjectInput{Bucket: aws.String(bucket), Key: aws.String(destinationKey), Body: bytes.NewReader(body), ContentType: aws.String(contentType)}); err != nil {
-		return "", "", "", fmt.Errorf("store remote cover: %w", err)
+		log.Printf("WARN: keep remote music asset URL after object storage write failed: url=%s error=%v", rawURL, err)
+		return rawURL, "", "", nil
 	}
 	return prefix + "/" + destinationKey, "", destinationKey, nil
 }
