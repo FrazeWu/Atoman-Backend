@@ -78,6 +78,7 @@ type BookImportSessionDTO struct {
 	CompletedParts   []BookUploadPart `json:"completed_parts"`
 	ExpiresAt        time.Time        `json:"expires_at"`
 	AssetID          string           `json:"asset_id,omitempty"`
+	PublishedAssetID string           `json:"published_asset_id,omitempty"`
 	WorkID           string           `json:"work_id,omitempty"`
 	EditionID        string           `json:"edition_id,omitempty"`
 	ProcessingStatus string           `json:"processing_status,omitempty"`
@@ -318,7 +319,7 @@ func (s *Service) CreateBookImport(user authctx.CurrentUser, input CreateBookImp
 		_ = s.bookUpload.AbortMultipartUpload(key, uploadID)
 		return BookImportSessionDTO{}, err
 	}
-	return buildBookImportSessionDTO(session, nil), nil
+	return buildBookImportSessionDTO(s.db, session, nil), nil
 }
 
 func (s *Service) ListBookImports(user authctx.CurrentUser) ([]BookImportSessionDTO, error) {
@@ -335,7 +336,7 @@ func (s *Service) ListBookImports(user authctx.CurrentUser) ([]BookImportSession
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, buildBookImportSessionDTO(session, asset))
+		result = append(result, buildBookImportSessionDTO(s.db, session, asset))
 	}
 	return result, nil
 }
@@ -349,7 +350,7 @@ func (s *Service) GetBookImport(user authctx.CurrentUser, id uuid.UUID) (BookImp
 	if err != nil {
 		return BookImportSessionDTO{}, err
 	}
-	return buildBookImportSessionDTO(session, asset), nil
+	return buildBookImportSessionDTO(s.db, session, asset), nil
 }
 
 func (s *Service) CreateBookUploadPart(user authctx.CurrentUser, id uuid.UUID, partNumber int) (BookUploadPartURL, error) {
@@ -427,7 +428,7 @@ func (s *Service) CompleteBookUploadPart(user authctx.CurrentUser, id uuid.UUID,
 	if err != nil {
 		return BookImportSessionDTO{}, err
 	}
-	return buildBookImportSessionDTO(session, asset), nil
+	return buildBookImportSessionDTO(s.db, session, asset), nil
 }
 
 func (s *Service) CompleteBookImport(user authctx.CurrentUser, id uuid.UUID) (BookImportSessionDTO, error) {
@@ -470,7 +471,7 @@ func (s *Service) CompleteBookImport(user authctx.CurrentUser, id uuid.UUID) (Bo
 		if err != nil {
 			return BookImportSessionDTO{}, err
 		}
-		return buildBookImportSessionDTO(session, asset), nil
+		return buildBookImportSessionDTO(s.db, session, asset), nil
 	}
 
 	if err := s.bookUpload.CompleteMultipartUpload(session.ObjectKey, session.UploadID, parts); err != nil {
@@ -539,7 +540,7 @@ func (s *Service) CompleteBookImport(user authctx.CurrentUser, id uuid.UUID) (Bo
 	}); err != nil {
 		return BookImportSessionDTO{}, s.failBookImport(session, err, true)
 	}
-	return buildBookImportSessionDTO(session, &asset), nil
+	return buildBookImportSessionDTO(s.db, session, &asset), nil
 }
 
 func (s *Service) DeleteBookImport(user authctx.CurrentUser, id uuid.UUID) error {
@@ -624,7 +625,7 @@ func bookImportNotFound(err error) error {
 	return err
 }
 
-func buildBookImportSessionDTO(session model.UserBookImport, asset *model.UserBookAsset) BookImportSessionDTO {
+func buildBookImportSessionDTO(db *gorm.DB, session model.UserBookImport, asset *model.UserBookAsset) BookImportSessionDTO {
 	parts, _ := bookUploadParts(session.CompletedPartsJSON)
 	dto := BookImportSessionDTO{
 		ID:             session.ID.String(),
@@ -650,6 +651,10 @@ func buildBookImportSessionDTO(session model.UserBookImport, asset *model.UserBo
 	if asset != nil {
 		dto.AssetID = asset.ID.String()
 		dto.ProcessingStatus = asset.ProcessingStatus
+		var published model.PublishedBookAsset
+		if db != nil && db.Where("source_asset_id = ? AND status = ?", asset.ID, model.BookPublicationStatusPublished).First(&published).Error == nil {
+			dto.PublishedAssetID = published.ID.String()
+		}
 	}
 	return dto
 }

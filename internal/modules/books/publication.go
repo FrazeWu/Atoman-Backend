@@ -61,6 +61,8 @@ type BookPublishedAssetDTO struct {
 	EditionID   string    `json:"edition_id,omitempty"`
 	Format      string    `json:"format"`
 	FileName    string    `json:"file_name"`
+	Title       string    `json:"title,omitempty"`
+	Author      string    `json:"author,omitempty"`
 	ContentType string    `json:"content_type"`
 	Size        int64     `json:"size"`
 	Status      string    `json:"status"`
@@ -221,15 +223,14 @@ func (s *Service) ReviewPublicationRequest(reviewer authctx.CurrentUser, request
 }
 
 func (s *Service) ListPublishedBookAssets(ctx context.Context, workID, editionID uuid.UUID, limit, offset int) ([]BookPublishedAssetDTO, int64, error) {
-	if workID == uuid.Nil && editionID == uuid.Nil {
-		return nil, 0, apperr.BadRequest("validation.invalid_request", "work_id or edition_id is required")
-	}
 	if workID != uuid.Nil {
 		if _, err := s.GetPublicWork(ctx, workID); err != nil {
 			return nil, 0, err
 		}
-	} else if _, err := s.GetPublicEdition(ctx, editionID); err != nil {
-		return nil, 0, err
+	} else if editionID != uuid.Nil {
+		if _, err := s.GetPublicEdition(ctx, editionID); err != nil {
+			return nil, 0, err
+		}
 	}
 	limit, offset = normalizeCatalogPagination(limit, offset)
 	query := s.db.WithContext(ctx).Model(&model.PublishedBookAsset{}).Where("status = ?", model.BookPublicationStatusPublished)
@@ -395,7 +396,13 @@ func (s *Service) buildPublishedAssetDTO(ctx context.Context, asset model.Publis
 	if err := s.db.WithContext(ctx).Where("id = ?", asset.SourceAssetID).First(&source).Error; err != nil {
 		return BookPublishedAssetDTO{}, apperr.NotFound("books.published_asset_not_found", "Published book asset not found")
 	}
-	return buildPublishedBookAssetDTO(asset, source), nil
+	dto := buildPublishedBookAssetDTO(asset, source)
+	var bookImport model.UserBookImport
+	if err := s.db.WithContext(ctx).Where("id = ?", source.ImportID).First(&bookImport).Error; err == nil {
+		dto.Title = bookImport.Title
+		dto.Author = bookImport.Author
+	}
+	return dto, nil
 }
 
 func buildPublishedBookAssetDTO(asset model.PublishedBookAsset, source model.UserBookAsset) BookPublishedAssetDTO {

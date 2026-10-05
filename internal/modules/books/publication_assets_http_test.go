@@ -67,4 +67,12 @@ func TestListPublishedBookAssetsHonorsPaginationQuery(t *testing.T) {
 	require.Equal(t, 1, payload.Data.Offset)
 	require.Len(t, payload.Data.Items, 1)
 	require.Equal(t, "first.pdf", payload.Data.Items[0].FileName)
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/books/catalog/assets?limit=1&offset=1", nil)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	require.Equal(t, int64(2), payload.Data.Total)
+	require.Len(t, payload.Data.Items, 1)
 }

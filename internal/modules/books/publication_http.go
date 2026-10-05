@@ -234,6 +234,25 @@ func (h *Handler) listPublishedBookAssets(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, PublishedBookAssetListResult{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
+// listPublicBookAssets godoc
+// @Summary 列出所有公共正文资源
+// @Description 列出完成安全扫描并已自动公开的电子书正文。
+// @Tags books-reading
+// @Produce json
+// @Param limit query int false "每页数量"
+// @Param offset query int false "偏移量"
+// @Success 200 {object} PublishedBookAssetListResult
+// @Router /api/v1/books/catalog/assets [get]
+func (h *Handler) listPublicBookAssets(c *gin.Context) {
+	limit, offset := bookPagination(c)
+	items, total, err := h.service.ListPublishedBookAssets(c.Request.Context(), uuid.Nil, uuid.Nil, limit, offset)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, PublishedBookAssetListResult{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
 // getPublishedBookAsset godoc
 // @Summary 获取公共正文元数据
 // @Tags books-reading

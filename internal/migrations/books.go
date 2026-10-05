@@ -40,6 +40,11 @@ ALTER TABLE user_book_assets ADD CONSTRAINT chk_user_book_assets_processing_stat
 		return fmt.Errorf("ensure book asset processing status constraint: %w", err)
 	}
 	if err := db.Exec(`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_published_book_assets_source_asset
+ON published_book_assets (source_asset_id) WHERE deleted_at IS NULL;`).Error; err != nil {
+		return fmt.Errorf("ensure published book asset source uniqueness: %w", err)
+	}
+	if err := db.Exec(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_publication_requests_pending_asset
 ON book_publication_requests (asset_id) WHERE status = 'pending_review';`).Error; err != nil {
 		return fmt.Errorf("ensure pending book publication request uniqueness: %w", err)
@@ -48,6 +53,21 @@ ON book_publication_requests (asset_id) WHERE status = 'pending_review';`).Error
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_publication_appeals_pending_request
 ON book_publication_appeals (publication_request_id) WHERE status = 'pending';`).Error; err != nil {
 		return fmt.Errorf("ensure pending book publication appeal uniqueness: %w", err)
+	}
+	if err := db.Exec(`
+CREATE INDEX IF NOT EXISTS idx_book_works_active_title
+ON book_works (title) WHERE lifecycle_status = 'active' AND edit_status <> 'closed' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_book_editions_active_work
+ON book_editions (work_id, published_date, title) WHERE lifecycle_status = 'active' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_book_people_active_name
+ON book_people (name) WHERE lifecycle_status = 'active' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_book_contributions_work_role
+ON book_contributions (work_id, role, position) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_published_book_assets_status_created
+ON published_book_assets (status, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_book_sources_live_type_url
+ON book_sources (target_type, url) WHERE deleted_at IS NULL;`).Error; err != nil {
+		return fmt.Errorf("ensure book catalog indexes: %w", err)
 	}
 	return nil
 }

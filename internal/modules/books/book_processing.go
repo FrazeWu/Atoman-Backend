@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/storage"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -155,6 +156,9 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 	if err != nil {
 		return err
 	}
+	if err := s.publishScannedBookAsset(ctx, asset); err != nil {
+		return err
+	}
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var locked model.UserBookAsset
@@ -179,6 +183,46 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 			"error_message": "",
 		}).Error
 	})
+}
+
+// publishScannedBookAsset makes a structurally and virus-scanned upload public.
+// The source remains in the owner's private area so private reading progress
+// and notes keep working independently from the public copy.
+func (s *Service) publishScannedBookAsset(ctx context.Context, source model.UserBookAsset) error {
+	var existing model.PublishedBookAsset
+	if err := s.db.WithContext(ctx).Where("source_asset_id = ?", source.ID).First(&existing).Error; err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	publishedID := uuid.New()
+	publicKey := storage.BuildBookPublishedObjectKey(publishedID.String(), source.Format)
+	if err := s.bookUpload.CopyObject(source.ObjectKey, publicKey, source.ContentType); err != nil {
+		return err
+	}
+
+	published := model.PublishedBookAsset{
+		Base:          model.Base{ID: publishedID},
+		SourceAssetID: source.ID,
+		Format:        source.Format,
+		ObjectKey:     publicKey,
+		SHA256:        source.SHA256,
+		Status:        model.BookPublicationStatusPublished,
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.PublishedBookAsset
+		if err := tx.Where("source_asset_id = ?", source.ID).First(&current).Error; err == nil {
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		return tx.Create(&published).Error
+	}); err != nil {
+		_ = s.bookUpload.DeleteObject(publicKey)
+		return err
+	}
+	return nil
 }
 
 func (s *Service) markBookAssetFailed(ctx context.Context, assetID uuid.UUID, cause error) error {

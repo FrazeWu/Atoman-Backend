@@ -61,5 +61,5 @@ func (s *Service) RetryBookImport(user authctx.CurrentUser, importID uuid.UUID) 
 		asset.ScanStatus = "pending"
 		asset.ErrorMessage = ""
 	}
-	return buildBookImportSessionDTO(session, asset), nil
+	return buildBookImportSessionDTO(s.db, session, asset), nil
 }
