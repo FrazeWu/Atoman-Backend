@@ -30,6 +30,7 @@ AUTH_CODE_SECRET=test-auth-code-secret
 BASE_URL=https://api.example.test
 S3_BUCKET=test-bucket
 POSTGRES_PASSWORD=compose-password
+REDIS_URL=redis://127.0.0.1:6379/0
 EOF
 
 cat >"$bin_dir/docker" <<'EOF'
@@ -84,6 +85,18 @@ if output="$(
   exit 1
 fi
 printf '%s' "$output" | grep -q 'missing POSTGRES_PASSWORD'
+
+sed '/^REDIS_URL=/d' "$repo/.env.prod" >"$repo/.env.prod.missing-redis"
+if output="$(
+  (
+    export ENV_FILE="$repo/.env.prod.missing-redis"
+    check_prerequisites
+  ) 2>&1
+)"; then
+  echo "expected a missing REDIS_URL to fail prerequisites" >&2
+  exit 1
+fi
+printf '%s' "$output" | grep -q 'missing REDIS_URL'
 
 sed 's#DATABASE_URL=postgres://atoman:compose-password#DATABASE_URL=postgres://atoman:database-password#' \
   "$repo/.env.prod" >"$repo/.env.prod.mismatched-password"
