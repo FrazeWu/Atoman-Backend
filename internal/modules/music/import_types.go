@@ -75,8 +75,9 @@ type AlbumImportAlbumPayload struct {
 }
 
 type AlbumImportTagPayload struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	ParentName string `json:"parent_name,omitempty"`
 }
 
 type AlbumImportMetadataFields struct {
