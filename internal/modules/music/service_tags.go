@@ -68,7 +68,7 @@ func validateMusicTagParent(db *gorm.DB, kind string, parentID *uuid.UUID) (int,
 		return 1, nil
 	}
 	if kind != model.MusicTagKindType {
-		return 0, apperr.BadRequest("music.invalid_tag_parent", "only type tags can have parent tags")
+		return 0, apperr.BadRequest("music.invalid_tag_parent", "only style tags can have parent tags")
 	}
 
 	var parent model.MusicTag
@@ -442,7 +442,25 @@ func replaceAlbumImportTags(tx *gorm.DB, userID, albumID uuid.UUID, tags []Album
 		if len(seen) > maxMusicTagsPerItem {
 			return apperr.Unprocessable("music.tag_limit_reached", "an item can have at most 12 tags")
 		}
-		tag, err := findOrCreateMusicTag(tx, userID, input.Kind, input.Name, nil)
+		var parentID *uuid.UUID
+		if strings.TrimSpace(input.ParentName) != "" {
+			parentName, err := normalizeMusicTagName(input.ParentName)
+			if err != nil {
+				return err
+			}
+			var parent model.MusicTag
+			result := tx.Where("kind = ? AND normalized_name = ?", input.Kind, parentName).First(&parent)
+			if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				parent, err = findOrCreateMusicTag(tx, userID, input.Kind, input.ParentName, nil)
+				if err != nil {
+					return err
+				}
+			} else if result.Error != nil {
+				return result.Error
+			}
+			parentID = &parent.ID
+		}
+		tag, err := findOrCreateMusicTag(tx, userID, input.Kind, input.Name, parentID)
 		if err != nil {
 			return err
 		}
