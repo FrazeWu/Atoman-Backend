@@ -23,6 +23,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	public.GET("/catalog/works/:workId/reviews", handler.listPublicBookReviews)
 	public.GET("/catalog/works/:workId/posts", handler.listRelatedBookPosts)
 	public.GET("/catalog/works/:workId/assets", handler.listPublishedBookAssets)
+	public.GET("/catalog/assets", handler.listPublicBookAssets)
 	public.GET("/catalog/assets/:assetId", handler.getPublishedBookAsset)
 	public.GET("/catalog/assets/:assetId/content", handler.getPublishedBookAssetContent)
 	public.GET("/catalog/editions/:editionId", handler.getPublicEdition)

@@ -65,7 +65,7 @@ func (s *Service) LinkBookImportToCatalog(user authctx.CurrentUser, importID uui
 	if err != nil {
 		return BookImportSessionDTO{}, err
 	}
-	return buildBookImportSessionDTO(session, asset), nil
+	return buildBookImportSessionDTO(s.db, session, asset), nil
 }
 
 func parseImportCatalogTargets(input LinkBookImportInput) (*uuid.UUID, *uuid.UUID, error) {

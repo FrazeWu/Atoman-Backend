@@ -17,7 +17,7 @@ import (
 
 func TestProcessBookAssetsMakesSafeEPUBPrivateAvailable(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.UserBookImport{}, &model.UserBookAsset{})
+	testdb.Migrate(t, db, &model.UserBookImport{}, &model.UserBookAsset{}, &model.PublishedBookAsset{})
 	owner := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
 	importID := uuid.New()
 	assetID := uuid.New()
@@ -61,6 +61,10 @@ func TestProcessBookAssetsMakesSafeEPUBPrivateAvailable(t *testing.T) {
 	require.Equal(t, model.BookAssetStatusPrivateAvailable, processedAsset.ProcessingStatus)
 	require.Equal(t, "structurally_clean", processedAsset.ScanStatus)
 	require.Len(t, processedAsset.SHA256, 64)
+	var published model.PublishedBookAsset
+	require.NoError(t, db.Where("source_asset_id = ?", assetID).First(&published).Error)
+	require.Equal(t, model.BookPublicationStatusPublished, published.Status)
+	require.Contains(t, store.objects, published.ObjectKey)
 	var processedImport model.UserBookImport
 	require.NoError(t, db.First(&processedImport, "id = ?", importID).Error)
 	require.Equal(t, model.BookImportStatusMetadataReady, processedImport.Status)

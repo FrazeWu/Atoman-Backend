@@ -140,7 +140,7 @@ func (s *Service) GetPublicEdition(ctx context.Context, editionID uuid.UUID) (Bo
 		return BookPublicEditionDetailDTO{}, err
 	}
 	var sources []model.BookSource
-	if err := s.db.WithContext(ctx).Where("target_type = ? AND target_id = ?", "edition", edition.ID).Order("created_at ASC").Find(&sources).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("target_type IN ? AND target_id = ?", []string{"edition", "book_edition"}, edition.ID).Order("created_at ASC").Find(&sources).Error; err != nil {
 		return BookPublicEditionDetailDTO{}, err
 	}
 	return BookPublicEditionDetailDTO{
@@ -197,7 +197,7 @@ func (s *Service) buildPublicWorkDTOs(ctx context.Context, works []model.BookWor
 	}
 	var sources []model.BookSource
 	if includeSources {
-		if err := s.db.WithContext(ctx).Where("target_type = ? AND target_id IN ?", "work", workIDs).Order("created_at ASC").Find(&sources).Error; err != nil {
+		if err := s.db.WithContext(ctx).Where("target_type IN ? AND target_id IN ?", []string{"work", "book_work"}, workIDs).Order("created_at ASC").Find(&sources).Error; err != nil {
 			return nil, err
 		}
 	}
