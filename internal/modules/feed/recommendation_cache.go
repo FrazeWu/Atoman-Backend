@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"atoman/internal/modules/recommendation"
+	"atoman/internal/platform/redisx"
 
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
@@ -37,18 +37,11 @@ type redisRecommendationCache struct {
 }
 
 func newRecommendationCacheFromEnv() recommendationCache {
-	rawURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
-	if rawURL == "" {
+	client := redisx.ClientFromEnv()
+	if client == nil {
 		return nil
 	}
-	options, err := redis.ParseURL(rawURL)
-	if err != nil {
-		return nil
-	}
-	options.DialTimeout = 100 * time.Millisecond
-	options.ReadTimeout = 100 * time.Millisecond
-	options.WriteTimeout = 100 * time.Millisecond
-	return &redisRecommendationCache{client: redis.NewClient(options)}
+	return &redisRecommendationCache{client: client}
 }
 
 func (c *redisRecommendationCache) Get(ctx context.Context, key string) (string, error) {
