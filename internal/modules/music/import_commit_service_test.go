@@ -1,11 +1,107 @@
 package music
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"atoman/internal/model"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/google/uuid"
 )
+
+func TestPromoteAlbumImportAssetCopiesLargePlaybackWithoutHTTPDownload(t *testing.T) {
+	requests := 0
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = io.WriteString(w, strings.Repeat("a", 11*1024*1024))
+	}))
+	defer origin.Close()
+	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
+	t.Setenv("MUSIC_PLAYBACK_URL_PREFIX", origin.URL)
+	importID := uuid.New()
+	source := "music/album-imports/playback/sessions/" + importID.String() + "/files/track.mp3"
+	destination := "music/albums/album/tracks/song/version.mp3"
+	var sources, destinations, deleted []string
+	svc := &Service{s3: fakeMusicPromotionS3Client(t, &sources, &destinations, &deleted)}
+	url, oldKey, newKey, err := svc.promoteAlbumImportAsset(origin.URL+"/"+source, destination, importID)
+	if err != nil || url != "https://cdn.example.test/"+destination || oldKey != source || newKey != destination {
+		t.Fatalf("promotion: url=%q old=%q new=%q error=%v", url, oldKey, newKey, err)
+	}
+	if requests != 0 || len(sources) != 1 || sources[0] != "atoman-test/"+source || len(destinations) != 1 || destinations[0] != destination {
+		t.Fatalf("expected server-side copy, HTTP requests=%d sources=%v destinations=%v", requests, sources, destinations)
+	}
+}
+
+func TestPromoteAlbumImportAssetRejectsMissingStorageForPlayback(t *testing.T) {
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
+	importID := uuid.New()
+	url := "https://cdn.example.test/music/album-imports/playback/sessions/" + importID.String() + "/files/track.mp3"
+	if _, _, _, err := (&Service{}).promoteAlbumImportAsset(url, "track.mp3", importID); err == nil {
+		t.Fatal("temporary playback URL must not be accepted without storage")
+	}
+}
+
+func TestCommitAlbumImportSessionRetainsPlaybackWhenCopyFails(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	var sources, destinations, deleted []string
+	svc.s3 = fakeMusicPromotionS3Client(t, &sources, &destinations, &deleted)
+	svc.s3.Config.MaxRetries = new(int)
+	svc.s3.Handlers.Send.Clear()
+	svc.s3.Handlers.Send.PushBack(func(r *request.Request) { r.Error = errors.New("copy failed") })
+	origin := httptest.NewServer(http.NotFoundHandler())
+	defer origin.Close()
+	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", origin.URL)
+	importID := uuid.New()
+	key := "music/album-imports/playback/sessions/" + importID.String() + "/files/track.mp3"
+	payload, err := json.Marshal(map[string]any{"derived_tracks": []map[string]any{{
+		"title": "Track", "track_number": 1, "audio_key": key, "audio_url": origin.URL + "/" + key,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := model.AlbumImportSession{Base: model.Base{ID: importID}, UserID: &user.ID, Status: AlbumImportStatusReady, PayloadJSON: string(payload)}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	file := model.AlbumImportFile{ImportID: importID, FileName: "track.mp3", PlaybackKey: key, UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusCompleted}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.CommitAlbumImportSession(user, importID, CommitAlbumImportSessionInput{
+		Artist: completeAlbumImportArtistPayload("Artist"), ArtistSource: "artist source", AlbumSource: "album source",
+		Album: AlbumImportAlbumPayload{Title: "Album", ReleaseDate: "2020-01-01", CoverURL: origin.URL + "/cover.jpg"},
+	})
+	if err == nil {
+		t.Fatal("copy failure must abort commit")
+	}
+	if err := db.First(&session, "id = ?", importID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if session.Status != AlbumImportStatusReady {
+		t.Fatalf("session status=%s", session.Status)
+	}
+	cleaned, err := NewImportWorker(db, NewMusicImportObjectStore(svc.s3), "test-worker").CleanupCommitted(context.Background())
+	if err != nil || cleaned {
+		t.Fatalf("uncommitted playback was scheduled for cleanup: cleaned=%t err=%v", cleaned, err)
+	}
+	if err := db.First(&file, "id = ?", file.ID).Error; err != nil || file.PlaybackKey != key {
+		t.Fatalf("temporary playback not retained: file=%#v error=%v", file, err)
+	}
+	var count int64
+	if err := db.Model(&model.Song{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("song created after failed copy: count=%d error=%v", count, err)
+	}
+}
 
 func TestMusicAlbumImportSourceKeyAcceptsPlaybackURLPrefix(t *testing.T) {
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
