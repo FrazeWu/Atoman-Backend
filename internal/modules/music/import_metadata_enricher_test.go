@@ -342,11 +342,14 @@ func TestExternalAlbumMetadataEnricherKeepsDiscogsAlbumMetadataWithPartialTrackM
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.MetadataSource != "discogs" || result.CoverURL != "https://img.example/juhua.jpg" || result.ReleaseDate != "2001-04-01" {
+	if result.MetadataSource != "discogs" || result.MatchStatus != model.MusicMatchAmbiguous || result.CoverURL != "https://img.example/juhua.jpg" || result.ReleaseDate != "2001-04-01" {
 		t.Fatalf("expected Discogs album metadata despite partial track match, got %#v", result)
 	}
 	if len(result.Genres) != 1 || len(result.Styles) != 1 || len(result.Labels) != 1 {
 		t.Fatalf("expected Discogs tags to be preserved, got %#v", result)
+	}
+	if len(result.MetadataSources) == 0 || result.MetadataSources[0].Status != model.MusicMatchAmbiguous {
+		t.Fatalf("expected partial Discogs source to remain ambiguous, got %#v", result.MetadataSources)
 	}
 	if len(result.Tracks) != 3 || result.Tracks[0].MatchStatus != model.MusicMatchMatched || result.Tracks[1].MatchStatus == model.MusicMatchMatched {
 		t.Fatalf("expected only confirmed tracks to be mapped, got %#v", result.Tracks)

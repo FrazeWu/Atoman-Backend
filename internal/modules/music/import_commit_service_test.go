@@ -142,7 +142,7 @@ func TestMatchDerivedTrackAudioUsesOnlyRemainingAudioWhenTitleIsUnmatched(t *tes
 	}
 }
 
-func TestResolveCommitDerivedTrackAudioDefersRemainingAudioUntilAllTitlesAreChecked(t *testing.T) {
+func TestResolveCommitDerivedTrackAudioDoesNotGuessRemainingAudioByPosition(t *testing.T) {
 	derived := []any{
 		map[string]any{"title": "两代人", "audio_url": "https://cdn.test/1.mp3"},
 		map[string]any{"title": "县道184(卷首诗)", "audio_url": "https://cdn.test/2.mp3"},
@@ -157,8 +157,8 @@ func TestResolveCommitDerivedTrackAudioDefersRemainingAudioUntilAllTitlesAreChec
 	}
 
 	resolved := resolveCommitDerivedTrackAudio(derived, tracks)
-	if resolved[2].AudioURL != "https://cdn.test/1.mp3" {
-		t.Fatalf("expected unmatched title to receive the only remaining audio, got %#v", resolved)
+	if resolved[2].AudioURL != "" {
+		t.Fatalf("expected unmatched title to remain unbound, got %#v", resolved)
 	}
 }
 

@@ -190,7 +190,7 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 		return AlbumImportMetadataPreviewDTO{Tracks: baseMetadataTracks(tracks), MetadataError: err.Error()}, nil
 	}
 	return AlbumImportMetadataPreviewDTO{
-		Matched: result.MetadataSource != "", AlbumTitle: result.AlbumTitle,
+		Matched: result.MatchStatus == model.MusicMatchMatched || result.MatchStatus == model.MusicMatchManual, AlbumTitle: result.AlbumTitle,
 		ReleaseDate: result.ReleaseDate, CoverURL: result.CoverURL, AlbumType: result.AlbumType,
 		SourceURL: result.SourceURL, MetadataSource: result.MetadataSource,
 		ExternalID: result.ExternalID, MatchStatus: result.MatchStatus,
