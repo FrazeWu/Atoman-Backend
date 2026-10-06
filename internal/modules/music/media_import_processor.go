@@ -622,6 +622,7 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	audios := []localAudio{}
 	cues := []string{}
 	localLyrics := map[string]AlbumImportTrackLyricsPayload{}
+	lyricErrors := []string{}
 	cover := ""
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -666,6 +667,10 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		case AlbumImportFileRoleLyrics:
 			if raw, readErr := os.ReadFile(path); readErr == nil && len(raw) <= 2*1024*1024 {
 				payload := lyricsPayloadFromFile(path, raw)
+				if err := validateImportedLyrics(relative, payload); err != nil {
+					lyricErrors = append(lyricErrors, err.Error())
+					return nil
+				}
 				mergeLocalLyrics(localLyrics, normalizedLyricName(relative), payload)
 				disc, track := discAndTrackFromPath(relative)
 				if track > 0 {
@@ -761,7 +766,13 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	if err := p.persistDerivedTracksWithLyrics(ctx, sessionID, localLyrics); err != nil {
 		return err
 	}
-	return p.setSession(ctx, sessionID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(processed), int64(processed))
+	if err := p.setSession(ctx, sessionID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(processed), int64(processed)); err != nil {
+		return err
+	}
+	if len(lyricErrors) > 0 {
+		return &importNeedsAttentionError{message: strings.Join(lyricErrors, "; ")}
+	}
+	return nil
 }
 
 func cueTracksForAudio(cueRelativePath, audioRelativePath string, tracks []cueTrack) []cueTrack {
@@ -1271,6 +1282,10 @@ func (p *MediaImportProcessor) loadUploadedLyrics(ctx context.Context, sessionID
 		_ = reader.Close()
 		if readErr == nil && len(raw) <= 2*1024*1024 {
 			payload := lyricsPayloadFromFile(file.FileName, raw)
+			if err := validateImportedLyrics(file.RelativePath, payload); err != nil {
+				_ = p.failFile(ctx, file.ID, err)
+				continue
+			}
 			mergeLocalLyrics(result, normalizedLyricName(file.RelativePath), payload)
 			disc, track := discAndTrackFromPath(file.RelativePath)
 			if track > 0 {
@@ -1286,10 +1301,43 @@ func (p *MediaImportProcessor) loadUploadedLyrics(ctx context.Context, sessionID
 
 func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayload {
 	format := "plain"
+	content := strings.TrimSpace(string(raw))
 	if strings.EqualFold(filepath.Ext(name), ".lrc") {
 		format = "lrc"
+		lines := splitLyricLines(content)
+		for index, line := range lines {
+			var credit struct {
+				Time  int `json:"t"`
+				Parts []struct {
+					Text string `json:"tx"`
+				} `json:"c"`
+			}
+			// Negative-time JSON rows describe credits, not timed lyric lines.
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "\uFEFF")), &credit) != nil || credit.Time >= 0 {
+				continue
+			}
+			var text strings.Builder
+			for _, part := range credit.Parts {
+				text.WriteString(part.Text)
+			}
+			if value := strings.TrimSpace(text.String()); value != "" {
+				lines[index] = "[by:" + value + "]"
+			}
+		}
+		content = strings.Join(lines, "\n")
 	}
-	return AlbumImportTrackLyricsPayload{Content: strings.TrimSpace(string(raw)), Format: format, EditSummary: "通过专辑导入添加歌词"}
+	return AlbumImportTrackLyricsPayload{Content: content, Format: format, EditSummary: "通过专辑导入添加歌词"}
+}
+
+func validateImportedLyrics(name string, payload AlbumImportTrackLyricsPayload) error {
+	lines, err := ParseLyricLines(payload.Content, payload.Translation, payload.Format)
+	if err != nil {
+		return fmt.Errorf("歌词文件 %s 解析失败: %w", name, err)
+	}
+	if len(lines) == 0 {
+		return fmt.Errorf("歌词文件 %s 没有有效歌词", name)
+	}
+	return nil
 }
 
 func mergeLocalLyrics(lyrics map[string]AlbumImportTrackLyricsPayload, key string, candidate AlbumImportTrackLyricsPayload) {

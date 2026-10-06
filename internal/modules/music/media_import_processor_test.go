@@ -21,6 +21,86 @@ type fakeMediaCommandRunner struct {
 	run   func(string, []string) ([]byte, error)
 }
 
+func TestLyricsPayloadFromFileNormalizesJSONCredits(t *testing.T) {
+	raw := "{\"t\":-1000,\"c\":[{\"tx\":\"作词: \"},{\"tx\":\"梁弈源\"}]}\n{\"t\":-500,\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"张智\"}]}\n[00:00.00]\n[00:17.27]依奇克里克"
+	payload := lyricsPayloadFromFile("张智 - 依奇克里克.lrc", []byte(raw))
+	want := "[by:作词: 梁弈源]\n[by:作曲: 张智]\n[00:00.00]\n[00:17.27]依奇克里克"
+	if payload.Content != want {
+		t.Fatalf("content = %q, want %q", payload.Content, want)
+	}
+	lines, err := ParseLyricLines(payload.Content, "", payload.Format)
+	if err != nil || len(lines) != 1 || *lines[0].TimeMS != 17270 {
+		t.Fatalf("unexpected parsed lyrics: %#v, %v", lines, err)
+	}
+	lyrics := map[string]AlbumImportTrackLyricsPayload{}
+	mergeLocalLyrics(lyrics, normalizedLyricName("张智 - 依奇克里克.lrc"), payload)
+	if len(lyrics) != 1 {
+		t.Fatal("normalized lyrics were discarded")
+	}
+}
+
+func TestLoadUploadedLyricsReportsInvalidLRC(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	file := model.AlbumImportFile{ImportID: session.ID, FileName: "broken.lrc", RelativePath: "broken.lrc", Role: AlbumImportFileRoleLyrics, SourceKey: "lyrics", UploadStatus: AlbumImportFileUploadStatusUploaded}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeMediaStore{objects: map[string][]byte{"lyrics": []byte("invalid\n[00:01.00]lyrics")}}
+	lyrics := NewMediaImportProcessor(db, store, nil, "").loadUploadedLyrics(context.Background(), session.ID)
+	if err := db.First(&file, "id = ?", file.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(lyrics) != 0 || file.ProcessingStatus != AlbumImportFileProcessingStatusFailed || !strings.Contains(file.ErrorMessage, "broken.lrc") || !strings.Contains(file.ErrorMessage, "timestamp") {
+		t.Fatalf("unexpected lyrics or file status: %#v, %#v", lyrics, file)
+	}
+}
+
+func TestLyricsPayloadFromFileKeepsStandardAndInvalidContent(t *testing.T) {
+	for _, content := range []string{
+		"[ar:Artist]\n[00:01.00]lyrics",
+		"{invalid json}\n[00:01.00]lyrics",
+		"{\"t\":0,\"c\":[{\"tx\":\"lyrics\"}]}\n[00:01.00]lyrics",
+		"{\"t\":-1000,\"c\":[]}\n[00:01.00]lyrics",
+	} {
+		payload := lyricsPayloadFromFile("song.lrc", []byte(content))
+		if payload.Content != content {
+			t.Fatalf("content changed: %q", payload.Content)
+		}
+		err := validateImportedLyrics("song.lrc", payload)
+		if strings.HasPrefix(content, "{") && err == nil {
+			t.Fatalf("invalid JSON lyric accepted: %q", content)
+		}
+		if strings.HasPrefix(content, "[") && err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestProcessExtractedTreeReportsInvalidLyrics(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	for name, content := range map[string]string{"song.flac": "audio", "song.lrc": "invalid lyrics"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &fakeMediaStore{objects: map[string][]byte{}, puts: map[string][]byte{}}
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	err := NewMediaImportProcessor(db, store, runner, "").processExtractedTree(context.Background(), session.ID, root, nil)
+	var attention *importNeedsAttentionError
+	if !errors.As(err, &attention) || !strings.Contains(err.Error(), "song.lrc") || !strings.Contains(err.Error(), "timestamp") {
+		t.Fatalf("expected actionable lyric error, got %v", err)
+	}
+}
+
 func (r *fakeMediaCommandRunner) LookPath(name string) (string, error) {
 	if path := r.paths[name]; path != "" {
 		return path, nil
@@ -179,7 +259,7 @@ func TestProcessExtractedTreePrefersTimedLyricsOverDuplicatePlainLyrics(t *testi
 	root := t.TempDir()
 	for name, content := range map[string]string{
 		"01 - First.flac": "audio",
-		"01 - First.lrc":  "[00:01.00]timed lyrics",
+		"01 - First.lrc":  "{\"t\":-1000,\"c\":[{\"tx\":\"作词: 梁弈源\"}]}\n[00:01.00]timed lyrics",
 		"01 - First.txt":  "plain lyrics",
 		"cover.jpg":       "cover",
 	} {
@@ -210,7 +290,7 @@ func TestProcessExtractedTreePrefersTimedLyricsOverDuplicatePlainLyrics(t *testi
 		t.Fatalf("unexpected derived track: %#v", tracks[0])
 	}
 	lyrics, ok := track["lyrics"].(map[string]any)
-	if !ok || lyrics["format"] != "lrc" || lyrics["content"] != "[00:01.00]timed lyrics" {
+	if !ok || lyrics["format"] != "lrc" || lyrics["content"] != "[by:作词: 梁弈源]\n[00:01.00]timed lyrics" {
 		t.Fatalf("expected timed local lyrics, got %#v", track["lyrics"])
 	}
 }
