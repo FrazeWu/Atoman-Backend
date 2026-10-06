@@ -1028,17 +1028,21 @@ func findRepairSong(existingSongs []model.Song, seenSongIDs map[uuid.UUID]bool, 
 }
 
 func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importID uuid.UUID) (string, string, string, error) {
-	if remoteURL := strings.TrimSpace(rawURL); strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
-		return s.promoteRemoteAlbumAsset(remoteURL, destinationKey)
-	}
-	if s.s3 == nil || !strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
+	sourceKey, ok := musicAlbumImportSourceKey(rawURL)
+	if !ok || !isPromotableAlbumImportKey(sourceKey, importID) {
+		if remoteURL := strings.TrimSpace(rawURL); strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
+			return s.promoteRemoteAlbumAsset(remoteURL, destinationKey)
+		}
 		return rawURL, "", "", nil
+	}
+	// Import playback must become durable before committed-session cleanup runs.
+	if s.s3 == nil || !strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
+		return "", "", "", errors.New("object storage is required to preserve imported media")
 	}
 	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
 	urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
-	sourceKey, ok := musicAlbumImportSourceKey(rawURL)
-	if bucket == "" || urlPrefix == "" || !ok || !isPromotableAlbumImportKey(sourceKey, importID) {
-		return rawURL, "", "", nil
+	if bucket == "" || urlPrefix == "" {
+		return "", "", "", errors.New("object storage bucket and URL prefix are required to preserve imported media")
 	}
 	escapedSource := strings.ReplaceAll(url.PathEscape(bucket+"/"+sourceKey), "%2F", "/")
 	if _, err := s.s3.CopyObject(&s3.CopyObjectInput{
