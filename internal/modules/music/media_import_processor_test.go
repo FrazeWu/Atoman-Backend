@@ -951,6 +951,7 @@ func TestMergeDerivedMetadataPayloadPreservesLockedMetadata(t *testing.T) {
 		"metadata_genres":       []any{"Electronic"},
 		"metadata_styles":       []any{"Ambient"},
 		"derived_cover":         "https://cover.test/matched.jpg",
+		"derived_tracks":        []any{map[string]any{"title": "Matched title", "match_status": model.MusicMatchMatched}},
 	}
 
 	mergeDerivedMetadataPayload(payload, []map[string]any{{"title": "Song"}}, AlbumImportMetadataResult{
@@ -963,6 +964,10 @@ func TestMergeDerivedMetadataPayloadPreservesLockedMetadata(t *testing.T) {
 	}
 	if payload["metadata_genres"].([]any)[0] != "Electronic" || payload["metadata_styles"].([]any)[0] != "Ambient" {
 		t.Fatalf("locked tags were overwritten: %#v", payload)
+	}
+	tracks := payload["derived_tracks"].([]any)
+	if tracks[0].(map[string]any)["title"] != "Matched title" {
+		t.Fatalf("locked derived tracks were overwritten: %#v", payload)
 	}
 }
 

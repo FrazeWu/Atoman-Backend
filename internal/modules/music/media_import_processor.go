@@ -1051,10 +1051,6 @@ func (p *MediaImportProcessor) persistLockedMetadataTracks(ctx context.Context, 
 			track = index + 1
 		}
 		file, ok := byPosition[fmt.Sprintf("%d:%d", disc, track)]
-		if !ok && index < len(files) {
-			file = files[index]
-			ok = true
-		}
 		if !ok {
 			continue
 		}
@@ -1137,10 +1133,10 @@ func (p *MediaImportProcessor) persistDerivedMetadataResult(ctx context.Context,
 }
 
 func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[string]any, result AlbumImportMetadataResult) {
-	payload["derived_tracks"] = derivedTracks
 	if locked, _ := payload["metadata_match_locked"].(bool); locked {
 		return
 	}
+	payload["derived_tracks"] = derivedTracks
 	if result.AlbumTitle != "" {
 		payload["derived_album_title"] = result.AlbumTitle
 	}
@@ -1170,7 +1166,7 @@ func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[str
 		delete(payload, "metadata_match_confidence")
 		delete(payload, "musicbrainz_release_id")
 	}
-	payload["metadata_matched"] = result.MetadataSource != ""
+	payload["metadata_matched"] = result.MatchStatus == model.MusicMatchMatched || result.MatchStatus == model.MusicMatchManual
 	payload["metadata_match_status"] = result.MatchStatus
 	payload["metadata_match_confidence"] = result.MatchConfidence
 	payload["metadata_error"] = result.MetadataError

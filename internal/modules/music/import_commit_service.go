@@ -148,11 +148,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 		metadataMatchStatus := strings.TrimSpace(stringValue(sessionPayload["metadata_match_status"]))
 		if metadataMatchStatus == "" {
-			if metadataProvider != "" {
-				metadataMatchStatus = model.MusicMatchMatched
-			} else {
-				metadataMatchStatus = model.MusicMatchUnmatched
-			}
+			// A source URL identifies a candidate only. Complete matching must be
+			// explicitly persisted so legacy payloads cannot become false positives.
+			metadataMatchStatus = model.MusicMatchUnmatched
 		}
 		metadataMatchConfidence := floatValue(sessionPayload["metadata_match_confidence"])
 		if metadataMatchStatus == model.MusicMatchMatched && metadataMatchConfidence == 0 {
@@ -1306,31 +1304,8 @@ func derivedTrackAudioFromMap(trackMap map[string]any) derivedTrackAudio {
 func resolveCommitDerivedTrackAudio(rawDerivedTracks []any, tracks []AlbumImportTrackPayload) []derivedTrackAudio {
 	resolved := make([]derivedTrackAudio, len(tracks))
 	used := map[int]bool{}
-	unmatched := make([]int, 0)
 	for index, track := range tracks {
 		resolved[index] = matchDerivedTrackAudioWithFallback(rawDerivedTracks, track, used, false)
-		if resolved[index].AudioURL == "" {
-			unmatched = append(unmatched, index)
-		}
-	}
-	remaining := make([]derivedTrackAudio, 0)
-	for index, rawTrack := range rawDerivedTracks {
-		if used[index] {
-			continue
-		}
-		trackMap, ok := rawTrack.(map[string]any)
-		if !ok {
-			continue
-		}
-		candidate := derivedTrackAudioFromMap(trackMap)
-		if candidate.AudioURL != "" {
-			remaining = append(remaining, candidate)
-		}
-	}
-	if len(unmatched) == len(remaining) {
-		for index, trackIndex := range unmatched {
-			resolved[trackIndex] = remaining[index]
-		}
 	}
 	return resolved
 }

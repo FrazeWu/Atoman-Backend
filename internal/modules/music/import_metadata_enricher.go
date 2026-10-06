@@ -259,7 +259,9 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	releaseMatched := false
 	lyricsArtists := []string{}
 	applyDiscogs := func(discogsRelease discogsRelease, discogsMapping []int) {
-		releaseMatched = true
+		// A partial release can still provide useful album metadata, but it is
+		// not safe to advertise it as a complete match or use it for lyrics.
+		releaseMatched = discogsMapping != nil && discogsReleaseMatchIsComplete(discogsRelease, input.Tracks, discogsMapping)
 		result.AlbumTitle = toSimplifiedChinese(discogsRelease.Title)
 		result.ReleaseDate = discogsRelease.Released
 		if result.ReleaseDate == "" && discogsRelease.Year > 0 {
@@ -269,7 +271,10 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.SourceURL = discogsReleaseURL(discogsRelease)
 		result.MetadataSource = "discogs"
 		result.ExternalID = strconv.Itoa(discogsRelease.ID)
-		result.MatchStatus = model.MusicMatchMatched
+		result.MatchStatus = model.MusicMatchAmbiguous
+		if releaseMatched {
+			result.MatchStatus = model.MusicMatchMatched
+		}
 		result.CoverURL = discogsReleaseCoverURL(discogsRelease)
 		result.Genres = uniqueMetadataValues(discogsRelease.Genres)
 		result.Styles = uniqueMetadataValues(discogsRelease.Styles)
@@ -326,6 +331,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		release        discogsRelease
 		mapping        []int
 		candidateCount int
+		complete       bool
 		err            error
 	}
 	musicBrainzDone := make(chan musicBrainzLookup, 1)
@@ -339,8 +345,8 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	if discogsConfigured {
 		discogsDone = make(chan discogsLookup, 1)
 		go func() {
-			release, mapping, candidateCount, err := e.findDiscogsRelease(ctx, input)
-			discogsDone <- discogsLookup{release: release, mapping: mapping, candidateCount: candidateCount, err: err}
+			release, mapping, candidateCount, complete, err := e.findDiscogsRelease(ctx, input)
+			discogsDone <- discogsLookup{release: release, mapping: mapping, candidateCount: candidateCount, complete: complete, err: err}
 		}()
 	}
 
@@ -356,7 +362,10 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		source := AlbumImportMetadataSourceResult{Provider: "discogs", Status: model.MusicMatchUnmatched}
 		source.CandidateCount = discogsMatch.candidateCount
 		if discogsMatch.err == nil && discogsMatch.release.ID > 0 {
-			source.Status = model.MusicMatchMatched
+			source.Status = model.MusicMatchAmbiguous
+			if discogsMatch.complete {
+				source.Status = model.MusicMatchMatched
+			}
 			source.SourceURL = discogsReleaseURL(discogsMatch.release)
 			source.ExternalID = strconv.Itoa(discogsMatch.release.ID)
 			source.SelectedTitle = toSimplifiedChinese(discogsMatch.release.Title)
@@ -538,12 +547,12 @@ func (e *ExternalAlbumMetadataEnricher) findRelease(ctx context.Context, input A
 	return musicBrainzRelease{}, nil, lastErr
 }
 
-func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, input AlbumImportMetadataInput) (discogsRelease, []int, int, error) {
+func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, input AlbumImportMetadataInput) (discogsRelease, []int, int, bool, error) {
 	if e.discogsBase == "" || e.discogsKey == "" || e.discogsSecret == "" {
-		return discogsRelease{}, nil, 0, errors.New("Discogs is not configured")
+		return discogsRelease{}, nil, 0, false, errors.New("Discogs is not configured")
 	}
 	if strings.TrimSpace(input.AlbumTitle) == "" || len(input.Tracks) == 0 {
-		return discogsRelease{}, nil, 0, errors.New("not enough metadata for Discogs lookup")
+		return discogsRelease{}, nil, 0, false, errors.New("not enough metadata for Discogs lookup")
 	}
 
 	artists := uniqueMusicArtists(append([]string{input.Artist}, input.Artists...))
@@ -619,15 +628,23 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 		}
 	}
 	if best.release.ID > 0 {
-		return best.release, best.mapping, candidateCount, nil
+		return best.release, best.mapping, candidateCount, true, nil
 	}
 	if bestAlbumMetadata.release.ID > 0 {
-		return bestAlbumMetadata.release, bestAlbumMetadata.mapping, candidateCount, nil
+		return bestAlbumMetadata.release, bestAlbumMetadata.mapping, candidateCount, false, nil
 	}
 	if lastErr != nil {
-		return discogsRelease{}, nil, candidateCount, lastErr
+		return discogsRelease{}, nil, candidateCount, false, lastErr
 	}
-	return discogsRelease{}, nil, candidateCount, errors.New("Discogs candidates did not safely match uploaded tracks")
+	return discogsRelease{}, nil, candidateCount, false, errors.New("Discogs candidates did not safely match uploaded tracks")
+}
+
+func discogsReleaseMatchIsComplete(release discogsRelease, uploaded []AlbumImportMetadataTrack, mapping []int) bool {
+	remote := flattenDiscogsTracks(release)
+	if len(remote) == 0 || len(mapping) != len(remote) {
+		return false
+	}
+	return countMatchedMusicBrainzTracks(mapping) == len(remote) && len(uploaded) <= len(remote)
 }
 
 type discogsReleaseMatch struct {

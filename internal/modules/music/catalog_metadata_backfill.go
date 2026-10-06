@@ -224,7 +224,7 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 		}
 		return result
 	}
-	result.Matched = true
+	result.Matched = enriched.MatchStatus == model.MusicMatchMatched || enriched.MatchStatus == model.MusicMatchManual
 	result.MatchedTitle = enriched.AlbumTitle
 	result.SourceURL = enriched.SourceURL
 	result.MetadataSource = strings.ToLower(strings.TrimSpace(enriched.MetadataSource))
@@ -278,6 +278,12 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 		if err := tx.Model(&model.Album{}).Where("id = ?", album.ID).Updates(updates).Error; err != nil {
 			return err
 		}
+		if err := upsertMusicMatchRecord(tx, "album", album.ID, result.MetadataSource, enriched.ExternalID, enriched.SourceURL, enriched.MatchStatus, enriched.MatchConfidence, album.MetadataManualOverride, map[string]any{
+			"album_title": enriched.AlbumTitle,
+			"source":      result.MetadataSource,
+		}); err != nil {
+			return err
+		}
 		for _, track := range enriched.Tracks {
 			songID, err := uuid.Parse(track.AudioKey)
 			if err != nil {
@@ -287,7 +293,14 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 			if err := tx.First(&song, "id = ? AND album_id = ?", songID, album.ID).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&song).Updates(map[string]any{"title": track.Title, "disc_number": track.DiscNumber, "track_number": track.TrackNumber}).Error; err != nil {
+			if !song.MetadataManualOverride {
+				if err := tx.Model(&song).Updates(map[string]any{"title": track.Title, "disc_number": track.DiscNumber, "track_number": track.TrackNumber}).Error; err != nil {
+					return err
+				}
+			}
+			if err := upsertMusicMatchRecord(tx, "song", song.ID, result.MetadataSource, track.MatchExternalID, enriched.SourceURL, track.MatchStatus, track.MatchConfidence, song.MetadataManualOverride, map[string]any{
+				"title": track.Title, "track_number": track.TrackNumber, "disc_number": track.DiscNumber,
+			}); err != nil {
 				return err
 			}
 			if strings.TrimSpace(song.Lyrics) == "" && track.Lyrics != nil && strings.TrimSpace(track.Lyrics.Content) != "" {
