@@ -20,7 +20,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 }
 
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db, hotCache: make(map[int]hotCacheEntry)}
+	return newServiceWithHotCache(db, newHotCacheFromEnv())
 }
 
 // HotContent godoc

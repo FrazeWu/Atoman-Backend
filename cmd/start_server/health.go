@@ -1,18 +1,26 @@
 package main
 
 import (
+	"context"
 	"net/http"
 
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
+	"atoman/internal/platform/redisx"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
 func registerHealthRoutes(r *gin.Engine, db *gorm.DB) {
+	registerHealthRoutesWithRedis(r, db, redisx.Check)
+}
+
+type redisHealthStatus = redisx.HealthStatus
+
+func registerHealthRoutesWithRedis(r *gin.Engine, db *gorm.DB, checkRedis func(context.Context) redisHealthStatus) {
 	r.GET("/healthz", func(c *gin.Context) {
-		httpx.OK(c, http.StatusOK, gin.H{"status": "ok"})
+		httpx.OK(c, http.StatusOK, gin.H{"status": "ok", "redis": checkRedis(c.Request.Context())})
 	})
 	r.GET("/readyz", func(c *gin.Context) {
 		sqlDB, err := db.DB()

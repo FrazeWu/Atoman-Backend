@@ -36,6 +36,7 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/platform/indexnow"
+	"atoman/internal/platform/redisx"
 	"atoman/internal/service"
 )
 
@@ -361,6 +362,8 @@ func main() {
 	}
 	defer sqlDB.Close()
 	log.Println("Database connected successfully")
+	redisStatus := redisx.Check(context.Background())
+	log.Printf("Redis status: configured=%t reachable=%t error=%s", redisStatus.Configured, redisStatus.Reachable, redisStatus.Error)
 
 	if shouldRunMigrationsOnStart(cfg.Env, os.Getenv("RUN_MIGRATIONS_ON_START")) {
 		log.Println("Running database migrations...")

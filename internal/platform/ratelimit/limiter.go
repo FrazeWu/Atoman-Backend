@@ -4,9 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
 	"sync"
 	"time"
+
+	"atoman/internal/platform/redisx"
 
 	redis "github.com/redis/go-redis/v9"
 )
@@ -21,11 +22,6 @@ return {count, ttl}
 `
 
 type redisAllowFunc func(context.Context, string, int, time.Duration) (bool, time.Duration, error)
-
-var (
-	sharedRedisClientOnce sync.Once
-	sharedRedisClient     *redis.Client
-)
 
 type window struct {
 	count   int
@@ -100,21 +96,7 @@ func (limiter *Limiter) allowLocal(key string, limit int, duration time.Duration
 }
 
 func sharedRedisClientFromEnv() *redis.Client {
-	sharedRedisClientOnce.Do(func() {
-		rawURL := os.Getenv("REDIS_URL")
-		if rawURL == "" {
-			return
-		}
-		options, err := redis.ParseURL(rawURL)
-		if err != nil {
-			return
-		}
-		options.DialTimeout = 100 * time.Millisecond
-		options.ReadTimeout = 100 * time.Millisecond
-		options.WriteTimeout = 100 * time.Millisecond
-		sharedRedisClient = redis.NewClient(options)
-	})
-	return sharedRedisClient
+	return redisx.ClientFromEnv()
 }
 
 func redisAllowWithClient(client *redis.Client) redisAllowFunc {

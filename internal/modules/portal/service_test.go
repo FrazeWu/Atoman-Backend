@@ -1,7 +1,9 @@
 package portal
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +14,26 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+type memoryHotCache struct {
+	mu      sync.Mutex
+	values  map[string]string
+	getHits int
+}
+
+func (cache *memoryHotCache) Get(_ context.Context, key string) (string, error) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.getHits++
+	return cache.values[key], nil
+}
+
+func (cache *memoryHotCache) Set(_ context.Context, key, value string, _ time.Duration) error {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.values[key] = value
+	return nil
+}
 
 func migratePortalHotContentTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
@@ -48,6 +70,25 @@ func TestHotContentCachesRepeatedRequests(t *testing.T) {
 	}
 	if queries.Load() != firstQueryCount {
 		t.Fatalf("expected cached response without new queries, got %d additional queries", queries.Load()-firstQueryCount)
+	}
+}
+
+func TestHotContentUsesSharedCacheAcrossServiceInstances(t *testing.T) {
+	db := testdb.Open(t)
+	migratePortalHotContentTables(t, db)
+	cache := &memoryHotCache{values: make(map[string]string)}
+
+	first := newServiceWithHotCache(db, cache)
+	if _, err := first.HotContent(4); err != nil {
+		t.Fatalf("first HotContent call returned error: %v", err)
+	}
+
+	second := newServiceWithHotCache(nil, cache)
+	if _, err := second.HotContent(4); err != nil {
+		t.Fatalf("second HotContent call returned error: %v", err)
+	}
+	if cache.getHits == 0 {
+		t.Fatal("expected shared cache to be read")
 	}
 }
 
