@@ -393,6 +393,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		seenAudioAssetIDs := map[uuid.UUID]bool{}
 		for trackIndex, track := range payload.Album.Tracks {
 			derived := resolvedAudio[trackIndex]
+			if track.Lyrics == nil {
+				track.Lyrics, track.LyricsSource = derived.Lyrics, derived.LyricsSource
+			}
 			audioURL := strings.TrimSpace(derived.AudioURL)
 			var uploadedAudioAsset *model.MediaAsset
 			audioAssetID := strings.TrimSpace(track.AudioAssetID)
@@ -693,6 +696,9 @@ func (s *Service) commitStandaloneSongImport(
 	}
 	rawDerivedTracks, _ := sessionPayload["derived_tracks"].([]any)
 	derived := matchDerivedTrackAudio(rawDerivedTracks, track, map[int]bool{})
+	if track.Lyrics == nil {
+		track.Lyrics, track.LyricsSource = derived.Lyrics, derived.LyricsSource
+	}
 	matchStatus, matchProvider, matchExternalID, matchSourceURL, matchConfidence, matchManualOverride := importTrackMatchState(track, derived)
 	var importFile model.AlbumImportFile
 	if derived.FileID != "" {
@@ -1190,6 +1196,8 @@ type derivedTrackAudio struct {
 	MatchExternalID string
 	MatchSourceURL  string
 	MatchConfidence float64
+	Lyrics          *AlbumImportTrackLyricsPayload
+	LyricsSource    string
 }
 
 func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, used map[int]bool) derivedTrackAudio {
@@ -1323,12 +1331,20 @@ func derivedTrackAudioFromMap(trackMap map[string]any) derivedTrackAudio {
 	if audioURL == "" {
 		audioURL = resolveMusicMediaURL(stringValue(trackMap["audio_key"]))
 	}
-	return derivedTrackAudio{
+	derived := derivedTrackAudio{
 		AudioURL: audioURL, FileID: stringValue(trackMap["file_id"]),
 		MatchStatus: stringValue(trackMap["match_status"]), MatchProvider: stringValue(trackMap["match_provider"]),
 		MatchExternalID: stringValue(trackMap["match_external_id"]), MatchSourceURL: stringValue(trackMap["match_source_url"]),
 		MatchConfidence: floatValue(trackMap["match_confidence"]),
+		LyricsSource:    stringValue(trackMap["lyrics_source"]),
 	}
+	if lyrics, ok := trackMap["lyrics"].(map[string]any); ok {
+		derived.Lyrics = &AlbumImportTrackLyricsPayload{
+			Content: stringValue(lyrics["content"]), Translation: stringValue(lyrics["translation"]),
+			Format: stringValue(lyrics["format"]), Language: stringValue(lyrics["language"]), EditSummary: stringValue(lyrics["edit_summary"]),
+		}
+	}
+	return derived
 }
 
 func resolveCommitDerivedTrackAudio(rawDerivedTracks []any, tracks []AlbumImportTrackPayload) []derivedTrackAudio {
