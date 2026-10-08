@@ -21,6 +21,7 @@ func main() {
 	worksDump := flag.String("works-dump", "", "Open Library works dump (.txt or .gz)")
 	editionsDump := flag.String("editions-dump", "", "Open Library editions dump (.txt or .gz)")
 	authorsDump := flag.String("authors-dump", "", "Open Library authors dump (.txt or .gz)")
+	repairTitles := flag.Bool("repair-titles", false, "repair unchanged imported titles from selected Chinese editions")
 	flag.Parse()
 
 	if err := godotenv.Load(*envFile); err != nil {
@@ -46,10 +47,14 @@ func main() {
 
 	if dumpMode {
 		summary, err := books.NewOpenLibraryDumpImporter(db).ImportChinese(context.Background(), books.OpenLibraryDumpImportOptions{
-			WorksPath: *worksDump, EditionsPath: *editionsDump, AuthorsPath: *authorsDump, Limit: *limit,
+			WorksPath: *worksDump, EditionsPath: *editionsDump, AuthorsPath: *authorsDump, Limit: *limit, RepairTitles: *repairTitles,
 		})
 		if err != nil {
 			log.Fatalf("import Chinese Open Library dumps: %v", err)
+		}
+		if *repairTitles {
+			log.Printf("repaired %d imported titles from %d Chinese editions; no new catalog records created", summary.TitlesRepaired, summary.ChineseEditions)
+			return
 		}
 		log.Printf("imported %d Chinese works (%d editions scanned, %d Chinese editions, %d works scanned, %d authors selected); new works=%d, new editions=%d, new people=%d, new contributions=%d; existing works=%d, editions=%d, people=%d, contributions=%d",
 			summary.RecordsImported, summary.EditionsScanned, summary.ChineseEditions, summary.WorksScanned, summary.AuthorsSelected,
