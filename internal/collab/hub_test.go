@@ -24,6 +24,24 @@ func TestWebSocketCheckOriginRejectsUnknownOrigin(t *testing.T) {
 	}
 }
 
+func TestWebSocketCheckOriginAllowsThirdPartyAPIAuthentication(t *testing.T) {
+	t.Setenv("ALLOWED_ORIGINS", "")
+	for _, header := range []string{"Authorization", "Sec-WebSocket-Protocol"} {
+		req, _ := http.NewRequest(http.MethodGet, "/ws/user", nil)
+		req.Header.Set("Origin", "https://third-party.example")
+		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set("Connection", "Upgrade")
+		if header == "Authorization" {
+			req.Header.Set(header, "Bearer api-test-token")
+		} else {
+			req.Header.Set(header, "atoman, atoman.api.api-test-token")
+		}
+		if !upgrader.CheckOrigin(req) {
+			t.Fatalf("third-party API authentication via %s must be accepted", header)
+		}
+	}
+}
+
 func TestWebSocketCheckOriginAllowsDefaultDevelopmentOrigins(t *testing.T) {
 	t.Setenv("ALLOWED_ORIGINS", "")
 

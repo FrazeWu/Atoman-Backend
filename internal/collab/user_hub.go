@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 
 	"atoman/internal/middleware"
@@ -138,12 +137,8 @@ func (c *userClient) readPump() {
 }
 
 func extractUserIDFromRequest(c *gin.Context, db *gorm.DB) (uuid.UUID, error) {
-	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
-	if authorization != "" {
-		if !strings.HasPrefix(authorization, "Bearer ") {
-			return uuid.Nil, errors.New("invalid authorization")
-		}
-		resolved, err := authsession.New(db).Authenticate(strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer ")), authsession.KindAPI)
+	if token, present := middleware.APITokenFromRequest(c.Request); present {
+		resolved, err := authsession.New(db).Authenticate(token, authsession.KindAPI)
 		if err != nil {
 			return uuid.Nil, err
 		}

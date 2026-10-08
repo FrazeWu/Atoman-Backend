@@ -191,7 +191,9 @@ func TestAuthMiddlewareAcceptsAPIBearerForWriteRequestWithoutCSRF(t *testing.T) 
 	db := newMiddlewareAuthTestDB(t)
 	user := seedMiddlewareAuthUser(t, db, model.User{Username: "client", Email: "client@example.com", Password: "hash", Role: "user", IsActive: true})
 	session := seedMiddlewareSession(t, db, user, authsession.KindAPI)
-	w := performAuthRequest(t, db, http.MethodPost, session, nil)
+	w := performAuthRequest(t, db, http.MethodPost, session, func(req *http.Request) {
+		req.Header.Set("Origin", "https://third-party.example")
+	})
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected api bearer request to pass, got %d: %s", w.Code, w.Body.String())
 	}
@@ -225,6 +227,49 @@ func TestAuthMiddlewareDoesNotFallBackToCookieWhenBearerIsInvalid(t *testing.T) 
 	})
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected invalid bearer to win, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAuthMiddlewareRejectsThirdPartyCookieWriteEvenWithCSRF(t *testing.T) {
+	t.Setenv("ENV", "production")
+	t.Setenv("ALLOWED_ORIGINS", "")
+	db := newMiddlewareAuthTestDB(t)
+	user := seedMiddlewareAuthUser(t, db, model.User{Username: "alice", Email: "alice@example.com", Password: "hash", IsActive: true})
+	session := seedMiddlewareSession(t, db, user, authsession.KindWeb)
+	w := performAuthRequest(t, db, http.MethodPost, session, func(req *http.Request) {
+		req.Header.Set("Origin", "https://third-party.example")
+		req.Header.Set(CSRFHeaderName, session.CSRF)
+	})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("third-party cookies must not authorize writes, got %d", w.Code)
+	}
+}
+
+func TestAPITokenSubprotocolCredentialBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, protocols, authorization, wantToken string
+		upgrade, wantPresent                      bool
+	}{
+		{name: "ordinary HTTP ignores subprotocol", protocols: "atoman, atoman.api.token"},
+		{name: "browser upgrade", upgrade: true, protocols: "atoman, atoman.api.token", wantToken: "token", wantPresent: true},
+		{name: "invalid bearer wins", upgrade: true, protocols: "atoman, atoman.api.token", authorization: "Basic token", wantPresent: true},
+		{name: "bearer wins", upgrade: true, protocols: "atoman, atoman.api.other", authorization: "Bearer token", wantToken: "token", wantPresent: true},
+		{name: "multiple tokens rejected", upgrade: true, protocols: "atoman.api.first, atoman.api.second", wantPresent: true},
+		{name: "empty token rejected", upgrade: true, protocols: "atoman, atoman.api.", wantPresent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+			req.Header.Set("Sec-WebSocket-Protocol", tc.protocols)
+			req.Header.Set("Authorization", tc.authorization)
+			if tc.upgrade {
+				req.Header.Set("Upgrade", "websocket")
+				req.Header.Set("Connection", "Upgrade")
+			}
+			token, present := APITokenFromRequest(req)
+			if token != tc.wantToken || present != tc.wantPresent {
+				t.Fatalf("got (%q, %v), want (%q, %v)", token, present, tc.wantToken, tc.wantPresent)
+			}
+		})
 	}
 }
 

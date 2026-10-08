@@ -52,7 +52,7 @@ func TestWaitForWorkersTimesOutWhenWorkerDoesNotStop(t *testing.T) {
 	}
 }
 
-func TestCORSRejectsUnknownOriginWithCredentialsOutsideProduction(t *testing.T) {
+func TestCORSAllowsThirdPartyOriginWithoutCredentials(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("ENV", "development")
 	t.Setenv("ALLOWED_ORIGINS", "")
@@ -69,11 +69,50 @@ func TestCORSRejectsUnknownOriginWithCredentialsOutsideProduction(t *testing.T) 
 
 	router.ServeHTTP(rec, req)
 
-	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
-		t.Fatalf("expected unknown origin to be rejected, got ACAO %q", got)
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("expected third-party origin to receive wildcard CORS, got %q", got)
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
 		t.Fatalf("expected credentials header to be absent for unknown origin, got %q", got)
+	}
+}
+
+func TestCORSThirdPartyPreflightAndErrorResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(corsMiddleware([]string{"https://www.atoman.org"}))
+	router.GET("/protected", func(c *gin.Context) { c.Status(http.StatusUnauthorized) })
+	for _, method := range []string{http.MethodOptions, http.MethodGet} {
+		req := httptest.NewRequest(method, "/protected", nil)
+		req.Header.Set("Origin", "https://third-party.example")
+		req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+		req.Header.Set("Access-Control-Request-Headers", "Authorization,Content-Type")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Header().Get("Access-Control-Allow-Origin") != "*" || rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+			t.Fatalf("third-party CORS headers: %v", rec.Header())
+		}
+		if !strings.Contains(rec.Header().Get("Access-Control-Allow-Headers"), "Authorization") || !strings.Contains(rec.Header().Get("Vary"), "Origin") {
+			t.Fatalf("missing bearer support or cache isolation: %v", rec.Header())
+		}
+		if method == http.MethodGet && rec.Code != http.StatusUnauthorized {
+			t.Fatalf("CORS must not bypass authentication, got %d", rec.Code)
+		}
+	}
+}
+
+func TestCORSDoesNotOpenOpaqueOrNonHTTPOrigins(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(corsMiddleware(nil))
+	for _, origin := range []string{"", "null", "file:///tmp/ui.html", "javascript:alert(1)", "https://ui.example/path"} {
+		req := httptest.NewRequest(http.MethodOptions, "/api", nil)
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("invalid origin %q was allowed", origin)
+		}
 	}
 }
 
