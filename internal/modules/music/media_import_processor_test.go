@@ -109,7 +109,7 @@ func TestProcessExtractedTreeReportsInvalidLyrics(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	for name, content := range map[string]string{"song.flac": "audio", "song.lrc": "invalid lyrics"} {
+	for name, content := range map[string]string{"song.flac": "audio", "song.lrc": "[00:invalid]broken lyrics"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
