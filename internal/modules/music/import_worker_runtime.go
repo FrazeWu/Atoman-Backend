@@ -42,13 +42,14 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 	if playbackURLPrefix == "" {
 		playbackURLPrefix = strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
 	}
+	importService := NewServiceWithS3(db, s3Client)
 	processor := NewMediaImportProcessor(db, mediaStore, NewSystemMediaCommandRunner(), playbackURLPrefix)
-	if metadataEnricher := newImportWorkerMetadataEnricher(); metadataEnricher != nil {
+	if metadataEnricher := NewImportWorkerMetadataEnricherFromEnv(); metadataEnricher != nil {
 		processor.WithMetadataEnricher(metadataEnricher)
+		importService.WithAlbumImportMetadataEnricher(metadataEnricher)
 	} else {
 		log.Println("music metadata enrichment disabled: MUSICBRAINZ_USER_AGENT and Discogs credentials are empty")
 	}
-	importService := NewServiceWithS3(db, s3Client)
 	worker := NewImportWorker(db, NewMusicImportObjectStore(s3Client), workerID).WithCompletionFinalizer(
 		func(_ context.Context, importID uuid.UUID) error {
 			return importService.FinalizeSubmittedAlbumImport(importID)
@@ -67,6 +68,9 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 	go func() {
 		defer close(done)
 		log.Printf("music import worker started as %s", workerID)
+		// 外部元数据查询和转码各自运行，慢查询不会阻塞音频队列。
+		metadataDone := StartMetadataMatchWorker(ctx, importService, interval)
+		defer func() { <-metadataDone }()
 		run := func() {
 			if err := importService.CleanupExpiredMusicAssetUploads(ctx); err != nil {
 				log.Printf("WARN: music import worker could not clean expired audio uploads: %v", err)
@@ -106,7 +110,8 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 	return done
 }
 
-func newImportWorkerMetadataEnricher() *ExternalAlbumMetadataEnricher {
+// 内置和独立 worker 使用同一组匹配来源与超时配置。
+func NewImportWorkerMetadataEnricherFromEnv() *ExternalAlbumMetadataEnricher {
 	userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT"))
 	discogsKey := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_KEY"))
 	discogsSecret := strings.TrimSpace(os.Getenv("DISCOGS_CONSUMER_SECRET"))

@@ -2,8 +2,10 @@ package music
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,6 +26,7 @@ type AlbumImportMetadataPreviewInput struct {
 	TrackTitles []string                          `json:"trackTitles"`
 	Tracks      []AlbumImportMetadataPreviewTrack `json:"tracks,omitempty"`
 	Force       bool                              `json:"force,omitempty"`
+	Async       bool                              `json:"async,omitempty"`
 }
 
 type AlbumImportMetadataPreviewTrack struct {
@@ -99,6 +102,13 @@ func (s *Service) MatchAlbumImportMetadata(ctx context.Context, user authctx.Cur
 		input.Tracks[index].AudioKey = ""
 		input.Tracks[index].AudioURL = ""
 	}
+	identity := input
+	identity.Async, identity.Force = false, false
+	encodedInput, err := json.Marshal(identity)
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	inputHash := fmt.Sprintf("%x", sha256.Sum256(encodedInput))
 	var generation int64
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var latest model.AlbumImportSession
@@ -109,8 +119,16 @@ func (s *Service) MatchAlbumImportMetadata(ctx context.Context, user authctx.Cur
 		if err != nil {
 			return err
 		}
+		if latest.Status == AlbumImportStatusCanceled || latest.Status == AlbumImportStatusCommitted {
+			return apperr.Unprocessable("music.import_invalid_status", "已完成或已取消的导入不能重新匹配")
+		}
+		if input.Async && !input.Force && stringValue(values["metadata_match_status"]) == "matching" && stringValue(values["metadata_match_input_hash"]) == inputHash {
+			generation = int64Value(values["metadata_match_generation"])
+			return nil
+		}
 		generation = int64Value(values["metadata_match_generation"]) + 1
 		values["metadata_match_generation"] = generation
+		values["metadata_match_input_hash"] = inputHash
 		if artist := strings.TrimSpace(input.Artist); artist != "" {
 			values["artist_name"] = artist
 		}
@@ -122,14 +140,40 @@ func (s *Service) MatchAlbumImportMetadata(ctx context.Context, user authctx.Cur
 		if err != nil {
 			return err
 		}
+		if input.Async {
+			jobInput := identity
+			jobInput.Force = input.Force
+			jobJSON, err := json.Marshal(jobInput)
+			if err != nil {
+				return err
+			}
+			job := model.MusicMetadataMatchJob{ImportID: sessionID, Generation: generation, InputJSON: string(jobJSON), Status: "queued"}
+			if err := tx.Create(&job).Error; err != nil {
+				return err
+			}
+		}
 		return tx.Model(&latest).Update("payload_json", string(encoded)).Error
 	}); err != nil {
 		return model.AlbumImportSession{}, err
+	}
+	if input.Async {
+		return loadAlbumImportSession(s.db, sessionID, &user.ID)
 	}
 	preview, err := s.PreviewAlbumImportMetadata(ctx, input)
 	if err != nil {
 		return model.AlbumImportSession{}, err
 	}
+	result := metadataResultFromPreview(preview)
+	// 请求超时也要落下结束状态，不能把会话永久留在 matching。
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.persistAlbumImportMetadataMatchGeneration(persistCtx, &session, result, generation); err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	return loadAlbumImportSession(s.db, sessionID, &user.ID)
+}
+
+func metadataResultFromPreview(preview AlbumImportMetadataPreviewDTO) AlbumImportMetadataResult {
 	result := AlbumImportMetadataResult{
 		AlbumTitle: preview.AlbumTitle, ReleaseDate: preview.ReleaseDate, CoverURL: preview.CoverURL,
 		AlbumType: preview.AlbumType, SourceURL: preview.SourceURL, MetadataSource: preview.MetadataSource,
@@ -141,13 +185,7 @@ func (s *Service) MatchAlbumImportMetadata(ctx context.Context, user authctx.Cur
 	if result.MatchStatus == "" {
 		result.MatchStatus = model.MusicMatchUnmatched
 	}
-	// 请求超时也要落下结束状态，不能把会话永久留在 matching。
-	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	if err := s.persistAlbumImportMetadataMatchGeneration(persistCtx, &session, result, generation); err != nil {
-		return model.AlbumImportSession{}, err
-	}
-	return loadAlbumImportSession(s.db, sessionID, &user.ID)
+	return result
 }
 
 func (s *Service) persistAlbumImportMetadataMatch(ctx context.Context, session *model.AlbumImportSession, result AlbumImportMetadataResult) error {
@@ -228,12 +266,23 @@ func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImp
 	}
 	metadataCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	result, err := s.albumImportMetadataEnricher.Enrich(metadataCtx, AlbumImportMetadataInput{
+	metadataInput := AlbumImportMetadataInput{
 		AlbumTitle: strings.TrimSpace(input.AlbumTitle),
 		Artist:     artist,
 		Tracks:     tracks,
 		SkipLyrics: true,
-	})
+	}
+	load := func(ctx context.Context) (AlbumImportMetadataResult, error) {
+		return s.albumImportMetadataEnricher.Enrich(ctx, metadataInput)
+	}
+	var result AlbumImportMetadataResult
+	var err error
+	if input.Force {
+		result, err = load(metadataCtx)
+	} else {
+		encoded, _ := json.Marshal(metadataInput)
+		result, err = s.metadataResults.GetCancelable(metadataCtx, fmt.Sprintf("%x", sha256.Sum256(encoded)), load)
+	}
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(metadataCtx.Err(), context.DeadlineExceeded) {
 			return AlbumImportMetadataPreviewDTO{

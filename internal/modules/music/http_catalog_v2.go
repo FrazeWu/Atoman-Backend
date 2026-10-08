@@ -34,9 +34,11 @@ type musicSearchMeta struct {
 
 // listSongs godoc
 // @Summary 获取歌曲列表
+// @Description view=summary 保留播放地址与基础信息，省略歌词、波形和详细关联资料；不传保持完整响应。
 // @Tags music
 // @Produce json
 // @Param artist_id query string false "艺术家 ID"
+// @Param view query string false "summary 返回轻量列表信息"
 // @Param release_type query string false "歌曲类型，多个值使用逗号分隔" example(single,leak)
 // @Param tag_id query string false "标签 ID（包含子孙标签及可见所属专辑的标签）"
 // @Param sort query string false "排序方式" Enums(-release_date,release_date,hot)
@@ -120,6 +122,9 @@ func (h *Handler) listSongs(c *gin.Context) {
 	}
 
 	var songs []model.Song
+	if c.Query("view") == "summary" {
+		query = query.Omit("Lyrics", "WaveformPeaks", "Description")
+	}
 	if err := query.Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("ArtistCredits", visibleSongArtistCreditsPreload(viewerPtr)).Preload("ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
 		httpx.Error(c, err)
 		return
@@ -163,6 +168,10 @@ func (h *Handler) listSongs(c *gin.Context) {
 		if songs[i].Album != nil {
 			resolveAlbumMediaURLs(songs[i].Album)
 		}
+	}
+	if c.Query("view") == "summary" {
+		httpx.List(c, summarizeSongs(songs), page, pageSize, total)
+		return
 	}
 	httpx.List(c, songs, page, pageSize, total)
 }
@@ -224,8 +233,12 @@ func (h *Handler) search(c *gin.Context) {
 			return
 		}
 		result.Meta.Totals["song"] = total
+		selection := `"Songs".*`
+		if c.Query("view") == "summary" {
+			selection = songSummarySelection
+		}
 		if err := songQuery().
-			Distinct(`"Songs".*, CASE WHEN LOWER("Songs".title) = LOWER(?) THEN 0 WHEN LOWER("Songs".title) LIKE LOWER(?) THEN 1 WHEN LOWER("Albums".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 2 ELSE 3 END AS search_rank`, query, prefix, prefix, prefix, prefix).Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).
+			Distinct(selection+`, CASE WHEN LOWER("Songs".title) = LOWER(?) THEN 0 WHEN LOWER("Songs".title) LIKE LOWER(?) THEN 1 WHEN LOWER("Albums".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 2 ELSE 3 END AS search_rank`, query, prefix, prefix, prefix, prefix).Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).
 			Order(`search_rank ASC, "Songs".play_count DESC, "Songs".title ASC`).Limit(pageSize).Offset(offset).Find(&result.Songs).Error; err != nil {
 			httpx.Error(c, err)
 			return
@@ -305,6 +318,10 @@ func (h *Handler) search(c *gin.Context) {
 	}
 	for kind, total := range result.Meta.Totals {
 		result.Meta.HasMore[kind] = int64(page*pageSize) < total
+	}
+	if c.Query("view") == "summary" {
+		httpx.OK(c, http.StatusOK, gin.H{"songs": summarizeSongs(result.Songs), "albums": result.Albums, "artists": result.Artists, "playlists": result.Playlists, "meta": result.Meta})
+		return
 	}
 	httpx.OK(c, http.StatusOK, result)
 }

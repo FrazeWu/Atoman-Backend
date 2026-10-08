@@ -8,7 +8,7 @@ func TestNewImportWorkerMetadataEnricherPrefersDiscogs(t *testing.T) {
 	t.Setenv("DISCOGS_CONSUMER_SECRET", "consumer-secret")
 	t.Setenv("DISCOGS_BASE_URL", "https://discogs.example")
 
-	enricher := newImportWorkerMetadataEnricher()
+	enricher := NewImportWorkerMetadataEnricherFromEnv()
 	if enricher == nil {
 		t.Fatal("expected metadata enricher")
 	}

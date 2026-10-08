@@ -43,6 +43,7 @@ func (h *Handler) previewAlbumImportMetadata(c *gin.Context) {
 
 // matchAlbumImportMetadata godoc
 // @Summary 保存专辑导入匹配结果
+// @Description async=true 只持久入队并返回 matching，通过导入详情轮询结果；重复请求去重，force=true 强制新一轮匹配。省略 async 保持同步兼容。
 // @Tags music-imports
 // @Accept json
 // @Produce json

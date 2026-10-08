@@ -1,6 +1,7 @@
 package music
 
 import (
+	"atoman/internal/platform/cachex"
 	"net/http"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ type Service struct {
 	applePreviewBaseURL         string
 	lyricsSaveMu                sync.Mutex
 	lyricsVoteMu                sync.Mutex
+	metadataResults             *cachex.Cache[AlbumImportMetadataResult]
 }
 
 func NewService(db *gorm.DB) *Service {
@@ -31,6 +33,7 @@ func NewService(db *gorm.DB) *Service {
 		applePreviewHTTPClient: &http.Client{Timeout: 8 * time.Second},
 		remoteMediaHTTPClient:  &http.Client{Timeout: 15 * time.Second},
 		applePreviewBaseURL:    "https://itunes.apple.com/lookup",
+		metadataResults:        cachex.New[AlbumImportMetadataResult](cachex.FromEnv(), "atoman:music:metadata:v1", 30*time.Minute, 30*time.Minute),
 	}
 }
 

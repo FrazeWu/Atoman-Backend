@@ -6648,6 +6648,9 @@ definitions:
     type: object
   music.AlbumImportMetadataPreviewInput:
     properties:
+      async:
+        description: true 返回 matching 并持久后台匹配，轮询导入详情获取结果；省略保持同步兼容
+        type: boolean
       albumTitle:
         type: "string"
       artist:
@@ -11963,6 +11966,10 @@ paths:
     get:
       description: 返回已发布文章，可按用户、频道或合集筛选。
       parameters:
+      - description: summary 返回轻量列表，正文、歌词和波形按详情接口获取；不传保持旧响应
+        in: query
+        name: view
+        type: string
       - description: 用户 UUID
         in: query
         name: user_id
@@ -20820,6 +20827,10 @@ paths:
   /api/v1/music/search:
     get:
       parameters:
+      - description: summary 返回轻量列表，正文、歌词和波形按详情接口获取；不传保持旧响应
+        in: query
+        name: view
+        type: string
       - description: 关键词
         in: query
         name: q
@@ -20872,6 +20883,10 @@ paths:
   /api/v1/music/songs:
     get:
       parameters:
+      - description: summary 返回轻量列表，正文、歌词和波形按详情接口获取；不传保持旧响应
+        in: query
+        name: view
+        type: string
       - description: 艺术家 ID
         in: query
         name: artist_id
