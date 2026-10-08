@@ -15779,7 +15779,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "标签 ID",
+                        "description": "标签 ID（包含子孙标签）",
                         "name": "tag_id",
                         "in": "query"
                     },
@@ -18754,7 +18754,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "标签 ID",
+                        "description": "标签 ID（包含子孙标签及可见所属专辑的标签）",
                         "name": "tag_id",
                         "in": "query"
                     },
@@ -19921,7 +19921,7 @@ const docTemplate = `{
         },
         "/api/v1/music/tags": {
             "get": {
-                "description": "按标签类别、父级和关键词浏览公共标签目录。",
+                "description": "按标签类别、父级和关键词浏览公共标签目录；歌曲和专辑计数包含子孙标签，歌曲还包含可见所属专辑的标签。",
                 "produces": [
                     "application/json"
                 ],
@@ -20027,7 +20027,7 @@ const docTemplate = `{
         },
         "/api/v1/music/tags/{tagId}": {
             "get": {
-                "description": "根据标签 ID 获取标签名称和标签类别。",
+                "description": "返回标签信息及当前用户可见的歌曲、专辑数量；包含子孙标签和歌曲所属专辑的标签。",
                 "produces": [
                     "application/json"
                 ],
@@ -39504,6 +39504,9 @@ const docTemplate = `{
         "music.MusicTagOptionDTO": {
             "type": "object",
             "properties": {
+                "album_count": {
+                    "type": "integer"
+                },
                 "assignment_count": {
                     "type": "integer"
                 },
@@ -39524,6 +39527,9 @@ const docTemplate = `{
                 },
                 "parent_id": {
                     "type": "string"
+                },
+                "song_count": {
+                    "type": "integer"
                 }
             }
         },

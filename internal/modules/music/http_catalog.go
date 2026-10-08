@@ -432,7 +432,7 @@ func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 // @Param q query string false "搜索关键词"
 // @Param artist_id query string false "艺术家 ID"
 // @Param artist_relation query string false "艺术家专辑关系" Enums(participating)
-// @Param tag_id query string false "标签 ID"
+// @Param tag_id query string false "标签 ID（包含子孙标签）"
 // @Param sort query string false "排序方式"
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
@@ -509,13 +509,7 @@ func (h *Handler) listAlbums(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
-		db = db.Where(`EXISTS (
-			SELECT 1 FROM music_tag_assignments
-			WHERE music_tag_assignments.entity_type = 'album'
-			  AND music_tag_assignments.entity_id = "Albums".id
-			  AND music_tag_assignments.tag_id = ?
-			  AND music_tag_assignments.deleted_at IS NULL
-		)`, tagID)
+		db = scopeMusicTagEntries(db, musicTagEntityAlbum, `"Albums"`, tagID, viewerPtr)
 	}
 	if cursor != nil {
 		db = db.Where("(\"Albums\".created_at < ? OR (\"Albums\".created_at = ? AND \"Albums\".id < ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)

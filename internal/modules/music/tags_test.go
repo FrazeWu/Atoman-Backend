@@ -10,6 +10,136 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestMusicTagCatalogIncludesAlbumSongsAndDescendants(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	root, _, err := service.CreateMusicTag(user, "type", "民谣", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _, err := service.CreateMusicTag(user, "type", "当代民谣", &root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, _, err := service.CreateMusicTag(user, "type", "独立民谣", &child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	album := model.Album{Title: "尼勒克小镇", LifecycleStatus: model.MusicLifecycleActive, Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatal(err)
+	}
+	songs := []model.Song{
+		{Title: "依奇克里克", AlbumID: &album.ID, LifecycleStatus: model.MusicLifecycleActive, Status: "open"},
+		{Title: "北山牧场", AlbumID: &album.ID, LifecycleStatus: model.MusicLifecycleActive, Status: "open"},
+		{Title: "草稿", AlbumID: &album.ID, LifecycleStatus: model.MusicLifecycleDraft, Status: "open"},
+	}
+	if err := db.Create(&songs).Error; err != nil {
+		t.Fatal(err)
+	}
+	assignments := []model.MusicTagAssignment{
+		{EntityType: "album", EntityID: album.ID, TagID: leaf.ID, CreatedBy: user.ID},
+		{EntityType: "song", EntityID: songs[0].ID, TagID: root.ID, CreatedBy: user.ID},
+	}
+	if err := db.Create(&assignments).Error; err != nil {
+		t.Fatal(err)
+	}
+	router := newMusicHTTPRouter(service, nil)
+	for _, tagID := range []uuid.UUID{root.ID, child.ID, leaf.ID} {
+		for _, entity := range []string{"songs", "albums"} {
+			response := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/"+entity+"?tag_id="+tagID.String(), "")
+			var result struct {
+				Data []struct{ ID uuid.UUID }
+				Meta struct{ Total int64 }
+			}
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s: %s", entity, response.Body.String())
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			want := int64(2)
+			if entity == "albums" {
+				want = 1
+			}
+			if result.Meta.Total != want || len(result.Data) != int(want) {
+				t.Fatalf("%s tag %s: expected %d distinct visible entries, got %s", entity, tagID, want, response.Body.String())
+			}
+		}
+		response := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/tags/"+tagID.String(), "")
+		var result struct {
+			Data struct {
+				SongCount  int64 `json:"song_count"`
+				AlbumCount int64 `json:"album_count"`
+			}
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Data.SongCount != 2 || result.Data.AlbumCount != 1 {
+			t.Fatalf("counts must match lists: %s", response.Body.String())
+		}
+	}
+	var count int64
+	if err := db.Model(&model.MusicTagAssignment{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("inheritance must not create assignments, got %d", count)
+	}
+}
+
+func TestMusicTagCountsRespectAlbumVisibilityAndViewer(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	tag, _, err := service.CreateMusicTag(user, "type", "民谣", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	album := model.Album{Title: "私有草稿", LifecycleStatus: model.MusicLifecycleDraft, UploadedBy: &user.ID, Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatal(err)
+	}
+	song := model.Song{Title: "已发布歌曲", AlbumID: &album.ID, LifecycleStatus: model.MusicLifecycleActive, Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	assignment := model.MusicTagAssignment{EntityType: "album", EntityID: album.ID, TagID: tag.ID, CreatedBy: user.ID}
+	if err := db.Create(&assignment).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, authenticated := range []bool{false, true} {
+		router := newMusicHTTPRouter(service, nil)
+		want := int64(0)
+		if authenticated {
+			router = newMusicHTTPRouter(service, &user)
+			want = 1
+		}
+		for _, entity := range []string{"songs", "albums"} {
+			response := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/"+entity+"?tag_id="+tag.ID.String(), "")
+			var result struct{ Meta struct{ Total int64 } }
+			if response.Code != http.StatusOK {
+				t.Fatal(response.Body.String())
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Meta.Total != want {
+				t.Fatalf("%s viewer=%t: %s", entity, authenticated, response.Body.String())
+			}
+		}
+		response := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/tags?kind=type&root=true", "")
+		var result struct{ Data []MusicTagOptionDTO }
+		if response.Code != http.StatusOK {
+			t.Fatal(response.Body.String())
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Data) != 1 || result.Data[0].SongCount != want || result.Data[0].AlbumCount != want {
+			t.Fatalf("catalog counts viewer=%t: %s", authenticated, response.Body.String())
+		}
+	}
+}
+
 func TestMusicTagsSupportSongAlbumKindsAndVotes(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	album := model.Album{Title: "Tagged Album", LifecycleStatus: model.MusicLifecycleActive, Status: "open"}

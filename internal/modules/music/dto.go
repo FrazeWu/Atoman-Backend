@@ -33,6 +33,8 @@ type MusicTagOptionDTO struct {
 	Depth           int        `json:"depth"`
 	AssignmentCount int64      `json:"assignment_count"`
 	ChildCount      int64      `json:"child_count"`
+	SongCount       int64      `json:"song_count"`
+	AlbumCount      int64      `json:"album_count"`
 }
 
 type SubmitEditRequest struct {

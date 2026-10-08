@@ -38,7 +38,7 @@ type musicSearchMeta struct {
 // @Produce json
 // @Param artist_id query string false "艺术家 ID"
 // @Param release_type query string false "歌曲类型，多个值使用逗号分隔" example(single,leak)
-// @Param tag_id query string false "标签 ID"
+// @Param tag_id query string false "标签 ID（包含子孙标签及可见所属专辑的标签）"
 // @Param sort query string false "排序方式" Enums(-release_date,release_date,hot)
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
@@ -100,13 +100,7 @@ func (h *Handler) listSongs(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
-		query = query.Where(`EXISTS (
-			SELECT 1 FROM music_tag_assignments
-			WHERE music_tag_assignments.entity_type = 'song'
-			  AND music_tag_assignments.entity_id = "Songs".id
-			  AND music_tag_assignments.tag_id = ?
-			  AND music_tag_assignments.deleted_at IS NULL
-		)`, tagID)
+		query = scopeMusicTagEntries(query, musicTagEntitySong, `"Songs"`, tagID, viewerPtr)
 	}
 
 	var total int64
