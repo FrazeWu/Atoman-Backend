@@ -21,6 +21,28 @@ type fakeMediaCommandRunner struct {
 	run   func(string, []string) ([]byte, error)
 }
 
+func TestLyricsPayloadFromFileAcceptsNonnegativeJSONCredits(t *testing.T) {
+	raw := "{\"t\":0,\"c\":[{\"tx\":\"作词: \"},{\"tx\":\"张智\"}]}\n{\"t\":1000,\"c\":[{\"tx\":\"作曲: 张智\"}]}\n[00:52.00]孩子啊你要去哪里"
+	payload := lyricsPayloadFromFile("张智 - 巴克图口岸.lrc", []byte(raw))
+	if err := validateImportedLyrics("巴克图口岸.lrc", payload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload.Content, "[by:作词: 张智]") || payload.Format != "lrc" {
+		t.Fatalf("unexpected lyrics: %#v", payload)
+	}
+}
+
+func TestLyricsPayloadFromFileKeepsUntimedInstrumentCreditsAsPlain(t *testing.T) {
+	raw := "{\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"张智\"}]}\n笛子：周昇\n吉他&冬不拉：叶尔波利\n键盘&人声：张智"
+	payload := lyricsPayloadFromFile("张智 - 阿尔金山.lrc", []byte(raw))
+	if payload.Format != "plain" || payload.Content != "作曲: 张智\n笛子：周昇\n吉他&冬不拉：叶尔波利\n键盘&人声：张智" {
+		t.Fatalf("unexpected lyrics: %#v", payload)
+	}
+	if err := validateImportedLyrics("阿尔金山.lrc", payload); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLyricsPayloadFromFileNormalizesJSONCredits(t *testing.T) {
 	raw := "{\"t\":-1000,\"c\":[{\"tx\":\"作词: \"},{\"tx\":\"梁弈源\"}]}\n{\"t\":-500,\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"张智\"}]}\n[00:00.00]\n[00:17.27]依奇克里克"
 	payload := lyricsPayloadFromFile("张智 - 依奇克里克.lrc", []byte(raw))
