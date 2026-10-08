@@ -65,7 +65,7 @@ func parseRecommendationLanguage(raw string) (string, error) {
 }
 
 func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, languageCode string, search string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	if mode != recommendation.ModeFeatured {
+	if mode != recommendation.ModeFeatured && mode != recommendation.ModeHot {
 		return s.recommendArticles(mode, category, theme, languageCode, search, page, pageSize)
 	}
 	key := recommendationCacheKey("articles", mode, normalizeSourceCategory(category), theme, languageCode, search, page, pageSize)
@@ -202,7 +202,7 @@ func (s *Service) recommendArticles(mode recommendation.Mode, category string, t
 }
 
 func (s *Service) RecommendChannels(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	if mode != recommendation.ModeFeatured {
+	if mode != recommendation.ModeFeatured && mode != recommendation.ModeHot {
 		return s.recommendChannels(mode, category, theme, languageCode, page, pageSize)
 	}
 	key := recommendationCacheKey("channels", mode, category, theme, languageCode, "", page, pageSize)
