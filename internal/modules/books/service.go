@@ -1,15 +1,21 @@
 package books
 
 import (
+	"sync"
+	"time"
+
 	"github.com/aws/aws-sdk-go/service/s3"
 	"gorm.io/gorm"
 )
 
 // Service owns book authorization and future catalog/import operations.
 type Service struct {
-	db           *gorm.DB
-	bookUpload   bookUploadStore
-	virusScanner bookVirusScanner
+	db                    *gorm.DB
+	bookUpload            bookUploadStore
+	virusScanner          bookVirusScanner
+	catalogCountMu        sync.Mutex
+	catalogCountValue     int64
+	catalogCountExpiresAt time.Time
 }
 
 func NewService(db *gorm.DB) *Service {

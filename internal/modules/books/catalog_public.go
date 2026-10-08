@@ -90,8 +90,8 @@ func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, 
 			WHERE bc.work_id = book_works.id AND bc.deleted_at IS NULL AND bp.deleted_at IS NULL AND bp.name ILIKE ? ESCAPE '\'
 		))`, pattern, pattern, pattern, pattern)
 	}
-	var total int64
-	if err := base.Count(&total).Error; err != nil {
+	total, err := s.countPublicCatalog(base, query)
+	if err != nil {
 		return nil, 0, err
 	}
 	var works []model.BookWork
@@ -100,6 +100,26 @@ func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, 
 	}
 	result, err := s.buildPublicWorkDTOs(ctx, works, false)
 	return result, total, err
+}
+
+func (s *Service) countPublicCatalog(base *gorm.DB, query string) (int64, error) {
+	// 发现页只缓存总数；当前页和搜索仍实时查询，避免翻页反复扫描全部作品。
+	if query == "" {
+		s.catalogCountMu.Lock()
+		defer s.catalogCountMu.Unlock()
+		if time.Now().Before(s.catalogCountExpiresAt) {
+			return s.catalogCountValue, nil
+		}
+	}
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return 0, err
+	}
+	if query == "" {
+		s.catalogCountValue = total
+		s.catalogCountExpiresAt = time.Now().Add(time.Minute)
+	}
+	return total, nil
 }
 
 func (s *Service) GetPublicWork(ctx context.Context, workID uuid.UUID) (BookPublicWorkDTO, error) {
