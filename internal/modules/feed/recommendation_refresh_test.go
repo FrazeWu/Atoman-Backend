@@ -8,7 +8,40 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"atoman/internal/modules/recommendation"
 )
+
+func TestHotRecommendationsReuseFreshCachedResults(t *testing.T) {
+	for _, kind := range []string{"articles", "channels"} {
+		t.Run(kind, func(t *testing.T) {
+			db := newRecommendationTestDB(t)
+			key := recommendationCacheKey(kind, recommendation.ModeHot, "blog", "all", "zh", "", 1, 20)
+			payload, err := json.Marshal(recommendationCachedValue[recommendationCacheEntry]{
+				Value: recommendationCacheEntry{
+					Items: []RecommendationItemDTO{{ID: "cached-hot-item", Title: "Hot result"}},
+					Total: 1,
+				},
+				RefreshAfter: time.Now().Add(time.Minute),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := NewService(db)
+			s.recommendationCache = &memoryRecommendationCache{values: map[string]string{key: string(payload)}}
+			var items []RecommendationItemDTO
+			var total int64
+			if kind == "articles" {
+				items, total, err = s.RecommendArticlesByMode(recommendation.ModeHot, "blog", "all", "zh", "", 1, 20)
+			} else {
+				items, total, err = s.RecommendChannelsByMode(recommendation.ModeHot, "blog", "all", "zh", 1, 20)
+			}
+			if err != nil || total != 1 || len(items) != 1 || items[0].ID != "cached-hot-item" {
+				t.Fatalf("fresh hot cache was bypassed: items=%+v total=%d err=%v", items, total, err)
+			}
+		})
+	}
+}
 
 type memoryRecommendationCache struct {
 	mu     sync.Mutex

@@ -836,11 +836,17 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 	if category == "video" || category == "podcast" {
 		db = db.Where(recommendationFeedItemCategorySQL()+" = ?", category)
 	} else {
-		// 分开来源分类与附件类型条件，避免 CASE 把候选行数低估到 1 而放弃有序索引。
+		// 附件类型优先于来源分类。
 		db = db.Where(`LOWER(COALESCE(feed_items.enclosure_type, '')) NOT LIKE 'video/%'
-			AND LOWER(COALESCE(feed_items.enclosure_type, '')) NOT LIKE 'audio/%'`).
-			Where(`CASE WHEN LOWER(COALESCE(feed_sources.category, '')) IN ('blog', 'news', 'social', 'video', 'forum', 'podcast')
+			AND LOWER(COALESCE(feed_items.enclosure_type, '')) NOT LIKE 'audio/%'`)
+		if category == "blog" {
+			// CASE 会低估博客来源数量，导致全量扫描后排序；等价 OR 条件可沿发布时间索引取有限候选。
+			db = db.Where(`(LOWER(COALESCE(feed_sources.category, '')) = 'blog'
+				OR LOWER(COALESCE(feed_sources.category, '')) NOT IN ('blog', 'news', 'social', 'video', 'forum', 'podcast'))`)
+		} else {
+			db = db.Where(`CASE WHEN LOWER(COALESCE(feed_sources.category, '')) IN ('blog', 'news', 'social', 'video', 'forum', 'podcast')
 				THEN LOWER(feed_sources.category) ELSE 'blog' END = ?`, category)
+		}
 	}
 	db = applyRecommendationLanguageFilter(db, "feed_items.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "feed_items.title", "feed_items.summary", keywords)
