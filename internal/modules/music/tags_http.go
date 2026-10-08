@@ -24,7 +24,7 @@ type musicTagVoteInput struct {
 
 // searchMusicTags godoc
 // @Summary 浏览或搜索公共音乐标签
-// @Description 按标签类别、父级和关键词浏览公共标签目录。
+// @Description 按标签类别、父级和关键词浏览公共标签目录；歌曲和专辑计数包含子孙标签，歌曲还包含可见所属专辑的标签。
 // @Tags music
 // @Produce json
 // @Param kind query string false "标签类别" Enums(mood,type,scene,theme,instrument)
@@ -41,7 +41,8 @@ func (h *Handler) searchMusicTags(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	tags, err := h.service.ListMusicTagOptions(kind, strings.TrimSpace(c.Query("q")), parentID, c.Query("root") == "true")
+	viewer, hasViewer := currentMusicUser(c)
+	tags, err := h.service.ListMusicTagOptions(kind, strings.TrimSpace(c.Query("q")), parentID, c.Query("root") == "true", musicViewer(viewer, hasViewer))
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -85,7 +86,7 @@ func (h *Handler) createMusicTag(c *gin.Context) {
 
 // getMusicTag godoc
 // @Summary 获取公共音乐标签详情
-// @Description 根据标签 ID 获取标签名称和标签类别。
+// @Description 返回标签信息及当前用户可见的歌曲、专辑数量；包含子孙标签和歌曲所属专辑的标签。
 // @Tags music
 // @Produce json
 // @Param tagId path string true "标签 ID"
@@ -98,7 +99,8 @@ func (h *Handler) getMusicTag(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	tag, err := h.service.GetMusicTag(tagID)
+	viewer, hasViewer := currentMusicUser(c)
+	tag, err := h.service.GetMusicTag(tagID, musicViewer(viewer, hasViewer))
 	if err != nil {
 		httpx.Error(c, err)
 		return

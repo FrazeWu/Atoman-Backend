@@ -108,7 +108,7 @@ func musicTagOptionDTO(tag model.MusicTag, assignmentCount, childCount int64) Mu
 	}
 }
 
-func (s *Service) ListMusicTagOptions(kind, rawQuery string, parentID *uuid.UUID, rootOnly bool) ([]MusicTagOptionDTO, error) {
+func (s *Service) ListMusicTagOptions(kind, rawQuery string, parentID *uuid.UUID, rootOnly bool, viewers ...*authctx.CurrentUser) ([]MusicTagOptionDTO, error) {
 	if kind != "" {
 		if err := validateMusicTagKind(kind); err != nil {
 			return nil, err
@@ -182,8 +182,15 @@ func (s *Service) ListMusicTagOptions(kind, rawQuery string, parentID *uuid.UUID
 	}
 
 	result := make([]MusicTagOptionDTO, 0, len(tags))
+	contentCounts, err := s.musicTagContentCounts(tagIDs, firstMusicTagViewer(viewers))
+	if err != nil {
+		return nil, err
+	}
 	for _, tag := range tags {
-		result = append(result, musicTagOptionDTO(tag, assignmentCountByTag[tag.ID], childCountByTag[tag.ID]))
+		option := musicTagOptionDTO(tag, assignmentCountByTag[tag.ID], childCountByTag[tag.ID])
+		option.SongCount = contentCounts[tag.ID].SongCount
+		option.AlbumCount = contentCounts[tag.ID].AlbumCount
+		result = append(result, option)
 	}
 	return result, nil
 }
@@ -192,7 +199,7 @@ func (s *Service) SearchMusicTags(kind, rawQuery string) ([]MusicTagOptionDTO, e
 	return s.ListMusicTagOptions(kind, rawQuery, nil, false)
 }
 
-func (s *Service) GetMusicTag(tagID uuid.UUID) (MusicTagOptionDTO, error) {
+func (s *Service) GetMusicTag(tagID uuid.UUID, viewers ...*authctx.CurrentUser) (MusicTagOptionDTO, error) {
 	var tag model.MusicTag
 	if err := s.db.Select("id, name, kind, parent_id, depth").First(&tag, "id = ?", tagID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -208,7 +215,14 @@ func (s *Service) GetMusicTag(tagID uuid.UUID) (MusicTagOptionDTO, error) {
 	if err := s.db.Model(&model.MusicTag{}).Where("parent_id = ?", tag.ID).Count(&childCount).Error; err != nil {
 		return MusicTagOptionDTO{}, err
 	}
-	return musicTagOptionDTO(tag, assignmentCount, childCount), nil
+	counts, err := s.musicTagContentCounts([]uuid.UUID{tagID}, firstMusicTagViewer(viewers))
+	if err != nil {
+		return MusicTagOptionDTO{}, err
+	}
+	option := musicTagOptionDTO(tag, assignmentCount, childCount)
+	option.SongCount = counts[tagID].SongCount
+	option.AlbumCount = counts[tagID].AlbumCount
+	return option, nil
 }
 
 func (s *Service) validateMusicTagEntity(user *authctx.CurrentUser, entityType string, entityID uuid.UUID) error {

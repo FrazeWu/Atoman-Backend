@@ -7427,6 +7427,8 @@ definitions:
     type: object
   music.MusicTagOptionDTO:
     properties:
+      album_count:
+        type: integer
       assignment_count:
         type: integer
       child_count:
@@ -7441,6 +7443,8 @@ definitions:
         type: string
       parent_id:
         type: string
+      song_count:
+        type: integer
     type: object
   music.PaginationMetaResponse:
     properties:
@@ -18932,7 +18936,7 @@ paths:
         in: query
         name: artist_relation
         type: string
-      - description: 标签 ID
+      - description: 标签 ID（包含子孙标签）
         in: query
         name: tag_id
         type: string
@@ -20798,7 +20802,7 @@ paths:
         in: query
         name: release_type
         type: string
-      - description: 标签 ID
+      - description: 标签 ID（包含子孙标签及可见所属专辑的标签）
         in: query
         name: tag_id
         type: string
@@ -21546,7 +21550,7 @@ paths:
       - music-entry-state
   /api/v1/music/tags:
     get:
-      description: 按标签类别、父级和关键词浏览公共标签目录。
+      description: 按标签类别、父级和关键词浏览公共标签目录；歌曲和专辑计数包含子孙标签，歌曲还包含可见所属专辑的标签。
       parameters:
       - description: 标签类别
         enum:
@@ -21617,7 +21621,7 @@ paths:
       - music
   /api/v1/music/tags/{tagId}:
     get:
-      description: 根据标签 ID 获取标签名称和标签类别。
+      description: 返回标签信息及当前用户可见的歌曲、专辑数量；包含子孙标签和歌曲所属专辑的标签。
       parameters:
       - description: 标签 ID
         in: path
