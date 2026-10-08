@@ -49,7 +49,7 @@ func recordRSSFetchDiagnostics(db *gorm.DB, diagnostics []model.FeedSourceDiagno
 	if err := db.CreateInBatches(&diagnostics, 100).Error; err != nil {
 		return err
 	}
-	return db.Unscoped().Where("created_at < ?", time.Now().UTC().Add(-feedSourceDiagnosticRetention)).Delete(&model.FeedSourceDiagnostic{}).Error
+	return nil
 }
 
 func recordRSSFetchRecoveryOperations(db *gorm.DB, group rssSourceGroup, recoveredAt time.Time) {
@@ -153,7 +153,6 @@ func clearRSSFetchIncidentNotifications(db *gorm.DB, sourceIDs []uuid.UUID) erro
 }
 
 func recordFeedSourceDiagnostic(db *gorm.DB, sourceID uuid.UUID, itemID *uuid.UUID, kind, errorCode, message string, attemptCount int, recoveredAt *time.Time) error {
-	now := time.Now().UTC()
 	entry := model.FeedSourceDiagnostic{
 		FeedSourceID: sourceID,
 		FeedItemID:   itemID,
@@ -166,5 +165,13 @@ func recordFeedSourceDiagnostic(db *gorm.DB, sourceID uuid.UUID, itemID *uuid.UU
 	if err := db.Create(&entry).Error; err != nil {
 		return err
 	}
-	return db.Unscoped().Where("created_at < ?", now.Add(-feedSourceDiagnosticRetention)).Delete(&model.FeedSourceDiagnostic{}).Error
+	return nil
+}
+
+// 每次定时任务最多清理一批，避免诊断写入扫描整张表或长时间占用写锁。
+func cleanupFeedSourceDiagnostics(db *gorm.DB, now time.Time) error {
+	return db.Exec(`DELETE FROM feed_source_diagnostics WHERE id IN (
+		SELECT id FROM feed_source_diagnostics WHERE created_at < ?
+		ORDER BY created_at LIMIT 1000
+	)`, now.Add(-feedSourceDiagnosticRetention)).Error
 }

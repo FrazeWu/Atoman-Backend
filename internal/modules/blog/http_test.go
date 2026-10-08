@@ -206,6 +206,9 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.PodcastEpisode{},
 		&model.Video{},
 		&model.ContentPublicationEvent{},
+		&model.ContentLifecycleEvent{},
+		&model.ContentProgress{},
+		&model.ContentNotificationPreference{},
 		&model.PostCollection{},
 		&model.ContentEntry{},
 		&model.ContentPostExtension{},
@@ -217,6 +220,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.ContentBlogDraft{},
 		&model.BlogMarkdownImport{},
 		&model.BlogMarkdownImportDiagnostic{},
+		&model.BlogPublishSchedule{},
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.LegacyCollectionMapping{},
@@ -354,7 +358,7 @@ func TestPublicBlogTagsLifecycle(t *testing.T) {
 		t.Fatalf("expected tag list, got %d: %s", response.Code, response.Body.String())
 	}
 	var tag model.ContentBlogUserTag
-	if err := db.Where("content_id = ? AND user_id = ?", post.ID, reader.ID).First(&tag).Error; err != nil {
+	if err := db.Where("content_id = ? AND user_id = ?", post.ID, reader.UUID).First(&tag).Error; err != nil {
 		t.Fatal(err)
 	}
 	response = httptest.NewRecorder()

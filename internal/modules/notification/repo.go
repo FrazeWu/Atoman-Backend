@@ -55,7 +55,7 @@ func (r *Repo) ListAnnouncements(query ListAnnouncementsQuery) ([]announcementRe
 	}
 
 	var total int64
-	if err := base.Distinct("source_id").Count(&total).Error; err != nil {
+	if err := base.Session(&gorm.Session{}).Distinct("source_id").Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -65,7 +65,7 @@ func (r *Repo) ListAnnouncements(query ListAnnouncementsQuery) ([]announcementRe
 		SourceID    uuid.UUID
 		PublishedAt time.Time
 	}
-	if err := base.Select("source_id, MIN(created_at) AS published_at").
+	if err := base.Session(&gorm.Session{}).Select("source_id, MIN(created_at) AS published_at").
 		Group("source_id").
 		Order("published_at DESC").
 		Order("source_id DESC").
@@ -85,7 +85,7 @@ func (r *Repo) ListAnnouncements(query ListAnnouncementsQuery) ([]announcementRe
 	}
 
 	var representatives []model.Notification
-	if err := base.Where("source_id IN ?", sourceIDs).
+	if err := base.Session(&gorm.Session{}).Where("source_id IN ?", sourceIDs).
 		Select("DISTINCT ON (source_id) *").
 		Preload("Actor").
 		Order("source_id, created_at ASC, id ASC").
@@ -97,7 +97,7 @@ func (r *Repo) ListAnnouncements(query ListAnnouncementsQuery) ([]announcementRe
 		SourceID uuid.UUID
 		Count    int64
 	}
-	if err := base.Where("source_id IN ?", sourceIDs).
+	if err := base.Session(&gorm.Session{}).Where("source_id IN ?", sourceIDs).
 		Select("source_id, COUNT(*) AS count").
 		Group("source_id").
 		Scan(&counts).Error; err != nil {

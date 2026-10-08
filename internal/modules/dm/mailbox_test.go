@@ -35,8 +35,9 @@ func TestMailboxesIncludeUserAndOwnedChannels(t *testing.T) {
 
 func TestConversationPartiesIncludeNamesAndAvatars(t *testing.T) {
 	db := testDB(t)
-	actor := model.User{UUID: uuid.New(), Username: "actor-user", Email: "actor@example.test", Password: "test", DisplayName: "Actor Name", AvatarURL: "/avatars/actor.png"}
-	other := model.User{UUID: uuid.New(), Username: "other-user", Email: "other@example.test", Password: "test", DisplayName: "Other Name", AvatarURL: "/avatars/other.png"}
+	// 手工构造的用户会话必须遵循 NormalizeParties 的 UUID 排序。
+	actor := model.User{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000001"), Username: "actor-user", Email: "actor@example.test", Password: "test", DisplayName: "Actor Name", AvatarURL: "/avatars/actor.png"}
+	other := model.User{UUID: uuid.MustParse("00000000-0000-4000-8000-000000000002"), Username: "other-user", Email: "other@example.test", Password: "test", DisplayName: "Other Name", AvatarURL: "/avatars/other.png"}
 	owner := model.User{UUID: uuid.New(), Username: "channel-owner", Email: "owner@example.test", Password: "test", DisplayName: "Channel Owner", AvatarURL: "/avatars/owner.png"}
 	for _, user := range []*model.User{&actor, &other, &owner} {
 		if err := db.Create(user).Error; err != nil {
@@ -60,11 +61,21 @@ func TestConversationPartiesIncludeNamesAndAvatars(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(mailboxes) != 1 {
+		t.Fatalf("actor should only see their own mailbox, got %#v", mailboxes)
+	}
 	if mailboxes[0].Party.Name != actor.DisplayName || mailboxes[0].Party.AvatarURL != actor.AvatarURL {
 		t.Fatalf("user mailbox party = %#v", mailboxes[0].Party)
 	}
-	if mailboxes[1].Party.Name != "Channel Name" || mailboxes[1].Party.AvatarURL != "/covers/channel.png" {
-		t.Fatalf("channel mailbox party = %#v", mailboxes[1].Party)
+	ownerMailboxes, err := service.ListMailboxes(context.Background(), authctx.CurrentUser{ID: owner.UUID, Username: owner.Username})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ownerMailboxes) != 2 {
+		t.Fatalf("owner should see user and owned channel mailboxes, got %#v", ownerMailboxes)
+	}
+	if ownerMailboxes[1].Party.Name != "Channel Name" || ownerMailboxes[1].Party.AvatarURL != "/covers/channel.png" {
+		t.Fatalf("channel mailbox party = %#v", ownerMailboxes[1].Party)
 	}
 
 	page, err := service.ListConversations(context.Background(), authctx.CurrentUser{ID: actor.UUID}, TargetRef{Type: model.DMPartyUser, ID: actor.UUID}, "", 30)

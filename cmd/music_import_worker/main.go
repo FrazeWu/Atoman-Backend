@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -41,11 +40,16 @@ func main() {
 	if store == nil {
 		log.Fatal("MUSIC_SOURCE_BUCKET or S3_BUCKET is required")
 	}
+	importService := music.NewServiceWithS3(db, client)
+	metadataEnricher := music.NewImportWorkerMetadataEnricherFromEnv()
+	if metadataEnricher != nil {
+		importService.WithAlbumImportMetadataEnricher(metadataEnricher)
+	}
 	worker := music.NewImportWorker(db, store, workerIDFromEnv()).WithCompletionFinalizer(
 		func(_ context.Context, importID uuid.UUID) error {
-			return music.NewServiceWithS3(db, client).FinalizeSubmittedAlbumImport(importID)
+			return importService.FinalizeSubmittedAlbumImport(importID)
 		},
-	)
+	).WithMediaService(importService)
 	var processor music.ImportProcessor
 	mediaStore := music.NewMusicImportMediaStore(client)
 	if mediaStore == nil {
@@ -53,39 +57,17 @@ func main() {
 	} else {
 		mediaProcessor := music.NewMediaImportProcessor(db, mediaStore, music.NewSystemMediaCommandRunner(), os.Getenv("MUSIC_PLAYBACK_URL_PREFIX"))
 		processor = mediaProcessor
-		configureMetadataEnricher(mediaProcessor)
+		if metadataEnricher != nil {
+			mediaProcessor.WithMetadataEnricher(metadataEnricher)
+		}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	metadataDone := music.StartMetadataMatchWorker(ctx, importService, workerPollIntervalFromEnv())
 	if err := runWorker(ctx, worker, processor, workerPollIntervalFromEnv()); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func configureMetadataEnricher(processor *music.MediaImportProcessor) {
-	if processor == nil {
-		return
-	}
-	userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT"))
-	if userAgent == "" {
-		log.Println("music metadata enrichment disabled: MUSICBRAINZ_USER_AGENT is empty")
-		return
-	}
-	musicBrainzBase := strings.TrimRight(strings.TrimSpace(os.Getenv("MUSICBRAINZ_BASE_URL")), "/")
-	if musicBrainzBase == "" {
-		musicBrainzBase = "https://musicbrainz.org"
-	}
-	coverArtBase := strings.TrimRight(strings.TrimSpace(os.Getenv("COVER_ART_ARCHIVE_BASE_URL")), "/")
-	if coverArtBase == "" {
-		coverArtBase = "https://coverartarchive.org"
-	}
-	lrcLibBase := strings.TrimRight(strings.TrimSpace(os.Getenv("LRCLIB_BASE_URL")), "/")
-	if lrcLibBase == "" {
-		lrcLibBase = "https://lrclib.net"
-	}
-	processor.WithMetadataEnricher(music.NewExternalAlbumMetadataEnricher(
-		&http.Client{Timeout: 10 * time.Second}, musicBrainzBase, coverArtBase, lrcLibBase, userAgent,
-	))
+	<-metadataDone
 }
 
 func validateWorkerToolchain(runner music.MediaCommandRunner) error {

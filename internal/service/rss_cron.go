@@ -820,6 +820,9 @@ func StartRSSCron(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	}
 
 	return startPeriodicWorker(ctx, cfg.StartupDelay, cfg.Interval, func() {
+		if err := cleanupFeedSourceDiagnostics(db.WithContext(ctx), time.Now().UTC()); err != nil {
+			log.Printf("RSS diagnostic cleanup failed: %v", err)
+		}
 		log.Println("Running scheduled RSS sync...")
 		syncAllRSSFeeds(db, cfg.Concurrency)
 	})

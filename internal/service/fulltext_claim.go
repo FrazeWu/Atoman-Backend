@@ -82,25 +82,45 @@ func claimFullTextBatch(db *gorm.DB, now time.Time, limit int) ([]claimedFullTex
 			return err
 		}
 
-		var sources []model.FeedSource
-		if err := tx.Where("id IN ?", usedSourceIDs).Find(&sources).Error; err != nil {
-			return fmt.Errorf("load claimed full text sources: %w", err)
-		}
-		sourcesByID := make(map[uuid.UUID]model.FeedSource, len(sources))
-		for _, source := range sources {
-			sourcesByID[source.ID] = source
-		}
-		for index := range claimed {
-			source, ok := sourcesByID[claimed[index].item.FeedSourceID]
-			if !ok {
-				return fmt.Errorf("full text source %s was not found after claim", claimed[index].item.FeedSourceID)
-			}
-			claimed[index].source = source
-		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(claimed) == 0 {
+		return claimed, nil
+	}
+	// 领取事务只处理身份与状态；正文等大字段在提交后读取，缩短持锁时间。
+	ids := make([]uuid.UUID, 0, len(claimed))
+	for _, claim := range claimed {
+		ids = append(ids, claim.item.ID)
+	}
+	var items []model.FeedItem
+	if err := db.Where("id IN ?", ids).Find(&items).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[uuid.UUID]model.FeedItem, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	var sources []model.FeedSource
+	if err := db.Where("id IN ?", uniqueFullTextSourceIDsFromClaims(claimed)).Find(&sources).Error; err != nil {
+		return nil, err
+	}
+	sourcesByID := make(map[uuid.UUID]model.FeedSource, len(sources))
+	for _, source := range sources {
+		sourcesByID[source.ID] = source
+	}
+	for index := range claimed {
+		item, ok := byID[claimed[index].item.ID]
+		if !ok {
+			return nil, fmt.Errorf("full text item %s was not found after claim", claimed[index].item.ID)
+		}
+		source, ok := sourcesByID[item.FeedSourceID]
+		if !ok {
+			return nil, fmt.Errorf("full text source %s was not found after claim", item.FeedSourceID)
+		}
+		claimed[index].item, claimed[index].source = item, source
 	}
 	return claimed, nil
 }
@@ -160,18 +180,20 @@ func appendClaimedFullTextItems(claimed []claimedFullTextItem, items []model.Fee
 func listFullTextClaimCandidates(db *gorm.DB, now time.Time, limit int) ([]model.FeedItem, error) {
 	var candidates []model.FeedItem
 	err := db.Raw(`
-WITH source_candidates AS (
+WITH priority_items AS MATERIALIZED (
+	SELECT target_id AS id, 0 AS priority FROM reading_list_items WHERE target_type = 'feed_item'
+	UNION ALL SELECT feed_item_id AS id, 1 AS priority FROM feed_item_stars
+), priorities AS MATERIALIZED (
+	SELECT id, MIN(priority) AS priority FROM priority_items GROUP BY id
+), source_candidates AS (
 	SELECT DISTINCT ON (feed_items.feed_source_id)
 		feed_items.id,
-		CASE
-			WHEN EXISTS (SELECT 1 FROM reading_list_items WHERE target_type = 'feed_item' AND target_id = feed_items.id) THEN 0
-			WHEN EXISTS (SELECT 1 FROM feed_item_stars WHERE feed_item_id = feed_items.id) THEN 1
-			ELSE 2
-		END AS priority,
+		COALESCE(priorities.priority, 2) AS priority,
 		feed_items.created_at,
 		feed_items.published_at
 	FROM feed_items
 	JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id
+	LEFT JOIN priorities ON priorities.id = feed_items.id
 	WHERE feed_items.deleted_at IS NULL
 		AND feed_sources.deleted_at IS NULL
 		AND feed_items.full_text_status IN (?, ?)
@@ -191,7 +213,7 @@ WITH source_candidates AS (
 	ORDER BY priority, created_at ASC, published_at ASC
 	LIMIT ?
 )
-SELECT feed_items.*
+SELECT feed_items.id, feed_items.feed_source_id, feed_items.full_text_attempt_count
 FROM feed_items
 JOIN prioritized ON prioritized.id = feed_items.id
 ORDER BY prioritized.priority, prioritized.created_at ASC, prioritized.published_at ASC
@@ -206,7 +228,7 @@ func listAdditionalFullTextClaimCandidates(db *gorm.DB, now time.Time, sourceIDs
 
 	var candidates []model.FeedItem
 	err := db.Raw(`
-SELECT feed_items.*
+SELECT feed_items.id, feed_items.feed_source_id, feed_items.full_text_attempt_count
 FROM feed_items
 JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id
 WHERE feed_items.deleted_at IS NULL

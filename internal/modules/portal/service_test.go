@@ -97,12 +97,13 @@ func TestHotContentRotatesSpotlightBatches(t *testing.T) {
 	for index := 0; index < 8; index++ {
 		items = append(items, HotItem{ID: fmt.Sprintf("spotlight-%d", index)})
 	}
-	service := &Service{hotCache: map[int]hotCacheEntry{
-		8: {
-			items:     items,
-			expiresAt: time.Now().Add(time.Minute),
-		},
-	}}
+	service := newServiceWithHotCache(nil, nil)
+	_, err := service.publicHot.Get(context.Background(), "8", func(context.Context) (hotCachePayload, error) {
+		return hotCachePayload{Items: items}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	first, err := service.HotContent(8)
 	if err != nil {

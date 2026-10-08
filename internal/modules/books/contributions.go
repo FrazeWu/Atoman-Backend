@@ -111,6 +111,7 @@ func (s *Service) createBookEdit(user authctx.CurrentUser, input SubmitBookEditI
 	if err != nil {
 		return BookEditDTO{}, err
 	}
+	s.InvalidateCatalog()
 	return buildBookEditDTO(s.db, edit), nil
 }
 
@@ -199,6 +200,7 @@ func (s *Service) ReviewBookEdit(reviewer authctx.CurrentUser, editID uuid.UUID,
 	if err != nil {
 		return BookEditDTO{}, err
 	}
+	s.InvalidateCatalog()
 	return buildBookEditDTO(s.db, edit), nil
 }
 

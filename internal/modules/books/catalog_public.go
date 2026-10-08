@@ -84,11 +84,14 @@ func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, 
 		Where("lifecycle_status = ? AND edit_status <> ?", model.BookLifecycleStatusActive, model.BookEditStatusClosed)
 	if query != "" {
 		pattern := "%" + escapeBookCatalogQuery(query) + "%"
-		base = base.Where(`(title ILIKE ? ESCAPE '\' OR original_title ILIKE ? ESCAPE '\' OR subtitle ILIKE ? ESCAPE '\' OR EXISTS (
-			SELECT 1 FROM book_contributions bc
-			JOIN book_people bp ON bp.id = bc.person_id
-			WHERE bc.work_id = book_works.id AND bc.deleted_at IS NULL AND bp.deleted_at IS NULL AND bp.name ILIKE ? ESCAPE '\'
-		))`, pattern, pattern, pattern, pattern)
+		// 分别匹配书名和作者，让两个分支各自使用索引；UNION 保证同时命中不重复。
+		base = base.Where(`book_works.id IN (
+			SELECT id FROM book_works WHERE deleted_at IS NULL AND
+			(title ILIKE ? ESCAPE '\' OR original_title ILIKE ? ESCAPE '\' OR subtitle ILIKE ? ESCAPE '\')
+			UNION
+			SELECT bc.work_id FROM book_people bp JOIN book_contributions bc ON bc.person_id = bp.id
+			WHERE bc.deleted_at IS NULL AND bp.deleted_at IS NULL AND bp.name ILIKE ? ESCAPE '\'
+		)`, pattern, pattern, pattern, pattern)
 	}
 	total, err := s.countPublicCatalog(base, query)
 	if err != nil {
@@ -103,23 +106,11 @@ func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, 
 }
 
 func (s *Service) countPublicCatalog(base *gorm.DB, query string) (int64, error) {
-	// 发现页只缓存总数；当前页和搜索仍实时查询，避免翻页反复扫描全部作品。
-	if query == "" {
-		s.catalogCountMu.Lock()
-		defer s.catalogCountMu.Unlock()
-		if time.Now().Before(s.catalogCountExpiresAt) {
-			return s.catalogCountValue, nil
-		}
-	}
-	var total int64
-	if err := base.Count(&total).Error; err != nil {
-		return 0, err
-	}
-	if query == "" {
-		s.catalogCountValue = total
-		s.catalogCountExpiresAt = time.Now().Add(time.Minute)
-	}
-	return total, nil
+	return s.catalogCounts.Get(base.Statement.Context, query, func(ctx context.Context) (int64, error) {
+		var total int64
+		err := base.Session(&gorm.Session{}).WithContext(ctx).Count(&total).Error
+		return total, err
+	})
 }
 
 func (s *Service) GetPublicWork(ctx context.Context, workID uuid.UUID) (BookPublicWorkDTO, error) {

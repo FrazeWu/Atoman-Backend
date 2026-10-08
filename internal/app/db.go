@@ -9,6 +9,10 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL array type support
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"log"
+	"os"
+	"time"
 )
 
 func OpenDB(cfg config.DBConfig) (*gorm.DB, error) {
@@ -23,7 +27,9 @@ func OpenDB(cfg config.DBConfig) (*gorm.DB, error) {
 		return nil, fmt.Errorf("unsupported database type %q (expected postgres)", cfg.Type)
 	}
 
-	db, err := gorm.Open(dialector, &gorm.Config{})
+	db, err := gorm.Open(dialector, &gorm.Config{Logger: logger.New(log.New(os.Stdout, "", log.LstdFlags), logger.Config{
+		SlowThreshold: 200 * time.Millisecond, LogLevel: logger.Warn, ParameterizedQueries: true,
+	})})
 	if err != nil {
 		return nil, fmt.Errorf("open %s database: %w", dbType, err)
 	}

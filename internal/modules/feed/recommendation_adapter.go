@@ -65,11 +65,15 @@ func parseRecommendationLanguage(raw string) (string, error) {
 }
 
 func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, languageCode string, search string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	if mode != recommendation.ModeFeatured && mode != recommendation.ModeHot {
+	if mode == recommendation.ModeRandom {
 		return s.recommendArticles(mode, category, theme, languageCode, search, page, pageSize)
 	}
 	key := recommendationCacheKey("articles", mode, normalizeSourceCategory(category), theme, languageCode, search, page, pageSize)
-	entry, err := loadCachedRecommendation(s, key, recommendationCacheTTL, func() (recommendationCacheEntry, error) {
+	freshTTL := recommendationCacheTTL
+	if mode == recommendation.ModeLatest || mode == recommendation.ModeDiscover {
+		freshTTL = 30 * time.Second
+	}
+	entry, err := loadCachedRecommendation(s, key, freshTTL, func() (recommendationCacheEntry, error) {
 		items, total, err := s.recommendArticles(mode, category, theme, languageCode, search, page, pageSize)
 		return recommendationCacheEntry{Items: items, Total: total}, err
 	})
@@ -202,11 +206,15 @@ func (s *Service) recommendArticles(mode recommendation.Mode, category string, t
 }
 
 func (s *Service) RecommendChannels(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	if mode != recommendation.ModeFeatured && mode != recommendation.ModeHot {
+	if mode == recommendation.ModeRandom {
 		return s.recommendChannels(mode, category, theme, languageCode, page, pageSize)
 	}
 	key := recommendationCacheKey("channels", mode, category, theme, languageCode, "", page, pageSize)
-	entry, err := loadCachedRecommendation(s, key, recommendationCacheTTL, func() (recommendationCacheEntry, error) {
+	freshTTL := recommendationCacheTTL
+	if mode == recommendation.ModeLatest || mode == recommendation.ModeDiscover {
+		freshTTL = 30 * time.Second
+	}
+	entry, err := loadCachedRecommendation(s, key, freshTTL, func() (recommendationCacheEntry, error) {
 		items, total, err := s.recommendChannels(mode, category, theme, languageCode, page, pageSize)
 		return recommendationCacheEntry{Items: items, Total: total}, err
 	})

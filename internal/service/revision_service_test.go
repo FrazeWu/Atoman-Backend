@@ -95,7 +95,7 @@ func TestRevisionContributorsAreDistinctRecentAndSafe(t *testing.T) {
 
 func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.MusicMatchRecord{}, &model.Revision{}, &model.EditConflict{})
 
 	contentID := uuid.New()
 	editorID := createRevisionTestUser(t, db)
@@ -163,7 +163,7 @@ func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *test
 
 func TestCreateRevisionDetectsStaleAlbumFieldConflict(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.MusicMatchRecord{}, &model.Revision{}, &model.EditConflict{})
 	actorID := createRevisionTestUser(t, db)
 	album := model.Album{Title: "base"}
 	if err := db.Create(&album).Error; err != nil {
@@ -243,7 +243,7 @@ func TestCreateRevisionAutoApproveAppliesArtistChanges(t *testing.T) {
 
 func TestApproveRevisionKeepsOnlyOneCurrentWithUniqueIndex(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.MusicMatchRecord{}, &model.Revision{})
 
 	contentID := uuid.New()
 	editorID := createRevisionTestUser(t, db)
@@ -376,7 +376,7 @@ func assertSingleCurrentAndUniqueVersions(t *testing.T, db *gorm.DB, contentID u
 func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Album{}, &model.Song{}, &model.Revision{},
+		&model.User{}, &model.Album{}, &model.Song{}, &model.MusicMatchRecord{}, &model.Revision{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
 	)
@@ -659,7 +659,7 @@ func TestApproveAlbumRevisionRejectsFlatSnapshot(t *testing.T) {
 
 func TestCreateRevisionBaselineUsesEmptySongsArray(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
+	testdb.Migrate(t, db, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.MusicMatchRecord{}, &model.Revision{}, &model.EditConflict{})
 	actorID := createRevisionTestUser(t, db)
 
 	album := model.Album{Title: "No Tracks", AlbumType: "album", EntryStatus: "open", Status: "open"}
@@ -688,7 +688,7 @@ func TestCreateRevisionBaselineUsesEmptySongsArray(t *testing.T) {
 func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{},
+		&model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.MusicMatchRecord{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.Revision{}, &model.EditConflict{},
 	)
@@ -877,7 +877,7 @@ func TestCreateAlbumRevisionPreservesStructuredLyricsWhenTrackPayloadOmitsLyrics
 func TestRevertAlbumRevisionRestoresSoftDeletedSong(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.Album{}, &model.Song{},
+		&model.Album{}, &model.Song{}, &model.MusicMatchRecord{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.Revision{}, &model.EditConflict{},
 	)
@@ -982,7 +982,7 @@ func TestMergeAlbumRevisionChangesPreservesLyricsWhenTrackPayloadOmitsThem(t *te
 func TestSongRevisionAppliesStructuredFieldsCreditsAndReverts(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.Artist{}, &model.Album{}, &model.Song{}, &model.SongArtist{},
+		&model.Artist{}, &model.Album{}, &model.Song{}, &model.SongArtist{}, &model.MusicMatchRecord{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
 		&model.Revision{}, &model.EditConflict{},
@@ -1046,7 +1046,7 @@ func TestSongRevisionAppliesStructuredFieldsCreditsAndReverts(t *testing.T) {
 func TestStandaloneSongRevisionAppliesReleaseMetadata(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.Artist{}, &model.Song{}, &model.SongArtist{},
+		&model.Artist{}, &model.Song{}, &model.SongArtist{}, &model.MusicMatchRecord{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.Revision{}, &model.EditConflict{},
 	)

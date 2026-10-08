@@ -23,7 +23,7 @@ func newShortNoteHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.Curr
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.ShortNote{}, &model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.Like{}, &model.DiscussionTarget{}, &model.ContentReference{}, &model.Notification{})
+	testdb.Migrate(t, db, &model.User{}, &model.ShortNote{}, &model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.ShortNoteRead{}, &model.Like{}, &model.DiscussionTarget{}, &model.ContentReference{}, &model.Notification{})
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
 		t.Fatalf("create notification indexes: %v", err)
 	}

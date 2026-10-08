@@ -19,10 +19,15 @@ func TestSaveInputAcceptsMediaModule(t *testing.T) {
 	}
 }
 
-func TestDefaultSiteAccessDisablesBooksUntilLaunch(t *testing.T) {
+func TestDefaultSiteAccessEnablesLaunchedBooks(t *testing.T) {
 	books := DefaultSiteAccessMatrix().Modules["books"]
-	if books.Enabled == nil || *books.Enabled {
-		t.Fatal("books should be disabled by default")
+	if books.Enabled == nil || !*books.Enabled {
+		t.Fatal("books should be enabled by default after launch")
+	}
+	for _, feature := range []string{"books.submit", "books.review", "books.publish_asset"} {
+		if !books.Features[feature] {
+			t.Fatalf("launched books feature %q should be enabled", feature)
+		}
 	}
 }
 

@@ -79,3 +79,15 @@ type AlbumImportJob struct {
 func (AlbumImportJob) TableName() string {
 	return "music_album_import_jobs"
 }
+
+// 匹配与音频处理独立排队，二者可以同时进行，重启后任务仍可领取。
+type MusicMetadataMatchJob struct {
+	Base
+	ImportID   uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_music_metadata_generation"`
+	Generation int64     `gorm:"not null;uniqueIndex:idx_music_metadata_generation"`
+	InputJSON  string    `gorm:"type:text;not null"`
+	Status     string    `gorm:"not null;default:'queued';index"`
+	LockedAt   *time.Time
+}
+
+func (MusicMetadataMatchJob) TableName() string { return "music_metadata_match_jobs" }

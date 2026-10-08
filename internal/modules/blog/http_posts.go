@@ -74,6 +74,7 @@ func (h *Handler) listSEOSitemap(c *gin.Context) {
 // @Param channel_id query string false "频道 UUID"
 // @Param collection_id query string false "合集 UUID"
 // @Param q query string false "搜索标题或摘要"
+// @Param view query string false "summary 只返回列表信息，正文按详情接口加载；不传保持完整响应"
 // @Param limit query int false "返回数量上限"
 // @Success 200 {array} model.Post
 // @Failure 500 {object} handlers.ErrorResponse
@@ -108,7 +109,7 @@ func (h *Handler) listPosts(c *gin.Context) {
 		}
 		canonicalCollectionID = &resolved
 	}
-	query := canonicalBlogPostsQuery(h.service.db).Where("posts.status = ?", "published")
+	query := canonicalBlogPostsQuery(h.service.db, c.Query("view") == "summary").Where("posts.status = ?", "published")
 	query = ApplyPublishedPostListVisibility(query, currentViewerID(c))
 
 	if userID != nil {

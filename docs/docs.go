@@ -4531,6 +4531,12 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "summary 返回轻量列表，正文、歌词和波形按详情接口获取；不传保持旧响应",
+                        "name": "view",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "用户 UUID",
                         "name": "user_id",
                         "in": "query"
@@ -18657,6 +18663,12 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "summary 返回轻量列表，正文、歌词和波形按详情接口获取；不传保持旧响应",
+                        "name": "view",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "关键词",
                         "name": "q",
                         "in": "query",
@@ -18739,6 +18751,12 @@ const docTemplate = `{
                 ],
                 "summary": "获取歌曲列表",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "summary 返回轻量列表，正文、歌词和波形按详情接口获取；不传保持旧响应",
+                        "name": "view",
+                        "in": "query"
+                    },
                     {
                         "type": "string",
                         "description": "艺术家 ID",
@@ -38317,6 +38335,10 @@ const docTemplate = `{
         "music.AlbumImportMetadataPreviewInput": {
             "type": "object",
             "properties": {
+                "async": {
+                    "type": "boolean",
+                    "description": "true 返回 matching 并持久后台匹配，轮询导入详情获取结果；省略保持同步兼容"
+                },
                 "albumTitle": {
                     "type": "string"
                 },

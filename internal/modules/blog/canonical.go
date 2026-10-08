@@ -36,12 +36,18 @@ type canonicalBlogPostRow struct {
 	CollectionPosition int        `gorm:"column:collection_position"`
 }
 
-func canonicalBlogPostsQuery(db *gorm.DB) *gorm.DB {
+func canonicalBlogPostsQuery(db *gorm.DB, summaryOnly ...bool) *gorm.DB {
+	contentColumn := "blog_extensions.content"
+	summaryColumn := "posts.summary"
+	if len(summaryOnly) > 0 && summaryOnly[0] {
+		contentColumn = "'' AS content"
+		summaryColumn = "CASE WHEN TRIM(COALESCE(posts.summary, '')) = '' THEN LEFT(blog_extensions.content, 400) ELSE posts.summary END AS summary"
+	}
 	capabilities := contentmodule.CurrentMediaSchema(db)
 	query := db.Table("content_entries AS posts").
 		Select(`posts.id, posts.created_at, posts.updated_at, posts.author_id, posts.channel_id,
-			posts.title, posts.summary, posts.cover_url, posts.status, posts.visibility,
-			posts.published_at, posts.scheduled_at, blog_extensions.content,
+			posts.title, `+summaryColumn+`, posts.cover_url, posts.status, posts.visibility,
+			posts.published_at, posts.scheduled_at, `+contentColumn+`,
 			blog_extensions.language_code, blog_extensions.pinned, blog_extensions.view_count,
 			blog_extensions.collection_conflict, memberships.collection_id,
 			memberships.position AS collection_position`).
@@ -50,8 +56,8 @@ func canonicalBlogPostsQuery(db *gorm.DB) *gorm.DB {
 	if !capabilities.ContentCollectionMembershipTable {
 		query = db.Table("content_entries AS posts").
 			Select(`posts.id, posts.created_at, posts.updated_at, posts.author_id, posts.channel_id,
-				posts.title, posts.summary, posts.cover_url, posts.status, posts.visibility,
-				posts.published_at, posts.scheduled_at, blog_extensions.content,
+				posts.title, `+summaryColumn+`, posts.cover_url, posts.status, posts.visibility,
+				posts.published_at, posts.scheduled_at, `+contentColumn+`,
 				blog_extensions.language_code, blog_extensions.pinned, blog_extensions.view_count,
 				blog_extensions.collection_conflict, NULL::uuid AS collection_id,
 				0 AS collection_position`).

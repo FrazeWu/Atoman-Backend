@@ -27,6 +27,7 @@ func TestSemiProtectedMusicRevisionsApplyDirectly(t *testing.T) {
 		&model.AlbumArtist{},
 		&model.SongArtist{},
 		&model.MusicSongLyric{},
+		&model.MusicMatchRecord{},
 		&model.Revision{},
 		&model.EditConflict{},
 		&model.ContentProtection{},

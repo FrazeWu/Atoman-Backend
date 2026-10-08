@@ -45,6 +45,28 @@ func RegisterV1Routes(
 	userHub *collab.UserHub,
 	collabHub *collab.Hub,
 ) {
+	portalService := portal.NewService(db)
+	bookService := books.NewService(db).WithS3(s3Client)
+	feedService := feed.NewService(db)
+	r.Use(func(c *gin.Context) {
+		c.Next()
+		method := c.Request.Method
+		if (method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch && method != http.MethodDelete) || c.Writer.Status() >= 400 {
+			return
+		}
+		path := c.Request.URL.Path
+		// 书目总数在书目修改服务中失效，收藏、评分、阅读状态不会改变总数。
+		// 统计、阅读进度和播放上报不改变公共列表，避免每次曝光都清空缓存。
+		if c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPatch || c.Request.Method == http.MethodDelete {
+			if !strings.Contains(path, "/progress") && !strings.Contains(path, "/read") && !strings.HasPrefix(path, "/api/v1/dm/") && !strings.HasPrefix(path, "/api/v1/notifications") {
+				portalService.InvalidateHotContent()
+				feedService.InvalidateRecommendations()
+			}
+		} else if strings.Contains(path, "/posts") || strings.Contains(path, "/revisions") || strings.Contains(path, "/topics") || strings.Contains(path, "/entries") || strings.HasPrefix(path, "/api/v1/protection") {
+			portalService.InvalidateHotContent()
+			feedService.InvalidateRecommendations()
+		}
+	})
 	group := r.Group("/api/v1")
 	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
 	commentService.SetNotificationPublisher(handlers.WsPushNotif(userHub))
@@ -55,9 +77,9 @@ func RegisterV1Routes(
 	reference.RegisterRoutes(group, refService)
 	blogService := blog.NewService(db).WithExportAssetReader(blog.NewS3ExportAssetReader(s3Client))
 	blog.RegisterRoutes(group.Group("/blog"), blogService)
-	books.RegisterRoutes(group.Group("/books"), books.NewService(db).WithS3(s3Client))
+	books.RegisterRoutes(group.Group("/books"), bookService)
 	shortnote.RegisterRoutes(group.Group("/short-notes"), shortnote.NewService(db, refService))
-	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
+	feed.RegisterRoutes(group.Group("/feed"), feedService)
 	feed.RegisterPublicRSSRoutes(group.Group("/rss"), db)
 	notificationService := notification.NewService(db)
 	notificationService.SetNotificationPublisher(handlers.WsPushNotif(userHub))
@@ -108,7 +130,7 @@ func RegisterV1Routes(
 	}
 	music.RegisterRoutes(musicGroup, musicService)
 	reputation.RegisterRoutes(group.Group("/reputation"), reputation.NewService(db))
-	portal.RegisterRoutes(group.Group("/portal"), portal.NewService(db))
+	portal.RegisterRoutes(group.Group("/portal"), portalService)
 	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
 	lifecycle.RegisterRoutes(group.Group("/content"), lifecycle.NewService(db))
 	timeline.RegisterRoutes(r, db)

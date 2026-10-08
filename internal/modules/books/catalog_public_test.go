@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
@@ -19,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestDiscoveryReusesTotalAcrossPagesButSearchCountsStayFresh(t *testing.T) {
+func TestCatalogCountCacheReusesQueriesAndInvalidatesAfterWrite(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{})
 	work := model.BookWork{Title: "Visible Book", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
@@ -42,11 +41,11 @@ func TestDiscoveryReusesTotalAcrossPagesButSearchCountsStayFresh(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(1), total)
 	}
-	require.Equal(t, 3, counts, "搜索总数保持实时")
-	service.catalogCountExpiresAt = time.Now().Add(-time.Second)
+	require.Equal(t, 2, counts, "相同搜索复用精确总数")
+	service.InvalidateCatalog()
 	_, _, err := service.SearchPublicCatalog(context.Background(), "", 24, 0)
 	require.NoError(t, err)
-	require.Equal(t, 4, counts, "过期后应重新统计")
+	require.Equal(t, 3, counts, "写入失效后应重新统计")
 }
 
 func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
