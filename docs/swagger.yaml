@@ -6359,84 +6359,86 @@ definitions:
   music.AlbumImportDTO:
     properties:
       albumSource:
-        type: string
+        type: "string"
       albumTitle:
-        type: string
+        type: "string"
       archiveName:
-        type: string
+        type: "string"
       artistId:
-        type: string
+        type: "string"
       artistSource:
-        type: string
+        type: "string"
       commitRequest:
-        $ref: '#/definitions/music.CommitAlbumImportSessionInput'
+        $ref: "#/definitions/music.CommitAlbumImportSessionInput"
       coverKey:
-        type: string
+        type: "string"
       coverUrl:
-        type: string
+        type: "string"
       derivedAlbumTitle:
-        type: string
+        type: "string"
       derivedAlbumType:
-        type: string
+        type: "string"
       derivedCover:
-        type: string
+        type: "string"
       derivedReleaseDate:
-        type: string
+        type: "string"
       derivedTracks:
         items:
-          $ref: '#/definitions/music.AlbumImportDTOTrack'
-        type: array
+          $ref: "#/definitions/music.AlbumImportDTOTrack"
+        type: "array"
+      draftRequest:
+        $ref: "#/definitions/music.CommitAlbumImportSessionInput"
       errorMessage:
-        type: string
+        type: "string"
       errors:
         items:
-          $ref: '#/definitions/music.AlbumImportErrorDTO'
-        type: array
+          $ref: "#/definitions/music.AlbumImportErrorDTO"
+        type: "array"
       files:
         items:
-          $ref: '#/definitions/music.AlbumImportFileDTO'
-        type: array
+          $ref: "#/definitions/music.AlbumImportFileDTO"
+        type: "array"
       importId:
-        type: string
+        type: "string"
       inputMode:
-        type: string
+        type: "string"
       lastSyncedAt:
-        type: string
+        type: "string"
       metadataExternalId:
-        type: string
+        type: "string"
       metadataMatchConfidence:
-        type: number
-      metadataMatchStatus:
-        type: string
+        type: "number"
       metadataMatched:
-        type: boolean
+        type: "boolean"
+      metadataMatchStatus:
+        type: "string"
       metadataSource:
-        type: string
+        type: "string"
       metadataSourceUrl:
-        type: string
+        type: "string"
       missingArtists:
         items:
-          type: string
-        type: array
+          type: "string"
+        type: "array"
       progress:
-        $ref: '#/definitions/music.AlbumImportProgressDTO'
+        $ref: "#/definitions/music.AlbumImportProgressDTO"
       stage:
-        type: string
+        type: "string"
       status:
-        type: string
+        type: "string"
       targetAlbumId:
-        type: string
+        type: "string"
       targetSongId:
-        type: string
+        type: "string"
       tracks:
         items:
-          $ref: '#/definitions/music.AlbumImportDTOTrack'
-        type: array
+          $ref: "#/definitions/music.AlbumImportDTOTrack"
+        type: "array"
       uploadProgress:
-        type: number
+        type: "number"
       uploadSpeed:
-        type: number
-    type: object
+        type: "number"
+    type: "object"
   music.AlbumImportDTOTrack:
     properties:
       audioKey:
@@ -6540,15 +6542,77 @@ definitions:
       data:
         $ref: '#/definitions/music.AlbumImportFileDTO'
     type: object
+  music.AlbumImportMetadataPreviewTrack:
+    properties:
+      audioKey:
+        type: "string"
+      audioUrl:
+        type: "string"
+      discNumber:
+        type: "integer"
+      fileId:
+        type: "string"
+      origin:
+        type: "string"
+      originalDiscNumber:
+        type: "integer"
+      originalTitle:
+        type: "string"
+      originalTrackNumber:
+        type: "integer"
+      title:
+        type: "string"
+      trackNumber:
+        type: "integer"
+    type: "object"
+  music.AlbumImportListDTO:
+    properties:
+      albumTitle:
+        type: "string"
+      archiveName:
+        type: "string"
+      artistId:
+        type: "string"
+      coverUrl:
+        type: "string"
+      derivedCover:
+        type: "string"
+      errorMessage:
+        type: "string"
+      hasCommitRequest:
+        type: "boolean"
+      hasDraftRequest:
+        type: "boolean"
+      importId:
+        type: "string"
+      inputMode:
+        type: "string"
+      lastSyncedAt:
+        type: "string"
+      progress:
+        $ref: "#/definitions/music.AlbumImportProgressDTO"
+      stage:
+        type: "string"
+      status:
+        type: "string"
+      targetAlbumId:
+        type: "string"
+      targetSongId:
+        type: "string"
+      trackCount:
+        type: "integer"
+      uploadProgress:
+        type: "number"
+    type: "object"
   music.AlbumImportListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/music.AlbumImportDTO'
-        type: array
+          $ref: "#/definitions/music.AlbumImportListDTO"
+        type: "array"
       meta:
-        $ref: '#/definitions/music.PaginationMetaResponse'
-    type: object
+        $ref: "#/definitions/music.PaginationMetaResponse"
+    type: "object"
   music.AlbumImportMetadataPreviewDTO:
     properties:
       albumTitle:
@@ -6585,14 +6649,21 @@ definitions:
   music.AlbumImportMetadataPreviewInput:
     properties:
       albumTitle:
-        type: string
+        type: "string"
       artist:
-        type: string
+        type: "string"
+      force:
+        description: "重新检索，替换旧的匹配结果。"
+        type: "boolean"
+      tracks:
+        items:
+          $ref: "#/definitions/music.AlbumImportMetadataPreviewTrack"
+        type: "array"
       trackTitles:
         items:
-          type: string
-        type: array
-    type: object
+          type: "string"
+        type: "array"
+    type: "object"
   music.AlbumImportMetadataSourceResult:
     properties:
       candidateCount:
@@ -6888,32 +6959,40 @@ definitions:
   music.CommitAlbumImportSessionInput:
     properties:
       album:
-        $ref: '#/definitions/music.AlbumImportAlbumPayload'
+        $ref: "#/definitions/music.AlbumImportAlbumPayload"
       album_source:
-        type: string
+        type: "string"
       album_sources:
         items:
-          $ref: '#/definitions/music.Source'
-        type: array
+          $ref: "#/definitions/music.Source"
+        type: "array"
       artist:
-        $ref: '#/definitions/music.AlbumImportArtistPayload'
+        $ref: "#/definitions/music.AlbumImportArtistPayload"
       artist_id:
-        type: string
+        type: "string"
       artist_source:
-        type: string
+        type: "string"
       artist_sources:
         items:
-          $ref: '#/definitions/music.Source'
-        type: array
+          $ref: "#/definitions/music.Source"
+        type: "array"
       artists:
         items:
-          $ref: '#/definitions/music.CommitAlbumImportArtistInput'
-        type: array
+          $ref: "#/definitions/music.CommitAlbumImportArtistInput"
+        type: "array"
       deleted_import_track_keys:
         items:
-          type: string
-        type: array
-    type: object
+          type: "string"
+        type: "array"
+      draft_customization:
+        additionalProperties:
+          type: "boolean"
+        description: "草稿的用户修改标记，恢复后继续保护手动修改。"
+        type: "object"
+      draft_only:
+        description: "仅保存填写草稿，不登记正式提交或创建请求。"
+        type: "boolean"
+    type: "object"
   music.CompleteAlbumImportMultipartPartInput:
     properties:
       etag:
@@ -19713,7 +19792,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 创建或更新同一导入会话对应的专辑，并保存创作者身份与曲目。
+      description: draft_only=true 仅保存填写草稿，不创建或登记后台提交；默认正式提交，音频处理中时登记后台创建请求。
       parameters:
       - description: 导入会话 UUID
         in: path

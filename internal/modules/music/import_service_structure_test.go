@@ -18,6 +18,8 @@ func TestAlbumImportServiceOnlyOwnsCoreSessionAndSharedState(t *testing.T) {
 		"buildAlbumImportDTO":                    true,
 		"buildAlbumImportListDTO":                true,
 		"albumImportCommitRequest":               true,
+		"albumImportDraftRequest":                true,
+		"albumImportSavedRequest":                true,
 		"albumImportCommitSources":               true,
 		"albumImportSessionAlbumTitle":           true,
 		"stringValue":                            true,

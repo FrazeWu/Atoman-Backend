@@ -55,11 +55,15 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	albumTitle := albumImportSessionAlbumTitle(session, payload)
 	artistSource, albumSource := albumImportCommitSources(payload)
 	commitRequest := albumImportCommitRequest(payload)
+	savedRequest := albumImportDraftRequest(payload)
+	if savedRequest == nil {
+		savedRequest = commitRequest
+	}
 	artistID := strings.TrimSpace(stringValue(payload["artist_id"]))
-	if artistID == "" && commitRequest != nil {
-		artistID = strings.TrimSpace(commitRequest.ArtistID)
+	if artistID == "" && savedRequest != nil {
+		artistID = strings.TrimSpace(savedRequest.ArtistID)
 		if artistID == "" {
-			for _, artist := range commitRequest.Artists {
+			for _, artist := range savedRequest.Artists {
 				if candidate := strings.TrimSpace(artist.ArtistID); candidate != "" {
 					artistID = candidate
 					break
@@ -92,6 +96,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 		ArtistID:      artistID,
 		ArtistSource:  artistSource,
 		CommitRequest: commitRequest,
+		DraftRequest:  albumImportDraftRequest(payload),
 		AlbumTitle:    albumTitle,
 		AlbumSource:   albumSource,
 		Status:        session.Status,
@@ -227,10 +232,14 @@ func buildAlbumImportListDTO(session model.AlbumImportSession) AlbumImportListDT
 	}
 	artistID := strings.TrimSpace(stringValue(payload["artist_id"]))
 	commitRequest := albumImportCommitRequest(payload)
-	if artistID == "" && commitRequest != nil {
-		artistID = strings.TrimSpace(commitRequest.ArtistID)
+	savedRequest := albumImportDraftRequest(payload)
+	if savedRequest == nil {
+		savedRequest = commitRequest
+	}
+	if artistID == "" && savedRequest != nil {
+		artistID = strings.TrimSpace(savedRequest.ArtistID)
 		if artistID == "" {
-			for _, artist := range commitRequest.Artists {
+			for _, artist := range savedRequest.Artists {
 				if candidate := strings.TrimSpace(artist.ArtistID); candidate != "" {
 					artistID = candidate
 					break
@@ -265,11 +274,15 @@ func buildAlbumImportListDTO(session model.AlbumImportSession) AlbumImportListDT
 		ArchiveName: stringValue(payload["archive_name"]), TrackCount: trackCount,
 		LastSyncedAt: session.UpdatedAt.Format(time.RFC3339), ErrorMessage: errorMessage,
 		HasCommitRequest: commitRequest != nil,
+		HasDraftRequest:  albumImportDraftRequest(payload) != nil,
 	}
 }
 
 func albumImportCommitSources(payload map[string]any) (artistSource, albumSource string) {
-	request := albumImportCommitRequest(payload)
+	request := albumImportDraftRequest(payload)
+	if request == nil {
+		request = albumImportCommitRequest(payload)
+	}
 	if request == nil {
 		return "", ""
 	}
@@ -277,7 +290,15 @@ func albumImportCommitSources(payload map[string]any) (artistSource, albumSource
 }
 
 func albumImportCommitRequest(payload map[string]any) *CommitAlbumImportSessionInput {
-	raw, ok := payload["commit_request"]
+	return albumImportSavedRequest(payload, "commit_request")
+}
+
+func albumImportDraftRequest(payload map[string]any) *CommitAlbumImportSessionInput {
+	return albumImportSavedRequest(payload, "draft_request")
+}
+
+func albumImportSavedRequest(payload map[string]any, key string) *CommitAlbumImportSessionInput {
+	raw, ok := payload[key]
 	if !ok {
 		return nil
 	}
@@ -295,6 +316,9 @@ func albumImportCommitRequest(payload map[string]any) *CommitAlbumImportSessionI
 func albumImportSessionAlbumTitle(session model.AlbumImportSession, payload map[string]any) string {
 	if session.TargetAlbum != nil && strings.TrimSpace(session.TargetAlbum.Title) != "" {
 		return strings.TrimSpace(session.TargetAlbum.Title)
+	}
+	if request := albumImportDraftRequest(payload); request != nil && strings.TrimSpace(request.Album.Title) != "" {
+		return strings.TrimSpace(request.Album.Title)
 	}
 	if request, ok := payload["commit_request"].(map[string]any); ok {
 		if album, ok := request["album"].(map[string]any); ok {

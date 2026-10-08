@@ -17060,7 +17060,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "创建或更新同一导入会话对应的专辑，并保存创作者身份与曲目。",
+                "description": "draft_only=true 仅保存填写草稿，不创建或登记后台提交；默认正式提交，音频处理中时登记后台创建请求。",
                 "consumes": [
                     "application/json"
                 ],
@@ -37919,6 +37919,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/music.AlbumImportDTOTrack"
                     }
                 },
+                "draftRequest": {
+                    "$ref": "#/definitions/music.CommitAlbumImportSessionInput"
+                },
                 "errorMessage": {
                     "type": "string"
                 },
@@ -37949,11 +37952,11 @@ const docTemplate = `{
                 "metadataMatchConfidence": {
                     "type": "number"
                 },
-                "metadataMatchStatus": {
-                    "type": "string"
-                },
                 "metadataMatched": {
                     "type": "boolean"
+                },
+                "metadataMatchStatus": {
+                    "type": "string"
                 },
                 "metadataSource": {
                     "type": "string"
@@ -38153,13 +38156,107 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AlbumImportMetadataPreviewTrack": {
+            "type": "object",
+            "properties": {
+                "audioKey": {
+                    "type": "string"
+                },
+                "audioUrl": {
+                    "type": "string"
+                },
+                "discNumber": {
+                    "type": "integer"
+                },
+                "fileId": {
+                    "type": "string"
+                },
+                "origin": {
+                    "type": "string"
+                },
+                "originalDiscNumber": {
+                    "type": "integer"
+                },
+                "originalTitle": {
+                    "type": "string"
+                },
+                "originalTrackNumber": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "trackNumber": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.AlbumImportListDTO": {
+            "type": "object",
+            "properties": {
+                "albumTitle": {
+                    "type": "string"
+                },
+                "archiveName": {
+                    "type": "string"
+                },
+                "artistId": {
+                    "type": "string"
+                },
+                "coverUrl": {
+                    "type": "string"
+                },
+                "derivedCover": {
+                    "type": "string"
+                },
+                "errorMessage": {
+                    "type": "string"
+                },
+                "hasCommitRequest": {
+                    "type": "boolean"
+                },
+                "hasDraftRequest": {
+                    "type": "boolean"
+                },
+                "importId": {
+                    "type": "string"
+                },
+                "inputMode": {
+                    "type": "string"
+                },
+                "lastSyncedAt": {
+                    "type": "string"
+                },
+                "progress": {
+                    "$ref": "#/definitions/music.AlbumImportProgressDTO"
+                },
+                "stage": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "targetAlbumId": {
+                    "type": "string"
+                },
+                "targetSongId": {
+                    "type": "string"
+                },
+                "trackCount": {
+                    "type": "integer"
+                },
+                "uploadProgress": {
+                    "type": "number"
+                }
+            }
+        },
         "music.AlbumImportListResponse": {
             "type": "object",
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/music.AlbumImportDTO"
+                        "$ref": "#/definitions/music.AlbumImportListDTO"
                     }
                 },
                 "meta": {
@@ -38225,6 +38322,16 @@ const docTemplate = `{
                 },
                 "artist": {
                     "type": "string"
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "重新检索，替换旧的匹配结果。"
+                },
+                "tracks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumImportMetadataPreviewTrack"
+                    }
                 },
                 "trackTitles": {
                     "type": "array",
@@ -38721,6 +38828,17 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "draft_customization": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    },
+                    "description": "草稿的用户修改标记，恢复后继续保护手动修改。"
+                },
+                "draft_only": {
+                    "type": "boolean",
+                    "description": "仅保存填写草稿，不登记正式提交或创建请求。"
                 }
             }
         },

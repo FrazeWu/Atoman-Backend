@@ -392,7 +392,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	discogsMatched := discogsMatch.err == nil && discogsMatch.release.ID > 0
 	musicBrainzMatched := musicBrainzMatch.err == nil && musicBrainzMatch.release.ID != ""
 	switch {
-	case discogsMatched && (e.preferDiscogs || !musicBrainzMatched):
+	case discogsMatched && discogsMatch.complete && (e.preferDiscogs || !musicBrainzMatched):
 		applyDiscogs(discogsMatch.release, discogsMatch.mapping)
 	case musicBrainzMatched:
 		applyMusicBrainz(musicBrainzMatch.release, musicBrainzMatch.mapping)
@@ -420,6 +420,15 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	if input.SkipLyrics {
 		return result, nil
 	}
+	return e.enrichLyrics(ctx, input, result, releaseMatched, lyricsArtists), nil
+}
+
+// EnrichLyrics 补齐歌词，不重复检索或修改已确认的发行版。
+func (e *ExternalAlbumMetadataEnricher) EnrichLyrics(ctx context.Context, input AlbumImportMetadataInput, result AlbumImportMetadataResult) AlbumImportMetadataResult {
+	return e.enrichLyrics(ctx, input, result, result.MatchStatus == model.MusicMatchMatched || result.MatchStatus == model.MusicMatchManual, nil)
+}
+
+func (e *ExternalAlbumMetadataEnricher) enrichLyrics(ctx context.Context, input AlbumImportMetadataInput, result AlbumImportMetadataResult, releaseMatched bool, lyricsArtists []string) AlbumImportMetadataResult {
 
 	missingLyrics := make([]int, 0, len(result.Tracks))
 	for index := range result.Tracks {
@@ -434,7 +443,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	}
 	if !releaseMatched {
 		log.Printf("WARN: skipping LRCLIB lookup because no external metadata source safely matched album=%q error=%v", input.AlbumTitle, result.MetadataError)
-		return result, nil
+		return result
 	}
 	var lyricsWG sync.WaitGroup
 	lyricsSlots := make(chan struct{}, 4)
@@ -462,7 +471,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		}()
 	}
 	lyricsWG.Wait()
-	return result, nil
+	return result
 }
 
 func metadataTrackForResult(tracks []AlbumImportMetadataTrack, result AlbumImportDTOTrack) AlbumImportMetadataTrack {
