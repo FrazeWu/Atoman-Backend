@@ -2,6 +2,7 @@ package books
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -14,6 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+
+	"atoman/internal/model"
 
 	"gorm.io/gorm"
 )
@@ -33,6 +37,7 @@ type OpenLibraryDumpImportOptions struct {
 	EditionsPath string
 	AuthorsPath  string
 	Limit        int
+	RepairTitles bool
 }
 
 // OpenLibraryDumpImportSummary describes a complete Chinese-catalog import.
@@ -45,6 +50,7 @@ type OpenLibraryDumpImportSummary struct {
 	AuthorsSelected int
 	RecordsImported int
 	RecordsFailed   int
+	TitlesRepaired  int64
 	CatalogImportSummary
 }
 
@@ -135,6 +141,9 @@ func (i *openLibraryDumpImporter) ImportChinese(ctx context.Context, options Ope
 	if err := validateOpenLibraryDumpPaths(options); err != nil {
 		return summary, err
 	}
+	if options.RepairTitles {
+		return i.repairChineseTitles(ctx, options.EditionsPath)
+	}
 
 	editions, err := collectChineseOpenLibraryEditions(ctx, options.EditionsPath, &summary)
 	if err != nil {
@@ -192,7 +201,8 @@ func (i *openLibraryDumpImporter) ImportChinese(ctx context.Context, options Ope
 		record := CatalogBook{
 			ExternalWorkID:    strings.TrimPrefix(work.WorkID, "/works/"),
 			ExternalEditionID: strings.TrimPrefix(edition.EditionID, "/books/"),
-			Title:             work.Title,
+			Title:             openLibraryDisplayTitle(edition.Title, work.Title),
+			OriginalTitle:     work.Title,
 			Subtitle:          work.Subtitle,
 			Description:       work.Description,
 			Language:          openLibraryChineseLanguage,
@@ -236,6 +246,95 @@ func (i *openLibraryDumpImporter) ImportChinese(ctx context.Context, options Ope
 		return summary, fmt.Errorf("commit catalog import batch: %w", err)
 	}
 	return summary, nil
+}
+
+// The old importer copied the same work title into both records. Read only their
+// selected edition sources, so repair never creates records or scans authors.
+func (i *openLibraryDumpImporter) repairChineseTitles(ctx context.Context, path string) (OpenLibraryDumpImportSummary, error) {
+	var summary OpenLibraryDumpImportSummary
+	var rows []struct{ Title, WorkURL, EditionURL string }
+	err := i.db.WithContext(ctx).Table("book_works AS w").
+		Select("w.title, ws.url AS work_url, es.url AS edition_url").
+		Joins("JOIN book_editions e ON e.work_id = w.id").
+		Joins("JOIN book_sources ws ON ws.target_id = w.id AND ws.kind = ?", openLibraryWorkSource).
+		Joins("JOIN book_sources es ON es.target_id = e.id AND es.kind = ?", openLibraryEditionSource).
+		Where("w.title = e.title AND (w.original_title IS NULL OR w.original_title = '') AND w.created_by IS NULL AND e.created_by IS NULL").
+		Where("w.deleted_at IS NULL AND e.deleted_at IS NULL AND ws.deleted_at IS NULL AND es.deleted_at IS NULL").
+		Scan(&rows).Error
+	if err != nil {
+		return summary, err
+	}
+	candidates := make(map[string]CatalogBook, len(rows))
+	for _, row := range rows {
+		key := strings.TrimPrefix(row.EditionURL, "https://openlibrary.org")
+		candidates[key] = CatalogBook{OriginalTitle: row.Title, WorkSourceURL: row.WorkURL, EditionSourceURL: row.EditionURL}
+	}
+	if len(candidates) == 0 {
+		return summary, nil
+	}
+	keys := make(map[string]struct{}, len(candidates))
+	for key := range candidates {
+		keys[key] = struct{}{}
+	}
+	err = scanOpenLibraryDumpKeys(ctx, path, keys, func(source openLibraryDumpRecord) error {
+		if source.Kind != "type/edition" {
+			return nil
+		}
+		summary.EditionsScanned++
+		var payload openLibraryDumpEditionPayload
+		if err := json.Unmarshal(source.Body, &payload); err != nil {
+			return err
+		}
+		if openLibraryChineseEditionLanguage(payload.Languages) == "" {
+			return nil
+		}
+		summary.ChineseEditions++
+		record := candidates[source.Key]
+		record.Title = openLibraryDisplayTitle(payload.Title, record.OriginalTitle)
+		if record.Title == "" || record.Title == record.OriginalTitle {
+			return nil
+		}
+		return i.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			repaired, err := repairOpenLibraryTitles(tx, record)
+			summary.TitlesRepaired += repaired
+			summary.RecordsImported++
+			return err
+		})
+	})
+	return summary, err
+}
+
+func openLibraryDisplayTitle(editionTitle, workTitle string) string {
+	title := strings.TrimSpace(editionTitle)
+	if strings.IndexFunc(title, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) < 0 || strings.IndexFunc(title, unicode.IsControl) >= 0 {
+		return workTitle
+	}
+	return title
+}
+
+// Only replace the old importer value; user-created or edited records are untouched.
+func repairOpenLibraryTitles(tx *gorm.DB, record CatalogBook) (int64, error) {
+	var repaired int64
+	for _, target := range []struct {
+		model     any
+		kind, url string
+	}{
+		{&model.BookWork{}, bookWorkSourceTarget, record.WorkSourceURL},
+		{&model.BookEdition{}, bookEditionSourceTarget, record.EditionSourceURL},
+	} {
+		ids := tx.Model(&model.BookSource{}).Select("target_id").Where("target_type = ? AND url = ?", target.kind, target.url)
+		edited := tx.Model(&model.BookEdit{}).Select("entity_id").Where("entity_id IS NOT NULL")
+		updates := map[string]any{"title": record.Title}
+		if target.kind == bookWorkSourceTarget {
+			updates["original_title"] = record.OriginalTitle
+		}
+		result := tx.Model(target.model).Where("id IN (?) AND id NOT IN (?) AND title = ? AND created_by IS NULL", ids, edited, record.OriginalTitle).Updates(updates)
+		if result.Error != nil {
+			return repaired, result.Error
+		}
+		repaired += result.RowsAffected
+	}
+	return repaired, nil
 }
 
 func validateOpenLibraryDumpPaths(options OpenLibraryDumpImportOptions) error {
@@ -361,6 +460,10 @@ func collectSelectedOpenLibraryAuthors(ctx context.Context, path string, selecte
 }
 
 func scanOpenLibraryDump(ctx context.Context, path string, visit func(openLibraryDumpRecord) error) error {
+	return scanOpenLibraryDumpKeys(ctx, path, nil, visit)
+}
+
+func scanOpenLibraryDumpKeys(ctx context.Context, path string, keys map[string]struct{}, visit func(openLibraryDumpRecord) error) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open dump %s: %w", path, err)
@@ -385,6 +488,15 @@ func scanOpenLibraryDump(ctx context.Context, path string, visit func(openLibrar
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+		if keys != nil {
+			fields := bytes.SplitN(scanner.Bytes(), []byte("\t"), 3)
+			if len(fields) < 2 {
+				return errors.New("invalid TSV dump record")
+			}
+			if _, selected := keys[string(fields[1])]; !selected {
+				continue
+			}
 		}
 		record, err := parseOpenLibraryDumpRecord(scanner.Bytes())
 		if err != nil {
