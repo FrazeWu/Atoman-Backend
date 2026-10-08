@@ -15,6 +15,49 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestFinalizeSubmittedAlbumImportRetainsProcessedLyrics(t *testing.T) {
+	for _, albumType := range []string{"album", "single"} {
+		for _, manual := range []bool{false, true} {
+			t.Run(albumType+"/"+map[bool]string{false: "imported", true: "manual"}[manual], func(t *testing.T) {
+				svc, db, user := newMusicTestService(t)
+				fileID := uuid.New().String()
+				track := AlbumImportTrackPayload{FileID: fileID, Title: "用户改名", TrackNumber: 1}
+				want, source := "[00:01.00]本地歌词", "local"
+				if manual {
+					want, source = "[00:02.00]用户编辑歌词", ""
+					track.Lyrics = &AlbumImportTrackLyricsPayload{Content: want, Format: "lrc"}
+				}
+				request := CommitAlbumImportSessionInput{Artist: completeAlbumImportArtistPayload("Artist"), ArtistSource: "artist source", AlbumSource: "album source", Album: AlbumImportAlbumPayload{Title: "Album", AlbumType: albumType, ReleaseDate: "2020-01-01", CoverURL: "https://example.test/cover.jpg", Tracks: []AlbumImportTrackPayload{track}}}
+				payload, err := json.Marshal(map[string]any{"commit_request": request, "derived_tracks": []map[string]any{{"title": "原名", "file_id": fileID, "audio_url": "https://example.test/track.mp3", "lyrics_source": "local", "lyrics": AlbumImportTrackLyricsPayload{Content: "[00:01.00]本地歌词", Format: "lrc"}}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				session := model.AlbumImportSession{UserID: &user.ID, Status: AlbumImportStatusReady, PayloadJSON: string(payload)}
+				if err := db.Create(&session).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Create(&model.AlbumImportFile{Base: model.Base{ID: uuid.MustParse(fileID)}, ImportID: session.ID, FileName: "track.mp3", Role: "audio", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusCompleted}).Error; err != nil {
+					t.Fatal(err)
+				}
+				if err := svc.FinalizeSubmittedAlbumImport(session.ID); err != nil {
+					t.Fatal(err)
+				}
+				var song model.Song
+				if err := db.First(&song).Error; err != nil {
+					t.Fatal(err)
+				}
+				var lyrics model.MusicSongLyric
+				if err := db.First(&lyrics, "song_id = ?", song.ID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if song.Lyrics != want || lyrics.Content != want || lyrics.Source != source {
+					t.Fatalf("song=%#v lyrics=%#v", song, lyrics)
+				}
+			})
+		}
+	}
+}
+
 func TestPromoteAlbumImportAssetCopiesLargePlaybackWithoutHTTPDownload(t *testing.T) {
 	requests := 0
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
