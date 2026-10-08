@@ -1445,15 +1445,19 @@ func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayloa
 	if strings.EqualFold(filepath.Ext(name), ".lrc") {
 		format = "lrc"
 		lines := splitLyricLines(content)
+		hasTimestamp := regexp.MustCompile(`\[\d+:`).MatchString(content)
+		if !hasTimestamp {
+			format = "plain"
+		}
 		for index, line := range lines {
 			var credit struct {
-				Time  int `json:"t"`
+				Time  *int `json:"t"`
 				Parts []struct {
 					Text string `json:"tx"`
 				} `json:"c"`
 			}
-			// Negative-time JSON rows describe credits, not timed lyric lines.
-			if json.Unmarshal([]byte(strings.TrimPrefix(line, "\uFEFF")), &credit) != nil || credit.Time >= 0 {
+			// 网易云导出的 JSON 作者信息也可能使用零或正数时间，不属于 LRC 时间轴。
+			if json.Unmarshal([]byte(strings.TrimPrefix(line, "\uFEFF")), &credit) != nil || len(credit.Parts) == 0 {
 				continue
 			}
 			var text strings.Builder
@@ -1461,7 +1465,13 @@ func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayloa
 				text.WriteString(part.Text)
 			}
 			if value := strings.TrimSpace(text.String()); value != "" {
-				lines[index] = "[by:" + value + "]"
+				if (credit.Time == nil || *credit.Time >= 0) && !regexp.MustCompile(`^(?:作词|作曲|编曲|演唱|制作人|词|曲)\s*[:：]`).MatchString(value) {
+					continue
+				}
+				lines[index] = value
+				if hasTimestamp {
+					lines[index] = "[by:" + value + "]"
+				}
 			}
 		}
 		content = strings.Join(lines, "\n")
