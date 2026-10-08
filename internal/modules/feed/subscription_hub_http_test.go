@@ -93,14 +93,20 @@ func TestSubscriptionHubHandlersExposeTypeScopedTreeAndUpdates(t *testing.T) {
 func TestDeleteSubscriptionHubSourceRemovesAllBackingSubscriptions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
-	testdb.Migrate(t, db, &model.SubscriptionGroup{})
+	testdb.Migrate(t, db, &model.SubscriptionGroup{}, &model.ChannelBookmark{}, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
 
 	var source model.FeedSource
 	if err := db.Where("source_type = ?", "internal_channel").First(&source).Error; err != nil {
 		t.Fatalf("load internal channel source: %v", err)
 	}
-	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
-		t.Fatalf("create channel subscription: %v", err)
+	var subscription model.Subscription
+	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("load existing channel subscription: %v", err)
+	}
+	for _, kind := range []string{"podcast_show", "video_channel"} {
+		if err := db.Create(&model.ChannelBookmark{UserID: user.ID, ChannelID: *source.SourceID, Kind: kind}).Error; err != nil {
+			t.Fatalf("create legacy channel bookmark: %v", err)
+		}
 	}
 
 	router := gin.New()
@@ -120,5 +126,12 @@ func TestDeleteSubscriptionHubSourceRemovesAllBackingSubscriptions(t *testing.T)
 	}
 	if subscriptionCount != 0 {
 		t.Fatalf("subscription remained: %d", subscriptionCount)
+	}
+	var bookmarkCount int64
+	if err := db.Model(&model.ChannelBookmark{}).Where("user_id = ? AND channel_id = ?", user.ID, *source.SourceID).Count(&bookmarkCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if bookmarkCount != 0 {
+		t.Fatalf("legacy channel bookmarks remained: %d", bookmarkCount)
 	}
 }

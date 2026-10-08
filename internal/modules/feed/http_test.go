@@ -1526,7 +1526,8 @@ func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=featured", nil)
+	// 精选仅包含编辑目录的 RSS；内部频道契约在热门模式下验证。
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=hot", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -1613,7 +1614,7 @@ func TestFeedRecommendationChannelsIncludePreviewAndStats(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=featured", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=hot", nil)
 	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -1945,7 +1946,7 @@ func TestFeedRecommendationChannelsDeduplicatesMirroredInternalAndRSSSources(t *
 
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=featured", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=hot", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

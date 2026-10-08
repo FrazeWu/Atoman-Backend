@@ -220,6 +220,8 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.FeedItemRating{},
 		&model.FeedItemRead{},
 		&model.FeedItemStar{},
+		&model.ShortNote{},
+		&model.ShortNoteRead{},
 		&model.ReadingListItem{},
 		&model.SourceReadEvent{},
 		&model.FeedContentFeedback{},
@@ -278,7 +280,9 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 	if err := db.Create(&internalSource).Error; err != nil {
 		t.Fatalf("create internal source: %v", err)
 	}
-	internalSubscription := model.Subscription{UserID: user.UUID, FeedSourceID: internalSource.ID, Title: "Alice posts"}
+	// 测试中的历史内容应发布在订阅激活之后。
+	activatedAt := time.Now().Add(-24 * time.Hour).UTC()
+	internalSubscription := model.Subscription{Base: model.Base{CreatedAt: activatedAt}, UserID: user.UUID, FeedSourceID: internalSource.ID, Title: "Alice posts"}
 	if err := db.Create(&internalSubscription).Error; err != nil {
 		t.Fatalf("create internal subscription: %v", err)
 	}
@@ -286,14 +290,14 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 	if err := db.Create(&channelSource).Error; err != nil {
 		t.Fatalf("create channel source: %v", err)
 	}
-	if err := db.Create(&model.Subscription{UserID: user.UUID, FeedSourceID: channelSource.ID, Title: channel.Name}).Error; err != nil {
+	if err := db.Create(&model.Subscription{Base: model.Base{CreatedAt: activatedAt}, UserID: user.UUID, FeedSourceID: channelSource.ID, Title: channel.Name}).Error; err != nil {
 		t.Fatalf("create channel subscription: %v", err)
 	}
 	collectionSource := model.FeedSource{SourceType: "internal_collection", SourceID: &collection.ID, Hash: "internal-collection-hash", Title: collection.Name}
 	if err := db.Create(&collectionSource).Error; err != nil {
 		t.Fatalf("create collection source: %v", err)
 	}
-	if err := db.Create(&model.Subscription{UserID: user.UUID, FeedSourceID: collectionSource.ID, Title: collection.Name}).Error; err != nil {
+	if err := db.Create(&model.Subscription{Base: model.Base{CreatedAt: activatedAt}, UserID: user.UUID, FeedSourceID: collectionSource.ID, Title: collection.Name}).Error; err != nil {
 		t.Fatalf("create collection subscription: %v", err)
 	}
 
@@ -315,7 +319,7 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 	if err := db.Create(&feedItem).Error; err != nil {
 		t.Fatalf("create feed item: %v", err)
 	}
-	if err := db.Create(&model.Subscription{UserID: user.UUID, FeedSourceID: externalSource.ID, Title: "Example Feed"}).Error; err != nil {
+	if err := db.Create(&model.Subscription{Base: model.Base{CreatedAt: activatedAt}, UserID: user.UUID, FeedSourceID: externalSource.ID, Title: "Example Feed"}).Error; err != nil {
 		t.Fatalf("create external subscription: %v", err)
 	}
 

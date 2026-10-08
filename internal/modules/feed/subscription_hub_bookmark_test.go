@@ -2,6 +2,7 @@ package feed
 
 import (
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
@@ -21,7 +22,7 @@ func TestSubscriptionHubUsesOneChannelSubscriptionAcrossContentTypes(t *testing.
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatalf("create channel source: %v", err)
 	}
-	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+	if err := db.Create(&model.Subscription{Base: model.Base{CreatedAt: time.Now().Add(-time.Hour)}, UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
 		t.Fatalf("create channel subscription: %v", err)
 	}
 
