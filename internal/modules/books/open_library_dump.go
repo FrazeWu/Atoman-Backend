@@ -135,6 +135,7 @@ func (i *openLibraryDumpImporter) ImportChinese(ctx context.Context, options Ope
 	if i == nil || i.db == nil {
 		return summary, errors.New("book catalog database is required")
 	}
+	defer NewService(i.db).InvalidateCatalog()
 	if ctx == nil {
 		ctx = context.Background()
 	}

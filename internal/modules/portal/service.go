@@ -2,9 +2,7 @@ package portal
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -13,6 +11,7 @@ import (
 	"atoman/internal/model"
 	blogmodule "atoman/internal/modules/blog"
 	contentmodule "atoman/internal/modules/content"
+	"atoman/internal/platform/cachex"
 	"atoman/internal/platform/redisx"
 
 	"github.com/google/uuid"
@@ -22,15 +21,12 @@ import (
 )
 
 type Service struct {
-	db          *gorm.DB
-	cacheMu     sync.Mutex
-	hotCache    map[int]hotCacheEntry
-	sharedCache hotCacheStore
+	db        *gorm.DB
+	publicHot *cachex.Cache[hotCachePayload]
 }
 
 const (
 	hotCacheTTL       = time.Minute
-	sharedHotCacheTTL = time.Minute
 	spotlightPageSize = 4
 )
 
@@ -45,8 +41,11 @@ type hotCachePayload struct {
 }
 
 func newServiceWithHotCache(db *gorm.DB, sharedCache hotCacheStore) *Service {
-	return &Service{db: db, hotCache: make(map[int]hotCacheEntry), sharedCache: sharedCache}
+	return &Service{db: db,
+		publicHot: cachex.New[hotCachePayload](sharedCache, "atoman:portal:hot:v2", hotCacheTTL, time.Hour)}
 }
+
+func (s *Service) InvalidateHotContent() { s.publicHot.Invalidate() }
 
 func newHotCacheFromEnv() hotCacheStore {
 	if client := redisx.ClientFromEnv(); client != nil {
@@ -65,16 +64,8 @@ func (cache redisHotCache) Set(ctx context.Context, key, value string, ttl time.
 	return cache.client.Set(ctx, key, value, ttl).Err()
 }
 
-func hotCacheKey(limit int) string { return fmt.Sprintf("atoman:portal:hot:v1:%d", limit) }
-
 var spotlightModuleOrder = []string{
 	"blog", "feed", "video", "podcast", "music", "forum", "debate", "timeline",
-}
-
-type hotCacheEntry struct {
-	items     []HotItem
-	sections  []HotSection
-	expiresAt time.Time
 }
 
 func (s *Service) HotContent(limit int) (HotResponse, error) {
@@ -89,50 +80,19 @@ func (s *Service) HotContentAtOffset(limit int, spotlightOffset int) (HotRespons
 		spotlightOffset = 0
 	}
 
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-
-	cached, ok := s.hotCache[limit]
-	if !ok || !time.Now().Before(cached.expiresAt) {
-		if s.sharedCache != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
-			payload, err := s.sharedCache.Get(ctx, hotCacheKey(limit))
-			cancel()
-			if err == nil {
-				var shared hotCachePayload
-				if json.Unmarshal([]byte(payload), &shared) == nil {
-					cached = hotCacheEntry{items: shared.Items, sections: shared.Sections, expiresAt: time.Now().Add(hotCacheTTL)}
-					s.hotCache[limit] = cached
-					return HotResponse{Featured: spotlightBatch(cached.items, spotlightOffset), FeaturedTotal: len(cached.items), Sections: cached.sections}, nil
-				}
-			}
-		}
-		sections, items, err := s.loadHotContent(limit)
-		if err != nil {
-			return HotResponse{}, err
-		}
-		cached = hotCacheEntry{
-			items:     items,
-			sections:  sections,
-			expiresAt: time.Now().Add(hotCacheTTL),
-		}
-		s.hotCache[limit] = cached
-		if s.sharedCache != nil {
-			payload, err := json.Marshal(hotCachePayload{Items: items, Sections: sections})
-			if err == nil {
-				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
-				if err := s.sharedCache.Set(ctx, hotCacheKey(limit), string(payload), sharedHotCacheTTL); err != nil {
-					log.Printf("portal hot content Redis cache write failed: %v", err)
-				}
-				cancel()
-			}
-		}
+	payload, err := s.publicHot.Get(context.Background(), fmt.Sprint(limit), func(ctx context.Context) (hotCachePayload, error) {
+		// 查询使用刷新任务自己的超时，互不占用不同 limit 的锁。
+		loader := &Service{db: s.db.WithContext(ctx)}
+		sections, items, err := loader.loadHotContent(limit)
+		return hotCachePayload{Items: items, Sections: sections}, err
+	})
+	if err != nil {
+		return HotResponse{}, err
 	}
-
 	return HotResponse{
-		Featured:      spotlightBatch(cached.items, spotlightOffset),
-		FeaturedTotal: len(cached.items),
-		Sections:      cached.sections,
+		Featured:      spotlightBatch(payload.Items, spotlightOffset),
+		FeaturedTotal: len(payload.Items),
+		Sections:      payload.Sections,
 	}, nil
 }
 

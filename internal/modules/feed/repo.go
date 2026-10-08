@@ -1219,12 +1219,12 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 			feed_sources.cover_url,
 			feed_sources.category,
 			feed_sources.language_code,
-			COUNT(DISTINCT subscriptions.id) AS subscription_count,
-			COUNT(DISTINCT feed_items.id) AS recent_item_count,
-			MAX(feed_items.published_at) AS last_published_at
+			COALESCE(subscription_stats.subscription_count, 0) AS subscription_count,
+			item_stats.recent_item_count,
+			item_stats.last_published_at
 		`).
-		Joins("LEFT JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id AND subscriptions.deleted_at IS NULL").
-		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id AND feed_items.deleted_at IS NULL").
+		Joins(`LEFT JOIN (SELECT feed_source_id, COUNT(*) AS subscription_count FROM subscriptions WHERE deleted_at IS NULL GROUP BY feed_source_id) subscription_stats ON subscription_stats.feed_source_id = feed_sources.id`).
+		Joins(`JOIN (SELECT feed_source_id, COUNT(*) AS recent_item_count, MAX(published_at) AS last_published_at FROM feed_items WHERE deleted_at IS NULL GROUP BY feed_source_id) item_stats ON item_stats.feed_source_id = feed_sources.id`).
 		Where("feed_sources.source_type = ?", "external_rss").
 		Where("feed_sources.hidden = ?", false).
 		Where("feed_sources.deleted_at IS NULL")
@@ -1241,8 +1241,6 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
 	}
 	queryDB := db.
-		Group("feed_sources.id").
-		Having("COUNT(DISTINCT feed_items.id) > 0").
 		Order("subscription_count DESC").
 		Order("last_published_at DESC NULLS LAST").
 		Order("feed_sources.created_at DESC")
@@ -1279,11 +1277,11 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		sourceIDs = append(sourceIDs, raw.ID)
 	}
 
-	if err := r.attachExploreSourceRecentItems(rows, sourceIDs); err != nil {
+	normalizedCategory := normalizeFeedSourceCategory(category)
+	if err := r.attachExploreSourceRecentItems(rows, sourceIDs, normalizedCategory != ""); err != nil {
 		return nil, err
 	}
 
-	normalizedCategory := normalizeFeedSourceCategory(category)
 	normalizedQuery := strings.ToLower(strings.TrimSpace(queryValue))
 	if normalizedCategory != "" {
 		rows = filterExploreSourceRowsByCategory(rows, normalizedCategory)
@@ -1301,7 +1299,15 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 	if end > len(rows) {
 		end = len(rows)
 	}
-	return rows[offset:end], nil
+	rows = rows[offset:end]
+	sourceIDs = sourceIDs[:0]
+	for _, row := range rows {
+		sourceIDs = append(sourceIDs, row.ID)
+	}
+	if err := r.attachExploreSourceRecentItems(rows, sourceIDs); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // ListCuratedExploreSources returns only editorially selected sources. It uses
@@ -1385,7 +1391,7 @@ func (r *Repo) ListCuratedExploreSources(limit int, languageCode string) ([]Expl
 	return rows, nil
 }
 
-func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs []uuid.UUID) error {
+func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs []uuid.UUID, categoryOnly ...bool) error {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -1399,18 +1405,25 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 		EnclosureType string
 	}
 	var items []recentItemRow
+	selection := "id, feed_source_id, title, link, published_at, enclosure_type"
+	order := "recent.feed_source_id, recent.published_at DESC"
+	onlyCategory := len(categoryOnly) > 0 && categoryOnly[0]
+	if onlyCategory {
+		selection = "feed_source_id, enclosure_type"
+		order = "recent.feed_source_id"
+	}
 	if err := r.db.Raw(`
 		SELECT recent.*
 		FROM feed_sources AS source
 		CROSS JOIN LATERAL (
-			SELECT id, feed_source_id, title, link, published_at, enclosure_type
+			SELECT `+selection+`
 			FROM feed_items
 			WHERE feed_source_id = source.id AND deleted_at IS NULL
 			ORDER BY published_at DESC, created_at DESC
 			LIMIT 3
 		) recent
 		WHERE source.id IN ?
-		ORDER BY recent.feed_source_id, recent.published_at DESC
+		ORDER BY `+order+`
 	`, sourceIDs).Scan(&items).Error; err != nil {
 		return err
 	}
@@ -1446,6 +1459,11 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 		}
 		rows[i].Category = inferredCategory
 	}
+	if onlyCategory {
+		for i := range rows {
+			rows[i].RecentItems = nil
+		}
+	}
 
 	return nil
 }
@@ -1457,7 +1475,7 @@ func (r *Repo) CountExploreSources(category string, query string, language ...st
 	}
 	db := r.db.Table("feed_sources").
 		Select("feed_sources.id").
-		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id AND feed_items.deleted_at IS NULL").
+		Where("EXISTS (SELECT 1 FROM feed_items WHERE feed_items.feed_source_id = feed_sources.id AND feed_items.deleted_at IS NULL)").
 		Where("feed_sources.source_type = ? AND feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL", "external_rss", false)
 	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
 		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
@@ -1471,7 +1489,7 @@ func (r *Repo) CountExploreSources(category string, query string, language ...st
 			(LOWER(feed_sources.title) LIKE ? ESCAPE '\' OR
 			LOWER(feed_sources.rss_url) LIKE ? ESCAPE '\')`, like, like)
 	}
-	subquery := db.Group("feed_sources.id").Having("COUNT(DISTINCT feed_items.id) > 0")
+	subquery := db
 	var count int64
 	err := r.db.Table("(?) AS explore_sources", subquery).Count(&count).Error
 	return count, err

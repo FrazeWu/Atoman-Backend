@@ -134,6 +134,14 @@ func writeCachedRecommendation[T any](s *Service, key string, value T, freshTTL 
 }
 
 func loadCachedRecommendation[T any](s *Service, key string, freshTTL time.Duration, load func() (T, error)) (T, error) {
+	if s.recommendationCache != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+		version, _ := s.recommendationCache.Get(ctx, "atoman:feed:recommendation:version")
+		cancel()
+		if version != "" {
+			key += ":" + version
+		}
+	}
 	refresh := func() (any, error) {
 		// 冷请求等待期间，前一个请求可能已经填好缓存。
 		if cached, ok := readCachedRecommendation[T](s, key); ok && time.Now().Before(cached.RefreshAfter) {
@@ -158,6 +166,15 @@ func loadCachedRecommendation[T any](s *Service, key string, freshTTL time.Durat
 		return zero, err
 	}
 	return value.(T), nil
+}
+
+func (s *Service) InvalidateRecommendations() {
+	if s.recommendationCache == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+	_ = s.recommendationCache.Set(ctx, "atoman:feed:recommendation:version", uuid.NewString(), 0)
 }
 
 func (s *Service) listCuratedRecommendationSources(language string) ([]ExploreSourceRow, error) {
