@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
@@ -15,7 +16,38 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestDiscoveryReusesTotalAcrossPagesButSearchCountsStayFresh(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{})
+	work := model.BookWork{Title: "Visible Book", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	require.NoError(t, db.Create(&work).Error)
+	counts := 0
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:count_catalog_queries", func(tx *gorm.DB) {
+		if strings.Contains(tx.Statement.SQL.String(), "count(*)") && tx.Statement.Table == "book_works" {
+			counts++
+		}
+	}))
+	service := NewService(db)
+	for _, offset := range []int{0, 24} {
+		_, total, err := service.SearchPublicCatalog(context.Background(), "", 24, offset)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), total)
+	}
+	require.Equal(t, 1, counts, "翻页不应重复统计全部作品")
+	for range 2 {
+		_, total, err := service.SearchPublicCatalog(context.Background(), "Visible", 24, 0)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), total)
+	}
+	require.Equal(t, 3, counts, "搜索总数保持实时")
+	service.catalogCountExpiresAt = time.Now().Add(-time.Second)
+	_, _, err := service.SearchPublicCatalog(context.Background(), "", 24, 0)
+	require.NoError(t, err)
+	require.Equal(t, 4, counts, "过期后应重新统计")
+}
 
 func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
 	db := testdb.Open(t)
