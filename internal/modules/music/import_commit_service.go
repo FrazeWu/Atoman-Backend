@@ -159,10 +159,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			deletedImportTrackKeys[key] = true
 		}
 
-		coverURL := strings.TrimSpace(input.Album.CoverURL)
-		if coverURL == "" && sessionPayload != nil {
-			coverURL = resolveAlbumImportCoverURL(sessionPayload)
-		}
+		coverURL := resolveAlbumImportCommitCoverURL(input.Album.CoverURL, sessionPayload)
 		if coverURL == "" || strings.TrimSpace(payload.Album.ReleaseDate) == "" || len(payload.Album.Tracks) == 0 {
 			return apperr.BadRequest("validation.invalid_request", "album cover, release date and at least one track are required")
 		}
@@ -1054,6 +1051,9 @@ func findRepairSong(existingSongs []model.Song, seenSongIDs map[uuid.UUID]bool, 
 }
 
 func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importID uuid.UUID) (string, string, string, error) {
+	if isAlbumImportPreviewURL(rawURL) {
+		return "", "", "", apperr.BadRequest("validation.invalid_request", "browser preview URLs cannot be saved as music assets")
+	}
 	sourceKey, ok := musicAlbumImportSourceKey(rawURL)
 	if !ok || !isPromotableAlbumImportKey(sourceKey, importID) {
 		if remoteURL := strings.TrimSpace(rawURL); strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "http://") {
