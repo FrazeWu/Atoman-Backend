@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,20 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
+
+// 推荐查询同时读取规范博文与 RSS；使用完整依赖，避免依赖其他测试留下的表。
+func newRecommendationTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Channel{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentBlogTag{}, &model.ContentCollectionMembership{},
+		&model.FeedSource{}, &model.FeedItem{}, &model.Subscription{}, &model.FeedItemRead{}, &model.FeedItemStar{},
+	)
+	return db
+}
 
 func TestNormalizeArticleQualityPrefersStructuredContent(t *testing.T) {
 	structuredContent := "# 完整分析\n\n"
@@ -48,25 +62,21 @@ func TestArticleContentQualityPenalizesLinkHeavyContent(t *testing.T) {
 }
 
 func TestRecommendArticlesSeparatesHotFromFeaturedRanking(t *testing.T) {
-	db := testdb.Open(t)
-	testdb.Migrate(t, db,
-		&model.FeedSource{},
-		&model.FeedItem{},
-		&model.FeedItemRead{},
-		&model.FeedItemStar{},
-	)
+	db := newRecommendationTestDB(t)
 
 	now := time.Now().UTC()
 	featuredSource := model.FeedSource{
 		SourceType: "external_rss",
 		Hash:       "featured-source-" + uuid.NewString(),
-		Title:      "Featured source",
+		Title:      "少数派",
+		RssURL:     "https://example.com/featured.xml",
 		Category:   "blog",
 	}
 	hotSource := model.FeedSource{
 		SourceType: "external_rss",
 		Hash:       "hot-source-" + uuid.NewString(),
-		Title:      "Hot source",
+		Title:      "阮一峰的网络日志",
+		RssURL:     "https://example.com/hot.xml",
 		Category:   "blog",
 	}
 	if err := db.Create(&featuredSource).Error; err != nil {
@@ -123,12 +133,11 @@ func TestRecommendArticlesSeparatesHotFromFeaturedRanking(t *testing.T) {
 }
 
 func TestCuratedRecommendationsOnlyUseTwelveTopSourcesForLanguage(t *testing.T) {
-	db := testdb.Open(t)
-	testdb.Migrate(t, db,
-		&model.FeedSource{},
-		&model.FeedItem{},
-		&model.Subscription{},
-	)
+	db := newRecommendationTestDB(t)
+	user := model.User{Username: "curated-reader", Email: "curated-reader@example.com", Password: "hash"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	now := time.Now().UTC()
 	selectedItemIDs := make(map[string]struct{}, 12)
@@ -144,11 +153,11 @@ func TestCuratedRecommendationsOnlyUseTwelveTopSourcesForLanguage(t *testing.T) 
 		if err := db.Create(&source).Error; err != nil {
 			t.Fatalf("create selected source: %v", err)
 		}
-		if err := db.Create(&model.Subscription{UserID: uuid.New(), FeedSourceID: source.ID}).Error; err != nil {
+		if err := db.Create(&model.Subscription{UserID: user.UUID, FeedSourceID: source.ID}).Error; err != nil {
 			t.Fatalf("create selected subscription: %v", err)
 		}
 		item := model.FeedItem{
-			FeedSourceID: source.ID, GUID: "selected-item-" + uuid.NewString(), Title: "Selected item",
+			FeedSourceID: source.ID, GUID: "selected-item-" + uuid.NewString(), Title: fmt.Sprintf("Selected item %d", index),
 			Summary: strings.Repeat("完整内容。", 80), Link: "https://example.com/selected/" + source.ID.String(),
 			ReaderQualityScore: 90, FullTextWordCount: 1200, LanguageCode: "zh", PublishedAt: now, FetchedAt: now,
 		}
@@ -188,11 +197,7 @@ func TestCuratedRecommendationsOnlyUseTwelveTopSourcesForLanguage(t *testing.T) 
 }
 
 func TestCuratedRecommendationsUseEditorialSourcesWithCorrectedLanguage(t *testing.T) {
-	db := testdb.Open(t)
-	testdb.Migrate(t, db,
-		&model.FeedSource{},
-		&model.FeedItem{},
-	)
+	db := newRecommendationTestDB(t)
 
 	now := time.Now().UTC()
 	trustedSource := model.FeedSource{

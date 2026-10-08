@@ -65,17 +65,22 @@ func parseRecommendationLanguage(raw string) (string, error) {
 }
 
 func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, languageCode string, search string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	if mode != recommendation.ModeFeatured {
+		return s.recommendArticles(mode, category, theme, languageCode, search, page, pageSize)
+	}
+	key := recommendationCacheKey("articles", mode, normalizeSourceCategory(category), theme, languageCode, search, page, pageSize)
+	entry, err := loadCachedRecommendation(s, key, recommendationCacheTTL, func() (recommendationCacheEntry, error) {
+		items, total, err := s.recommendArticles(mode, category, theme, languageCode, search, page, pageSize)
+		return recommendationCacheEntry{Items: items, Total: total}, err
+	})
+	return entry.Items, entry.Total, err
+}
+
+func (s *Service) recommendArticles(mode recommendation.Mode, category string, theme string, languageCode string, search string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
 	normalizedCategory := normalizeSourceCategory(category)
 	keywords, validTheme := recommendationThemeKeywords(normalizedCategory, theme)
 	if !validTheme {
 		return []RecommendationItemDTO{}, 0, nil
-	}
-	cacheKey := ""
-	if mode == recommendation.ModeFeatured {
-		cacheKey = recommendationCacheKey("articles", mode, normalizedCategory, theme, languageCode, search, page, pageSize)
-		if cached, ok := s.readRecommendationCache(cacheKey); ok {
-			return cached.Items, cached.Total, nil
-		}
 	}
 	includeText := len(keywords) > 0 || strings.TrimSpace(search) != ""
 	publishedAfter := time.Now().Add(-recommendationArticleCandidateWindow(mode))
@@ -193,21 +198,23 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 	if err := s.hydrateRecommendationArticles(items); err != nil {
 		return nil, 0, err
 	}
-	if cacheKey != "" {
-		s.writeRecommendationCache(cacheKey, recommendationCacheEntry{Items: items, Total: total})
-	}
 	return items, total, nil
 }
 
 func (s *Service) RecommendChannels(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	curated := mode == recommendation.ModeFeatured || mode == recommendation.ModeRandom
-	cacheKey := ""
-	if mode == recommendation.ModeFeatured {
-		cacheKey = recommendationCacheKey("channels", mode, category, theme, languageCode, "", page, pageSize)
-		if cached, ok := s.readRecommendationCache(cacheKey); ok {
-			return cached.Items, cached.Total, nil
-		}
+	if mode != recommendation.ModeFeatured {
+		return s.recommendChannels(mode, category, theme, languageCode, page, pageSize)
 	}
+	key := recommendationCacheKey("channels", mode, category, theme, languageCode, "", page, pageSize)
+	entry, err := loadCachedRecommendation(s, key, recommendationCacheTTL, func() (recommendationCacheEntry, error) {
+		items, total, err := s.recommendChannels(mode, category, theme, languageCode, page, pageSize)
+		return recommendationCacheEntry{Items: items, Total: total}, err
+	})
+	return entry.Items, entry.Total, err
+}
+
+func (s *Service) recommendChannels(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	curated := mode == recommendation.ModeFeatured || mode == recommendation.ModeRandom
 	rows := []RecommendationChannelRow{}
 	if !curated {
 		var err error
@@ -352,9 +359,6 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 	}
 	if err := s.enrichRecommendationChannels(items, rowByID, sourceByID); err != nil {
 		return nil, 0, err
-	}
-	if cacheKey != "" {
-		s.writeRecommendationCache(cacheKey, recommendationCacheEntry{Items: items, Total: total})
 	}
 	return items, total, nil
 }

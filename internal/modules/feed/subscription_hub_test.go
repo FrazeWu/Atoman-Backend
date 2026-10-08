@@ -84,7 +84,7 @@ func TestSubscriptionHubAllContextDeduplicatesSourcesAndCombinesContentTypes(t *
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatalf("create channel source: %v", err)
 	}
-	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+	if err := db.Create(&model.Subscription{Base: model.Base{CreatedAt: time.Now().Add(-time.Hour)}, UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
 		t.Fatalf("create channel subscription: %v", err)
 	}
 
@@ -289,7 +289,7 @@ func TestSubscriptionHubCountsUnreadContentForEachModule(t *testing.T) {
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatalf("create channel source: %v", err)
 	}
-	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+	if err := db.Create(&model.Subscription{Base: model.Base{CreatedAt: time.Now().Add(-time.Hour)}, UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
 		t.Fatalf("create channel subscription: %v", err)
 	}
 	if err := db.Create(&model.ContentLifecycleEvent{
@@ -330,7 +330,7 @@ func TestSubscriptionHubKeepsChannelContextsSeparatedByType(t *testing.T) {
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatalf("create channel source: %v", err)
 	}
-	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+	if err := db.Create(&model.Subscription{Base: model.Base{CreatedAt: time.Now().Add(-time.Hour)}, UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
 		t.Fatalf("create channel subscription: %v", err)
 	}
 
@@ -529,7 +529,7 @@ func TestSubscriptionHubUsesSubscriptionActivationAndResumeWindows(t *testing.T)
 	if err != nil {
 		t.Fatalf("get active subscription tree: %v", err)
 	}
-	group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeRSS)
+	group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeAll)
 	if group == nil || len(group.Memberships) != 1 || group.Memberships[0].UnreadCount != 1 {
 		t.Fatalf("only post-activation item should be unread: %#v", group)
 	}
@@ -543,7 +543,28 @@ func TestSubscriptionHubUsesSubscriptionActivationAndResumeWindows(t *testing.T)
 	if err != nil {
 		t.Fatalf("get paused subscription tree: %v", err)
 	}
-	if group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeRSS); group != nil {
-		t.Fatalf("paused subscription must not remain in RSS tree: %#v", group)
+	if group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeAll); group != nil {
+		t.Fatalf("paused subscription must not remain in subscription tree: %#v", group)
+	}
+
+	resumedAt := now.Add(-10 * time.Minute)
+	if err := db.Model(&model.Subscription{}).Where("user_id = ? AND feed_source_id = ?", viewer.ID, source.ID).Updates(map[string]any{
+		"is_paused": false, "resumed_after": resumedAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.FeedItem{
+		FeedSourceID: source.ID, GUID: "after-resume", Title: "After resume", Link: "https://example.com/resumed",
+		PublishedAt: resumedAt.Add(time.Minute), FetchedAt: resumedAt.Add(2 * time.Minute),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	tree, err = service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group = firstSubscriptionHubGroup(tree, SubscriptionHubTypeAll)
+	if group == nil || len(group.Memberships) != 1 || group.Memberships[0].UnreadCount != 1 {
+		t.Fatalf("only post-resume item should be unread: %#v", group)
 	}
 }

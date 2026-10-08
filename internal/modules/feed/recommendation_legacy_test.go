@@ -295,13 +295,7 @@ func TestRecommendChannelsReturnsEmptyWithoutCanonicalBlogExtensions(t *testing.
 }
 
 func TestRecommendArticlesReturnsSourceIdentityForExternalFeedItems(t *testing.T) {
-	db := testdb.Open(t)
-	testdb.Migrate(t, db,
-		&model.FeedSource{},
-		&model.FeedItem{},
-		&model.FeedItemRead{},
-		&model.FeedItemStar{},
-	)
+	db := newRecommendationTestDB(t)
 
 	now := time.Now().UTC()
 	source := model.FeedSource{

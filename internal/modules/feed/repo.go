@@ -811,7 +811,7 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		"LENGTH(COALESCE(feed_items.summary, '')) AS summary_length",
 		"COALESCE(feed_items.summary, '') <> '' AS has_summary",
 		"COALESCE(feed_items.image_url, '') <> '' AS has_image",
-		"COALESCE(feed_items.reader_html, '') <> '' OR COALESCE(feed_items.full_text_html, '') <> '' AS has_full_text",
+		"COALESCE(OCTET_LENGTH(feed_items.reader_html), 0) > 0 OR COALESCE(OCTET_LENGTH(feed_items.full_text_html), 0) > 0 AS has_full_text",
 		"COALESCE(feed_items.reader_quality_score, 0) AS reader_quality_score",
 		"COALESCE(feed_items.full_text_word_count, 0) AS full_text_word_count",
 		"COALESCE(feed_items.reader_source, '') AS reader_source",
@@ -821,8 +821,8 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		"feed_items.language_code",
 	}
 	if includeText {
-		columns[2] = "feed_items.title"
-		columns[3] = "feed_items.summary"
+		columns[3] = "feed_items.title"
+		columns[4] = "feed_items.summary"
 	}
 
 	var items []RecommendationArticleFeedItemRow
@@ -832,16 +832,40 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		Where("feed_sources.hidden = ?", false).
 		Where("feed_items.deleted_at IS NULL").
 		Where("feed_items.published_at >= ?", publishedAfter).
-		Where(recommendationFeedItemQualityPredicate(), recommendationFeedReaderQualityThreshold, recommendationFeedFallbackWordCount, recommendationFeedFallbackSummaryLength).
-		Where(recommendationFeedItemCategorySQL()+" = ?", category)
-	if len(sourceIDs) > 0 {
-		db = db.Where("feed_items.feed_source_id IN ?", sourceIDs)
+		Where(recommendationFeedItemQualityPredicate(), recommendationFeedReaderQualityThreshold, recommendationFeedFallbackWordCount, recommendationFeedFallbackSummaryLength)
+	if category == "video" || category == "podcast" {
+		db = db.Where(recommendationFeedItemCategorySQL()+" = ?", category)
+	} else {
+		// 分开来源分类与附件类型条件，避免 CASE 把候选行数低估到 1 而放弃有序索引。
+		db = db.Where(`LOWER(COALESCE(feed_items.enclosure_type, '')) NOT LIKE 'video/%'
+			AND LOWER(COALESCE(feed_items.enclosure_type, '')) NOT LIKE 'audio/%'`).
+			Where(`CASE WHEN LOWER(COALESCE(feed_sources.category, '')) IN ('blog', 'news', 'social', 'video', 'forum', 'podcast')
+				THEN LOWER(feed_sources.category) ELSE 'blog' END = ?`, category)
 	}
 	db = applyRecommendationLanguageFilter(db, "feed_items.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "feed_items.title", "feed_items.summary", keywords)
 	db = applyRecommendationFeedItemSearchFilter(db, search)
 	db = db.Order("feed_items.published_at DESC, feed_items.id DESC")
 	db = db.Limit(limit)
+	if len(sourceIDs) > 0 {
+		// 每个来源最多取 limit 条，合并后再取全局前 limit 条，保持候选集合不变。
+		// 先选 ID，再读取这 limit 条的摘要与正文标记，避免为所有候选解压大字段。
+		queries := make([]string, 0, len(sourceIDs))
+		args := make([]any, 0, len(sourceIDs))
+		for _, sourceID := range sourceIDs {
+			queries = append(queries, "(?)")
+			args = append(args, db.Session(&gorm.Session{}).Select("feed_items.id", "feed_items.published_at").Where("feed_items.feed_source_id = ?", sourceID))
+		}
+		// 使用具体来源 ID，让规划器利用各来源的数据分布选择 ORDER BY/LIMIT 索引。
+		candidates := r.db.Raw(strings.Join(queries, " UNION ALL "), args...)
+		selected := r.db.Table("(?) AS candidates", candidates).
+			Select("candidates.id, candidates.published_at").
+			Order("candidates.published_at DESC, candidates.id DESC").Limit(limit)
+		db = r.db.Table("feed_items").Select(columns).
+			Joins("JOIN (?) AS selected ON selected.id = feed_items.id", selected).
+			Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+			Order("feed_items.published_at DESC, feed_items.id DESC")
+	}
 	err := db.Scan(&items).Error
 	return items, err
 }
@@ -1370,18 +1394,17 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 	}
 	var items []recentItemRow
 	if err := r.db.Raw(`
-		SELECT id, feed_source_id, title, link, published_at, enclosure_type
-		FROM (
-			SELECT id, feed_source_id, title, link, published_at, enclosure_type,
-				ROW_NUMBER() OVER (
-					PARTITION BY feed_source_id
-					ORDER BY published_at DESC, created_at DESC
-				) AS row_number
+		SELECT recent.*
+		FROM feed_sources AS source
+		CROSS JOIN LATERAL (
+			SELECT id, feed_source_id, title, link, published_at, enclosure_type
 			FROM feed_items
-			WHERE feed_source_id IN ? AND deleted_at IS NULL
-		) ranked_items
-		WHERE row_number <= 3
-		ORDER BY feed_source_id, published_at DESC
+			WHERE feed_source_id = source.id AND deleted_at IS NULL
+			ORDER BY published_at DESC, created_at DESC
+			LIMIT 3
+		) recent
+		WHERE source.id IN ?
+		ORDER BY recent.feed_source_id, recent.published_at DESC
 	`, sourceIDs).Scan(&items).Error; err != nil {
 		return err
 	}
