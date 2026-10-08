@@ -1117,6 +1117,8 @@ func TestNormalizeAlbumImportTrackTitleRemovesKnownArtistPrefixOrSuffix(t *testi
 		{name: "unicode dash", input: "Artist – Song - Remix", want: "Song - Remix"},
 		{name: "unknown artist", input: "Unknown - Song", want: "Unknown - Song"},
 		{name: "hyphenated title", input: "Run - DMC", want: "Run - DMC"},
+		{name: "hyphenated collaborator", input: "Artist,Ab-Soul - Welcome to C4", want: "Welcome to C4"},
+		{name: "hyphenated subtitle", input: "Artist - The Real Hip Hop (Ab-Soul Freestyle)", want: "The Real Hip Hop (Ab-Soul Freestyle)"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

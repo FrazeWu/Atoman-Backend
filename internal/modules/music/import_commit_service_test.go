@@ -49,6 +49,14 @@ func TestPromoteAlbumImportAssetRejectsMissingStorageForPlayback(t *testing.T) {
 	}
 }
 
+func TestPromoteAlbumImportAssetRejectsBrowserPreview(t *testing.T) {
+	for _, url := range []string{"blob:https://site.test/preview", "data:image/png;base64,preview"} {
+		if _, _, _, err := (&Service{}).promoteAlbumImportAsset(url, "cover.webp", uuid.New()); err == nil {
+			t.Fatalf("不得保存临时地址 %s", url)
+		}
+	}
+}
+
 func TestCommitAlbumImportSessionRetainsPlaybackWhenCopyFails(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	var sources, destinations, deleted []string
