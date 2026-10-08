@@ -55,14 +55,14 @@ func (c *redisRecommendationCache) Set(ctx context.Context, key string, value st
 func recommendationCacheKey(kind string, mode recommendation.Mode, category, theme, language, search string, page, pageSize int) string {
 	encode := func(value string) string { return url.QueryEscape(strings.TrimSpace(value)) }
 	return fmt.Sprintf(
-		"atoman:feed:recommendation:v1:%s:%s:%s:%s:%s:%s:%d:%d",
+		"atoman:feed:recommendation:v2:%s:%s:%s:%s:%s:%s:%d:%d",
 		encode(kind), encode(string(mode)), encode(category), encode(theme), encode(language), encode(search), page, pageSize,
 	)
 }
 
 func curatedSourceCacheKey(language string) string {
 	language = strings.ToLower(strings.TrimSpace(language))
-	return "atoman:feed:recommendation:sources:v1:" + url.QueryEscape(language)
+	return "atoman:feed:recommendation:sources:v2:" + url.QueryEscape(language)
 }
 
 func marshalRecommendationCacheEntry(entry recommendationCacheEntry) (string, error) {
@@ -97,76 +97,73 @@ func unmarshalCuratedSourceCacheEntry(payload string) (curatedSourceCacheEntry, 
 	return entry, nil
 }
 
-func (s *Service) readRecommendationCache(key string) (recommendationCacheEntry, bool) {
+type recommendationCachedValue[T any] struct {
+	Value        T         `json:"value"`
+	RefreshAfter time.Time `json:"refresh_after"`
+}
+
+// 新鲜度与保留时间分开：过期结果立即可读，刷新成功后才替换旧值。
+func readCachedRecommendation[T any](s *Service, key string) (recommendationCachedValue[T], bool) {
 	if s.recommendationCache == nil {
-		return recommendationCacheEntry{}, false
+		return recommendationCachedValue[T]{}, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
 	payload, err := s.recommendationCache.Get(ctx, key)
 	if err != nil {
-		return recommendationCacheEntry{}, false
+		return recommendationCachedValue[T]{}, false
 	}
-	entry, err := unmarshalRecommendationCacheEntry(payload)
-	if err != nil {
-		return recommendationCacheEntry{}, false
+	var entry recommendationCachedValue[T]
+	if err := json.Unmarshal([]byte(payload), &entry); err != nil {
+		return recommendationCachedValue[T]{}, false
 	}
 	return entry, true
 }
 
-func (s *Service) writeRecommendationCache(key string, entry recommendationCacheEntry) {
+func writeCachedRecommendation[T any](s *Service, key string, value T, freshTTL time.Duration) {
 	if s.recommendationCache == nil {
 		return
 	}
-	payload, err := marshalRecommendationCacheEntry(entry)
+	payload, err := json.Marshal(recommendationCachedValue[T]{Value: value, RefreshAfter: time.Now().Add(freshTTL)})
 	if err != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
-	_ = s.recommendationCache.Set(ctx, key, payload, recommendationCacheTTL)
+	_ = s.recommendationCache.Set(ctx, key, string(payload), time.Hour)
 }
 
-func (s *Service) readCuratedSourceCache(language string) ([]ExploreSourceRow, bool) {
-	if s.recommendationCache == nil {
-		return nil, false
+func loadCachedRecommendation[T any](s *Service, key string, freshTTL time.Duration, load func() (T, error)) (T, error) {
+	refresh := func() (any, error) {
+		// 冷请求等待期间，前一个请求可能已经填好缓存。
+		if cached, ok := readCachedRecommendation[T](s, key); ok && time.Now().Before(cached.RefreshAfter) {
+			return cached.Value, nil
+		}
+		value, err := load()
+		if err == nil {
+			writeCachedRecommendation(s, key, value, freshTTL)
+		}
+		return value, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
-	defer cancel()
-	payload, err := s.recommendationCache.Get(ctx, curatedSourceCacheKey(language))
+	if cached, ok := readCachedRecommendation[T](s, key); ok {
+		if !time.Now().Before(cached.RefreshAfter) {
+			// DoChan 同步登记 key，刷新在后台执行；同 key 只会有一次刷新。
+			s.recommendationLoads.DoChan(key, refresh)
+		}
+		return cached.Value, nil
+	}
+	value, err, _ := s.recommendationLoads.Do(key, refresh)
 	if err != nil {
-		return nil, false
+		var zero T
+		return zero, err
 	}
-	entry, err := unmarshalCuratedSourceCacheEntry(payload)
-	if err != nil {
-		return nil, false
-	}
-	return entry.Sources, true
-}
-
-func (s *Service) writeCuratedSourceCache(language string, sources []ExploreSourceRow) {
-	if s.recommendationCache == nil {
-		return
-	}
-	payload, err := marshalCuratedSourceCacheEntry(curatedSourceCacheEntry{Sources: sources})
-	if err != nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
-	defer cancel()
-	_ = s.recommendationCache.Set(ctx, curatedSourceCacheKey(language), payload, curatedSourceCacheTTL)
+	return value.(T), nil
 }
 
 func (s *Service) listCuratedRecommendationSources(language string) ([]ExploreSourceRow, error) {
-	if cached, ok := s.readCuratedSourceCache(language); ok {
-		return cached, nil
-	}
-	sources, err := s.repo.ListCuratedExploreSources(recommendationFeaturedSourceLimit, language)
-	if err != nil {
-		return nil, err
-	}
-	s.writeCuratedSourceCache(language, sources)
-	return sources, nil
+	return loadCachedRecommendation(s, curatedSourceCacheKey(language), curatedSourceCacheTTL, func() ([]ExploreSourceRow, error) {
+		return s.repo.ListCuratedExploreSources(recommendationFeaturedSourceLimit, language)
+	})
 }
 
 func curatedSourceIDList(sources []ExploreSourceRow) []uuid.UUID {

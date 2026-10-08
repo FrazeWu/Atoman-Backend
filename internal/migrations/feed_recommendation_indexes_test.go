@@ -19,6 +19,9 @@ func TestRunFeedRecommendationIndexesCreatesIndex(t *testing.T) {
 	if !db.Migrator().HasIndex("feed_items", "idx_feed_items_recommendation_source_language_published") {
 		t.Fatal("expected feed recommendation source language published index")
 	}
+	if !db.Migrator().HasIndex("feed_items", "idx_feed_items_source_recent") {
+		t.Fatal("expected source recent items index")
+	}
 	if !db.Migrator().HasIndex("feed_sources", "idx_feed_sources_curated_title") {
 		t.Fatal("expected curated feed source title index")
 	}

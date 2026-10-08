@@ -4,6 +4,11 @@ import "gorm.io/gorm"
 
 func RunFeedRecommendationIndexes(db *gorm.DB) error {
 	if db.Migrator().HasTable("feed_items") {
+		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_feed_items_source_recent
+			ON feed_items (feed_source_id, published_at DESC, created_at DESC)
+			WHERE deleted_at IS NULL`).Error; err != nil {
+			return err
+		}
 		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_feed_items_recommendation_published
 			ON feed_items (published_at DESC, id DESC) WHERE deleted_at IS NULL`).Error; err != nil {
 			return err
