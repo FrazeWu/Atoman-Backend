@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"atoman/internal/middleware"
 	"atoman/internal/storage"
 
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -83,12 +84,17 @@ func configuredAllowedOrigins() []string {
 func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		if originAllowed(origin, allowedOrigins) {
+		c.Writer.Header().Add("Vary", "Origin")
+		if middleware.IsHTTPOrigin(origin) && originAllowed(origin, allowedOrigins) {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		} else if middleware.IsHTTPOrigin(origin) {
+			// Third-party clients use Bearer tokens with credentials omitted.
+			c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		}
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Request-ID")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Request-ID, Range")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, HEAD, PUT, DELETE, PATCH")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, ETag, Content-Disposition, Retry-After, Location, Accept-Ranges, Content-Range")
 		c.Writer.Header().Set("Access-Control-Max-Age", "600")
 
 		if c.Request.Method == "OPTIONS" {

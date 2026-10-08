@@ -44,7 +44,7 @@ import (
 
 // @title Atoman API
 // @version 1.0
-// @description Atoman 后端 API 文档。
+// @description Atoman 后端 API 文档。公开及 API Token 接口支持任意 HTTP/HTTPS 网站；第三方使用 Authorization: Bearer <API Token> 并设置 credentials: omit，权限沿用账号权限。Cookie 登录仅支持可信来源，写请求仍需 CSRF。浏览器 WebSocket 使用子协议 atoman 和 atoman.api.<API Token>，不接受 URL query token。R2 上传使用接口下发的预签名地址。
 // @BasePath /api/v1
 // @schemes http https
 // @securityDefinitions.apikey BearerAuth

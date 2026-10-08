@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"atoman/internal/config"
+	"atoman/internal/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -24,12 +25,17 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin:     checkWebSocketOrigin,
+	Subprotocols:    []string{"atoman"},
 }
 
 func checkWebSocketOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
+	}
+	if token, present := middleware.APITokenFromRequest(r); present {
+		// Both WebSocket handlers authenticate the token before upgrading.
+		return token != "" && middleware.IsHTTPOrigin(origin)
 	}
 
 	for _, allowed := range allowedWebSocketOrigins() {

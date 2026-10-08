@@ -16,6 +16,7 @@ import (
 	"atoman/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"gorm.io/gorm"
 )
 
@@ -49,23 +50,49 @@ type requestCredential struct {
 }
 
 func credentialFromRequest(c *gin.Context) requestCredential {
-	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
-	if authorization != "" {
-		parts := strings.Fields(authorization)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			return requestCredential{kind: authsession.KindAPI, present: true}
-		}
-		return requestCredential{
-			token:   strings.TrimSpace(parts[1]),
-			kind:    authsession.KindAPI,
-			present: true,
-		}
+	if token, present := APITokenFromRequest(c.Request); present {
+		return requestCredential{token: token, kind: authsession.KindAPI, present: true}
 	}
 	cookie, err := c.Cookie(AuthSessionCookieName)
 	if err != nil || strings.TrimSpace(cookie) == "" {
 		return requestCredential{}
 	}
 	return requestCredential{token: cookie, kind: authsession.KindWeb, present: true}
+}
+
+// APITokenFromRequest accepts browser WebSocket credentials only during an upgrade.
+// An explicitly supplied invalid credential must never fall back to a web cookie.
+func APITokenFromRequest(r *http.Request) (string, bool) {
+	authorization := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authorization != "" {
+		parts := strings.Fields(authorization)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			return "", true
+		}
+		return parts[1], true
+	}
+	if !websocket.IsWebSocketUpgrade(r) {
+		return "", false
+	}
+	var token string
+	var present bool
+	for _, protocol := range websocket.Subprotocols(r) {
+		if strings.HasPrefix(protocol, "atoman.api.") {
+			if present {
+				return "", true
+			}
+			token, present = strings.TrimPrefix(protocol, "atoman.api."), true
+		}
+	}
+	return token, present
+}
+
+// IsHTTPOrigin excludes opaque origins and URLs that are not serialized origins.
+func IsHTTPOrigin(origin string) bool {
+	parsed, err := url.Parse(origin)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+		parsed.Hostname() != "" && parsed.User == nil && parsed.Path == "" &&
+		parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
 }
 
 func resolveRequestSession(c *gin.Context) (authsession.Resolved, requestCredential, bool) {
