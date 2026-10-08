@@ -48,6 +48,27 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			out = session
 			return nil
 		}
+		if input.DraftOnly {
+			if session.Status == AlbumImportStatusCanceled {
+				return apperr.Unprocessable("music.import_invalid_status", "已取消的导入不能保存草稿")
+			}
+			payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+			if err != nil {
+				return err
+			}
+			input.DraftOnly = false
+			payload["draft_request"] = input
+			encoded, err := json.Marshal(payload)
+			if err != nil {
+				return err
+			}
+			session.PayloadJSON = string(encoded)
+			if err := tx.Save(&session).Error; err != nil {
+				return err
+			}
+			out = session
+			return nil
+		}
 		if session.Status != AlbumImportStatusReady && !isAlbumImportValidationRetry(session) {
 			if !isAlbumImportActiveStatus(session.Status) {
 				return apperr.Unprocessable("music.import_invalid_status", "Import session cannot be submitted")
@@ -63,6 +84,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
 			}
 			payload["commit_request"] = input
+			delete(payload, "draft_request")
 			encoded, err := json.Marshal(payload)
 			if err != nil {
 				return err
@@ -128,10 +150,14 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			_ = json.Unmarshal([]byte(session.PayloadJSON), &sessionPayload)
 		}
 		delete(sessionPayload, "commit_validation_failed")
+		delete(sessionPayload, "draft_request")
 		if len(payload.Album.Tracks) == 0 {
 			payload.Album.Tracks = albumImportTracksFromDerived(sessionPayload)
 		}
 		deletedImportTrackKeys := albumImportDeletedTrackKeys(sessionPayload)
+		for _, key := range input.DeletedImportTrackKeys {
+			deletedImportTrackKeys[key] = true
+		}
 
 		coverURL := strings.TrimSpace(input.Album.CoverURL)
 		if coverURL == "" && sessionPayload != nil {
@@ -1651,6 +1677,7 @@ func importedTrackDeleted(track map[string]any, deleted map[string]bool) bool {
 		"song:" + strings.TrimSpace(stringValue(track["song_id"])),
 		"file:" + strings.TrimSpace(stringValue(track["file_id"])),
 		"audio:" + strings.TrimSpace(stringValue(track["audio_key"])),
+		"origin:" + strings.TrimSpace(stringValue(track["origin"])),
 		"position:" + strconv.Itoa(disc) + ":" + strconv.Itoa(trackNumber),
 		"position:" + strconv.Itoa(originalDisc) + ":" + strconv.Itoa(originalTrack),
 	}

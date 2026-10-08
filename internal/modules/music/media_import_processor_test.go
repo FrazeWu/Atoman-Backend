@@ -428,8 +428,9 @@ func TestMediaImportProcessorArchiveRetrySkipsCompletedDerivedAudio(t *testing.T
 	store := &fakeMediaStore{objects: map[string][]byte{archive.SourceKey: []byte("zip")}, puts: map[string][]byte{}}
 	processor := NewMediaImportProcessor(db, store, runner, "")
 	job := model.AlbumImportJob{ImportID: session.ID}
-	if err := processor.Process(context.Background(), job, nil); err != nil {
-		t.Fatal(err)
+	var attention *importNeedsAttentionError
+	if err := processor.Process(context.Background(), job, nil); !errors.As(err, &attention) {
+		t.Fatalf("expected actionable partial failure before retry, got %v", err)
 	}
 	if err := processor.Process(context.Background(), job, nil); err != nil {
 		t.Fatal(err)

@@ -82,7 +82,7 @@ func createLyricsPostgresFixture(t *testing.T, db *gorm.DB) (authctx.CurrentUser
 	if err := db.Create(&userModel).Error; err != nil {
 		t.Fatal(err)
 	}
-	song := model.Song{Title: "PostgreSQL Lyrics " + suffix, AudioURL: "/postgres.mp3", Status: "open"}
+	song := model.Song{Title: "PostgreSQL Lyrics " + suffix, AudioURL: "/postgres.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatal(err)
 	}

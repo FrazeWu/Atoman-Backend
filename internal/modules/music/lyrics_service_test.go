@@ -433,8 +433,8 @@ func TestPersistAlbumImportTrackLyricsCreatesInitialHistory(t *testing.T) {
 	if err := db.Model(&model.MusicSongLyricVersion{}).Where("song_id = ?", song.ID).Count(&versions).Error; err != nil {
 		t.Fatal(err)
 	}
-	if versions != 1 {
-		t.Fatalf("expected one initial version, got %d", versions)
+	if versions != 2 {
+		t.Fatalf("expected imported version and manual revision, got %d", versions)
 	}
 }
 

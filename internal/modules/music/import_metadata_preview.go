@@ -23,6 +23,7 @@ type AlbumImportMetadataPreviewInput struct {
 	Artist      string                            `json:"artist"`
 	TrackTitles []string                          `json:"trackTitles"`
 	Tracks      []AlbumImportMetadataPreviewTrack `json:"tracks,omitempty"`
+	Force       bool                              `json:"force,omitempty"`
 }
 
 type AlbumImportMetadataPreviewTrack struct {
@@ -80,9 +81,50 @@ func (s *Service) MatchAlbumImportMetadata(ctx context.Context, user authctx.Cur
 	if err != nil {
 		return model.AlbumImportSession{}, err
 	}
+	if session.Status == AlbumImportStatusCanceled || session.Status == AlbumImportStatusCommitted {
+		return model.AlbumImportSession{}, apperr.Unprocessable("music.import_invalid_status", "已完成或已取消的导入不能重新匹配")
+	}
+	if len(input.Tracks) == 0 && len(buildAlbumImportDTO(session).DerivedTracks) > 0 {
+		for _, track := range buildAlbumImportDTO(session).DerivedTracks {
+			input.Tracks = append(input.Tracks, AlbumImportMetadataPreviewTrack{Title: track.Title, FileID: track.FileID, AudioKey: track.AudioKey, AudioURL: track.AudioURL, Origin: track.Origin, DiscNumber: track.DiscNumber, TrackNumber: track.TrackNumber, OriginalTitle: track.OriginalTitle, OriginalDisc: track.OriginalDisc, OriginalTrack: track.OriginalTrack})
+		}
+	}
 	locked, _ := payload["metadata_match_locked"].(bool)
-	if locked {
+	if locked && !input.Force && (stringValue(payload["metadata_match_status"]) == model.MusicMatchMatched || stringValue(payload["metadata_match_status"]) == model.MusicMatchManual) {
 		return loadAlbumImportSession(s.db, sessionID, &user.ID)
+	}
+	// 匹配只接收文字和来源身份；音频就绪信息只能从服务端处理结果合并。
+	input.Tracks = append([]AlbumImportMetadataPreviewTrack(nil), input.Tracks...)
+	for index := range input.Tracks {
+		input.Tracks[index].AudioKey = ""
+		input.Tracks[index].AudioURL = ""
+	}
+	var generation int64
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var latest model.AlbumImportSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&latest, "id = ?", sessionID).Error; err != nil {
+			return err
+		}
+		values, err := readAlbumImportPayloadMap(latest.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		generation = int64Value(values["metadata_match_generation"]) + 1
+		values["metadata_match_generation"] = generation
+		if artist := strings.TrimSpace(input.Artist); artist != "" {
+			values["artist_name"] = artist
+		}
+		values["metadata_match_status"] = "matching"
+		values["metadata_match_locked"] = false
+		values["metadata_matched"] = false
+		values["metadata_error"] = ""
+		encoded, err := json.Marshal(values)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&latest).Update("payload_json", string(encoded)).Error
+	}); err != nil {
+		return model.AlbumImportSession{}, err
 	}
 	preview, err := s.PreviewAlbumImportMetadata(ctx, input)
 	if err != nil {
@@ -99,16 +141,20 @@ func (s *Service) MatchAlbumImportMetadata(ctx context.Context, user authctx.Cur
 	if result.MatchStatus == "" {
 		result.MatchStatus = model.MusicMatchUnmatched
 	}
-	if err := s.persistAlbumImportMetadataMatch(ctx, &session, result); err != nil {
+	// 请求超时也要落下结束状态，不能把会话永久留在 matching。
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := s.persistAlbumImportMetadataMatchGeneration(persistCtx, &session, result, generation); err != nil {
 		return model.AlbumImportSession{}, err
 	}
 	return loadAlbumImportSession(s.db, sessionID, &user.ID)
 }
 
 func (s *Service) persistAlbumImportMetadataMatch(ctx context.Context, session *model.AlbumImportSession, result AlbumImportMetadataResult) error {
-	if err := (&MediaImportProcessor{db: s.db}).persistDerivedMetadataResult(ctx, session, nil, result); err != nil {
-		return err
-	}
+	return s.persistAlbumImportMetadataMatchGeneration(ctx, session, result, 0)
+}
+
+func (s *Service) persistAlbumImportMetadataMatchGeneration(ctx context.Context, session *model.AlbumImportSession, result AlbumImportMetadataResult, generation int64) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var latest model.AlbumImportSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&latest, "id = ?", session.ID).Error; err != nil {
@@ -118,8 +164,16 @@ func (s *Service) persistAlbumImportMetadataMatch(ctx context.Context, session *
 		if err != nil {
 			return err
 		}
+		if latest.Status == AlbumImportStatusCanceled || latest.Status == AlbumImportStatusCommitted || (generation > 0 && int64Value(payload["metadata_match_generation"]) != generation) {
+			return nil
+		}
+		tracks := metadataResultTrackMaps(result)
+		mergeImportTrackAudio(tracks, payload["derived_tracks"])
+		payload["metadata_match_locked"] = false
+		payload["metadata_match_status"] = ""
+		mergeDerivedMetadataPayload(payload, tracks, result)
 		payload["metadata_match_started"] = true
-		payload["metadata_match_locked"] = true
+		payload["metadata_match_locked"] = result.MatchStatus == model.MusicMatchMatched || result.MatchStatus == model.MusicMatchManual || result.MatchStatus == model.MusicMatchAmbiguous
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return err

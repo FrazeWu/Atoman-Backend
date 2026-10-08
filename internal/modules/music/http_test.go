@@ -1810,7 +1810,7 @@ func TestRegisterRoutesGetArtistReturnsGroupedMembersForGroupArtist(t *testing.T
 	}
 }
 
-func TestRegisterRoutesGetArtistIncludesAlbumSongs(t *testing.T) {
+func TestRegisterRoutesGetArtistIncludesAlbumSongCounts(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Track Count Artist", EntryStatus: "open"}
 	if err := db.Create(&artist).Error; err != nil {
@@ -1821,8 +1821,8 @@ func TestRegisterRoutesGetArtistIncludesAlbumSongs(t *testing.T) {
 		t.Fatalf("create album: %v", err)
 	}
 	songs := []model.Song{
-		{Title: "Track One", AudioURL: "/audio/one.mp3", Status: "open", AlbumID: &album.ID},
-		{Title: "Track Two", AudioURL: "/audio/two.mp3", Status: "open", AlbumID: &album.ID},
+		{Title: "Track One", AudioURL: "/audio/one.mp3", AudioStatus: "ready", Status: "open", AlbumID: &album.ID},
+		{Title: "Track Two", AudioURL: "/audio/two.mp3", AudioStatus: "ready", Status: "open", AlbumID: &album.ID},
 	}
 	if err := db.Create(&songs).Error; err != nil {
 		t.Fatalf("create songs: %v", err)
@@ -1837,8 +1837,9 @@ func TestRegisterRoutesGetArtistIncludesAlbumSongs(t *testing.T) {
 	var payload struct {
 		Data struct {
 			Albums []struct {
-				ID    string `json:"id"`
-				Songs []struct {
+				ID        string `json:"id"`
+				SongCount int    `json:"song_count"`
+				Songs     []struct {
 					ID string `json:"id"`
 				} `json:"songs"`
 			} `json:"albums"`
@@ -1850,8 +1851,8 @@ func TestRegisterRoutesGetArtistIncludesAlbumSongs(t *testing.T) {
 	if len(payload.Data.Albums) != 1 || payload.Data.Albums[0].ID != album.ID.String() {
 		t.Fatalf("unexpected artist albums: %#v", payload.Data.Albums)
 	}
-	if len(payload.Data.Albums[0].Songs) != len(songs) {
-		t.Fatalf("album songs = %d, want %d", len(payload.Data.Albums[0].Songs), len(songs))
+	if payload.Data.Albums[0].SongCount != len(songs) || len(payload.Data.Albums[0].Songs) != 0 {
+		t.Fatalf("expected album summary with %d songs, got %#v", len(songs), payload.Data.Albums[0])
 	}
 }
 
@@ -2037,7 +2038,7 @@ func TestRegisterRoutesMusicStatsUseRealCounts(t *testing.T) {
 
 func TestRegisterRoutesPlaybackProgressRoundTrip(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Resume Song", AudioURL: "/resume.mp3", Status: "open"}
+	song := model.Song{Title: "Resume Song", AudioURL: "/resume.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
@@ -2065,8 +2066,8 @@ func TestRegisterRoutesPlaybackProgressRoundTrip(t *testing.T) {
 
 func TestRegisterRoutesPlaybackSessionRoundTrip(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	first := model.Song{Title: "First Queue Song", AudioURL: "/first.mp3", Status: "open"}
-	second := model.Song{Title: "Second Queue Song", AudioURL: "/second.mp3", Status: "open"}
+	first := model.Song{Title: "First Queue Song", AudioURL: "/first.mp3", AudioStatus: "ready", Status: "open"}
+	second := model.Song{Title: "Second Queue Song", AudioURL: "/second.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&first).Error; err != nil {
 		t.Fatalf("create first song: %v", err)
 	}
@@ -2096,7 +2097,7 @@ func TestRegisterRoutesPlaybackSessionRoundTrip(t *testing.T) {
 
 func TestRegisterRoutesRecordSongPlayIncrementsCount(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Play Me", AudioURL: "/audio/play-me.mp3", Status: "open"}
+	song := model.Song{Title: "Play Me", AudioURL: "/audio/play-me.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
@@ -2193,7 +2194,7 @@ func TestRegisterRoutesReordersPlaylistSongs(t *testing.T) {
 
 func TestRegisterRoutesRecordSongPlayWithoutUserDoesNotCreateHistory(t *testing.T) {
 	service, db, _ := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Anonymous Play", AudioURL: "/audio/anonymous.mp3", Status: "open"}
+	song := model.Song{Title: "Anonymous Play", AudioURL: "/audio/anonymous.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
@@ -2218,7 +2219,7 @@ func TestRegisterRoutesRecordSongPlayWithoutUserDoesNotCreateHistory(t *testing.
 
 func TestRegisterRoutesRateLimitsAnonymousPlayReports(t *testing.T) {
 	service, db, _ := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Rate Limited Play", AudioURL: "/audio/rate-limited.mp3", Status: "open"}
+	song := model.Song{Title: "Rate Limited Play", AudioURL: "/audio/rate-limited.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
@@ -2261,6 +2262,7 @@ func TestRegisterRoutesPlayReportsRespectSongVisibility(t *testing.T) {
 	song := model.Song{
 		Title:           "Private Draft Play",
 		AudioURL:        "/audio/private-draft.mp3",
+		AudioStatus:     "ready",
 		Status:          "draft",
 		LifecycleStatus: model.MusicLifecycleDraft,
 		UploadedBy:      &ownerID,
@@ -2288,7 +2290,7 @@ func TestRegisterRoutesPlayReportsRespectSongVisibility(t *testing.T) {
 
 func TestRegisterRoutesListsCurrentUserListeningHistory(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Recent Song", AudioURL: "/audio/recent.mp3", Status: "open"}
+	song := model.Song{Title: "Recent Song", AudioURL: "/audio/recent.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
@@ -4180,7 +4182,7 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 			t.Fatalf("link album artist: %v", err)
 		}
 	}
-	playedSong := model.Song{Title: "Played Song", AudioURL: "/audio/played.mp3", AlbumID: &playedAlbum.ID, Status: "open"}
+	playedSong := model.Song{Title: "Played Song", AudioURL: "/audio/played.mp3", AudioStatus: "ready", AlbumID: &playedAlbum.ID, Status: "open"}
 	if err := db.Create(&playedSong).Error; err != nil {
 		t.Fatalf("create played song: %v", err)
 	}
@@ -4242,7 +4244,7 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 
 func TestSavePlaybackProgressCompletesNearSongEnd(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Almost Finished", AudioURL: "/almost-finished.mp3", Status: "open"}
+	song := model.Song{Title: "Almost Finished", AudioURL: "/almost-finished.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
@@ -4264,7 +4266,7 @@ func TestSavePlaybackProgressCompletesNearSongEnd(t *testing.T) {
 
 func TestSavePlaybackProgressIgnoresStaleDeviceReport(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Stale Progress Song", AudioURL: "/stale.mp3", Status: "open"}
+	song := model.Song{Title: "Stale Progress Song", AudioURL: "/stale.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
@@ -4283,8 +4285,8 @@ func TestSavePlaybackProgressIgnoresStaleDeviceReport(t *testing.T) {
 
 func TestSavePlaybackSessionIgnoresStaleDeviceReport(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	first := model.Song{Title: "Session First", AudioURL: "/session-first.mp3", Status: "open"}
-	second := model.Song{Title: "Session Second", AudioURL: "/session-second.mp3", Status: "open"}
+	first := model.Song{Title: "Session First", AudioURL: "/session-first.mp3", AudioStatus: "ready", Status: "open"}
+	second := model.Song{Title: "Session Second", AudioURL: "/session-second.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&first).Error; err != nil {
 		t.Fatalf("create first song: %v", err)
 	}
@@ -4306,8 +4308,8 @@ func TestSavePlaybackSessionIgnoresStaleDeviceReport(t *testing.T) {
 
 func TestGetPlaybackSessionDropsUnavailableSongs(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	first := model.Song{Title: "Available Session Song", AudioURL: "/available-session.mp3", Status: "open"}
-	retired := model.Song{Title: "Retired Session Song", AudioURL: "/retired-session.mp3", Status: "open"}
+	first := model.Song{Title: "Available Session Song", AudioURL: "/available-session.mp3", AudioStatus: "ready", Status: "open"}
+	retired := model.Song{Title: "Retired Session Song", AudioURL: "/retired-session.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&first).Error; err != nil {
 		t.Fatalf("create first song: %v", err)
 	}
@@ -4334,7 +4336,7 @@ func TestGetPlaybackSessionDropsUnavailableSongs(t *testing.T) {
 
 func TestGetPlaybackProgressIgnoresUnavailableSong(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Retired Progress Song", AudioURL: "/retired-progress.mp3", Status: "open"}
+	song := model.Song{Title: "Retired Progress Song", AudioURL: "/retired-progress.mp3", AudioStatus: "ready", Status: "open"}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
@@ -4360,6 +4362,7 @@ func TestOwnerCanPersistAndRestoreDraftPlaybackState(t *testing.T) {
 	draft := model.Song{
 		Title:           "Owner Draft Playback",
 		AudioURL:        "/owner-draft.mp3",
+		AudioStatus:     "ready",
 		Status:          "draft",
 		LifecycleStatus: model.MusicLifecycleDraft,
 		UploadedBy:      &ownerID,

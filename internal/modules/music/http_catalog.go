@@ -335,6 +335,14 @@ func (h *Handler) getArtist(c *gin.Context) {
 		return
 	}
 	artist = artistRows[0]
+	if err := hydrateAlbumStats(h.service.db, artist.Albums); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := hydrateAlbumMatchStates(h.service.db, artist.Albums); err != nil {
+		httpx.Error(c, err)
+		return
+	}
 
 	artist.ImageURL = resolveMusicMediaURL(artist.ImageURL)
 	for i := range artist.Albums {
@@ -611,10 +619,12 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	if err := hydrateAlbumMatchStates(h.service.db, []model.Album{album}); err != nil {
+	matchedAlbums := []model.Album{album}
+	if err := hydrateAlbumMatchStates(h.service.db, matchedAlbums); err != nil {
 		httpx.Error(c, err)
 		return
 	}
+	album = matchedAlbums[0]
 	if err := hydrateSongMatchStates(h.service.db, album.Songs); err != nil {
 		httpx.Error(c, err)
 		return

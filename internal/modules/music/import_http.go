@@ -689,7 +689,7 @@ func (h *Handler) repairAlbumImportSession(c *gin.Context) {
 
 // commitAlbumImportSession godoc
 // @Summary 提交专辑导入
-// @Description 创建或更新同一导入会话对应的专辑，并保存创作者身份与曲目。
+// @Description draft_only=true 仅保存填写草稿，不创建或登记后台提交；默认正式提交，音频处理中时登记后台创建请求。
 // @Tags music-imports
 // @Accept json
 // @Produce json

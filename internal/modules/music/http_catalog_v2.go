@@ -487,16 +487,20 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		return
 	}
 	result.Song = ratedSongs[0]
-	if err := hydrateSongMatchStates(h.service.db, []model.Song{result.Song}); err != nil {
+	matchedSongs := []model.Song{result.Song}
+	if err := hydrateSongMatchStates(h.service.db, matchedSongs); err != nil {
 		httpx.Error(c, err)
 		return
 	}
+	result.Song = matchedSongs[0]
 	if result.Song.Album != nil {
 		album := *result.Song.Album
-		if err := hydrateAlbumMatchStates(h.service.db, []model.Album{album}); err != nil {
+		matchedAlbums := []model.Album{album}
+		if err := hydrateAlbumMatchStates(h.service.db, matchedAlbums); err != nil {
 			httpx.Error(c, err)
 			return
 		}
+		album = matchedAlbums[0]
 		result.Song.Album.MatchStatus = album.MatchStatus
 		result.Song.Album.MatchProvider = album.MatchProvider
 		result.Song.Album.MatchExternalID = album.MatchExternalID

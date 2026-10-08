@@ -120,7 +120,7 @@ func TestBuildAlbumImportDTOUsesDeferredCommitArtistID(t *testing.T) {
 	}
 }
 
-func TestListAlbumImportSessionsPageForUserOnlyReturnsSubmittedImports(t *testing.T) {
+func TestListAlbumImportSessionsPageForUserIncludesUnsubmittedImports(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 
 	submitted, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
@@ -149,10 +149,17 @@ func TestListAlbumImportSessionsPageForUserOnlyReturnsSubmittedImports(t *testin
 	if err != nil {
 		t.Fatalf("list imports: %v", err)
 	}
-	if total != 1 || len(sessions) != 1 || sessions[0].ID != submitted.ID {
-		t.Fatalf("expected one submitted import, total=%d sessions=%#v", total, sessions)
+	if total != 2 || len(sessions) != 2 {
+		t.Fatalf("expected submitted and unfinished imports, total=%d sessions=%#v", total, sessions)
 	}
-	listDTO := buildAlbumImportListDTO(sessions[0])
+	var listDTO AlbumImportListDTO
+	for _, session := range sessions {
+		if session.ID == submitted.ID {
+			listDTO = buildAlbumImportListDTO(session)
+		} else if buildAlbumImportListDTO(session).HasCommitRequest {
+			t.Fatal("unfinished import must not be marked submitted")
+		}
+	}
 	if listDTO.TrackCount != 1 || !listDTO.HasCommitRequest {
 		t.Fatalf("unexpected list DTO: %#v", listDTO)
 	}
@@ -1627,7 +1634,8 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 		Album: AlbumImportAlbumPayload{Title: "Discovery (Remastered)", Description: "Updated metadata", CoverURL: "https://cdn.atoman.test/music/covers/uploads/users/test/repair.jpg", ReleaseDate: "2001-03-12", Tracks: []AlbumImportTrackPayload{
 			{SongID: beforeSongs[1].ID.String(), Title: "Aerodynamic (Remastered)", TrackNumber: 1},
 		}},
-		AlbumSource: "album source",
+		DeletedImportTrackKeys: []string{"song:" + beforeSongs[0].ID.String()},
+		AlbumSource:            "album source",
 	})
 	if err != nil {
 		t.Fatalf("submit repair: %v", err)
@@ -1644,7 +1652,7 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 		t.Fatalf("repair cover was not promoted: %s", album.CoverURL)
 	}
 	var songs []model.Song
-	if err := db.Where("album_id = ? AND status <> ?", album.ID, "closed").Order("track_number ASC").Find(&songs).Error; err != nil {
+	if err := db.Where("album_id = ? AND lifecycle_status = ?", album.ID, model.MusicLifecycleActive).Order("track_number ASC").Find(&songs).Error; err != nil {
 		t.Fatalf("load songs: %v", err)
 	}
 	if len(songs) != 1 || songs[0].ID != beforeSongs[1].ID || songs[0].Title != "Aerodynamic (Remastered)" {

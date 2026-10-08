@@ -104,6 +104,9 @@ type CreateAlbumImportSessionInput struct {
 }
 
 type CommitAlbumImportSessionInput struct {
+	// DraftOnly 保存填写进度，不登记后台创建请求。
+	DraftOnly              bool                           `json:"draft_only,omitempty"`
+	DraftCustomization     map[string]bool                `json:"draft_customization,omitempty"`
 	ArtistID               string                         `json:"artist_id"`
 	Artist                 AlbumImportArtistPayload       `json:"artist"`
 	Artists                []CommitAlbumImportArtistInput `json:"artists"`
@@ -238,6 +241,7 @@ type AlbumImportDTO struct {
 	ArtistID                string                            `json:"artistId"`
 	ArtistSource            string                            `json:"artistSource"`
 	CommitRequest           *CommitAlbumImportSessionInput    `json:"commitRequest,omitempty"`
+	DraftRequest            *CommitAlbumImportSessionInput    `json:"draftRequest,omitempty"`
 	AlbumTitle              string                            `json:"albumTitle"`
 	AlbumSource             string                            `json:"albumSource"`
 	Status                  string                            `json:"status"`
@@ -304,6 +308,7 @@ type AlbumImportListDTO struct {
 	LastSyncedAt     string                 `json:"lastSyncedAt"`
 	ErrorMessage     string                 `json:"errorMessage"`
 	HasCommitRequest bool                   `json:"hasCommitRequest"`
+	HasDraftRequest  bool                   `json:"hasDraftRequest"`
 }
 
 type AlbumImportFileResponse struct {
