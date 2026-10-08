@@ -183,6 +183,7 @@ func findOrCreateBookWork(tx *gorm.DB, record CatalogBook, title, sourceURL stri
 
 	work := model.BookWork{
 		Title:           title,
+		OriginalTitle:   strings.TrimSpace(record.OriginalTitle),
 		Subtitle:        strings.TrimSpace(record.Subtitle),
 		Description:     strings.TrimSpace(record.Description),
 		Language:        strings.TrimSpace(record.Language),

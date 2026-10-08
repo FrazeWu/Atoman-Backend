@@ -10,6 +10,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/testdb"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +19,7 @@ func TestOpenLibraryDumpImportKeepsOneBestChineseEditionPerWork(t *testing.T) {
 	testdb.Migrate(t, db,
 		&model.BookWork{}, &model.BookEdition{}, &model.BookPerson{},
 		&model.BookContribution{}, &model.BookSource{},
+		&model.BookEdit{},
 	)
 
 	dir := t.TempDir()
@@ -45,11 +47,14 @@ func TestOpenLibraryDumpImportKeepsOneBestChineseEditionPerWork(t *testing.T) {
 
 	var work model.BookWork
 	require.NoError(t, db.First(&work).Error)
+	require.Equal(t, "中文作品新版", work.Title)
+	require.Equal(t, "中文作品", work.OriginalTitle)
 	require.Equal(t, "chi", work.Language)
 	require.Equal(t, "作品简介", work.Description)
 
 	var edition model.BookEdition
 	require.NoError(t, db.Where("work_id = ?", work.ID).First(&edition).Error)
+	require.Equal(t, "中文作品新版", edition.Title)
 	require.Equal(t, "9781234567890", edition.ISBN13)
 	require.Equal(t, "Paperback", edition.Binding)
 	require.Equal(t, "chi", edition.Language)
@@ -60,11 +65,52 @@ func TestOpenLibraryDumpImportKeepsOneBestChineseEditionPerWork(t *testing.T) {
 	var person model.BookPerson
 	require.NoError(t, db.First(&person).Error)
 	require.Equal(t, "作者甲", person.Name)
+
+	// Recreate the old import bug, then repair using the same dump without duplicates.
+	require.NoError(t, db.Model(&work).Updates(map[string]any{"title": "中文作品", "original_title": ""}).Error)
+	require.NoError(t, db.Model(&edition).Update("title", "中文作品").Error)
+	summary, err = NewOpenLibraryDumpImporter(db).ImportChinese(context.Background(), OpenLibraryDumpImportOptions{
+		WorksPath: worksPath, EditionsPath: editionsPath, AuthorsPath: authorsPath, RepairTitles: true,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, summary.TitlesRepaired)
+	require.Zero(t, summary.NewWorks)
+	require.NoError(t, db.First(&work, "id = ?", work.ID).Error)
+	require.Equal(t, "中文作品新版", work.Title)
+	require.Equal(t, "中文作品", work.OriginalTitle)
+
+	require.NoError(t, db.Model(&work).Update("title", "用户更正的书名").Error)
+	summary, err = NewOpenLibraryDumpImporter(db).ImportChinese(context.Background(), OpenLibraryDumpImportOptions{
+		WorksPath: worksPath, EditionsPath: editionsPath, AuthorsPath: authorsPath, RepairTitles: true,
+	})
+	require.NoError(t, err)
+	require.Zero(t, summary.TitlesRepaired)
+	require.NoError(t, db.First(&work, "id = ?", work.ID).Error)
+	require.Equal(t, "用户更正的书名", work.Title)
+
+	// Even when a user edit leaves the old title unchanged, its history protects it.
+	require.NoError(t, db.Model(&work).Updates(map[string]any{"title": "中文作品", "original_title": ""}).Error)
+	require.NoError(t, db.Model(&edition).Update("title", "中文作品").Error)
+	require.NoError(t, db.Create(&model.BookEdit{EntityID: &work.ID, EntityType: "work", Type: model.BookEditTypeUpdate, Status: model.BookEditStatusApproved, SubmittedBy: uuid.New(), PayloadJSON: "{}", ChangesJSON: "{}"}).Error)
+	summary, err = NewOpenLibraryDumpImporter(db).ImportChinese(context.Background(), OpenLibraryDumpImportOptions{
+		WorksPath: worksPath, EditionsPath: editionsPath, AuthorsPath: authorsPath, RepairTitles: true,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, summary.TitlesRepaired)
+	require.NoError(t, db.First(&work, "id = ?", work.ID).Error)
+	require.Equal(t, "中文作品", work.Title)
 }
 
 func TestOpenLibraryDumpRecordRejectsMalformedLine(t *testing.T) {
 	_, err := parseOpenLibraryDumpRecord([]byte("not-a-dump-line"))
 	require.Error(t, err)
+}
+
+func TestOpenLibraryDisplayTitleRejectsCorruptSourceNames(t *testing.T) {
+	require.Equal(t, "一九八四", openLibraryDisplayTitle("一九八四", "Nineteen Eighty-Four"))
+	require.Equal(t, "Original", openLibraryDisplayTitle("\x1a\x1a", "Original"))
+	require.Equal(t, "Original", openLibraryDisplayTitle("", "Original"))
+	require.Equal(t, "1984", openLibraryDisplayTitle("1984", "Original"))
 }
 
 func writeOpenLibraryDump(t *testing.T, dir, name string, lines []string) string {

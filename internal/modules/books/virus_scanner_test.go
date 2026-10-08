@@ -32,7 +32,7 @@ func TestClamAVBookVirusScannerWithInstalledEngine(t *testing.T) {
 
 func TestProcessBookAssetsUsesConfiguredVirusScanner(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.UserBookImport{}, &model.UserBookAsset{})
+	testdb.Migrate(t, db, &model.UserBookImport{}, &model.UserBookAsset{}, &model.PublishedBookAsset{})
 	owner := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
 	importID, assetID := uuid.New(), uuid.New()
 	key := "books/private/scanned.txt"

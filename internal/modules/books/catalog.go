@@ -32,6 +32,7 @@ type CatalogBook struct {
 	ExternalWorkID    string
 	ExternalEditionID string
 	Title             string
+	OriginalTitle     string
 	Subtitle          string
 	Description       string
 	Language          string
