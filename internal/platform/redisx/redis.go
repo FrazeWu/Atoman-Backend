@@ -10,6 +10,31 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
+const defaultNamespace = "atoman"
+
+// Namespace isolates Redis data between development, staging and production.
+// The default keeps existing installations backward compatible.
+func Namespace() string {
+	raw := strings.TrimSpace(os.Getenv("REDIS_NAMESPACE"))
+	if raw == "" {
+		return defaultNamespace
+	}
+	return strings.Trim(raw, ":")
+}
+
+// Key adds the configured namespace exactly once to every shared Redis key.
+func Key(raw string) string {
+	raw = strings.Trim(strings.TrimSpace(raw), ":")
+	if raw == "" {
+		return Namespace()
+	}
+	namespace := Namespace()
+	if raw == namespace || strings.HasPrefix(raw, namespace+":") {
+		return raw
+	}
+	return namespace + ":" + raw
+}
+
 var (
 	clientOnce sync.Once
 	client     *redis.Client

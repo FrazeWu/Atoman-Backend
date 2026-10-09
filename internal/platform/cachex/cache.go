@@ -58,13 +58,13 @@ func (c *Cache[T]) cacheKey(key string) string {
 	c.mu.Unlock()
 	if c.store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
-		sharedVersion, err := c.store.Get(ctx, c.prefix+":version")
+		sharedVersion, err := c.store.Get(ctx, redisx.Key(c.prefix+":version"))
 		cancel()
 		if err == nil {
 			version = sharedVersion
 		}
 	}
-	return c.prefix + ":" + version + ":" + key
+	return redisx.Key(c.prefix + ":" + version + ":" + key)
 }
 
 func (c *Cache[T]) read(key string) (entry[T], bool) {
@@ -165,6 +165,6 @@ func (c *Cache[T]) Invalidate() {
 	if c.store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 		defer cancel()
-		_ = c.store.Set(ctx, c.prefix+":version", version, 0)
+		_ = c.store.Set(ctx, redisx.Key(c.prefix+":version"), version, 0)
 	}
 }
