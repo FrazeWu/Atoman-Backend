@@ -40,8 +40,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/explore", middleware.OptionalAuthMiddleware(), h.getExploreFeed)
 	group.GET("/explore/sources", middleware.OptionalAuthMiddleware(), GetExploreSources(service.db))
 	group.GET("/recommend/themes", h.getRecommendationThemes)
-	group.GET("/recommend/articles", h.getRecommendedArticles)
-	group.GET("/recommend/channels", h.getRecommendedChannels)
+	group.GET("/recommend/articles", middleware.OptionalAuthMiddleware(), h.getRecommendedArticles)
+	group.GET("/recommend/channels", middleware.OptionalAuthMiddleware(), h.getRecommendedChannels)
 
 	group.GET("/items/:id", middleware.OptionalAuthMiddleware(), GetFeedItem(service.db))
 	group.GET("/media/image", proxyFeedImage)
@@ -61,6 +61,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/timeline/star", h.toggleStar)
 		protected.POST("/events/read", h.recordReadEvent)
 		protected.POST("/items/:id/content-feedback", h.recordContentFeedback)
+		protected.POST("/recommendation-feedback", h.recordRecommendationFeedback)
+		protected.DELETE("/recommendation-feedback/:target_type/:id", h.deleteRecommendationFeedback)
 		protected.PUT("/items/:id/rating", h.setFeedItemRating)
 		protected.DELETE("/items/:id/rating", h.deleteFeedItemRating)
 		protected.GET("/reading-list", h.listReadingList)
@@ -342,6 +344,9 @@ func (h *Handler) getRecommendedArticles(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if user, ok := authctx.Current(c); ok {
+		items, total = filterRecommendationItemsForUser(h.service.db, &user.ID, items, "article")
+	}
 	httpx.List(c, items, page, pageSize, total)
 }
 
@@ -363,6 +368,9 @@ func (h *Handler) getRecommendedChannels(c *gin.Context) {
 	if err != nil {
 		httpx.Error(c, err)
 		return
+	}
+	if user, ok := authctx.Current(c); ok {
+		items, total = filterRecommendationItemsForUser(h.service.db, &user.ID, items, "channel")
 	}
 	httpx.List(c, items, page, pageSize, total)
 }
