@@ -19,7 +19,7 @@ import (
 const (
 	importWorkerRetryBase = time.Minute
 	importWorkerRetryMax  = time.Hour
-	importWorkerRetention = 7 * 24 * time.Hour
+	importWorkerRetention = 30 * 24 * time.Hour
 )
 
 // MusicImportObjectStore is the narrow storage contract required by the worker.
@@ -624,7 +624,7 @@ func (w *ImportWorker) CleanupExpired(ctx context.Context) error {
 }
 
 func cleanupExpiredArtistDrafts(db *gorm.DB, now time.Time) error {
-	cutoff := now.Add(-7 * 24 * time.Hour)
+	cutoff := now.Add(-30 * 24 * time.Hour)
 	return db.Where("entry_status = ? AND created_at <= ?", artistEntryDraft, cutoff).
 		Where(`NOT EXISTS (SELECT 1 FROM album_artists WHERE album_artists.artist_id = "Artists".id)`).
 		Where(`NOT EXISTS (SELECT 1 FROM song_artists WHERE song_artists.artist_id = "Artists".id)`).

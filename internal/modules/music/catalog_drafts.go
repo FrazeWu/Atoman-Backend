@@ -84,6 +84,16 @@ func validateArtistPublicationFields(artist model.Artist, members []ArtistMember
 	return nil
 }
 
+func artistPublicationFieldsComplete(artist model.Artist, members []ArtistMemberPayload) bool {
+	if normalizeArtistForm(artist.ArtistForm) == "group" {
+		return !(artist.ActiveStartDate.IsZero() && artist.ActiveStartDatePrecision != partialdate.Unknown)
+	}
+	return strings.TrimSpace(artist.ImageURL) != "" &&
+		strings.TrimSpace(artist.LegalName) != "" &&
+		strings.TrimSpace(artist.Nationality) != "" &&
+		!(artist.BirthDate == nil && artist.BirthDatePrecision != partialdate.Unknown)
+}
+
 func validateArtistMemberReferences(tx *gorm.DB, user authctx.CurrentUser, members []ArtistMemberPayload) error {
 	for _, member := range members {
 		memberID, err := uuid.Parse(strings.TrimSpace(member.ArtistID))

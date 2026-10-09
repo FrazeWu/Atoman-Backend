@@ -430,16 +430,16 @@ func (e *ExternalAlbumMetadataEnricher) EnrichLyrics(ctx context.Context, input 
 
 func (e *ExternalAlbumMetadataEnricher) enrichLyrics(ctx context.Context, input AlbumImportMetadataInput, result AlbumImportMetadataResult, releaseMatched bool, lyricsArtists []string) AlbumImportMetadataResult {
 
-	missingLyrics := make([]int, 0, len(result.Tracks))
+	lookupLyrics := make([]int, 0, len(result.Tracks))
 	for index := range result.Tracks {
 		track := &result.Tracks[index]
 		original := metadataTrackForResult(input.Tracks, *track)
 		if lyrics, ok := findLocalLyrics(input.LocalLyrics, original); ok {
 			track.Lyrics = &lyrics
 			track.LyricsSource = "local"
-			continue
+			track.LyricsCandidates = appendLyricsCandidate(track.LyricsCandidates, "local", lyrics)
 		}
-		missingLyrics = append(missingLyrics, index)
+		lookupLyrics = append(lookupLyrics, index)
 	}
 	if !releaseMatched {
 		log.Printf("WARN: skipping LRCLIB lookup because no external metadata source safely matched album=%q error=%v", input.AlbumTitle, result.MetadataError)
@@ -447,7 +447,7 @@ func (e *ExternalAlbumMetadataEnricher) enrichLyrics(ctx context.Context, input 
 	}
 	var lyricsWG sync.WaitGroup
 	lyricsSlots := make(chan struct{}, 4)
-	for _, index := range missingLyrics {
+	for _, index := range lookupLyrics {
 		index := index
 		lyricsWG.Add(1)
 		go func() {
@@ -461,8 +461,11 @@ func (e *ExternalAlbumMetadataEnricher) enrichLyrics(ctx context.Context, input 
 			}
 			lyrics, matchedArtist, lookupErr := e.findLRCLyricsForMusicBrainzTrack(ctx, result.AlbumTitle, artistCandidates, result.Tracks[index], original.DurationSeconds)
 			if lookupErr == nil && lyrics.Content != "" {
-				result.Tracks[index].Lyrics = &lyrics
-				result.Tracks[index].LyricsSource = "lrclib"
+				track := &result.Tracks[index]
+				track.LyricsCandidates = appendLyricsCandidate(track.LyricsCandidates, "lrclib", lyrics)
+				// 冲突未处理时默认采用在线结果；本地候选仍保留供编辑页选择。
+				track.Lyrics = &lyrics
+				track.LyricsSource = "lrclib"
 				return
 			}
 			if lookupErr != nil {
@@ -472,6 +475,21 @@ func (e *ExternalAlbumMetadataEnricher) enrichLyrics(ctx context.Context, input 
 	}
 	lyricsWG.Wait()
 	return result
+}
+
+func appendLyricsCandidate(candidates []AlbumImportTrackLyricsCandidate, source string, payload AlbumImportTrackLyricsPayload) []AlbumImportTrackLyricsCandidate {
+	if strings.TrimSpace(payload.Content) == "" {
+		return candidates
+	}
+	for _, candidate := range candidates {
+		if candidate.Source == source && candidate.Content == payload.Content && candidate.Translation == payload.Translation {
+			return candidates
+		}
+	}
+	return append(candidates, AlbumImportTrackLyricsCandidate{
+		Source: source, Content: payload.Content, Translation: payload.Translation,
+		Format: payload.Format, Language: payload.Language, EditSummary: payload.EditSummary,
+	})
 }
 
 func metadataTrackForResult(tracks []AlbumImportMetadataTrack, result AlbumImportDTOTrack) AlbumImportMetadataTrack {

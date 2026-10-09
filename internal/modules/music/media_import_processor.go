@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1221,6 +1222,9 @@ func metadataResultTrackMaps(result AlbumImportMetadataResult) []map[string]any 
 			derived["lyrics"] = track.Lyrics
 			derived["lyrics_source"] = track.LyricsSource
 		}
+		if len(track.LyricsCandidates) > 0 {
+			derived["lyrics_candidates"] = track.LyricsCandidates
+		}
 		derivedTracks = append(derivedTracks, derived)
 	}
 	return derivedTracks
@@ -1262,7 +1266,33 @@ func mergeImportTrackAudio(tracks []map[string]any, raw any) {
 		if matched["lyrics"] != nil && (track["lyrics"] == nil || stringValue(matched["lyrics_source"]) == "local") {
 			track["lyrics"], track["lyrics_source"] = matched["lyrics"], matched["lyrics_source"]
 		}
+		if matched["lyrics_candidates"] != nil {
+			track["lyrics_candidates"] = mergeImportLyricsCandidates(track["lyrics_candidates"], matched["lyrics_candidates"])
+		}
 	}
+}
+
+func mergeImportLyricsCandidates(current, incoming any) []map[string]any {
+	decode := func(raw any) []map[string]any {
+		encoded, _ := json.Marshal(raw)
+		var values []map[string]any
+		_ = json.Unmarshal(encoded, &values)
+		return values
+	}
+	values := append([]map[string]any{}, decode(current)...)
+	seen := map[string]bool{}
+	for _, value := range values {
+		seen[stringValue(value["source"])+"\x00"+stringValue(value["content"])+"\x00"+stringValue(value["translation"])] = true
+	}
+	for _, value := range decode(incoming) {
+		key := stringValue(value["source"]) + "\x00" + stringValue(value["content"]) + "\x00" + stringValue(value["translation"])
+		if key == "\x00\x00" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		values = append(values, value)
+	}
+	return values
 }
 
 func mergeDerivedMetadataPayload(payload map[string]any, derivedTracks []map[string]any, result AlbumImportMetadataResult) {
@@ -1699,12 +1729,28 @@ func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID 
 		track = overrideTrack
 	}
 	metadataValues := metadata.archiveMetadata()
+	if audioHash, hashErr := hashLocalAudioFile(sourcePath); hashErr == nil {
+		metadataValues["audio_hash"] = audioHash
+	}
 	metadataValues["waveform_peaks"] = waveformPeaks
 	metadataJSON, _ := json.Marshal(metadataValues)
 	return p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
 		"playback_key": playbackKey, "title": title, "disc_number": disc, "track_number": track,
 		"duration_seconds": duration, "metadata_json": string(metadataJSON), "processing_status": "completed", "error_message": "",
 	}).Error
+}
+
+func hashLocalAudioFile(path string) (string, error) {
+	input, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer input.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, input); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil)), nil
 }
 
 func (p *MediaImportProcessor) downloadSource(destination, key string) error {

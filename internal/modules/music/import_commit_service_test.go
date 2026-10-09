@@ -58,6 +58,35 @@ func TestFinalizeSubmittedAlbumImportRetainsProcessedLyrics(t *testing.T) {
 	}
 }
 
+func TestFindDuplicateImportedAlbumNormalizesTitleAndIgnoresRetiredAlbums(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	artist := model.Artist{Name: "Kendrick Lamar", LifecycleStatus: model.MusicLifecycleActive}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatal(err)
+	}
+	active := model.Album{Title: "  DAMN.  ", LifecycleStatus: model.MusicLifecycleActive}
+	retired := model.Album{Title: "DAMN.", LifecycleStatus: model.MusicLifecycleRetired}
+	if err := db.Create(&active).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&retired).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.AlbumArtist{AlbumID: active.ID, ArtistID: artist.ID, Role: "primary"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.AlbumArtist{AlbumID: retired.ID, ArtistID: artist.ID, Role: "primary"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := findDuplicateImportedAlbum(db, []resolvedCommitAlbumImportArtist{{Artist: &artist}}, "damn.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate == nil || duplicate.ID != active.ID {
+		t.Fatalf("expected active duplicate, got %#v", duplicate)
+	}
+}
+
 func TestPromoteAlbumImportAssetCopiesLargePlaybackWithoutHTTPDownload(t *testing.T) {
 	requests := 0
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

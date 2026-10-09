@@ -38038,6 +38038,12 @@ const docTemplate = `{
                 "lyricsSource": {
                     "type": "string"
                 },
+                "lyricsCandidates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumImportTrackLyricsCandidate"
+                    }
+                },
                 "matchConfidence": {
                     "type": "number"
                 },
@@ -38484,6 +38490,29 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AlbumImportTrackLyricsCandidate": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "edit_summary": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "translation": {
+                    "type": "string"
+                }
+            }
+        },
         "music.AlbumImportTrackPayload": {
             "type": "object",
             "properties": {
@@ -38504,6 +38533,12 @@ const docTemplate = `{
                 },
                 "lyrics_source": {
                     "type": "string"
+                },
+                "lyrics_candidates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumImportTrackLyricsCandidate"
+                    }
                 },
                 "match_confidence": {
                     "type": "number"
