@@ -19,12 +19,22 @@ type AlbumImportTrackPayload struct {
 	TitleCustomized    bool    `json:"title_customized,omitempty"`
 	SequenceCustomized bool    `json:"sequence_customized,omitempty"`
 	// AudioURL is retained for internal processors and legacy tests only. Client JSON cannot set it.
-	AudioURL     string                         `json:"-"`
-	Lyrics       *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
-	LyricsSource string                         `json:"lyrics_source,omitempty"`
+	AudioURL         string                            `json:"-"`
+	Lyrics           *AlbumImportTrackLyricsPayload    `json:"lyrics,omitempty"`
+	LyricsSource     string                            `json:"lyrics_source,omitempty"`
+	LyricsCandidates []AlbumImportTrackLyricsCandidate `json:"lyrics_candidates,omitempty"`
 }
 
 type AlbumImportTrackLyricsPayload struct {
+	Content     string `json:"content"`
+	Translation string `json:"translation"`
+	Format      string `json:"format"`
+	Language    string `json:"language"`
+	EditSummary string `json:"edit_summary"`
+}
+
+type AlbumImportTrackLyricsCandidate struct {
+	Source      string `json:"source"`
 	Content     string `json:"content"`
 	Translation string `json:"translation"`
 	Format      string `json:"format"`
@@ -183,24 +193,25 @@ type CompleteAlbumImportMultipartPartInput struct {
 }
 
 type AlbumImportDTOTrack struct {
-	SongID          string                         `json:"songId"`
-	FileID          string                         `json:"fileId"`
-	Title           string                         `json:"title"`
-	AudioKey        string                         `json:"audioKey"`
-	AudioURL        string                         `json:"audioUrl"`
-	Origin          string                         `json:"origin"`
-	DiscNumber      int                            `json:"discNumber,omitempty"`
-	TrackNumber     int                            `json:"trackNumber,omitempty"`
-	OriginalTitle   string                         `json:"originalTitle,omitempty"`
-	OriginalDisc    int                            `json:"originalDiscNumber,omitempty"`
-	OriginalTrack   int                            `json:"originalTrackNumber,omitempty"`
-	MatchStatus     string                         `json:"matchStatus,omitempty"`
-	MatchProvider   string                         `json:"matchProvider,omitempty"`
-	MatchExternalID string                         `json:"matchExternalId,omitempty"`
-	MatchSourceURL  string                         `json:"matchSourceUrl,omitempty"`
-	MatchConfidence float64                        `json:"matchConfidence,omitempty"`
-	Lyrics          *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
-	LyricsSource    string                         `json:"lyricsSource,omitempty"`
+	SongID           string                            `json:"songId"`
+	FileID           string                            `json:"fileId"`
+	Title            string                            `json:"title"`
+	AudioKey         string                            `json:"audioKey"`
+	AudioURL         string                            `json:"audioUrl"`
+	Origin           string                            `json:"origin"`
+	DiscNumber       int                               `json:"discNumber,omitempty"`
+	TrackNumber      int                               `json:"trackNumber,omitempty"`
+	OriginalTitle    string                            `json:"originalTitle,omitempty"`
+	OriginalDisc     int                               `json:"originalDiscNumber,omitempty"`
+	OriginalTrack    int                               `json:"originalTrackNumber,omitempty"`
+	MatchStatus      string                            `json:"matchStatus,omitempty"`
+	MatchProvider    string                            `json:"matchProvider,omitempty"`
+	MatchExternalID  string                            `json:"matchExternalId,omitempty"`
+	MatchSourceURL   string                            `json:"matchSourceUrl,omitempty"`
+	MatchConfidence  float64                           `json:"matchConfidence,omitempty"`
+	Lyrics           *AlbumImportTrackLyricsPayload    `json:"lyrics,omitempty"`
+	LyricsSource     string                            `json:"lyricsSource,omitempty"`
+	LyricsCandidates []AlbumImportTrackLyricsCandidate `json:"lyricsCandidates,omitempty"`
 }
 
 type AlbumImportProgressDTO struct {

@@ -425,7 +425,7 @@ func (s *Service) CreateAlbumImportSession(user authctx.CurrentUser, input Creat
 		return model.AlbumImportSession{}, err
 	}
 	session.PayloadJSON = string(payloadJSON)
-	expiresAt := time.Now().UTC().Add(7 * 24 * time.Hour)
+	expiresAt := time.Now().UTC().Add(30 * 24 * time.Hour)
 	session.ExpiresAt = &expiresAt
 	if err := s.db.Create(&session).Error; err != nil {
 		return model.AlbumImportSession{}, err
@@ -523,7 +523,7 @@ func applyAlbumImportSessionState(session *model.AlbumImportSession, status stri
 	}
 }
 
-func albumImportFailureExpiresAt() time.Time { return time.Now().UTC().Add(7 * 24 * time.Hour) }
+func albumImportFailureExpiresAt() time.Time { return time.Now().UTC().Add(30 * 24 * time.Hour) }
 
 func (s *Service) markAlbumImportFailed(id uuid.UUID, message string) error {
 	session, err := s.GetAlbumImportSession(id)

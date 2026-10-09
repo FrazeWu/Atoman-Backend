@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -260,6 +261,13 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 
 		isRepair := session.TargetAlbumID != nil
+		if !isRepair {
+			if duplicate, err := findDuplicateImportedAlbum(tx, resolvedArtists, album.Title); err != nil {
+				return err
+			} else if duplicate != nil {
+				return apperr.Conflict("music.album_duplicate", fmt.Sprintf("艺术家已有同名专辑：%s", duplicate.Title))
+			}
+		}
 		revisions := revisionservice.NewRevisionService(tx)
 		if isRepair {
 			var existing model.Album
@@ -346,17 +354,19 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			if err != nil {
 				return err
 			}
-			if err := tx.Model(resolved.Artist).Updates(map[string]any{
-				"entry_status":     artistEntryOpen,
-				"lifecycle_status": model.MusicLifecycleActive,
-				"sources_json":     artistSourcesJSON,
-			}).Error; err != nil {
-				return err
+			if artistPublicationFieldsComplete(*resolved.Artist, nil) {
+				if err := tx.Model(resolved.Artist).Updates(map[string]any{
+					"entry_status":     artistEntryOpen,
+					"lifecycle_status": model.MusicLifecycleActive,
+					"sources_json":     artistSourcesJSON,
+				}).Error; err != nil {
+					return err
+				}
+				resolved.Artist.EntryStatus = artistEntryOpen
+				resolved.Artist.LifecycleStatus = model.MusicLifecycleActive
+				resolved.Artist.Sources = artistSources
+				resolved.Artist.SourcesJSON = artistSourcesJSON
 			}
-			resolved.Artist.EntryStatus = artistEntryOpen
-			resolved.Artist.LifecycleStatus = model.MusicLifecycleActive
-			resolved.Artist.Sources = artistSources
-			resolved.Artist.SourcesJSON = artistSourcesJSON
 		}
 
 		rawDerivedTracks := []any(nil)
@@ -391,10 +401,14 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		resolvedAudio := resolveCommitDerivedTrackAudio(rawDerivedTracks, payload.Album.Tracks)
 		seenSongIDs := map[uuid.UUID]bool{}
 		seenAudioAssetIDs := map[uuid.UUID]bool{}
+		seenImportedTrackKeys := map[string]bool{}
 		for trackIndex, track := range payload.Album.Tracks {
 			derived := resolvedAudio[trackIndex]
 			if track.Lyrics == nil {
 				track.Lyrics, track.LyricsSource = derived.Lyrics, derived.LyricsSource
+			}
+			if len(track.LyricsCandidates) == 0 {
+				track.LyricsCandidates = derived.LyricsCandidates
 			}
 			audioURL := strings.TrimSpace(derived.AudioURL)
 			var uploadedAudioAsset *model.MediaAsset
@@ -422,6 +436,17 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				seenAudioAssetIDs[asset.ID] = true
 			}
 			metadata := songAudioMetadataFromImportFile(importFilesByID[derived.FileID])
+			if !isRepair && metadata.audioHash != "" {
+				artistKey := ""
+				if len(resolvedArtists) > 0 && resolvedArtists[0].Artist != nil {
+					artistKey = resolvedArtists[0].Artist.ID.String()
+				}
+				trackKey := artistKey + "\x00" + normalizedMusicText(track.Title) + "\x00" + metadata.audioHash
+				if seenImportedTrackKeys[trackKey] {
+					continue
+				}
+				seenImportedTrackKeys[trackKey] = true
+			}
 			matchStatus, matchProvider, matchExternalID, matchSourceURL, matchConfidence, matchManualOverride := importTrackMatchState(track, derived)
 			var existingSong *model.Song
 			if strings.TrimSpace(track.SongID) != "" {
@@ -698,6 +723,9 @@ func (s *Service) commitStandaloneSongImport(
 	derived := matchDerivedTrackAudio(rawDerivedTracks, track, map[int]bool{})
 	if track.Lyrics == nil {
 		track.Lyrics, track.LyricsSource = derived.Lyrics, derived.LyricsSource
+	}
+	if len(track.LyricsCandidates) == 0 {
+		track.LyricsCandidates = derived.LyricsCandidates
 	}
 	matchStatus, matchProvider, matchExternalID, matchSourceURL, matchConfidence, matchManualOverride := importTrackMatchState(track, derived)
 	var importFile model.AlbumImportFile
@@ -1192,15 +1220,16 @@ func (s *Service) deleteAlbumImportObjects(keys []string) {
 }
 
 type derivedTrackAudio struct {
-	AudioURL        string
-	FileID          string
-	MatchStatus     string
-	MatchProvider   string
-	MatchExternalID string
-	MatchSourceURL  string
-	MatchConfidence float64
-	Lyrics          *AlbumImportTrackLyricsPayload
-	LyricsSource    string
+	AudioURL         string
+	FileID           string
+	MatchStatus      string
+	MatchProvider    string
+	MatchExternalID  string
+	MatchSourceURL   string
+	MatchConfidence  float64
+	Lyrics           *AlbumImportTrackLyricsPayload
+	LyricsSource     string
+	LyricsCandidates []AlbumImportTrackLyricsCandidate
 }
 
 func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, used map[int]bool) derivedTrackAudio {
@@ -1347,6 +1376,19 @@ func derivedTrackAudioFromMap(trackMap map[string]any) derivedTrackAudio {
 			Format: stringValue(lyrics["format"]), Language: stringValue(lyrics["language"]), EditSummary: stringValue(lyrics["edit_summary"]),
 		}
 	}
+	if rawCandidates, ok := trackMap["lyrics_candidates"].([]any); ok {
+		for _, rawCandidate := range rawCandidates {
+			candidateMap, ok := rawCandidate.(map[string]any)
+			if !ok {
+				continue
+			}
+			derived.LyricsCandidates = append(derived.LyricsCandidates, AlbumImportTrackLyricsCandidate{
+				Source: stringValue(candidateMap["source"]), Content: stringValue(candidateMap["content"]),
+				Translation: stringValue(candidateMap["translation"]), Format: stringValue(candidateMap["format"]),
+				Language: stringValue(candidateMap["language"]), EditSummary: stringValue(candidateMap["edit_summary"]),
+			})
+		}
+	}
 	return derived
 }
 
@@ -1484,6 +1526,7 @@ type songAudioMetadata struct {
 	lossless      bool
 	durationSec   int
 	waveformPeaks json.RawMessage
+	audioHash     string
 }
 
 func songAudioMetadataFromImportFile(file model.AlbumImportFile) songAudioMetadata {
@@ -1504,6 +1547,7 @@ func songAudioMetadataFromImportFile(file model.AlbumImportFile) songAudioMetada
 		sampleRateHz: int(int64Value(values["sample_rate"])), bitDepth: int(int64Value(values["bit_depth"])),
 		channels: int(int64Value(values["channels"])), sizeBytes: file.Size,
 		lossless: isLosslessAudio(container, codec), durationSec: int(file.DurationSeconds + 0.5), waveformPeaks: waveformPeaks,
+		audioHash: strings.TrimSpace(stringValue(values["audio_hash"])),
 	}
 }
 
@@ -1594,11 +1638,6 @@ func resolveCommitAlbumImportArtists(tx *gorm.DB, user authctx.CurrentUser, inpu
 		if err != nil {
 			return nil, err
 		}
-		if hasAlbumArtistRole(entry.Roles, "primary") {
-			if err := validateArtistPublicationFields(*artist, entry.Members); err != nil {
-				return nil, err
-			}
-		}
 		artist.CreatedBy = &user.ID
 		if err := createAlbumImportArtist(tx, artist); err != nil {
 			return nil, err
@@ -1657,6 +1696,19 @@ func albumImportTracksFromDerived(payload map[string]any) []AlbumImportTrackPayl
 				Content: stringValue(lyricsMap["content"]), Translation: stringValue(lyricsMap["translation"]),
 				Format: stringValue(lyricsMap["format"]), Language: stringValue(lyricsMap["language"]),
 				EditSummary: stringValue(lyricsMap["edit_summary"]),
+			}
+		}
+		if rawCandidates, ok := trackMap["lyrics_candidates"].([]any); ok {
+			for _, rawCandidate := range rawCandidates {
+				candidateMap, ok := rawCandidate.(map[string]any)
+				if !ok {
+					continue
+				}
+				track.LyricsCandidates = append(track.LyricsCandidates, AlbumImportTrackLyricsCandidate{
+					Source: stringValue(candidateMap["source"]), Content: stringValue(candidateMap["content"]),
+					Translation: stringValue(candidateMap["translation"]), Format: stringValue(candidateMap["format"]),
+					Language: stringValue(candidateMap["language"]), EditSummary: stringValue(candidateMap["edit_summary"]),
+				})
 			}
 		}
 		tracks = append(tracks, track)
@@ -1797,4 +1849,34 @@ func createAlbumImportAlbum(tx *gorm.DB, album *model.Album) error {
 		}
 	}
 	return tx.Create(album).Error
+}
+
+func findDuplicateImportedAlbum(tx *gorm.DB, artists []resolvedCommitAlbumImportArtist, title string) (*model.Album, error) {
+	artistIDs := make([]uuid.UUID, 0, len(artists))
+	seen := map[uuid.UUID]bool{}
+	for _, resolved := range artists {
+		if resolved.Artist == nil || seen[resolved.Artist.ID] {
+			continue
+		}
+		seen[resolved.Artist.ID] = true
+		artistIDs = append(artistIDs, resolved.Artist.ID)
+	}
+	if len(artistIDs) == 0 {
+		return nil, nil
+	}
+	var albums []model.Album
+	if err := tx.Model(&model.Album{}).
+		Joins("JOIN album_artists ON album_artists.album_id = \"Albums\".id").
+		Where("album_artists.artist_id IN ?", artistIDs).
+		Where("\"Albums\".lifecycle_status NOT IN ?", []string{model.MusicLifecycleMerged, model.MusicLifecycleRetired}).
+		Find(&albums).Error; err != nil {
+		return nil, err
+	}
+	normalizedTitle := normalizedMusicText(title)
+	for index := range albums {
+		if normalizedMusicText(albums[index].Title) == normalizedTitle {
+			return &albums[index], nil
+		}
+	}
+	return nil, nil
 }

@@ -6453,6 +6453,10 @@ definitions:
         $ref: '#/definitions/music.AlbumImportTrackLyricsPayload'
       lyricsSource:
         type: string
+      lyricsCandidates:
+        items:
+          $ref: '#/definitions/music.AlbumImportTrackLyricsCandidate'
+        type: array
       matchConfidence:
         type: number
       matchExternalId:
@@ -6745,6 +6749,21 @@ definitions:
       translation:
         type: string
     type: object
+  music.AlbumImportTrackLyricsCandidate:
+    properties:
+      content:
+        type: string
+      edit_summary:
+        type: string
+      format:
+        type: string
+      language:
+        type: string
+      source:
+        type: string
+      translation:
+        type: string
+    type: object
   music.AlbumImportTrackPayload:
     properties:
       audio_asset_id:
@@ -6759,6 +6778,10 @@ definitions:
         $ref: '#/definitions/music.AlbumImportTrackLyricsPayload'
       lyrics_source:
         type: string
+      lyrics_candidates:
+        items:
+          $ref: '#/definitions/music.AlbumImportTrackLyricsCandidate'
+        type: array
       match_confidence:
         type: number
       match_external_id:
