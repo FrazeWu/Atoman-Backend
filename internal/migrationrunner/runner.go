@@ -473,7 +473,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
 		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.StudioMetricEvent{}, &model.StudioInteractionState{}, &model.StudioReplyTemplate{}, &model.StudioGoalCycle{}, &model.StudioGoal{}, &model.StudioGoalAction{}, &model.StudioGoalReview{}, &model.ContentLifecycleEvent{},
 		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{}, &model.BlogPublishSchedule{}, &model.ContentBlogTag{}, &model.ContentBlogUserTag{}, &model.BlogRecommendationPreference{}, &model.BlogPostReport{}, &model.BlogPostAppeal{},
-		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.BlogRecommendationFeedback{}, &model.ShortNote{},
+		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.BlogRecommendationFeedback{}, &model.RecommendationFeedback{}, &model.ShortNote{},
 		&model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.ShortNoteRead{}, &model.Like{}, &model.PostRating{},
 		&model.ReputationRun{}, &model.BlogQualitySnapshot{}, &model.UserReputationSnapshot{},
 		&model.MusicContributionEvent{}, &model.MusicContributionEvidence{},
