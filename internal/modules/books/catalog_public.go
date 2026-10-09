@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net/url"
 	"strings"
 	"time"
 
@@ -295,12 +296,27 @@ func escapeBookCatalogQuery(query string) string {
 }
 
 func buildBookPublicEditionDTO(edition model.BookEdition) BookPublicEditionDTO {
+	coverURL := strings.TrimSpace(edition.CoverURL)
+	if coverURL == "" {
+		coverURL = openLibraryISBNImageURL(edition.ISBN13)
+		if coverURL == "" {
+			coverURL = openLibraryISBNImageURL(edition.ISBN10)
+		}
+	}
 	return BookPublicEditionDTO{
 		ID: edition.ID.String(), WorkID: edition.WorkID.String(), Title: edition.Title,
 		Publisher: edition.Publisher, ISBN10: edition.ISBN10, ISBN13: edition.ISBN13,
 		Language: edition.Language, PublishedDate: edition.PublishedDate, PageCount: edition.PageCount,
-		Binding: edition.Binding, CoverURL: edition.CoverURL,
+		Binding: edition.Binding, CoverURL: coverURL,
 	}
+}
+
+func openLibraryISBNImageURL(isbn string) string {
+	isbn = strings.TrimSpace(isbn)
+	if isbn == "" {
+		return ""
+	}
+	return "https://covers.openlibrary.org/isbn/" + url.PathEscape(isbn) + "-M.jpg"
 }
 
 func buildBookPublicSources(sources []model.BookSource) []BookPublicSourceDTO {

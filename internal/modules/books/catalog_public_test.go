@@ -79,6 +79,12 @@ func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestPublicEditionUsesISBNCoverWhenImportedCoverIsMissing(t *testing.T) {
+	edition := model.BookEdition{Base: model.Base{ID: uuid.New()}, WorkID: uuid.New(), ISBN13: "978-7-111-00000-1"}
+	dto := buildBookPublicEditionDTO(edition)
+	require.Equal(t, "https://covers.openlibrary.org/isbn/978-7-111-00000-1-M.jpg", dto.CoverURL)
+}
+
 func TestPublicCatalogRoutesDoNotRequireAuthentication(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{})
