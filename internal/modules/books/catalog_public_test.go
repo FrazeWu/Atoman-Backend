@@ -21,8 +21,9 @@ import (
 func TestCatalogCountCacheReusesQueriesAndInvalidatesAfterWrite(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{})
-	work := model.BookWork{Title: "Visible Book", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	work := model.BookWork{Title: "可见书籍", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
 	require.NoError(t, db.Create(&work).Error)
+	require.NoError(t, db.Create(&model.BookEdition{WorkID: work.ID, Title: work.Title, ISBN13: "9787111000001", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
 	counts := 0
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:count_catalog_queries", func(tx *gorm.DB) {
 		if strings.Contains(tx.Statement.SQL.String(), "count(*)") && tx.Statement.Table == "book_works" {
@@ -37,7 +38,7 @@ func TestCatalogCountCacheReusesQueriesAndInvalidatesAfterWrite(t *testing.T) {
 	}
 	require.Equal(t, 1, counts, "翻页不应重复统计全部作品")
 	for range 2 {
-		_, total, err := service.SearchPublicCatalog(context.Background(), "Visible", 24, 0)
+		_, total, err := service.SearchPublicCatalog(context.Background(), "可见", 24, 0)
 		require.NoError(t, err)
 		require.Equal(t, int64(1), total)
 	}
@@ -83,6 +84,33 @@ func TestPublicEditionUsesISBNCoverWhenImportedCoverIsMissing(t *testing.T) {
 	edition := model.BookEdition{Base: model.Base{ID: uuid.New()}, WorkID: uuid.New(), ISBN13: "978-7-111-00000-1"}
 	dto := buildBookPublicEditionDTO(edition)
 	require.Equal(t, "https://covers.openlibrary.org/isbn/978-7-111-00000-1-M.jpg", dto.CoverURL)
+}
+
+func TestDiscoveryOnlyReturnsChineseBooksWithCoverOrISBN(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{})
+	visible := model.BookWork{Title: "中文书", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	noCover := model.BookWork{Title: "另一本书", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	latin := model.BookWork{Title: "English Book", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	for _, work := range []*model.BookWork{&visible, &noCover, &latin} {
+		require.NoError(t, db.Create(work).Error)
+	}
+	require.NoError(t, db.Create(&model.BookEdition{WorkID: visible.ID, Title: visible.Title, ISBN13: "9787111000001", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
+	require.NoError(t, db.Create(&model.BookEdition{WorkID: noCover.ID, Title: noCover.Title, LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
+	require.NoError(t, db.Create(&model.BookEdition{WorkID: latin.ID, Title: latin.Title, CoverURL: "https://example.test/cover.jpg", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
+
+	service := NewService(db)
+	items, total, err := service.SearchPublicCatalog(context.Background(), "", 20, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, items, 1)
+	require.Equal(t, visible.ID.String(), items[0].ID)
+
+	items, total, err = service.SearchPublicCatalog(context.Background(), "另一本书", 20, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, items, 1)
+	require.Equal(t, noCover.ID.String(), items[0].ID)
 }
 
 func TestPublicCatalogRoutesDoNotRequireAuthentication(t *testing.T) {

@@ -83,6 +83,18 @@ func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, 
 	query = strings.TrimSpace(query)
 	base := s.db.WithContext(ctx).Model(&model.BookWork{}).
 		Where("lifecycle_status = ? AND edit_status <> ?", model.BookLifecycleStatusActive, model.BookEditStatusClosed)
+	if query == "" {
+		// 发现页只展示可直接浏览的中文书目；搜索页仍保留完整公共书目。
+		base = base.Where("title ~ ?", `[一-龥]`).Where(`EXISTS (
+			SELECT 1 FROM book_editions discovery_editions
+			WHERE discovery_editions.work_id = book_works.id
+			  AND discovery_editions.lifecycle_status = ?
+			  AND discovery_editions.deleted_at IS NULL
+			  AND (NULLIF(discovery_editions.cover_url, '') IS NOT NULL
+			       OR NULLIF(discovery_editions.isbn13, '') IS NOT NULL
+			       OR NULLIF(discovery_editions.isbn10, '') IS NOT NULL)
+		)`, model.BookLifecycleStatusActive)
+	}
 	if query != "" {
 		pattern := "%" + escapeBookCatalogQuery(query) + "%"
 		// 分别匹配书名和作者，让两个分支各自使用索引；UNION 保证同时命中不重复。
