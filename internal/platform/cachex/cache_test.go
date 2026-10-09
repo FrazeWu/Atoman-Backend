@@ -179,6 +179,16 @@ func TestCacheInvalidateDiscardsSharedValues(t *testing.T) {
 	}
 }
 
+func TestCacheVersionUsesRedisNamespace(t *testing.T) {
+	t.Setenv("REDIS_NAMESPACE", "test")
+	store := &memoryCacheStore{values: make(map[string]string)}
+	cache := New[int](store, "atoman:cache:v1", time.Minute, time.Hour)
+	cache.Invalidate()
+	if _, ok := store.values["test:atoman:cache:v1:version"]; !ok {
+		t.Fatalf("version key was not namespaced: %#v", store.values)
+	}
+}
+
 func TestCacheInvalidationPreventsPendingLoadFromRestoringOldValue(t *testing.T) {
 	cache := New[int](nil, "pending-invalidate", time.Minute, time.Hour)
 	started := make(chan struct{})
