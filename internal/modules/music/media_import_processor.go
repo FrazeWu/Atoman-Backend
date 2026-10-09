@@ -1465,7 +1465,7 @@ func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayloa
 				text.WriteString(part.Text)
 			}
 			if value := strings.TrimSpace(text.String()); value != "" {
-				if (credit.Time == nil || *credit.Time >= 0) && !regexp.MustCompile(`^(?:作词|作曲|编曲|演唱|制作人|词|曲)\s*[:：]`).MatchString(value) {
+				if (credit.Time == nil || *credit.Time >= 0) && !regexp.MustCompile(`^(?:作词|作曲|编曲|演唱|制作人|母带|混音|录音|和声|监制|词|曲)\s*[:：]`).MatchString(value) {
 					continue
 				}
 				lines[index] = value

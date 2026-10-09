@@ -32,6 +32,17 @@ func TestLyricsPayloadFromFileAcceptsNonnegativeJSONCredits(t *testing.T) {
 	}
 }
 
+func TestLyricsPayloadFromFileAcceptsMasteringCreditJSON(t *testing.T) {
+	raw := "{\"t\":2880,\"c\":[{\"tx\":\"母带: \"},{\"tx\":\"kvyw\"}]}\n[00:03.60]轧轧!"
+	payload := lyricsPayloadFromFile("卡力老虎,周乘羽 - 太古飞.lrc", []byte(raw))
+	if payload.Format != "lrc" || !strings.Contains(payload.Content, "[by:母带: kvyw]") {
+		t.Fatalf("mastering credit was not normalized: %#v", payload)
+	}
+	if err := validateImportedLyrics("太古飞.lrc", payload); err != nil {
+		t.Fatalf("mastering credit LRC should be valid: %v", err)
+	}
+}
+
 func TestLyricsPayloadFromFileKeepsUntimedInstrumentCreditsAsPlain(t *testing.T) {
 	raw := "{\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"张智\"}]}\n笛子：周昇\n吉他&冬不拉：叶尔波利\n键盘&人声：张智"
 	payload := lyricsPayloadFromFile("张智 - 阿尔金山.lrc", []byte(raw))
