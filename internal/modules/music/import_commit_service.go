@@ -963,6 +963,9 @@ func persistAlbumImportTrackLyrics(tx *gorm.DB, actorID, songID uuid.UUID, paylo
 	if input.EditSummary == "" {
 		input.EditSummary = "添加歌词"
 	}
+	if err := normalizeImportedTimedLyrics(&input); err != nil {
+		return err
+	}
 	lines, err := prepareLyricsSave(tx, songID, &input)
 	if err != nil {
 		return err

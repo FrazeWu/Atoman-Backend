@@ -438,6 +438,28 @@ func TestPersistAlbumImportTrackLyricsCreatesInitialHistory(t *testing.T) {
 	}
 }
 
+func TestPersistAlbumImportTrackLyricsSortsDescendingTimestamps(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return persistAlbumImportTrackLyrics(tx, user.ID, song.ID, &AlbumImportTrackLyricsPayload{
+			Content:     "[00:10.00]Later\n[00:02.00]First",
+			Translation: "[00:10.00]后一句\n[00:02.00]第一句",
+			Format:      "lrc", Language: "zh-CN", EditSummary: "导入歌词",
+		}, "local")
+	})
+	if err != nil {
+		t.Fatalf("persist descending imported lyrics: %v", err)
+	}
+	lyrics, err := svc.GetSongLyrics(user, song.ID)
+	if err != nil {
+		t.Fatalf("load normalized imported lyrics: %v", err)
+	}
+	if len(lyrics.Lines) != 2 || lyrics.Lines[0].Text != "First" || lyrics.Lines[1].Text != "Later" ||
+		lyrics.Lines[0].Translation != "第一句" || lyrics.Lines[1].Translation != "后一句" {
+		t.Fatalf("imported lyrics were not sorted with translations: %#v", lyrics.Lines)
+	}
+}
+
 func TestSaveSongLyricsUpdatesTranslationAndTimingIndependently(t *testing.T) {
 	svc, _, user, song := newLyricsTestService(t)
 	first, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{

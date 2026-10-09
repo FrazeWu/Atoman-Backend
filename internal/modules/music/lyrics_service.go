@@ -627,6 +627,24 @@ func hasDescendingLyricTime(lines []ParsedLyricLine) bool {
 	return false
 }
 
+func normalizeImportedTimedLyrics(input *SaveLyricsInput) error {
+	if strings.TrimSpace(input.Format) != "lrc" {
+		return nil
+	}
+	lines, err := ParseLyricLines(input.Content, input.Translation, input.Format)
+	if err != nil {
+		return err
+	}
+	sort.SliceStable(lines, func(i, j int) bool {
+		if lines[i].TimeMS == nil || lines[j].TimeMS == nil {
+			return false
+		}
+		return *lines[i].TimeMS < *lines[j].TimeMS
+	})
+	input.Content, input.Translation = serializeParsedLyrics(lines, input.Format)
+	return nil
+}
+
 func modelLinesToParsed(lines []model.MusicSongLyricLine) []ParsedLyricLine {
 	parsed := make([]ParsedLyricLine, 0, len(lines))
 	for _, line := range lines {
