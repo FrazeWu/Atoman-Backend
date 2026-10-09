@@ -54,15 +54,15 @@ func (c *redisRecommendationCache) Set(ctx context.Context, key string, value st
 
 func recommendationCacheKey(kind string, mode recommendation.Mode, category, theme, language, search string, page, pageSize int) string {
 	encode := func(value string) string { return url.QueryEscape(strings.TrimSpace(value)) }
-	return fmt.Sprintf(
+	return redisx.Key(fmt.Sprintf(
 		"atoman:feed:recommendation:v2:%s:%s:%s:%s:%s:%s:%d:%d",
 		encode(kind), encode(string(mode)), encode(category), encode(theme), encode(language), encode(search), page, pageSize,
-	)
+	))
 }
 
 func curatedSourceCacheKey(language string) string {
 	language = strings.ToLower(strings.TrimSpace(language))
-	return "atoman:feed:recommendation:sources:v2:" + url.QueryEscape(language)
+	return redisx.Key("feed:recommendation:sources:v2:" + url.QueryEscape(language))
 }
 
 func marshalRecommendationCacheEntry(entry recommendationCacheEntry) (string, error) {
@@ -136,7 +136,7 @@ func writeCachedRecommendation[T any](s *Service, key string, value T, freshTTL 
 func loadCachedRecommendation[T any](s *Service, key string, freshTTL time.Duration, load func() (T, error)) (T, error) {
 	if s.recommendationCache != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
-		version, _ := s.recommendationCache.Get(ctx, "atoman:feed:recommendation:version")
+		version, _ := s.recommendationCache.Get(ctx, redisx.Key("feed:recommendation:version"))
 		cancel()
 		if version != "" {
 			key += ":" + version
@@ -174,7 +174,7 @@ func (s *Service) InvalidateRecommendations() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
-	_ = s.recommendationCache.Set(ctx, "atoman:feed:recommendation:version", uuid.NewString(), 0)
+	_ = s.recommendationCache.Set(ctx, redisx.Key("feed:recommendation:version"), uuid.NewString(), 0)
 }
 
 func (s *Service) listCuratedRecommendationSources(language string) ([]ExploreSourceRow, error) {

@@ -134,5 +134,5 @@ func redisInt64(value interface{}) (int64, bool) {
 
 func redisWindowKey(key string) string {
 	digest := sha256.Sum256([]byte(key))
-	return "atoman:ratelimit:v1:" + hex.EncodeToString(digest[:])
+	return redisx.Key("ratelimit:v1:" + hex.EncodeToString(digest[:]))
 }
