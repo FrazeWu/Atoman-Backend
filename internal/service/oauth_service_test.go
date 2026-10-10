@@ -174,6 +174,17 @@ func TestOAuthServiceBeginStoresHashedStateAndPKCE(t *testing.T) {
 	}
 }
 
+func TestSanitizeOAuthReturnToRejectsBackslashOpenRedirects(t *testing.T) {
+	for _, raw := range []string{"/\\\\evil.example", "/\\evil.example/path", "\\\\evil.example"} {
+		if got := sanitizeOAuthReturnTo(raw); got != "/" {
+			t.Fatalf("sanitizeOAuthReturnTo(%q) = %q, want /", raw, got)
+		}
+	}
+	if got := sanitizeOAuthReturnTo("/posts?tab=latest"); got != "/posts?tab=latest" {
+		t.Fatalf("sanitizeOAuthReturnTo preserved path = %q", got)
+	}
+}
+
 func TestOAuthServiceCallbackLogsInLinkedIdentityOnce(t *testing.T) {
 	db := newOAuthServiceTestDB(t)
 	user := model.User{Username: "linked-user", Email: "linked@example.com", Password: "hash", Role: "user", IsActive: true}

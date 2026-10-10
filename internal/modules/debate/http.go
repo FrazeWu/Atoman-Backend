@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"atoman/internal/middleware"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -18,7 +19,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	topics := group.Group("/debate/topics")
 	topics.GET("", h.list)
-	topics.POST("", h.create)
+	topics.POST("", middleware.RequireSiteFeature(service.db, "debate", "debate.create"), h.create)
 	topics.GET("/:id", h.get)
 	topics.PUT("/:id", h.save)
 	topics.POST("/:id/archive", h.archive)

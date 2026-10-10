@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +25,49 @@ type UserProfileInput struct {
 	Bio         *string `json:"bio"`
 	Website     *string `json:"website"`
 	Location    *string `json:"location"`
+}
+
+const (
+	maxProfileDisplayNameBytes = 120
+	maxProfileAvatarURLBytes   = 2048
+	maxProfileBioBytes         = 20000
+	maxProfileWebsiteBytes     = 2048
+	maxProfileLocationBytes    = 200
+)
+
+func validateUserProfileInput(input UserProfileInput) error {
+	fields := []struct {
+		name  string
+		value *string
+		limit int
+	}{
+		{"display_name", input.DisplayName, maxProfileDisplayNameBytes},
+		{"avatar_url", input.AvatarURL, maxProfileAvatarURLBytes},
+		{"bio", input.Bio, maxProfileBioBytes},
+		{"website", input.Website, maxProfileWebsiteBytes},
+		{"location", input.Location, maxProfileLocationBytes},
+	}
+	for _, field := range fields {
+		if field.value != nil && len(strings.TrimSpace(*field.value)) > field.limit {
+			return fmt.Errorf("%s exceeds %d bytes", field.name, field.limit)
+		}
+	}
+	for _, field := range []struct {
+		name  string
+		value *string
+	}{
+		{"avatar_url", input.AvatarURL},
+		{"website", input.Website},
+	} {
+		if field.value == nil || strings.TrimSpace(*field.value) == "" {
+			continue
+		}
+		parsed, err := url.ParseRequestURI(strings.TrimSpace(*field.value))
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return fmt.Errorf("%s must be an http or https URL", field.name)
+		}
+	}
+	return nil
 }
 
 // UserSettingsInput represents the request body for updating user settings
@@ -300,6 +345,10 @@ func UpdateUserProfile(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input UserProfileInput
 		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := validateUserProfileInput(input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

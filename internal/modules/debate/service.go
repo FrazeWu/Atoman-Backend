@@ -3,6 +3,7 @@ package debate
 import (
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
@@ -18,6 +19,14 @@ import (
 )
 
 const debateContentType = "debate"
+
+const (
+	maxDebateTitleLength       = 200
+	maxDebateDescriptionLength = 5000
+	maxDebateContentLength     = 200000
+	maxDebateTags              = 30
+	maxDebateTagLength         = 80
+)
 
 type Service struct {
 	db        *gorm.DB
@@ -192,11 +201,25 @@ func normalizedSnapshot(title, description, content string, tags []string) (Deba
 	if refs, err := resourceref.Parse(title); err != nil || len(refs) > 0 {
 		return DebateSnapshot{}, apperr.BadRequest("debate.title_reference", "Title cannot contain resource references")
 	}
+	if utf8.RuneCountInString(title) > maxDebateTitleLength {
+		return DebateSnapshot{}, apperr.BadRequest("validation.invalid_request", "title is too long")
+	}
+	description = strings.TrimSpace(description)
+	content = strings.TrimSpace(content)
+	if utf8.RuneCountInString(description) > maxDebateDescriptionLength || utf8.RuneCountInString(content) > maxDebateContentLength {
+		return DebateSnapshot{}, apperr.BadRequest("validation.invalid_request", "wiki content is too long")
+	}
+	if len(tags) > maxDebateTags {
+		return DebateSnapshot{}, apperr.BadRequest("validation.invalid_request", "too many tags")
+	}
 	cleanTags := make([]string, 0, len(tags))
 	for _, tag := range tags {
 		if tag = strings.TrimSpace(tag); tag != "" {
+			if utf8.RuneCountInString(tag) > maxDebateTagLength {
+				return DebateSnapshot{}, apperr.BadRequest("validation.invalid_request", "tag is too long")
+			}
 			cleanTags = append(cleanTags, tag)
 		}
 	}
-	return DebateSnapshot{Title: title, Description: strings.TrimSpace(description), Content: strings.TrimSpace(content), Tags: cleanTags}, nil
+	return DebateSnapshot{Title: title, Description: description, Content: content, Tags: cleanTags}, nil
 }
