@@ -102,7 +102,7 @@ func TestCommitFirstAlbumPublishesReferencedOwnedDrafts(t *testing.T) {
 
 func TestCleanupExpiredArtistDraftsDeletesOnlyUnreferencedDrafts(t *testing.T) {
 	_, db, user := newMusicTestService(t)
-	old := time.Now().Add(-8 * 24 * time.Hour)
+	old := time.Now().Add(-32 * 24 * time.Hour)
 	orphan := model.Artist{Name: "Expired Orphan", EntryStatus: artistEntryDraft, CreatedBy: &user.ID}
 	referenced := model.Artist{Name: "Referenced Draft", EntryStatus: artistEntryDraft, CreatedBy: &user.ID}
 	member := model.Artist{Name: "Member Draft", EntryStatus: artistEntryDraft, CreatedBy: &user.ID}

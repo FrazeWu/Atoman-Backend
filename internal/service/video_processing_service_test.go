@@ -60,6 +60,9 @@ func (s *previewObjectStoreFake) PutObject(input *s3.PutObjectInput) (*s3.PutObj
 }
 
 func TestFFmpegPreviewGeneratorUploadsR2CoverAndThumbnails(t *testing.T) {
+	if encoders, err := exec.Command("ffmpeg", "-encoders").Output(); err != nil || (!bytes.Contains(encoders, []byte("libwebp")) && !bytes.Contains(encoders, []byte(" webp "))) {
+		t.Skip("ffmpeg does not support webp encoder")
+	}
 	workingDir := t.TempDir()
 	sourcePath := workingDir + "/source.mp4"
 	if output, err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", sourcePath).CombinedOutput(); err != nil {
