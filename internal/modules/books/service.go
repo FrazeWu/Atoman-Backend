@@ -17,7 +17,7 @@ type Service struct {
 }
 
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db, catalogCounts: cachex.New[int64](cachex.FromEnv(), "atoman:books:counts:v1", time.Minute, 10*time.Minute)}
+	return &Service{db: db, catalogCounts: cachex.New[int64](cachex.FromEnv(), "atoman:books:counts:v2", time.Minute, 10*time.Minute)}
 }
 
 func (s *Service) InvalidateCatalog() { s.catalogCounts.Invalidate() }
