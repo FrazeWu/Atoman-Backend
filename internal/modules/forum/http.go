@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
@@ -25,10 +26,10 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/search", h.searchTopics)
 	group.GET("/topics", h.listTopics)
 	group.GET("/topics/:topicID", h.getTopic)
-	group.POST("/topics", h.createTopic)
+	group.POST("/topics", middleware.RequireSiteFeature(service.db, "forum", "topic.create"), h.createTopic)
 	group.PUT("/topics/:topicID", h.updateTopic)
 	group.DELETE("/topics/:topicID", h.deleteTopic)
-	group.POST("/category-requests", h.createCategoryRequest)
+	group.POST("/category-requests", middleware.RequireSiteFeature(service.db, "forum", "category.request"), h.createCategoryRequest)
 	group.GET("/drafts", h.listDrafts)
 	group.PUT("/drafts", h.saveDraft)
 	group.DELETE("/drafts", h.deleteDraftByContext)
