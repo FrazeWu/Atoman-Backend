@@ -19,6 +19,7 @@ func TestRunBooksMigrationCreatesIndependentCatalogAndPrivateResourceTables(t *t
 	for _, table := range []string{
 		"book_works",
 		"book_editions",
+		"book_publishers",
 		"book_people",
 		"book_contributions",
 		"book_sources",

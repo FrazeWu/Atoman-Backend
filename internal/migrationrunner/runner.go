@@ -487,7 +487,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.ArtistBookmark{}, &model.AlbumBookmark{}, &model.PlaylistBookmark{},
 		&model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicPlaybackSession{}, &model.MusicPlaybackProgress{}, &model.MusicSearchInteraction{}, &model.MusicRecommendationEvent{},
 		&model.Bookmark{}, &model.BookmarkFolder{}, &model.ChannelBookmark{}, &model.SiteSetting{}, &model.SiteVisitDaily{},
-		&model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookEdit{},
+		&model.BookWork{}, &model.BookEdition{}, &model.BookPublisher{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookEdit{},
 		&model.UserBookImport{}, &model.UserBookAsset{}, &model.UserBookReadingState{}, &model.UserBookShelf{},
 		&model.BookPublicationRequest{}, &model.BookRightsDeclaration{}, &model.PublishedBookAsset{}, &model.BookRating{}, &model.BookReview{}, &model.BookPostLink{},
 		&model.FeedSource{}, &model.OnboardingFeedRecommendation{}, &model.Subscription{},

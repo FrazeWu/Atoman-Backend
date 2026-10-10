@@ -1,7 +1,9 @@
 package migrations
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 
 	"atoman/internal/model"
 
@@ -14,6 +16,7 @@ func RunBooksMigration(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&model.BookWork{},
 		&model.BookEdition{},
+		&model.BookPublisher{},
 		&model.BookPerson{},
 		&model.BookContribution{},
 		&model.BookSource{},
@@ -33,6 +36,9 @@ func RunBooksMigration(db *gorm.DB) error {
 		&model.BookPublicationAppeal{},
 	); err != nil {
 		return fmt.Errorf("migrate books schema: %w", err)
+	}
+	if err := backfillBookPublishers(db); err != nil {
+		return fmt.Errorf("backfill book publishers: %w", err)
 	}
 	if err := db.Exec(`
 ALTER TABLE user_book_assets DROP CONSTRAINT IF EXISTS chk_user_book_assets_format;
@@ -63,6 +69,8 @@ CREATE INDEX IF NOT EXISTS idx_book_works_active_title
 ON book_works (title) WHERE lifecycle_status = 'active' AND edit_status <> 'closed' AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_book_editions_active_work
 ON book_editions (work_id, published_date, title) WHERE lifecycle_status = 'active' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_book_publishers_active_name
+ON book_publishers (name) WHERE lifecycle_status = 'active' AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_book_people_active_name
 ON book_people (name) WHERE lifecycle_status = 'active' AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_book_contributions_work_role
@@ -72,6 +80,33 @@ ON published_book_assets (status, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_book_sources_live_type_url
 ON book_sources (target_type, url) WHERE deleted_at IS NULL;`).Error; err != nil {
 		return fmt.Errorf("ensure book catalog indexes: %w", err)
+	}
+	return nil
+}
+
+func backfillBookPublishers(db *gorm.DB) error {
+	var names []string
+	if err := db.Table("book_editions").Where("publisher_id IS NULL AND NULLIF(BTRIM(publisher), '') IS NOT NULL").Distinct().Pluck("publisher", &names).Error; err != nil {
+		return err
+	}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		var publisher model.BookPublisher
+		err := db.Where("name = ? AND deleted_at IS NULL", name).First(&publisher).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			publisher = model.BookPublisher{Name: name, LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+			if err := db.Create(&publisher).Error; err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		if err := db.Model(&model.BookEdition{}).Where("publisher_id IS NULL AND publisher = ?", name).Update("publisher_id", publisher.ID).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }

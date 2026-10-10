@@ -101,6 +101,7 @@ type BookEdition struct {
 	Base
 	WorkID          uuid.UUID  `json:"work_id" gorm:"type:uuid;not null;index"`
 	Title           string     `json:"title,omitempty"`
+	PublisherID     *uuid.UUID `json:"publisher_id,omitempty" gorm:"type:uuid;index"`
 	Publisher       string     `json:"publisher,omitempty"`
 	ISBN10          string     `json:"isbn10,omitempty" gorm:"index"`
 	ISBN13          string     `json:"isbn13,omitempty" gorm:"index"`
@@ -117,6 +118,21 @@ type BookEdition struct {
 }
 
 func (BookEdition) TableName() string { return "book_editions" }
+
+// BookPublisher is a shared publisher entity. Its name is stored exactly as
+// submitted; language and translation are product concerns, not data rules.
+type BookPublisher struct {
+	Base
+	Name            string     `json:"name" gorm:"not null;index"`
+	SortName        string     `json:"sort_name,omitempty" gorm:"index"`
+	Description     string     `json:"description,omitempty" gorm:"type:text"`
+	LifecycleStatus string     `json:"lifecycle_status" gorm:"not null;default:'draft';index;check:chk_book_publishers_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
+	EditStatus      string     `json:"edit_status" gorm:"not null;default:'development';index;check:chk_book_publishers_edit_status,edit_status IN ('development','locked','closed')"`
+	CreatedBy       *uuid.UUID `json:"created_by,omitempty" gorm:"type:uuid;index"`
+	RedirectTo      *uuid.UUID `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
+}
+
+func (BookPublisher) TableName() string { return "book_publishers" }
 
 type BookPerson struct {
 	Base

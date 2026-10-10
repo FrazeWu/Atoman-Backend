@@ -15,12 +15,13 @@ import (
 )
 
 const (
-	bookWorkSourceTarget     = "book_work"
-	bookEditionSourceTarget  = "book_edition"
-	bookPersonSourceTarget   = "book_person"
-	openLibraryWorkSource    = "open_library_work"
-	openLibraryEditionSource = "open_library_edition"
-	openLibraryPersonSource  = "open_library_person"
+	bookWorkSourceTarget      = "book_work"
+	bookEditionSourceTarget   = "book_edition"
+	bookPersonSourceTarget    = "book_person"
+	bookPublisherSourceTarget = "book_publisher"
+	openLibraryWorkSource     = "open_library_work"
+	openLibraryEditionSource  = "open_library_edition"
+	openLibraryPersonSource   = "open_library_person"
 )
 
 // CatalogImportSummary describes changes made by a metadata import.
@@ -236,9 +237,14 @@ func findOrCreateBookEdition(tx *gorm.DB, record CatalogBook, workID uuid.UUID) 
 		date := time.Date(record.PublishedYear, time.January, 1, 0, 0, 0, 0, time.UTC)
 		publishedDate = &date
 	}
+	publisherID, err := findOrCreateBookPublisher(tx, record.Publisher)
+	if err != nil {
+		return model.BookEdition{}, false, err
+	}
 	edition := model.BookEdition{
 		WorkID:          workID,
 		Title:           strings.TrimSpace(record.Title),
+		PublisherID:     publisherID,
 		Publisher:       strings.TrimSpace(record.Publisher),
 		ISBN10:          strings.TrimSpace(record.ISBN10),
 		ISBN13:          strings.TrimSpace(record.ISBN13),
@@ -264,6 +270,24 @@ func findOrCreateBookEdition(tx *gorm.DB, record CatalogBook, workID uuid.UUID) 
 		return edition, false, fmt.Errorf("save edition source: %w", err)
 	}
 	return edition, true, nil
+}
+
+func findOrCreateBookPublisher(tx *gorm.DB, rawName string) (*uuid.UUID, error) {
+	name := strings.TrimSpace(rawName)
+	if name == "" || !tx.Migrator().HasTable(&model.BookPublisher{}) {
+		return nil, nil
+	}
+	var publisher model.BookPublisher
+	err := tx.Where("name = ? AND deleted_at IS NULL", name).First(&publisher).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		publisher = model.BookPublisher{Name: name, SortName: name, LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+		if err := tx.Create(&publisher).Error; err != nil {
+			return nil, fmt.Errorf("create publisher: %w", err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("find publisher: %w", err)
+	}
+	return &publisher.ID, nil
 }
 
 func findOrCreateBookPerson(tx *gorm.DB, author CatalogAuthor) (model.BookPerson, bool, error) {

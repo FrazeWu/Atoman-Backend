@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -49,6 +50,7 @@ type BookEditDTO struct {
 	Sources       []BookPublicSourceDTO `json:"sources"`
 	UpvoteCount   int64                 `json:"upvote_count"`
 	DownvoteCount int64                 `json:"downvote_count"`
+	Payload       map[string]any        `json:"payload"`
 }
 
 func (s *Service) SubmitBookEdit(user authctx.CurrentUser, input SubmitBookEditInput) (BookEditDTO, error) {
@@ -78,6 +80,9 @@ func (s *Service) SubmitBookEdit(user authctx.CurrentUser, input SubmitBookEditI
 		return BookEditDTO{}, apperr.BadRequest("validation.invalid_request", "edit payload is invalid")
 	}
 	if err := s.validateBookEditTarget(input.Type, input.EntityType, entityID, payload); err != nil {
+		return BookEditDTO{}, err
+	}
+	if err := validateBookRelations(s.db, input.EntityType, payload); err != nil {
 		return BookEditDTO{}, err
 	}
 	return s.createBookEdit(user, input, entityID, string(encoded))
@@ -219,6 +224,8 @@ func (s *Service) validateBookEditTarget(editType, entityType string, entityID *
 		table = "book_editions"
 	case "person":
 		table = "book_people"
+	case "publisher":
+		table = "book_publishers"
 	default:
 		return apperr.BadRequest("validation.invalid_request", "entity_type is invalid")
 	}
@@ -246,7 +253,7 @@ func validateBookEditInput(input SubmitBookEditInput) error {
 		return apperr.BadRequest("validation.invalid_request", "edit type is invalid")
 	}
 	switch input.EntityType {
-	case "work", "edition", "person":
+	case "work", "edition", "person", "publisher":
 	default:
 		return apperr.BadRequest("validation.invalid_request", "entity_type is invalid")
 	}
@@ -267,6 +274,9 @@ func (s *Service) applyBookEdit(tx *gorm.DB, edit *model.BookEdit) error {
 	if err := json.Unmarshal([]byte(edit.PayloadJSON), &payload); err != nil {
 		return apperr.Unprocessable("books.edit_payload_invalid", "Book edit payload is invalid")
 	}
+	if err := validateBookRelations(tx, edit.EntityType, payload); err != nil {
+		return err
+	}
 	if edit.Type == model.BookEditTypeMerge {
 		redirect, ok := payload["redirect_to"].(string)
 		if !ok {
@@ -285,9 +295,38 @@ func (s *Service) applyBookEdit(tx *gorm.DB, edit *model.BookEdit) error {
 		return apperr.BadRequest("validation.invalid_request", "entity_id is required")
 	}
 	updates := map[string]any{}
-	for _, field := range []string{"title", "subtitle", "original_title", "description", "language", "publisher", "isbn10", "isbn13", "binding", "cover_url", "name", "sort_name"} {
+	fields := map[string][]string{
+		"work":      {"title", "subtitle", "original_title", "description", "language"},
+		"edition":   {"title", "language", "publisher", "publisher_id", "isbn10", "isbn13", "binding", "cover_url", "page_count", "published_date"},
+		"person":    {"name", "sort_name", "description"},
+		"publisher": {"name", "sort_name", "description"},
+	}
+	for _, field := range fields[edit.EntityType] {
 		if value, ok := payload[field]; ok {
 			updates[field] = value
+		}
+	}
+	if edit.EntityType == "edition" {
+		if value, ok := updates["publisher"]; ok {
+			name := strings.TrimSpace(fmt.Sprint(value))
+			publisherID, err := findOrCreateBookPublisher(tx, name)
+			if err != nil {
+				return err
+			}
+			updates["publisher"] = name
+			updates["publisher_id"] = publisherID
+		}
+		if value, ok := updates["publisher_id"]; ok {
+			if value == "" || value == nil || value == (*uuid.UUID)(nil) {
+				updates["publisher_id"] = nil
+				updates["publisher"] = ""
+			} else {
+				var publisher model.BookPublisher
+				if err := tx.First(&publisher, "id = ?", value).Error; err != nil {
+					return err
+				}
+				updates["publisher"] = publisher.Name
+			}
 		}
 	}
 	if edit.Type == model.BookEditTypeRetire {
@@ -296,7 +335,8 @@ func (s *Service) applyBookEdit(tx *gorm.DB, edit *model.BookEdit) error {
 	if edit.Type == model.BookEditTypeReopen {
 		updates["lifecycle_status"] = model.BookLifecycleStatusActive
 	}
-	if len(updates) == 0 {
+	_, authorsChanged := payload["author_ids"]
+	if len(updates) == 0 && !(edit.EntityType == "work" && authorsChanged) {
 		return apperr.BadRequest("validation.invalid_request", "book edit has no changes")
 	}
 	var table string
@@ -307,9 +347,83 @@ func (s *Service) applyBookEdit(tx *gorm.DB, edit *model.BookEdit) error {
 		table = "book_editions"
 	case "person":
 		table = "book_people"
+	case "publisher":
+		table = "book_publishers"
 	}
-	if err := tx.Table(table).Where("id = ?", *edit.EntityID).Updates(updates).Error; err != nil {
-		return err
+	if len(updates) > 0 {
+		if err := tx.Table(table).Where("id = ?", *edit.EntityID).Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+	if edit.EntityType == "work" && authorsChanged {
+		ids, _ := bookAuthorIDs(payload["author_ids"])
+		if err := tx.Where("work_id = ? AND edition_id IS NULL AND role = ?", *edit.EntityID, "author").Delete(&model.BookContribution{}).Error; err != nil {
+			return err
+		}
+		for index, id := range ids {
+			if err := tx.Create(&model.BookContribution{WorkID: edit.EntityID, PersonID: id, Role: "author", Position: index + 1}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func bookAuthorIDs(value any) ([]uuid.UUID, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var values []string
+	if err := json.Unmarshal(encoded, &values); err != nil {
+		return nil, apperr.BadRequest("validation.invalid_request", "author_ids must be an array")
+	}
+	ids := make([]uuid.UUID, 0, len(values))
+	seen := map[uuid.UUID]bool{}
+	for _, value := range values {
+		id, err := uuid.Parse(value)
+		if err != nil || id == uuid.Nil || seen[id] {
+			return nil, apperr.BadRequest("validation.invalid_request", "author_ids is invalid")
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func validateBookRelations(db *gorm.DB, entityType string, payload map[string]any) error {
+	if entityType == "edition" {
+		if value, ok := payload["publisher_id"]; ok && value != nil && value != "" {
+			name, ok := value.(string)
+			id, err := uuid.Parse(name)
+			if !ok || err != nil || id == uuid.Nil {
+				return apperr.BadRequest("validation.invalid_request", "publisher_id is invalid")
+			}
+			var count int64
+			if err := db.Model(&model.BookPublisher{}).Where("id = ? AND lifecycle_status = ?", id, model.BookLifecycleStatusActive).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 1 {
+				return apperr.BadRequest("validation.invalid_request", "publisher is unavailable")
+			}
+		}
+	}
+	if entityType == "work" {
+		if value, ok := payload["author_ids"]; ok {
+			ids, err := bookAuthorIDs(value)
+			if err != nil {
+				return err
+			}
+			var count int64
+			if len(ids) > 0 {
+				if err := db.Model(&model.BookPerson{}).Where("id IN ? AND lifecycle_status = ?", ids, model.BookLifecycleStatusActive).Count(&count).Error; err != nil {
+					return err
+				}
+			}
+			if int(count) != len(ids) {
+				return apperr.BadRequest("validation.invalid_request", "author is unavailable")
+			}
+		}
 	}
 	return nil
 }
@@ -317,6 +431,17 @@ func (s *Service) applyBookEdit(tx *gorm.DB, edit *model.BookEdit) error {
 func createBookEntity(tx *gorm.DB, edit *model.BookEdit, payload map[string]any) error {
 	title, _ := payload["title"].(string)
 	name, _ := payload["name"].(string)
+	if edit.EntityType == "publisher" {
+		if strings.TrimSpace(name) == "" {
+			return apperr.BadRequest("validation.invalid_request", "publisher name is required")
+		}
+		publisher := model.BookPublisher{Name: name, SortName: payloadString(payload, "sort_name"), Description: payloadString(payload, "description"), LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment, CreatedBy: &edit.SubmittedBy}
+		if err := tx.Create(&publisher).Error; err != nil {
+			return err
+		}
+		edit.EntityID = &publisher.ID
+		return updateBookEditSourceTargets(tx, edit.ID, publisher.ID)
+	}
 	if edit.EntityType == "person" {
 		if strings.TrimSpace(name) == "" {
 			return apperr.BadRequest("validation.invalid_request", "person name is required")
@@ -343,7 +468,12 @@ func createBookEntity(tx *gorm.DB, edit *model.BookEdit, payload map[string]any)
 	if err != nil || workID == uuid.Nil {
 		return apperr.BadRequest("validation.invalid_request", "edition work_id is required")
 	}
-	edition := model.BookEdition{WorkID: workID, Title: strings.TrimSpace(title), Publisher: payloadString(payload, "publisher"), ISBN10: payloadString(payload, "isbn10"), ISBN13: payloadString(payload, "isbn13"), Language: payloadString(payload, "language"), Binding: payloadString(payload, "binding"), CoverURL: payloadString(payload, "cover_url"), LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment, CreatedBy: &edit.SubmittedBy}
+	publisherName := payloadString(payload, "publisher")
+	publisherID, err := findOrCreateBookPublisher(tx, publisherName)
+	if err != nil {
+		return err
+	}
+	edition := model.BookEdition{WorkID: workID, Title: strings.TrimSpace(title), PublisherID: publisherID, Publisher: publisherName, ISBN10: payloadString(payload, "isbn10"), ISBN13: payloadString(payload, "isbn13"), Language: payloadString(payload, "language"), Binding: payloadString(payload, "binding"), CoverURL: payloadString(payload, "cover_url"), LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment, CreatedBy: &edit.SubmittedBy}
 	if err := tx.Create(&edition).Error; err != nil {
 		return err
 	}
@@ -459,6 +589,7 @@ func payloadString(payload map[string]any, key string) string {
 
 func buildBookEditDTO(db *gorm.DB, edit model.BookEdit) BookEditDTO {
 	dto := BookEditDTO{ID: edit.ID.String(), Type: edit.Type, EntityType: edit.EntityType, Status: edit.Status, Reason: edit.Reason, DecisionNote: edit.DecisionNote, CreatedAt: edit.CreatedAt, ReviewedAt: edit.ReviewedAt, Sources: []BookPublicSourceDTO{}}
+	_ = json.Unmarshal([]byte(edit.PayloadJSON), &dto.Payload)
 	if edit.EntityID != nil {
 		dto.EntityID = edit.EntityID.String()
 	}
