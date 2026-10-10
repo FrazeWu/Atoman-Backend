@@ -15,8 +15,11 @@ import (
 )
 
 const (
-	artistEntryDraft = "draft"
-	artistEntryOpen  = "open"
+	artistEntryDraft         = "draft"
+	artistEntryOpen          = "open"
+	maxMusicSources          = 20
+	maxMusicSourceTitleBytes = 200
+	maxMusicSourceURLBytes   = 2048
 )
 
 func normalizeMusicSources(sources []Source, legacy string) ([]model.MusicSource, string, error) {
@@ -29,11 +32,20 @@ func normalizeMusicSources(sources []Source, legacy string) ([]model.MusicSource
 		}
 	}
 	normalized := make([]model.MusicSource, 0, len(sources))
+	if len(sources) > maxMusicSources {
+		return nil, "", apperr.BadRequest("validation.invalid_request", "too many sources")
+	}
 	for _, source := range sources {
 		title := strings.TrimSpace(source.Title)
 		url := strings.TrimSpace(source.URL)
 		if title == "" && url == "" {
 			continue
+		}
+		if len(title) > maxMusicSourceTitleBytes || len(url) > maxMusicSourceURLBytes {
+			return nil, "", apperr.BadRequest("validation.invalid_request", "source is too long")
+		}
+		if url != "" && !isHTTPMusicSource(url) {
+			return nil, "", apperr.BadRequest("validation.invalid_request", "source URL must be http or https")
 		}
 		sourceType := "text"
 		if url != "" {
