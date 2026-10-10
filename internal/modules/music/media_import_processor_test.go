@@ -43,6 +43,28 @@ func TestLyricsPayloadFromFileAcceptsMasteringCreditJSON(t *testing.T) {
 	}
 }
 
+func TestLyricsPayloadFromFileAcceptsExtendedJSONCredits(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"t":0,"c":[{"tx":"统筹：沈婉婷"}]}`,
+		`{"t":0,"c":[{"tx":"营销：ayu阿油"}]}`,
+		`{"t":0,"c":[{"tx":"企划/监制：Ocd"}]}`,
+		`{"t":0,"c":[{"tx":"版权所有者：工作室"}]}`,
+		`{"t":0,"c":[{"tx":"词曲版权所有者：工作室"}]}`,
+		`{"t":0,"c":[{"tx":"协力出品：WASTED"}]}`,
+		`{"t":0,"c":[{"tx":"出品：公司"}]}`,
+		`{"t":0,"c":[{"tx":"出品人：制作人"}]}`,
+		`{"t":0,"c":[{"tx":"童声录制：瞿灿星"}]}`,
+		"[00:03.60]歌词",
+	}, "\n")
+	payload := lyricsPayloadFromFile("extended-credits.lrc", []byte(raw))
+	if payload.Format != "lrc" || strings.Contains(payload.Content, `{"t":`) {
+		t.Fatalf("extended credits were not normalized: %#v", payload)
+	}
+	if err := validateImportedLyrics("extended-credits.lrc", payload); err != nil {
+		t.Fatalf("extended credit LRC should be valid: %v", err)
+	}
+}
+
 func TestLyricsPayloadFromFileKeepsUntimedInstrumentCreditsAsPlain(t *testing.T) {
 	raw := "{\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"张智\"}]}\n笛子：周昇\n吉他&冬不拉：叶尔波利\n键盘&人声：张智"
 	payload := lyricsPayloadFromFile("张智 - 阿尔金山.lrc", []byte(raw))
