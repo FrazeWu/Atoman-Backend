@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 	"regexp"
 	"strings"
@@ -18,15 +19,20 @@ import (
 	"atoman/internal/storage"
 
 	"github.com/google/uuid"
+	"github.com/nwaples/rardecode"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 const (
-	bookProcessingBatchSize           = 16
-	bookEPUBMaxEntries                = 10000
-	bookEPUBMaxExpandedBytes    int64 = 512 * 1024 * 1024
-	bookEPUBMaxCompressionRatio       = 100
+	bookProcessingBatchSize            = 16
+	bookEPUBMaxEntries                 = 10000
+	bookEPUBMaxExpandedBytes     int64 = 512 * 1024 * 1024
+	bookEPUBMaxCompressionRatio        = 100
+	bookComicMaxEntries                = 20000
+	bookComicMaxExpandedBytes    int64 = 512 * 1024 * 1024
+	bookComicMaxCompressionRatio       = 100
+	bookEbookConvertPathEnv            = "BOOK_EBOOK_CONVERT_PATH"
 )
 
 var bookWindowsAbsolutePath = regexp.MustCompile(`^[A-Za-z]:`)
@@ -99,8 +105,11 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 		"verified_at":    time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	var sha string
-	if asset.Format == "epub" {
-		temporary, err := os.CreateTemp("", "atoman-book-*.epub")
+	readerFormat := asset.Format
+	readerContentType := asset.ContentType
+	derivedObjectKey := asset.DerivedObjectKey
+	if asset.Format == "epub" || asset.Format == "cbz" || asset.Format == "cbr" || asset.Format == "mobi" || asset.Format == "azw3" {
+		temporary, err := os.CreateTemp("", "atoman-book-*"+path.Ext("."+asset.Format))
 		if err != nil {
 			return err
 		}
@@ -117,7 +126,53 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 		if err != nil {
 			return err
 		}
-		epubMetadata, validationErr := validateBookEPUB(file, asset.SizeBytes)
+		var structuralMetadata map[string]any
+		var validationErr error
+		switch asset.Format {
+		case "epub":
+			structuralMetadata, validationErr = validateBookEPUB(file, asset.SizeBytes)
+		case "cbz":
+			structuralMetadata, validationErr = validateBookCBZ(file, asset.SizeBytes)
+		case "cbr":
+			structuralMetadata, validationErr = validateBookCBR(temporaryName)
+		case "mobi", "azw3":
+			convertedPath, convertErr := convertBookToEPUB(ctx, temporaryName)
+			if convertErr != nil {
+				_ = file.Close()
+				return convertErr
+			}
+			defer os.Remove(convertedPath)
+			convertedFile, openErr := os.Open(convertedPath)
+			if openErr != nil {
+				_ = file.Close()
+				return openErr
+			}
+			convertedInfo, statErr := convertedFile.Stat()
+			if statErr == nil {
+				structuralMetadata, validationErr = validateBookEPUB(convertedFile, convertedInfo.Size())
+			}
+			if closeConvertedErr := convertedFile.Close(); validationErr == nil && statErr == nil {
+				validationErr = closeConvertedErr
+			}
+			if statErr != nil {
+				validationErr = statErr
+			}
+			if validationErr == nil {
+				convertedFile, openErr = os.Open(convertedPath)
+				if openErr != nil {
+					validationErr = openErr
+				} else {
+					convertedInfo, _ = convertedFile.Stat()
+					derivedObjectKey = storage.BuildBookPrivateDerivedObjectKey(asset.UserID.String(), asset.ImportID.String())
+					validationErr = s.bookUpload.PutObject(derivedObjectKey, "application/epub+zip", convertedFile, convertedInfo.Size())
+					_ = convertedFile.Close()
+				}
+			}
+			if validationErr == nil {
+				readerFormat = "epub"
+				readerContentType = "application/epub+zip"
+			}
+		}
 		closeErr := file.Close()
 		if validationErr == nil {
 			validationErr = closeErr
@@ -125,7 +180,7 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 		if validationErr != nil {
 			return validationErr
 		}
-		for key, value := range epubMetadata {
+		for key, value := range structuralMetadata {
 			metadata[key] = value
 		}
 	} else {
@@ -134,6 +189,7 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 			return err
 		}
 	}
+	metadata["reader_format"] = readerFormat
 	scanStatus := "structurally_clean"
 	if s.virusScanner != nil {
 		scanObject, scanErr := s.bookUpload.OpenObject(asset.ObjectKey)
@@ -148,6 +204,20 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 		if scanErr != nil {
 			return scanErr
 		}
+		if strings.TrimSpace(derivedObjectKey) != "" {
+			derivedObject, derivedErr := s.bookUpload.OpenObject(derivedObjectKey)
+			if derivedErr != nil {
+				return derivedErr
+			}
+			scanErr = s.virusScanner.Scan(ctx, derivedObject)
+			closeErr = derivedObject.Close()
+			if scanErr == nil {
+				scanErr = closeErr
+			}
+			if scanErr != nil {
+				return scanErr
+			}
+		}
 		scanStatus = "clean"
 	}
 	metadata["scan_status"] = scanStatus
@@ -156,7 +226,11 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 	if err != nil {
 		return err
 	}
-	if err := s.publishScannedBookAsset(ctx, asset); err != nil {
+	assetForPublish := asset
+	assetForPublish.Format = readerFormat
+	assetForPublish.ContentType = readerContentType
+	assetForPublish.DerivedObjectKey = derivedObjectKey
+	if err := s.publishScannedBookAsset(ctx, assetForPublish); err != nil {
 		return err
 	}
 
@@ -169,10 +243,13 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 			return nil
 		}
 		if err := tx.Model(&model.UserBookAsset{}).Where("id = ? AND processing_status = ?", assetID, model.BookAssetStatusProcessing).Updates(map[string]any{
-			"sha256":            sha,
-			"scan_status":       scanStatus,
-			"processing_status": model.BookAssetStatusPrivateAvailable,
-			"error_message":     "",
+			"sha256":             sha,
+			"format":             readerFormat,
+			"content_type":       readerContentType,
+			"derived_object_key": derivedObjectKey,
+			"scan_status":        scanStatus,
+			"processing_status":  model.BookAssetStatusPrivateAvailable,
+			"error_message":      "",
 		}).Error; err != nil {
 			return err
 		}
@@ -183,6 +260,42 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 			"error_message": "",
 		}).Error
 	})
+}
+
+func convertBookToEPUB(ctx context.Context, inputPath string) (string, error) {
+	converter := strings.TrimSpace(os.Getenv(bookEbookConvertPathEnv))
+	if converter == "" {
+		converter = "ebook-convert"
+	}
+	output, err := os.CreateTemp("", "atoman-book-converted-*.epub")
+	if err != nil {
+		return "", err
+	}
+	outputPath := output.Name()
+	if err := output.Close(); err != nil {
+		_ = os.Remove(outputPath)
+		return "", err
+	}
+	if err := os.Remove(outputPath); err != nil {
+		return "", err
+	}
+	command := exec.CommandContext(ctx, converter, inputPath, outputPath)
+	commandOutput, err := command.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(commandOutput))
+		if message != "" {
+			return "", fmt.Errorf("ebook conversion failed: %w: %s", err, message)
+		}
+		return "", fmt.Errorf("ebook conversion failed: %w", err)
+	}
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		return "", fmt.Errorf("ebook converter did not produce an EPUB: %w", err)
+	}
+	if info.Size() <= 0 || info.Size() > bookEPUBMaxExpandedBytes {
+		return "", errors.New("converted EPUB size is invalid")
+	}
+	return outputPath, nil
 }
 
 // publishScannedBookAsset makes a structurally and virus-scanned upload public.
@@ -198,7 +311,11 @@ func (s *Service) publishScannedBookAsset(ctx context.Context, source model.User
 
 	publishedID := uuid.New()
 	publicKey := storage.BuildBookPublishedObjectKey(publishedID.String(), source.Format)
-	if err := s.bookUpload.CopyObject(source.ObjectKey, publicKey, source.ContentType); err != nil {
+	sourceKey := source.ObjectKey
+	if strings.TrimSpace(source.DerivedObjectKey) != "" {
+		sourceKey = source.DerivedObjectKey
+	}
+	if err := s.bookUpload.CopyObject(sourceKey, publicKey, source.ContentType); err != nil {
 		return err
 	}
 
@@ -354,6 +471,130 @@ func validateBookEPUB(reader io.ReaderAt, size int64) (map[string]any, error) {
 		"rootfile":        rootfile,
 		"structural_scan": "structurally_clean",
 	}, nil
+}
+
+func validateBookCBZ(reader io.ReaderAt, size int64) (map[string]any, error) {
+	archive, err := zip.NewReader(reader, size)
+	if err != nil {
+		return nil, fmt.Errorf("invalid CBZ archive: %w", err)
+	}
+	if len(archive.File) == 0 || len(archive.File) > bookComicMaxEntries {
+		return nil, errors.New("CBZ entry count is invalid")
+	}
+	seen := make(map[string]struct{}, len(archive.File))
+	var totalExpanded int64
+	imageCount := 0
+	for _, entry := range archive.File {
+		clean, err := cleanBookArchivePath(entry.Name)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[clean]; exists {
+			return nil, fmt.Errorf("duplicate CBZ entry %q", entry.Name)
+		}
+		seen[clean] = struct{}{}
+		if entry.Flags&0x1 != 0 || entry.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("unsafe CBZ entry %q", entry.Name)
+		}
+		if entry.UncompressedSize64 > uint64(bookComicMaxExpandedBytes) {
+			return nil, errors.New("CBZ entry is too large")
+		}
+		if entry.CompressedSize64 == 0 && entry.UncompressedSize64 > 0 {
+			return nil, fmt.Errorf("invalid CBZ compression size for %q", entry.Name)
+		}
+		if entry.CompressedSize64 > 0 && entry.UncompressedSize64/entry.CompressedSize64 > bookComicMaxCompressionRatio {
+			return nil, fmt.Errorf("CBZ compression ratio is too high for %q", entry.Name)
+		}
+		if entry.UncompressedSize64 > uint64(bookComicMaxExpandedBytes)-uint64(totalExpanded) {
+			return nil, errors.New("CBZ expands beyond size limit")
+		}
+		totalExpanded += int64(entry.UncompressedSize64)
+		if !entry.FileInfo().IsDir() && isBookComicImage(clean) {
+			imageCount++
+		}
+	}
+	if imageCount == 0 {
+		return nil, errors.New("CBZ contains no supported comic images")
+	}
+	return map[string]any{
+		"entry_count":     len(archive.File),
+		"image_count":     imageCount,
+		"expanded_bytes":  totalExpanded,
+		"structural_scan": "structurally_clean",
+	}, nil
+}
+
+func validateBookCBR(filename string) (map[string]any, error) {
+	reader, err := rardecode.OpenReader(filename, "")
+	if err != nil {
+		return nil, fmt.Errorf("invalid CBR archive: %w", err)
+	}
+	defer reader.Close()
+	seen := make(map[string]struct{})
+	entryCount := 0
+	imageCount := 0
+	var totalExpanded int64
+	for {
+		header, nextErr := reader.Next()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			return nil, fmt.Errorf("invalid CBR archive: %w", nextErr)
+		}
+		entryCount++
+		if entryCount > bookComicMaxEntries {
+			return nil, errors.New("CBR entry count is invalid")
+		}
+		if header.UnPackedSize < 0 || header.PackedSize < 0 {
+			return nil, errors.New("invalid CBR entry size")
+		}
+		if header.PackedSize > 0 && header.UnPackedSize > header.PackedSize*bookComicMaxCompressionRatio {
+			return nil, fmt.Errorf("CBR compression ratio is too high for %q", header.Name)
+		}
+		clean, cleanErr := cleanBookArchivePath(header.Name)
+		if cleanErr != nil {
+			return nil, cleanErr
+		}
+		if header.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("unsafe CBR entry %q", header.Name)
+		}
+		if header.IsDir {
+			continue
+		}
+		if _, exists := seen[clean]; exists {
+			return nil, fmt.Errorf("duplicate CBR entry %q", header.Name)
+		}
+		seen[clean] = struct{}{}
+		if header.UnPackedSize > bookComicMaxExpandedBytes-totalExpanded {
+			return nil, errors.New("CBR expands beyond size limit")
+		}
+		totalExpanded += header.UnPackedSize
+		if isBookComicImage(clean) {
+			imageCount++
+		}
+		if _, copyErr := io.Copy(io.Discard, reader); copyErr != nil {
+			return nil, fmt.Errorf("read CBR entry %q: %w", header.Name, copyErr)
+		}
+	}
+	if imageCount == 0 {
+		return nil, errors.New("CBR contains no supported comic images")
+	}
+	return map[string]any{
+		"entry_count":     entryCount,
+		"image_count":     imageCount,
+		"expanded_bytes":  totalExpanded,
+		"structural_scan": "structurally_clean",
+	}, nil
+}
+
+func isBookComicImage(filename string) bool {
+	switch strings.ToLower(path.Ext(filename)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
+		return true
+	default:
+		return false
+	}
 }
 
 func cleanBookArchivePath(raw string) (string, error) {

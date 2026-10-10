@@ -35,6 +35,10 @@ func RunBooksMigration(db *gorm.DB) error {
 		return fmt.Errorf("migrate books schema: %w", err)
 	}
 	if err := db.Exec(`
+ALTER TABLE user_book_assets DROP CONSTRAINT IF EXISTS chk_user_book_assets_format;
+ALTER TABLE user_book_assets ADD CONSTRAINT chk_user_book_assets_format CHECK (format IN ('epub','pdf','txt','cbz','cbr'));
+ALTER TABLE published_book_assets DROP CONSTRAINT IF EXISTS chk_published_book_assets_format;
+ALTER TABLE published_book_assets ADD CONSTRAINT chk_published_book_assets_format CHECK (format IN ('epub','pdf','txt','cbz','cbr'));
 ALTER TABLE user_book_assets DROP CONSTRAINT IF EXISTS chk_user_book_assets_processing_status;
 ALTER TABLE user_book_assets ADD CONSTRAINT chk_user_book_assets_processing_status CHECK (processing_status IN ('pending_upload','uploading','uploaded','scanning','processing','metadata_ready','private_available','publication_requested','pending_review','failed','rejected','quarantined','removed'));`).Error; err != nil {
 		return fmt.Errorf("ensure book asset processing status constraint: %w", err)
