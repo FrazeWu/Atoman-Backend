@@ -38,6 +38,8 @@ const (
 	embeddedCoverMaxAspectRatio       = 1.25
 )
 
+var lrcJSONCreditPattern = regexp.MustCompile(`^(?:作词|作曲|编曲|演唱|制作人|母带|混音|录音|和声|监制|词|曲|统筹|营销|企划/监制|版权所有者|词曲版权所有者|协力出品|出品人|出品|童声录制|童声)\s*[:：]`)
+
 // MediaCommandRunner isolates external binaries so processing remains unit-testable.
 type MediaCommandRunner interface {
 	LookPath(string) (string, error)
@@ -1507,7 +1509,7 @@ func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayloa
 				text.WriteString(part.Text)
 			}
 			if value := strings.TrimSpace(text.String()); value != "" {
-				if (credit.Time == nil || *credit.Time >= 0) && !regexp.MustCompile(`^(?:作词|作曲|编曲|演唱|制作人|母带|混音|录音|和声|监制|词|曲)\s*[:：]`).MatchString(value) {
+				if (credit.Time == nil || *credit.Time >= 0) && !lrcJSONCreditPattern.MatchString(value) {
 					continue
 				}
 				lines[index] = value
