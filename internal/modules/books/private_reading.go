@@ -79,7 +79,11 @@ func (s *Service) OpenBookAsset(user authctx.CurrentUser, assetID uuid.UUID) (bo
 	if err != nil {
 		return bookPrivateObject{}, err
 	}
-	body, err := s.bookUpload.OpenObject(asset.ObjectKey)
+	objectKey := asset.ObjectKey
+	if strings.TrimSpace(asset.DerivedObjectKey) != "" {
+		objectKey = asset.DerivedObjectKey
+	}
+	body, err := s.bookUpload.OpenObject(objectKey)
 	if err != nil {
 		return bookPrivateObject{}, apperr.Wrap(http.StatusServiceUnavailable, "storage.unavailable", "Storage is unavailable", err)
 	}

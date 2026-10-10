@@ -31,6 +31,8 @@ func TestValidateBookUploadMetadataRequiresMatchingSupportedType(t *testing.T) {
 		{name: "txt", fileName: "novel.txt", contentType: "text/plain; charset=utf-8", size: 1024, format: "txt"},
 		{name: "cbz", fileName: "novel.cbz", contentType: "application/vnd.comicbook+zip", size: 1024, format: "cbz"},
 		{name: "cbr", fileName: "novel.cbr", contentType: "application/vnd.rar", size: 1024, format: "cbr"},
+		{name: "mobi", fileName: "novel.mobi", contentType: "application/x-mobipocket-ebook", size: 1024, format: "mobi"},
+		{name: "azw3", fileName: "novel.azw3", contentType: "application/vnd.amazon.mobi8-ebook", size: 1024, format: "azw3"},
 		{name: "spoofed extension", fileName: "novel.pdf", contentType: "text/plain", size: 1024, wantErr: true},
 		{name: "path traversal", fileName: "../novel.epub", contentType: "application/epub+zip", size: 1024, wantErr: true},
 		{name: "empty file", fileName: "novel.txt", contentType: "text/plain", size: 0, wantErr: true},
@@ -63,6 +65,15 @@ func TestInspectBookObjectAcceptsComicArchiveSignatures(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, sha, 64)
 		})
+	}
+}
+
+func TestInspectBookObjectAcceptsKindleBookSignatures(t *testing.T) {
+	for _, format := range []string{"mobi", "azw3"} {
+		body := strings.Repeat("0", 60) + "BOOKMOBI" + "converted"
+		sha, err := inspectBookObject(bytes.NewBufferString(body), format, int64(len(body)))
+		require.NoError(t, err)
+		require.Len(t, sha, 64)
 	}
 }
 

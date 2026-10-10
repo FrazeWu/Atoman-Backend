@@ -235,8 +235,8 @@ func validateBookUploadMetadata(fileName, contentType string, size int64) (strin
 		return "", apperr.BadRequest("books.upload_too_large", "book file size is invalid or exceeds the limit")
 	}
 	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
-	if format != "epub" && format != "pdf" && format != "txt" && format != "cbz" && format != "cbr" {
-		return "", apperr.BadRequest("books.unsupported_format", "only EPUB, PDF, TXT, CBZ, and CBR files are supported")
+	if format != "epub" && format != "pdf" && format != "txt" && format != "cbz" && format != "cbr" && format != "mobi" && format != "azw3" {
+		return "", apperr.BadRequest("books.unsupported_format", "only EPUB, PDF, TXT, CBZ, CBR, MOBI, and AZW3 files are supported")
 	}
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
 	if err != nil {
@@ -247,7 +247,8 @@ func validateBookUploadMetadata(fileName, contentType string, size int64) (strin
 		(format == "pdf" && mediaType == "application/pdf") ||
 		(format == "txt" && (mediaType == "text/plain" || mediaType == "text/markdown")) ||
 		(format == "cbz" && (mediaType == "application/zip" || mediaType == "application/vnd.comicbook+zip")) ||
-		(format == "cbr" && (mediaType == "application/vnd.rar" || mediaType == "application/x-rar-compressed"))
+		(format == "cbr" && (mediaType == "application/vnd.rar" || mediaType == "application/x-rar-compressed")) ||
+		((format == "mobi" || format == "azw3") && (mediaType == "application/x-mobipocket-ebook" || mediaType == "application/vnd.amazon.mobi8-ebook" || mediaType == "application/octet-stream"))
 	if !validType {
 		return "", apperr.BadRequest("books.content_type_mismatch", "book extension and content type do not match")
 	}
@@ -705,6 +706,10 @@ func inspectBookObject(reader io.Reader, format string, expectedSize int64) (str
 	case "cbr":
 		if !hasRARMagic(header[:headerSize]) {
 			return "", errors.New("CBR magic does not match")
+		}
+	case "mobi", "azw3":
+		if headerSize < 68 || !bytes.Equal(header[60:68], []byte("BOOKMOBI")) {
+			return "", fmt.Errorf("%s magic does not match", strings.ToUpper(format))
 		}
 	case "pdf":
 		if headerSize < 5 || !bytes.Equal(header[:5], []byte("%PDF-")) {
