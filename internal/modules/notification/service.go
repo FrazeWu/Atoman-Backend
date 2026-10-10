@@ -34,6 +34,13 @@ var notificationTypesByCategory = map[string][]string{
 
 var knownNotificationTypes = knownTypes()
 
+const (
+	maxNotificationPreferences = 100
+	maxNotificationEventType   = 64
+	maxNotificationSourceType  = 64
+	maxNotificationMuteReason  = 255
+)
+
 func knownTypes() []string {
 	types := make([]string, 0)
 	for _, category := range notificationCategories {
@@ -236,14 +243,25 @@ func (s *Service) SavePreferences(user authctx.CurrentUser, input SavePreference
 	if user.ID == uuid.Nil {
 		return nil, apperr.Unauthorized("Login required")
 	}
+	if len(input.Items) == 0 || len(input.Items) > maxNotificationPreferences {
+		return nil, apperr.BadRequest("notification.invalid_preference", "Too many notification preferences")
+	}
 	items := make([]model.NotificationPreference, 0, len(input.Items))
+	seen := make(map[string]struct{}, len(input.Items))
 	for _, item := range input.Items {
 		category := strings.TrimSpace(item.Category)
 		eventType := strings.TrimSpace(item.EventType)
-		if !validNotificationCategory(category) || eventType == "" {
+		if !validNotificationCategory(category) || !validNotificationType(eventType) || len(eventType) > maxNotificationEventType {
 			return nil, apperr.BadRequest("notification.invalid_preference", "Notification preference is invalid")
 		}
+		if _, exists := seen[eventType]; exists {
+			continue
+		}
+		seen[eventType] = struct{}{}
 		items = append(items, model.NotificationPreference{Category: category, EventType: eventType, Enabled: item.Enabled})
+	}
+	if len(items) == 0 {
+		return nil, apperr.BadRequest("notification.invalid_preference", "Notification preference is invalid")
 	}
 	if err := s.repo.SavePreferences(user.ID, items); err != nil {
 		return nil, err
@@ -264,7 +282,7 @@ func (s *Service) CreateMute(user authctx.CurrentUser, input CreateMuteInput) (m
 	}
 	input.SourceType = strings.TrimSpace(input.SourceType)
 	input.Reason = strings.TrimSpace(input.Reason)
-	if input.SourceType == "" || input.SourceID == uuid.Nil {
+	if input.SourceType == "" || len(input.SourceType) > maxNotificationSourceType || len(input.Reason) > maxNotificationMuteReason || input.SourceID == uuid.Nil {
 		return model.NotificationMute{}, apperr.BadRequest("notification.invalid_mute", "Notification source is invalid")
 	}
 	mute := model.NotificationMute{UserID: user.ID, SourceType: input.SourceType, SourceID: input.SourceID, Reason: input.Reason}
@@ -289,6 +307,18 @@ func notificationMetaString(meta model.NotificationMeta, key string) string {
 func validNotificationCategory(category string) bool {
 	for _, candidate := range notificationCategories {
 		if category == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func validNotificationType(notificationType string) bool {
+	if notificationType == announcementNotificationType {
+		return true
+	}
+	for _, candidate := range knownNotificationTypes {
+		if notificationType == candidate {
 			return true
 		}
 	}
