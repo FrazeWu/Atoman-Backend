@@ -699,7 +699,7 @@ func TestCompleteAlbumImportSessionQueuesOneJobIdempotently(t *testing.T) {
 	if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued || jobs[0].MaxAttempts != 3 {
+	if len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued || jobs[0].MaxAttempts != 2 {
 		t.Fatalf("expected one queued job, got %#v", jobs)
 	}
 }

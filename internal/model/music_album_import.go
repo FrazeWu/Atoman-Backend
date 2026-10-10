@@ -66,7 +66,7 @@ type AlbumImportJob struct {
 	Status        string     `json:"status" gorm:"not null;default:'queued'"`
 	Stage         string     `json:"stage" gorm:"not null;default:'queued'"`
 	Attempts      int        `json:"attempts" gorm:"not null;default:0"`
-	MaxAttempts   int        `json:"max_attempts" gorm:"not null;default:3"`
+	MaxAttempts   int        `json:"max_attempts" gorm:"not null;default:2"`
 	LockedBy      string     `json:"locked_by"`
 	LockedAt      *time.Time `json:"locked_at"`
 	HeartbeatAt   *time.Time `json:"heartbeat_at"`

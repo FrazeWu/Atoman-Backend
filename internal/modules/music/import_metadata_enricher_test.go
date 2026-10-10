@@ -27,8 +27,8 @@ func TestExternalAlbumMetadataEnricherPrefersLocalLyrics(t *testing.T) {
 	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
 		AlbumTitle: "Album",
 		Tracks:     []AlbumImportMetadataTrack{{Title: "First Song", Artist: "Artist", Origin: "01 - First Song.flac", DurationSeconds: 200}},
-		LocalLyrics: map[string]AlbumImportTrackLyricsPayload{
-			"first song": {Content: "[00:01.00]local", Format: "lrc"},
+		LocalLyrics: map[string][]AlbumImportTrackLyricsPayload{
+			"first song": {{Content: "[00:01.00]local", Format: "lrc"}},
 		},
 	})
 	if err != nil {
@@ -43,49 +43,49 @@ func TestExternalAlbumMetadataEnricherPrefersLocalLyrics(t *testing.T) {
 }
 
 func TestFindLocalLyricsUsesDiscAndTrackBeforeFileName(t *testing.T) {
-	lyrics, ok := findLocalLyrics(map[string]AlbumImportTrackLyricsPayload{
-		"01":             {Content: "ambiguous"},
-		"disc:2:track:1": {Content: "disc two"},
+	lyrics, ok := findLocalLyrics(map[string][]AlbumImportTrackLyricsPayload{
+		"01":             {{Content: "ambiguous"}},
+		"disc:2:track:1": {{Content: "disc two"}},
 	}, AlbumImportMetadataTrack{Title: "Song", Origin: "Disc 2/01.flac", DiscNumber: 2, TrackNumber: 1})
-	if !ok || lyrics.Content != "disc two" {
+	if !ok || len(lyrics) != 1 || lyrics[0].Content != "disc two" {
 		t.Fatalf("unexpected multidisc lyrics match: %#v, %v", lyrics, ok)
 	}
 }
 
 func TestLocalLyricsPreferLRCOverPlainTextForSameTrack(t *testing.T) {
-	lyrics := map[string]AlbumImportTrackLyricsPayload{}
+	lyrics := map[string][]AlbumImportTrackLyricsPayload{}
 	mergeLocalLyrics(lyrics, "disc:1:track:1", AlbumImportTrackLyricsPayload{Content: "plain", Format: "plain"})
 	mergeLocalLyrics(lyrics, "disc:1:track:1", AlbumImportTrackLyricsPayload{Content: "[00:01.00]synced", Format: "lrc"})
 	mergeLocalLyrics(lyrics, "disc:1:track:1", AlbumImportTrackLyricsPayload{Content: "later plain", Format: "plain"})
 
 	got, ok := findLocalLyrics(lyrics, AlbumImportMetadataTrack{DiscNumber: 1, TrackNumber: 1, Title: "Track"})
-	if !ok || got.Format != "lrc" || got.Content != "[00:01.00]synced" {
-		t.Fatalf("expected LRC to win over plain text, got %#v, ok=%v", got, ok)
+	if !ok || len(got) != 3 || got[0].Format != "plain" || got[1].Format != "lrc" || got[2].Content != "later plain" {
+		t.Fatalf("expected all local candidates, got %#v, ok=%v", got, ok)
 	}
 }
 
 func TestMergeLocalLyricsPrefersValidLRCOverPlainText(t *testing.T) {
-	lyrics := map[string]AlbumImportTrackLyricsPayload{}
+	lyrics := map[string][]AlbumImportTrackLyricsPayload{}
 	plain := AlbumImportTrackLyricsPayload{Content: "plain lyrics", Format: "plain"}
 	lrc := AlbumImportTrackLyricsPayload{Content: "[00:01.00]timed lyrics", Format: "lrc"}
 	invalidLRC := AlbumImportTrackLyricsPayload{Content: "untimed lyrics", Format: "lrc"}
 
 	mergeLocalLyrics(lyrics, "first song", plain)
 	mergeLocalLyrics(lyrics, "first song", lrc)
-	if got := lyrics["first song"]; got.Format != "lrc" || got.Content != lrc.Content {
-		t.Fatalf("expected valid LRC to replace plain lyrics, got %#v", got)
+	if got := lyrics["first song"]; len(got) != 2 || got[0] != plain || got[1] != lrc {
+		t.Fatalf("expected all valid local lyrics, got %#v", got)
 	}
 
 	mergeLocalLyrics(lyrics, "first song", plain)
-	if got := lyrics["first song"]; got.Format != "lrc" || got.Content != lrc.Content {
-		t.Fatalf("expected plain lyrics not to replace valid LRC, got %#v", got)
+	if got := lyrics["first song"]; len(got) != 2 {
+		t.Fatalf("expected duplicate plain lyrics to be ignored, got %#v", got)
 	}
 
-	lyrics = map[string]AlbumImportTrackLyricsPayload{}
+	lyrics = map[string][]AlbumImportTrackLyricsPayload{}
 	mergeLocalLyrics(lyrics, "first song", invalidLRC)
 	mergeLocalLyrics(lyrics, "first song", plain)
-	if got := lyrics["first song"]; got.Format != "plain" || got.Content != plain.Content {
-		t.Fatalf("expected plain lyrics to replace invalid LRC, got %#v", got)
+	if got := lyrics["first song"]; len(got) != 1 || got[0] != plain {
+		t.Fatalf("expected invalid LRC to be ignored, got %#v", got)
 	}
 }
 

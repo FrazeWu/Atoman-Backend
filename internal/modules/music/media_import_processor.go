@@ -627,7 +627,7 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	type localAudio struct{ path, relative string }
 	audios := []localAudio{}
 	cues := []string{}
-	localLyrics := map[string]AlbumImportTrackLyricsPayload{}
+	localLyrics := map[string][]AlbumImportTrackLyricsPayload{}
 	lyricErrors := []string{}
 	cover := ""
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -960,7 +960,7 @@ func (p *MediaImportProcessor) persistSourceTrackPreview(ctx context.Context, se
 	return p.persistDerivedMetadataResult(ctx, &session, files, result)
 }
 
-func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Context, sessionID uuid.UUID, localLyrics map[string]AlbumImportTrackLyricsPayload) error {
+func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Context, sessionID uuid.UUID, localLyrics map[string][]AlbumImportTrackLyricsPayload) error {
 	var session model.AlbumImportSession
 	if err := p.db.WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil {
 		return err
@@ -1076,8 +1076,12 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	}
 	for index := range rawResult.Tracks {
 		if lyrics, ok := findLocalLyrics(localLyrics, metadataTracks[index]); ok {
-			rawResult.Tracks[index].Lyrics = &lyrics
+			selected := lyrics[0]
+			rawResult.Tracks[index].Lyrics = &selected
 			rawResult.Tracks[index].LyricsSource = "local"
+			for _, candidate := range lyrics {
+				rawResult.Tracks[index].LyricsCandidates = appendLyricsCandidate(rawResult.Tracks[index].LyricsCandidates, "local", candidate)
+			}
 		}
 	}
 	if locked, _ := payload["metadata_match_locked"].(bool); locked || stringValue(payload["metadata_match_status"]) == "matching" {
@@ -1100,7 +1104,7 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	return p.persistDerivedMetadataResult(ctx, &session, files, result)
 }
 
-func (p *MediaImportProcessor) persistLockedMetadataTracks(ctx context.Context, session *model.AlbumImportSession, files []model.AlbumImportFile, localTracks []AlbumImportMetadataTrack, localLyrics map[string]AlbumImportTrackLyricsPayload, payload map[string]any) error {
+func (p *MediaImportProcessor) persistLockedMetadataTracks(ctx context.Context, session *model.AlbumImportSession, files []model.AlbumImportFile, localTracks []AlbumImportMetadataTrack, localLyrics map[string][]AlbumImportTrackLyricsPayload, payload map[string]any) error {
 	var derivedTracks []map[string]any
 	if raw, ok := payload["derived_tracks"]; ok {
 		encoded, _ := json.Marshal(raw)
@@ -1141,8 +1145,16 @@ func (p *MediaImportProcessor) persistLockedMetadataTracks(ctx context.Context, 
 		derived["audio_url"] = audioURL
 		derived["origin"] = file.RelativePath
 		if lyrics, ok := findLocalLyrics(localLyrics, AlbumImportMetadataTrack{Title: file.Title, DiscNumber: file.DiscNumber, TrackNumber: file.TrackNumber, Origin: file.RelativePath}); ok {
-			derived["lyrics"] = lyrics
+			derived["lyrics"] = lyrics[0]
 			derived["lyrics_source"] = "local"
+			localCandidates := make([]AlbumImportTrackLyricsCandidate, 0, len(lyrics))
+			for _, candidate := range lyrics {
+				localCandidates = append(localCandidates, AlbumImportTrackLyricsCandidate{
+					Source: "local", Content: candidate.Content, Translation: candidate.Translation,
+					Format: candidate.Format, Language: candidate.Language, EditSummary: candidate.EditSummary,
+				})
+			}
+			derived["lyrics_candidates"] = mergeImportLyricsCandidates(derived["lyrics_candidates"], localCandidates)
 		}
 	}
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1437,10 +1449,10 @@ func albumImportFileMetadata(file model.AlbumImportFile) map[string]any {
 	return metadata
 }
 
-func (p *MediaImportProcessor) loadUploadedLyrics(ctx context.Context, sessionID uuid.UUID) map[string]AlbumImportTrackLyricsPayload {
-	result := map[string]AlbumImportTrackLyricsPayload{}
+func (p *MediaImportProcessor) loadUploadedLyrics(ctx context.Context, sessionID uuid.UUID) map[string][]AlbumImportTrackLyricsPayload {
+	result := map[string][]AlbumImportTrackLyricsPayload{}
 	var files []model.AlbumImportFile
-	if p.store == nil || p.db.WithContext(ctx).Where("import_id = ? AND role = ? AND upload_status = ?", sessionID, AlbumImportFileRoleLyrics, AlbumImportFileUploadStatusUploaded).Find(&files).Error != nil {
+	if p.store == nil || p.db.WithContext(ctx).Where("import_id = ? AND role = ? AND upload_status = ?", sessionID, AlbumImportFileRoleLyrics, AlbumImportFileUploadStatusUploaded).Order("relative_path ASC, id ASC").Find(&files).Error != nil {
 		return result
 	}
 	for _, file := range files {
@@ -1520,16 +1532,18 @@ func validateImportedLyrics(name string, payload AlbumImportTrackLyricsPayload) 
 	return nil
 }
 
-func mergeLocalLyrics(lyrics map[string]AlbumImportTrackLyricsPayload, key string, candidate AlbumImportTrackLyricsPayload) {
+func mergeLocalLyrics(lyrics map[string][]AlbumImportTrackLyricsPayload, key string, candidate AlbumImportTrackLyricsPayload) {
 	key = strings.TrimSpace(key)
 	priority := localLyricsPriority(candidate)
 	if key == "" || priority == 0 {
 		return
 	}
-	current, exists := lyrics[key]
-	if !exists || priority > localLyricsPriority(current) {
-		lyrics[key] = candidate
+	for _, current := range lyrics[key] {
+		if current == candidate {
+			return
+		}
 	}
+	lyrics[key] = append(lyrics[key], candidate)
 }
 
 func localLyricsPriority(payload AlbumImportTrackLyricsPayload) int {
