@@ -65,7 +65,7 @@ func TestLyricsPayloadFromFileNormalizesJSONCredits(t *testing.T) {
 	if err != nil || len(lines) != 1 || *lines[0].TimeMS != 17270 {
 		t.Fatalf("unexpected parsed lyrics: %#v, %v", lines, err)
 	}
-	lyrics := map[string]AlbumImportTrackLyricsPayload{}
+	lyrics := map[string][]AlbumImportTrackLyricsPayload{}
 	mergeLocalLyrics(lyrics, normalizedLyricName("张智 - 依奇克里克.lrc"), payload)
 	if len(lyrics) != 1 {
 		t.Fatal("normalized lyrics were discarded")

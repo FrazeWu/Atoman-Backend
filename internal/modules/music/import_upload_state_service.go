@@ -211,7 +211,7 @@ func queueAlbumImportSession(tx *gorm.DB, session *model.AlbumImportSession, res
 	var job model.AlbumImportJob
 	err = tx.First(&job, "import_id = ?", session.ID).Error
 	if err == gorm.ErrRecordNotFound {
-		return tx.Create(&model.AlbumImportJob{ImportID: session.ID, Status: AlbumImportJobStatusQueued, Stage: AlbumImportStageQueued, MaxAttempts: 3}).Error
+		return tx.Create(&model.AlbumImportJob{ImportID: session.ID, Status: AlbumImportJobStatusQueued, Stage: AlbumImportStageQueued, MaxAttempts: 2}).Error
 	}
 	if err != nil || !resetJob {
 		return err
@@ -219,7 +219,7 @@ func queueAlbumImportSession(tx *gorm.DB, session *model.AlbumImportSession, res
 	job.Status = AlbumImportJobStatusQueued
 	job.Stage = AlbumImportStageQueued
 	job.Attempts = 0
-	job.MaxAttempts = 3
+	job.MaxAttempts = 2
 	job.LockedBy = ""
 	job.LockedAt = nil
 	job.HeartbeatAt = nil

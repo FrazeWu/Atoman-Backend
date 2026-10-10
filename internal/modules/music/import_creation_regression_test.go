@@ -206,16 +206,16 @@ func TestImportCreationRegressionLockedTracksBindAudioBySource(t *testing.T) {
 				t.Fatal(err)
 			}
 			localTracks := make([]AlbumImportMetadataTrack, 0, len(files))
-			localLyrics := map[string]AlbumImportTrackLyricsPayload{}
+			localLyrics := map[string][]AlbumImportTrackLyricsPayload{}
 			for _, file := range files {
 				localTracks = append(localTracks, AlbumImportMetadataTrack{
 					Title: file.Title, FileID: file.ID.String(), Origin: file.RelativePath,
 					DiscNumber: file.DiscNumber, TrackNumber: file.TrackNumber, AudioKey: file.PlaybackKey,
 				})
 				// 仅按原始曲序提供歌词，避免新曲序串歌被 origin 查找掩盖。
-				localLyrics[lyricSequenceKey(file.DiscNumber, file.TrackNumber)] = AlbumImportTrackLyricsPayload{
+				localLyrics[lyricSequenceKey(file.DiscNumber, file.TrackNumber)] = []AlbumImportTrackLyricsPayload{{
 					Content: file.Title + " 的本地歌词", Translation: file.Title + " 的翻译", Format: "plain", Language: "zh",
-				}
+				}}
 			}
 			derived := make([]map[string]any, 0, len(files))
 			for index, file := range []model.AlbumImportFile{files[1], files[0]} {
@@ -268,7 +268,7 @@ func TestImportCreationRegressionLockedTracksBindAudioBySource(t *testing.T) {
 					t.Fatal(err)
 				}
 				wantLyrics := localLyrics[lyricSequenceKey(file.DiscNumber, file.TrackNumber)]
-				if lyrics != wantLyrics || track["lyrics_source"] != "local" {
+				if len(wantLyrics) != 1 || lyrics != wantLyrics[0] || track["lyrics_source"] != "local" {
 					t.Errorf("新曲序第 %d 首没有保留来源文件的本地歌词：%#v，期望 %#v", index+1, track, wantLyrics)
 				}
 			}

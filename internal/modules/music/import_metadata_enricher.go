@@ -46,7 +46,7 @@ type AlbumImportMetadataInput struct {
 	Artists            []string
 	PreferredReleaseID string
 	Tracks             []AlbumImportMetadataTrack
-	LocalLyrics        map[string]AlbumImportTrackLyricsPayload
+	LocalLyrics        map[string][]AlbumImportTrackLyricsPayload
 	SkipLyrics         bool
 }
 
@@ -435,9 +435,12 @@ func (e *ExternalAlbumMetadataEnricher) enrichLyrics(ctx context.Context, input 
 		track := &result.Tracks[index]
 		original := metadataTrackForResult(input.Tracks, *track)
 		if lyrics, ok := findLocalLyrics(input.LocalLyrics, original); ok {
-			track.Lyrics = &lyrics
+			for _, candidate := range lyrics {
+				track.LyricsCandidates = appendLyricsCandidate(track.LyricsCandidates, "local", candidate)
+			}
+			selected := lyrics[0]
+			track.Lyrics = &selected
 			track.LyricsSource = "local"
-			track.LyricsCandidates = appendLyricsCandidate(track.LyricsCandidates, "local", lyrics)
 		}
 		lookupLyrics = append(lookupLyrics, index)
 	}
@@ -2024,7 +2027,7 @@ func (e *ExternalAlbumMetadataEnricher) getJSON(ctx context.Context, endpoint st
 	return json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(target)
 }
 
-func findLocalLyrics(lyrics map[string]AlbumImportTrackLyricsPayload, track AlbumImportMetadataTrack) (AlbumImportTrackLyricsPayload, bool) {
+func findLocalLyrics(lyrics map[string][]AlbumImportTrackLyricsPayload, track AlbumImportMetadataTrack) ([]AlbumImportTrackLyricsPayload, bool) {
 	keys := []string{}
 	if track.TrackNumber > 0 {
 		keys = append(keys, lyricSequenceKey(track.DiscNumber, track.TrackNumber))
@@ -2034,11 +2037,19 @@ func findLocalLyrics(lyrics map[string]AlbumImportTrackLyricsPayload, track Albu
 		keys = append(keys, fmt.Sprintf("%02d", track.TrackNumber), fmt.Sprintf("%d", track.TrackNumber))
 	}
 	for _, key := range keys {
-		if value, ok := lyrics[key]; ok && strings.TrimSpace(value.Content) != "" {
-			return value, true
+		if values, ok := lyrics[key]; ok {
+			valid := make([]AlbumImportTrackLyricsPayload, 0, len(values))
+			for _, value := range values {
+				if strings.TrimSpace(value.Content) != "" && localLyricsPriority(value) > 0 {
+					valid = append(valid, value)
+				}
+			}
+			if len(valid) > 0 {
+				return valid, true
+			}
 		}
 	}
-	return AlbumImportTrackLyricsPayload{}, false
+	return nil, false
 }
 
 func normalizedLyricName(value string) string {
