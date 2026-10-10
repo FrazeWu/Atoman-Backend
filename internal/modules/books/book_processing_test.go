@@ -71,6 +71,24 @@ func TestProcessBookAssetsMakesSafeEPUBPrivateAvailable(t *testing.T) {
 	require.Contains(t, processedImport.MetadataJSON, `"structural_scan": "structurally_clean"`)
 }
 
+func TestValidateBookCBZRequiresSafeImageEntries(t *testing.T) {
+	body := testCBZBody(t)
+	metadata, err := validateBookCBZ(bytes.NewReader(body), int64(len(body)))
+	require.NoError(t, err)
+	require.Equal(t, 1, metadata["image_count"])
+	require.Equal(t, "structurally_clean", metadata["structural_scan"])
+
+	var unsafe bytes.Buffer
+	archive := zip.NewWriter(&unsafe)
+	entry, createErr := archive.Create("../escape.jpg")
+	require.NoError(t, createErr)
+	_, writeErr := entry.Write([]byte("image"))
+	require.NoError(t, writeErr)
+	require.NoError(t, archive.Close())
+	_, err = validateBookCBZ(bytes.NewReader(unsafe.Bytes()), int64(unsafe.Len()))
+	require.Error(t, err)
+}
+
 func TestProcessBookAssetsRejectsUnsafeEPUBAndKeepsItUnreadable(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.UserBookImport{}, &model.UserBookAsset{})
@@ -197,6 +215,17 @@ func testEPUBBodyWithPath(t *testing.T, extraPath string) []byte {
 	content, err := archive.Create(extraPath)
 	require.NoError(t, err)
 	_, err = content.Write([]byte("content"))
+	require.NoError(t, err)
+	require.NoError(t, archive.Close())
+	return buffer.Bytes()
+}
+
+func testCBZBody(t *testing.T) []byte {
+	var buffer bytes.Buffer
+	archive := zip.NewWriter(&buffer)
+	entry, err := archive.Create("001.jpg")
+	require.NoError(t, err)
+	_, err = entry.Write([]byte("image"))
 	require.NoError(t, err)
 	require.NoError(t, archive.Close())
 	return buffer.Bytes()

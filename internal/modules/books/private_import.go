@@ -235,8 +235,8 @@ func validateBookUploadMetadata(fileName, contentType string, size int64) (strin
 		return "", apperr.BadRequest("books.upload_too_large", "book file size is invalid or exceeds the limit")
 	}
 	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(fileName)), ".")
-	if format != "epub" && format != "pdf" {
-		return "", apperr.BadRequest("books.unsupported_format", "only EPUB and PDF files are supported")
+	if format != "epub" && format != "pdf" && format != "txt" && format != "cbz" && format != "cbr" {
+		return "", apperr.BadRequest("books.unsupported_format", "only EPUB, PDF, TXT, CBZ, and CBR files are supported")
 	}
 	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
 	if err != nil {
@@ -244,7 +244,10 @@ func validateBookUploadMetadata(fileName, contentType string, size int64) (strin
 	}
 	mediaType = strings.ToLower(mediaType)
 	validType := (format == "epub" && (mediaType == "application/epub+zip" || mediaType == "application/zip")) ||
-		(format == "pdf" && mediaType == "application/pdf")
+		(format == "pdf" && mediaType == "application/pdf") ||
+		(format == "txt" && (mediaType == "text/plain" || mediaType == "text/markdown")) ||
+		(format == "cbz" && (mediaType == "application/zip" || mediaType == "application/vnd.comicbook+zip")) ||
+		(format == "cbr" && (mediaType == "application/vnd.rar" || mediaType == "application/x-rar-compressed"))
 	if !validType {
 		return "", apperr.BadRequest("books.content_type_mismatch", "book extension and content type do not match")
 	}
@@ -695,9 +698,13 @@ func inspectBookObject(reader io.Reader, format string, expectedSize int64) (str
 	}
 	var textValidator *utf8StreamValidator
 	switch format {
-	case "epub":
+	case "epub", "cbz":
 		if headerSize < 4 || !bytes.Equal(header[:4], []byte("PK\x03\x04")) {
-			return "", errors.New("EPUB magic does not match")
+			return "", fmt.Errorf("%s magic does not match", strings.ToUpper(format))
+		}
+	case "cbr":
+		if !hasRARMagic(header[:headerSize]) {
+			return "", errors.New("CBR magic does not match")
 		}
 	case "pdf":
 		if headerSize < 5 || !bytes.Equal(header[:5], []byte("%PDF-")) {
@@ -733,6 +740,10 @@ func inspectBookObject(reader io.Reader, format string, expectedSize int64) (str
 		return "", errors.New("book object size changed while reading")
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func hasRARMagic(header []byte) bool {
+	return bytes.HasPrefix(header, []byte("Rar!\x1A\x07\x00")) || bytes.HasPrefix(header, []byte("Rar!\x1A\x07\x01\x00"))
 }
 
 type utf8StreamValidator struct {

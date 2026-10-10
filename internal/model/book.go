@@ -206,7 +206,7 @@ type UserBookAsset struct {
 	UserID           uuid.UUID `json:"-" gorm:"type:uuid;not null;index"`
 	OriginalFilename string    `json:"-" gorm:"type:text;not null"`
 	ContentType      string    `json:"-" gorm:"not null"`
-	Format           string    `json:"-" gorm:"not null;index;check:chk_user_book_assets_format,format IN ('epub','pdf','txt')"`
+	Format           string    `json:"-" gorm:"not null;index;check:chk_user_book_assets_format,format IN ('epub','pdf','txt','cbz','cbr')"`
 	SizeBytes        int64     `json:"-" gorm:"not null"`
 	SHA256           string    `json:"-" gorm:"type:varchar(64);not null;index"`
 	ObjectKey        string    `json:"-" gorm:"type:text;not null"`
@@ -289,7 +289,7 @@ type PublishedBookAsset struct {
 	SourceAssetID        uuid.UUID  `json:"-" gorm:"type:uuid;not null;index"`
 	WorkID               *uuid.UUID `json:"work_id,omitempty" gorm:"type:uuid;index"`
 	EditionID            *uuid.UUID `json:"edition_id,omitempty" gorm:"type:uuid;index"`
-	Format               string     `json:"format" gorm:"not null;check:chk_published_book_assets_format,format IN ('epub','pdf','txt')"`
+	Format               string     `json:"format" gorm:"not null;check:chk_published_book_assets_format,format IN ('epub','pdf','txt','cbz','cbr')"`
 	ObjectKey            string     `json:"-" gorm:"type:text;not null"`
 	SHA256               string     `json:"-" gorm:"type:varchar(64);not null;index"`
 	Status               string     `json:"status" gorm:"not null;default:'pending_review';index;check:chk_published_book_assets_status,status IN ('pending_review','published','rejected','quarantined','removed')"`
