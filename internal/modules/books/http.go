@@ -104,7 +104,7 @@ func requireCurrentUser() gin.HandlerFunc {
 
 // createBookImport godoc
 // @Summary 创建私有电子书导入
-// @Description 创建用户隔离的 EPUB 或 PDF 分片上传会话。正文不会进入公共书目。
+// @Description 创建用户隔离的 EPUB、PDF、TXT、CBZ 或 CBR 分片上传会话。正文不会进入公共书目。
 // @Tags books-imports
 // @Accept json
 // @Produce json

@@ -28,7 +28,9 @@ func TestValidateBookUploadMetadataRequiresMatchingSupportedType(t *testing.T) {
 	}{
 		{name: "epub", fileName: "novel.epub", contentType: "application/epub+zip", size: 1024, format: "epub"},
 		{name: "pdf", fileName: "novel.pdf", contentType: "application/pdf", size: 1024, format: "pdf"},
-		{name: "unsupported text", fileName: "novel.txt", contentType: "text/plain; charset=utf-8", size: 1024, wantErr: true},
+		{name: "txt", fileName: "novel.txt", contentType: "text/plain; charset=utf-8", size: 1024, format: "txt"},
+		{name: "cbz", fileName: "novel.cbz", contentType: "application/vnd.comicbook+zip", size: 1024, format: "cbz"},
+		{name: "cbr", fileName: "novel.cbr", contentType: "application/vnd.rar", size: 1024, format: "cbr"},
 		{name: "spoofed extension", fileName: "novel.pdf", contentType: "text/plain", size: 1024, wantErr: true},
 		{name: "path traversal", fileName: "../novel.epub", contentType: "application/epub+zip", size: 1024, wantErr: true},
 		{name: "empty file", fileName: "novel.txt", contentType: "text/plain", size: 0, wantErr: true},
@@ -42,6 +44,24 @@ func TestValidateBookUploadMetadataRequiresMatchingSupportedType(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, test.format, format)
+		})
+	}
+}
+
+func TestInspectBookObjectAcceptsComicArchiveSignatures(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		format string
+		body   string
+	}{
+		{name: "cbz", format: "cbz", body: "PK\x03\x04comic"},
+		{name: "cbr4", format: "cbr", body: "Rar!\x1A\x07\x00comic"},
+		{name: "cbr5", format: "cbr", body: "Rar!\x1A\x07\x01\x00comic"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sha, err := inspectBookObject(bytes.NewBufferString(test.body), test.format, int64(len(test.body)))
+			require.NoError(t, err)
+			require.Len(t, sha, 64)
 		})
 	}
 }
