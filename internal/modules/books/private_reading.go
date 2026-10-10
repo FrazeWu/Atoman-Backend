@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -197,12 +198,16 @@ func validateBookReadingState(input SaveBookReadingStateInput) error {
 }
 
 func buildBookPrivateAssetDTO(asset model.UserBookAsset, bookImport model.UserBookImport) BookPrivateAssetDTO {
+	fileName := bookImport.OriginalFilename
+	if strings.TrimSpace(asset.DerivedObjectKey) != "" {
+		fileName = strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".epub"
+	}
 	return BookPrivateAssetDTO{
 		ID:               asset.ID.String(),
 		ImportID:         bookImport.ID.String(),
 		Title:            bookImport.Title,
 		Author:           bookImport.Author,
-		FileName:         asset.OriginalFilename,
+		FileName:         fileName,
 		Format:           asset.Format,
 		ContentType:      asset.ContentType,
 		Size:             asset.SizeBytes,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -406,7 +407,11 @@ func (s *Service) buildPublishedAssetDTO(ctx context.Context, asset model.Publis
 }
 
 func buildPublishedBookAssetDTO(asset model.PublishedBookAsset, source model.UserBookAsset) BookPublishedAssetDTO {
-	dto := BookPublishedAssetDTO{ID: asset.ID.String(), Format: asset.Format, FileName: source.OriginalFilename, ContentType: source.ContentType, Size: source.SizeBytes, Status: asset.Status, CreatedAt: asset.CreatedAt}
+	fileName := source.OriginalFilename
+	if strings.TrimSpace(source.DerivedObjectKey) != "" {
+		fileName = strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".epub"
+	}
+	dto := BookPublishedAssetDTO{ID: asset.ID.String(), Format: asset.Format, FileName: fileName, ContentType: source.ContentType, Size: source.SizeBytes, Status: asset.Status, CreatedAt: asset.CreatedAt}
 	if asset.WorkID != nil {
 		dto.WorkID = asset.WorkID.String()
 	}
