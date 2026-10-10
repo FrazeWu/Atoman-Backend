@@ -77,6 +77,14 @@ func TestInspectBookObjectAcceptsKindleBookSignatures(t *testing.T) {
 	}
 }
 
+func TestConvertedBookAssetExposesEPUBFilename(t *testing.T) {
+	asset := model.UserBookAsset{OriginalFilename: "novel.azw3", DerivedObjectKey: "books/private/reader.epub", Format: "epub", ContentType: "application/epub+zip"}
+	bookImport := model.UserBookImport{OriginalFilename: "novel.azw3", Format: "azw3"}
+	dto := buildBookPrivateAssetDTO(asset, bookImport)
+	require.Equal(t, "novel.epub", dto.FileName)
+	require.Equal(t, "epub", dto.Format)
+}
+
 func TestValidateBookPublicationEvidenceAcceptsOnlyPDFAndEPUB(t *testing.T) {
 	for _, test := range []struct {
 		name        string
