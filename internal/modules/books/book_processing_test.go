@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"testing"
 
 	"atoman/internal/model"
@@ -87,6 +88,29 @@ func TestValidateBookCBZRequiresSafeImageEntries(t *testing.T) {
 	require.NoError(t, archive.Close())
 	_, err = validateBookCBZ(bytes.NewReader(unsafe.Bytes()), int64(unsafe.Len()))
 	require.Error(t, err)
+}
+
+func TestConvertBookToEPUBUsesConfiguredConverter(t *testing.T) {
+	input, err := os.CreateTemp(t.TempDir(), "input-*.mobi")
+	require.NoError(t, err)
+	_, err = input.WriteString("converted")
+	require.NoError(t, err)
+	require.NoError(t, input.Close())
+
+	converter, err := os.CreateTemp(t.TempDir(), "converter-*.sh")
+	require.NoError(t, err)
+	_, err = converter.WriteString("#!/bin/sh\ncp \"$1\" \"$2\"\n")
+	require.NoError(t, err)
+	require.NoError(t, converter.Close())
+	require.NoError(t, os.Chmod(converter.Name(), 0o700))
+	t.Setenv(bookEbookConvertPathEnv, converter.Name())
+
+	output, err := convertBookToEPUB(context.Background(), input.Name())
+	require.NoError(t, err)
+	defer os.Remove(output)
+	content, err := os.ReadFile(output)
+	require.NoError(t, err)
+	require.Equal(t, []byte("converted"), content)
 }
 
 func TestProcessBookAssetsRejectsUnsafeEPUBAndKeepsItUnreadable(t *testing.T) {
