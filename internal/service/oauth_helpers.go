@@ -48,7 +48,7 @@ func sanitizeOAuthReturnTo(raw string) string {
 		return "/"
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(raw, "//") {
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(raw, "//") || strings.Contains(raw, `\`) {
 		return "/"
 	}
 	return raw
