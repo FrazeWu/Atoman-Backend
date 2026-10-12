@@ -91,15 +91,13 @@ func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, 
 	base := s.db.WithContext(ctx).Model(&model.BookWork{}).
 		Where("lifecycle_status = ? AND edit_status <> ?", model.BookLifecycleStatusActive, model.BookEditStatusClosed)
 	if query == "" {
-		// 发现页只展示可直接浏览的中文书目；搜索页仍保留完整公共书目。
+		// 发现页只展示有实际封面图的中文书目；仅有 ISBN 时留给搜索页展示。
 		base = base.Where("title ~ ?", `[一-龥]`).Where(`EXISTS (
 			SELECT 1 FROM book_editions discovery_editions
 			WHERE discovery_editions.work_id = book_works.id
 			  AND discovery_editions.lifecycle_status = ?
 			  AND discovery_editions.deleted_at IS NULL
-			  AND (NULLIF(discovery_editions.cover_url, '') IS NOT NULL
-			       OR NULLIF(discovery_editions.isbn13, '') IS NOT NULL
-			       OR NULLIF(discovery_editions.isbn10, '') IS NOT NULL)
+			  AND NULLIF(BTRIM(discovery_editions.cover_url), '') IS NOT NULL
 		)`, model.BookLifecycleStatusActive)
 	}
 	if query != "" {
@@ -384,7 +382,7 @@ func openLibraryISBNImageURL(isbn string) string {
 	if isbn == "" {
 		return ""
 	}
-	return "https://covers.openlibrary.org/isbn/" + url.PathEscape(isbn) + "-M.jpg"
+	return "https://covers.openlibrary.org/b/isbn/" + url.PathEscape(isbn) + "-M.jpg"
 }
 
 func buildBookPublicSources(sources []model.BookSource) []BookPublicSourceDTO {
