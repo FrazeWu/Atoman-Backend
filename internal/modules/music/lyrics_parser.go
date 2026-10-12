@@ -1,6 +1,7 @@
 package music
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -71,7 +72,7 @@ func parseTimedLRCLines(content string, keepEmpty bool) ([]ParsedLyricLine, erro
 	keyOccurrences := make(map[string]int)
 	for _, rawLine := range splitLyricLines(content) {
 		line := strings.TrimSpace(strings.TrimPrefix(rawLine, "\uFEFF"))
-		if line == "" || lrcMetadataPattern.MatchString(line) {
+		if line == "" || lrcMetadataPattern.MatchString(line) || isLRCJSONCreditMetadata(line) {
 			continue
 		}
 
@@ -111,6 +112,26 @@ func parseTimedLRCLines(content string, keepEmpty bool) ([]ParsedLyricLine, erro
 		})
 	}
 	return lines, nil
+}
+
+func isLRCJSONCreditMetadata(line string) bool {
+	var metadata struct {
+		Time    *int `json:"t"`
+		Content []struct {
+			Text string `json:"tx"`
+		} `json:"c"`
+	}
+	if json.Unmarshal([]byte(line), &metadata) != nil || metadata.Time == nil || len(metadata.Content) == 0 {
+		return false
+	}
+
+	firstText := strings.TrimSpace(metadata.Content[0].Text)
+	for _, prefix := range []string{"作词", "作曲", "编曲", "吉他", "未经著作权人许可"} {
+		if strings.HasPrefix(firstText, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func plainLyricLines(content string) []string {
