@@ -226,6 +226,25 @@ func TestParseLyricLinesLRCAcceptsMetadataAndSkipsEmptyOriginalMarkers(t *testin
 	}
 }
 
+func TestParseLyricLinesLRCSkipsNeteaseJSONCreditMetadata(t *testing.T) {
+	content := strings.Join([]string{
+		`{"t":0,"c":[{"tx":"作词: "},{"tx":"郭顶","li":"artist.jpg","or":"orpheus://nm/artist/home?id=2843&type=artist"}]}`,
+		`{"t":1000,"c":[{"tx":"作曲: "},{"tx":"郭顶"}]}`,
+		`{"t":2000,"c":[{"tx":"编曲：Terence Teo"}]}`,
+		`{"t":3000,"c":[{"tx":"吉他：Jamie Wilson"}]}`,
+		`{"t":4000,"c":[{"tx":"未经著作权人许可不得翻唱翻录或使用"}]}`,
+		"[00:30.69]你有没有想",
+	}, "\n")
+
+	lines, err := ParseLyricLines(content, "", "lrc")
+	if err != nil {
+		t.Fatalf("parse LRC with Netease credit metadata: %v", err)
+	}
+	if len(lines) != 1 || lines[0].Text != "你有没有想" || lines[0].TimeMS == nil || *lines[0].TimeMS != 30690 {
+		t.Fatalf("unexpected parsed lyric lines: %#v", lines)
+	}
+}
+
 func TestParseLyricLinesLRCRepeatedTimeAndTextGetsDistinctStableKeys(t *testing.T) {
 	content := "[00:01.00]A\n[00:01.00]A"
 	first, err := ParseLyricLines(content, "", "lrc")
