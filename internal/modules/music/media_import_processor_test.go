@@ -65,6 +65,27 @@ func TestLyricsPayloadFromFileAcceptsExtendedJSONCredits(t *testing.T) {
 	}
 }
 
+func TestLyricsPayloadFromFileAcceptsInstrumentCreditsAndFullWidthColon(t *testing.T) {
+	raw := strings.Join([]string{
+		`{"t":0,"c":[{"tx":"吉他: "},{"tx":"江建民"}]}`,
+		`{"t":1000,"c":[{"tx":"贝斯：钟兴民"}]}`,
+		`{"t":2000,"c":[{"tx":"合声: "},{"tx":"郭顶"}]}`,
+		`{"t":3000,"c":[{"tx":"未经著作权人许可不得翻唱翻录或使用"}]}`,
+		"[00:24.99]一直在焦躁的不安",
+	}, "\n")
+	payload := lyricsPayloadFromFile("郭顶.lrc", []byte(raw))
+	if payload.Format != "lrc" || strings.Contains(payload.Content, `{"t":`) {
+		t.Fatalf("JSON credits were not normalized: %#v", payload)
+	}
+	if err := validateImportedLyrics("郭顶.lrc", payload); err != nil {
+		t.Fatalf("valid credited LRC was rejected: %v", err)
+	}
+	lines, err := ParseLyricLines(payload.Content, "", payload.Format)
+	if err != nil || len(lines) != 1 || lines[0].Text != "一直在焦躁的不安" {
+		t.Fatalf("unexpected parsed lyrics: %#v, %v", lines, err)
+	}
+}
+
 func TestLyricsPayloadFromFileKeepsUntimedInstrumentCreditsAsPlain(t *testing.T) {
 	raw := "{\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"张智\"}]}\n笛子：周昇\n吉他&冬不拉：叶尔波利\n键盘&人声：张智"
 	payload := lyricsPayloadFromFile("张智 - 阿尔金山.lrc", []byte(raw))
