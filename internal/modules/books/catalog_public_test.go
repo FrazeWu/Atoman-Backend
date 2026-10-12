@@ -23,7 +23,7 @@ func TestCatalogCountCacheReusesQueriesAndInvalidatesAfterWrite(t *testing.T) {
 	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{})
 	work := model.BookWork{Title: "可见书籍", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
 	require.NoError(t, db.Create(&work).Error)
-	require.NoError(t, db.Create(&model.BookEdition{WorkID: work.ID, Title: work.Title, ISBN13: "9787111000001", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
+	require.NoError(t, db.Create(&model.BookEdition{WorkID: work.ID, Title: work.Title, ISBN13: "9787111000001", CoverURL: "https://example.test/cover.jpg", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
 	counts := 0
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register("test:count_catalog_queries", func(tx *gorm.DB) {
 		if strings.Contains(tx.Statement.SQL.String(), "count(*)") && tx.Statement.Table == "book_works" {
@@ -83,20 +83,22 @@ func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
 func TestPublicEditionUsesISBNCoverWhenImportedCoverIsMissing(t *testing.T) {
 	edition := model.BookEdition{Base: model.Base{ID: uuid.New()}, WorkID: uuid.New(), ISBN13: "978-7-111-00000-1"}
 	dto := buildBookPublicEditionDTO(edition)
-	require.Equal(t, "https://covers.openlibrary.org/isbn/978-7-111-00000-1-M.jpg", dto.CoverURL)
+	require.Equal(t, "https://covers.openlibrary.org/b/isbn/978-7-111-00000-1-M.jpg", dto.CoverURL)
 }
 
-func TestDiscoveryOnlyReturnsChineseBooksWithCoverOrISBN(t *testing.T) {
+func TestDiscoveryOnlyReturnsChineseBooksWithActualCover(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{})
 	visible := model.BookWork{Title: "中文书", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
 	noCover := model.BookWork{Title: "另一本书", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	isbnOnly := model.BookWork{Title: "仅有 ISBN 的书", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
 	latin := model.BookWork{Title: "English Book", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
-	for _, work := range []*model.BookWork{&visible, &noCover, &latin} {
+	for _, work := range []*model.BookWork{&visible, &noCover, &isbnOnly, &latin} {
 		require.NoError(t, db.Create(work).Error)
 	}
-	require.NoError(t, db.Create(&model.BookEdition{WorkID: visible.ID, Title: visible.Title, ISBN13: "9787111000001", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
+	require.NoError(t, db.Create(&model.BookEdition{WorkID: visible.ID, Title: visible.Title, ISBN13: "9787111000001", CoverURL: "https://example.test/cover.jpg", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
 	require.NoError(t, db.Create(&model.BookEdition{WorkID: noCover.ID, Title: noCover.Title, LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
+	require.NoError(t, db.Create(&model.BookEdition{WorkID: isbnOnly.ID, Title: isbnOnly.Title, ISBN13: "9787111000002", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
 	require.NoError(t, db.Create(&model.BookEdition{WorkID: latin.ID, Title: latin.Title, CoverURL: "https://example.test/cover.jpg", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error)
 
 	service := NewService(db)
@@ -111,6 +113,12 @@ func TestDiscoveryOnlyReturnsChineseBooksWithCoverOrISBN(t *testing.T) {
 	require.Equal(t, int64(1), total)
 	require.Len(t, items, 1)
 	require.Equal(t, noCover.ID.String(), items[0].ID)
+
+	items, total, err = service.SearchPublicCatalog(context.Background(), "仅有 ISBN", 20, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, items, 1, "搜索应保留仅有 ISBN、没有实际封面的书目")
+	require.Equal(t, isbnOnly.ID.String(), items[0].ID)
 }
 
 func TestPublicCatalogRoutesDoNotRequireAuthentication(t *testing.T) {
