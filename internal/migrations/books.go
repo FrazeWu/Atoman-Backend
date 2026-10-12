@@ -1,7 +1,6 @@
 package migrations
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +8,8 @@ import (
 
 	"gorm.io/gorm"
 )
+
+const bookPublisherBackfillBatchSize = 500
 
 // RunBooksMigration creates the book catalog and private/public asset tables.
 // Private content is intentionally kept in separate tables from public metadata.
@@ -89,24 +90,61 @@ func backfillBookPublishers(db *gorm.DB) error {
 	if err := db.Table("book_editions").Where("publisher_id IS NULL AND NULLIF(BTRIM(publisher), '') IS NOT NULL").Distinct().Pluck("publisher", &names).Error; err != nil {
 		return err
 	}
+
+	uniqueNames := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
-		var publisher model.BookPublisher
-		err := db.Where("name = ? AND deleted_at IS NULL", name).First(&publisher).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			publisher = model.BookPublisher{Name: name, LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
-			if err := db.Create(&publisher).Error; err != nil {
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		uniqueNames = append(uniqueNames, name)
+	}
+
+	for start := 0; start < len(uniqueNames); start += bookPublisherBackfillBatchSize {
+		end := min(start+bookPublisherBackfillBatchSize, len(uniqueNames))
+		batch := uniqueNames[start:end]
+		var existing []string
+		if err := db.Model(&model.BookPublisher{}).Where("name IN ? AND deleted_at IS NULL", batch).Pluck("name", &existing).Error; err != nil {
+			return err
+		}
+		existingNames := make(map[string]struct{}, len(existing))
+		for _, name := range existing {
+			existingNames[name] = struct{}{}
+		}
+
+		publishers := make([]model.BookPublisher, 0, len(batch))
+		for _, name := range batch {
+			if _, exists := existingNames[name]; exists {
+				continue
+			}
+			publishers = append(publishers, model.BookPublisher{
+				Name: name, LifecycleStatus: model.BookLifecycleStatusActive,
+				EditStatus: model.BookEditStatusDevelopment,
+			})
+		}
+		if len(publishers) > 0 {
+			if err := db.CreateInBatches(&publishers, bookPublisherBackfillBatchSize).Error; err != nil {
 				return err
 			}
-		} else if err != nil {
-			return err
-		}
-		if err := db.Model(&model.BookEdition{}).Where("publisher_id IS NULL AND publisher = ?", name).Update("publisher_id", publisher.ID).Error; err != nil {
-			return err
 		}
 	}
-	return nil
+	return db.Exec(`
+		UPDATE book_editions
+		SET publisher_id = (
+			SELECT id FROM book_publishers
+			WHERE name = TRIM(book_editions.publisher) AND deleted_at IS NULL
+			ORDER BY created_at, id
+			LIMIT 1
+		)
+		WHERE publisher_id IS NULL
+			AND NULLIF(TRIM(publisher), '') IS NOT NULL
+			AND EXISTS (
+				SELECT 1 FROM book_publishers
+				WHERE name = TRIM(book_editions.publisher) AND deleted_at IS NULL
+			)`).Error
 }
