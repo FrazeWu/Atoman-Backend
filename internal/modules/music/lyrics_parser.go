@@ -126,7 +126,7 @@ func isLRCJSONCreditMetadata(line string) bool {
 	}
 
 	firstText := strings.TrimSpace(metadata.Content[0].Text)
-	for _, prefix := range []string{"作词", "作曲", "编曲", "吉他", "未经著作权人许可"} {
+	for _, prefix := range []string{"作词", "作曲", "编曲", "吉他", "贝斯", "合声", "未经著作权人许可"} {
 		if strings.HasPrefix(firstText, prefix) {
 			return true
 		}
