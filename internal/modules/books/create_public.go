@@ -26,6 +26,7 @@ type CreatePublicBookInput struct {
 	Edition       struct {
 		Title         string `json:"title,omitempty"`
 		Publisher     string `json:"publisher,omitempty"`
+		Producer      string `json:"producer,omitempty"`
 		ISBN10        string `json:"isbn10,omitempty"`
 		ISBN13        string `json:"isbn13,omitempty"`
 		Language      string `json:"language,omitempty"`
@@ -112,8 +113,13 @@ func (s *Service) CreatePublicBook(ctx context.Context, user authctx.CurrentUser
 		if err != nil {
 			return err
 		}
+		producerName := strings.TrimSpace(input.Edition.Producer)
+		producerID, err := findOrCreateBookProducer(tx, producerName)
+		if err != nil {
+			return err
+		}
 		edition := model.BookEdition{
-			WorkID: work.ID, Title: strings.TrimSpace(input.Edition.Title), PublisherID: publisherID, Publisher: publisherName,
+			WorkID: work.ID, Title: strings.TrimSpace(input.Edition.Title), PublisherID: publisherID, Publisher: publisherName, ProducerID: producerID, Producer: producerName,
 			ISBN10: strings.TrimSpace(input.Edition.ISBN10), ISBN13: strings.TrimSpace(input.Edition.ISBN13),
 			Language: strings.TrimSpace(input.Edition.Language), PublishedDate: publishedDate, PageCount: input.Edition.PageCount,
 			Binding: strings.TrimSpace(input.Edition.Binding), CoverURL: strings.TrimSpace(input.Edition.CoverURL),

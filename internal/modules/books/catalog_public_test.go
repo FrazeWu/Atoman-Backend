@@ -82,7 +82,7 @@ func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
 
 func TestPublicEditionUsesISBNCoverWhenImportedCoverIsMissing(t *testing.T) {
 	edition := model.BookEdition{Base: model.Base{ID: uuid.New()}, WorkID: uuid.New(), ISBN13: "978-7-111-00000-1"}
-	dto := buildBookPublicEditionDTO(edition)
+	dto := buildBookPublicEditionDTO(edition, nil, nil)
 	require.Equal(t, "https://covers.openlibrary.org/b/isbn/978-7-111-00000-1-M.jpg", dto.CoverURL)
 }
 
