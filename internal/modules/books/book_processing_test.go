@@ -18,10 +18,14 @@ import (
 
 func TestProcessBookAssetsMakesSafeEPUBPrivateAvailable(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.UserBookImport{}, &model.UserBookAsset{}, &model.PublishedBookAsset{})
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.UserBookImport{}, &model.UserBookAsset{}, &model.PublishedBookAsset{})
 	owner := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
 	importID := uuid.New()
 	assetID := uuid.New()
+	work := model.BookWork{Title: "已关联作品", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	require.NoError(t, db.Create(&work).Error)
+	edition := model.BookEdition{WorkID: work.ID, Title: "首版", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	require.NoError(t, db.Create(&edition).Error)
 	key := "books/private/test.epub"
 	body := testEPUBBody(t)
 	record := model.UserBookImport{
@@ -36,6 +40,8 @@ func TestProcessBookAssetsMakesSafeEPUBPrivateAvailable(t *testing.T) {
 		Status:             model.BookImportStatusScanning,
 		MetadataJSON:       "{}",
 		CompletedPartsJSON: "[]",
+		WorkID:             &work.ID,
+		EditionID:          &edition.ID,
 	}
 	asset := model.UserBookAsset{
 		Base:             model.Base{ID: assetID},
@@ -65,6 +71,10 @@ func TestProcessBookAssetsMakesSafeEPUBPrivateAvailable(t *testing.T) {
 	var published model.PublishedBookAsset
 	require.NoError(t, db.Where("source_asset_id = ?", assetID).First(&published).Error)
 	require.Equal(t, model.BookPublicationStatusPublished, published.Status)
+	require.NotNil(t, published.WorkID)
+	require.NotNil(t, published.EditionID)
+	require.Equal(t, work.ID, *published.WorkID)
+	require.Equal(t, edition.ID, *published.EditionID)
 	require.Contains(t, store.objects, published.ObjectKey)
 	var processedImport model.UserBookImport
 	require.NoError(t, db.First(&processedImport, "id = ?", importID).Error)

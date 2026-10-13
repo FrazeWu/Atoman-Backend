@@ -15,7 +15,7 @@ import (
 
 // createPublicWork godoc
 // @Summary 创建公共图书及首个版本
-// @Description 创建后立即进入公共目录；书目正文文件请通过私有电子书导入流程单独上传。
+// @Description 创建后立即进入公共目录；关联的电子书正文在安全处理完成后自动公开。
 // @Tags books-catalog
 // @Accept json
 // @Produce json

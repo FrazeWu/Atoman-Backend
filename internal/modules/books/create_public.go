@@ -12,9 +12,11 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type CreatePublicBookInput struct {
+	ImportID      string   `json:"import_id"`
 	Title         string   `json:"title"`
 	Subtitle      string   `json:"subtitle,omitempty"`
 	OriginalTitle string   `json:"original_title,omitempty"`
@@ -43,6 +45,10 @@ func (s *Service) CreatePublicBook(ctx context.Context, user authctx.CurrentUser
 	if title == "" {
 		return BookPublicWorkDTO{}, apperr.BadRequest("validation.invalid_request", "book title is required")
 	}
+	importID, err := uuid.Parse(strings.TrimSpace(input.ImportID))
+	if err != nil || importID == uuid.Nil {
+		return BookPublicWorkDTO{}, apperr.BadRequest("validation.invalid_request", "import_id is required")
+	}
 	if input.Edition.PageCount < 0 {
 		return BookPublicWorkDTO{}, apperr.BadRequest("validation.invalid_request", "page_count cannot be negative")
 	}
@@ -60,9 +66,37 @@ func (s *Service) CreatePublicBook(ctx context.Context, user authctx.CurrentUser
 			return BookPublicWorkDTO{}, apperr.BadRequest("validation.invalid_request", "source_url must be a valid HTTP(S) URL")
 		}
 	}
+	authorNames := make([]string, 0, len(input.Authors))
+	seenAuthors := make(map[string]struct{}, len(input.Authors))
+	for _, rawName := range input.Authors {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			continue
+		}
+		if _, exists := seenAuthors[name]; exists {
+			continue
+		}
+		seenAuthors[name] = struct{}{}
+		authorNames = append(authorNames, name)
+	}
 
 	var workID uuid.UUID
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var bookImport model.UserBookImport
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", importID, user.ID).First(&bookImport).Error; err != nil {
+			return bookImportNotFound(err)
+		}
+		if bookImport.WorkID != nil {
+			workID = *bookImport.WorkID
+			return nil
+		}
+		if bookImport.Status != model.BookImportStatusScanning && bookImport.Status != model.BookImportStatusMetadataReady {
+			return apperr.Unprocessable("books.import_not_ready", "Uploaded book is not ready to be added to the public catalog")
+		}
+		var sourceAsset model.UserBookAsset
+		if err := tx.Where("import_id = ? AND user_id = ?", bookImport.ID, user.ID).First(&sourceAsset).Error; err != nil {
+			return bookAssetNotFound(err)
+		}
 		work := model.BookWork{
 			Title: title, Subtitle: strings.TrimSpace(input.Subtitle), OriginalTitle: strings.TrimSpace(input.OriginalTitle),
 			Description: strings.TrimSpace(input.Description), Language: strings.TrimSpace(input.Language),
@@ -88,17 +122,20 @@ func (s *Service) CreatePublicBook(ctx context.Context, user authctx.CurrentUser
 		if err := tx.Create(&edition).Error; err != nil {
 			return err
 		}
+		bookImport.Title = title
+		bookImport.Author = strings.Join(authorNames, "、")
+		bookImport.WorkID = &work.ID
+		bookImport.EditionID = &edition.ID
+		if err := tx.Save(&bookImport).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.PublishedBookAsset{}).Where("source_asset_id = ?", sourceAsset.ID).Updates(map[string]any{
+			"work_id": work.ID, "edition_id": edition.ID,
+		}).Error; err != nil {
+			return err
+		}
 
-		seenAuthors := make(map[string]struct{}, len(input.Authors))
-		for _, rawName := range input.Authors {
-			name := strings.TrimSpace(rawName)
-			if name == "" {
-				continue
-			}
-			if _, exists := seenAuthors[name]; exists {
-				continue
-			}
-			seenAuthors[name] = struct{}{}
+		for index, name := range authorNames {
 			var person model.BookPerson
 			err := tx.Where("name = ? AND deleted_at IS NULL", name).First(&person).Error
 			if err == gorm.ErrRecordNotFound {
@@ -109,7 +146,7 @@ func (s *Service) CreatePublicBook(ctx context.Context, user authctx.CurrentUser
 			} else if err != nil {
 				return err
 			}
-			contribution := model.BookContribution{WorkID: &work.ID, PersonID: person.ID, Role: "author", Position: len(seenAuthors)}
+			contribution := model.BookContribution{WorkID: &work.ID, PersonID: person.ID, Role: "author", Position: index + 1}
 			if err := tx.Create(&contribution).Error; err != nil {
 				return err
 			}

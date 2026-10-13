@@ -761,6 +761,8 @@ definitions:
         type: array
       description:
         type: string
+      import_id:
+        type: string
       edition:
         properties:
           binding:
@@ -792,6 +794,9 @@ definitions:
         type: string
       title:
         type: string
+    required:
+    - import_id
+    - title
     type: object
   books.BookPublicationAppealDTO:
     properties:
@@ -12934,7 +12939,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 创建后立即进入公共目录；书目正文文件请通过私有电子书导入流程单独上传。
+      description: 创建后立即进入公共目录；关联的电子书正文在安全处理完成后自动公开。
       parameters:
       - description: 图书元数据
         in: body

@@ -304,7 +304,13 @@ func convertBookToEPUB(ctx context.Context, inputPath string) (string, error) {
 func (s *Service) publishScannedBookAsset(ctx context.Context, source model.UserBookAsset) error {
 	var existing model.PublishedBookAsset
 	if err := s.db.WithContext(ctx).Where("source_asset_id = ?", source.ID).First(&existing).Error; err == nil {
-		return nil
+		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var latestImport model.UserBookImport
+			if err := tx.First(&latestImport, "id = ?", source.ImportID).Error; err != nil {
+				return err
+			}
+			return tx.Model(&existing).Updates(map[string]any{"work_id": latestImport.WorkID, "edition_id": latestImport.EditionID}).Error
+		})
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
@@ -330,10 +336,20 @@ func (s *Service) publishScannedBookAsset(ctx context.Context, source model.User
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var current model.PublishedBookAsset
 		if err := tx.Where("source_asset_id = ?", source.ID).First(&current).Error; err == nil {
-			return nil
+			var latestImport model.UserBookImport
+			if err := tx.First(&latestImport, "id = ?", source.ImportID).Error; err != nil {
+				return err
+			}
+			return tx.Model(&current).Updates(map[string]any{"work_id": latestImport.WorkID, "edition_id": latestImport.EditionID}).Error
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
+		var latestImport model.UserBookImport
+		if err := tx.First(&latestImport, "id = ?", source.ImportID).Error; err != nil {
+			return err
+		}
+		published.WorkID = latestImport.WorkID
+		published.EditionID = latestImport.EditionID
 		return tx.Create(&published).Error
 	}); err != nil {
 		_ = s.bookUpload.DeleteObject(publicKey)

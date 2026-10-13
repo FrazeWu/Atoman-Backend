@@ -14,10 +14,16 @@ import (
 
 func TestCreatePublicBookCreatesVisibleWorkEditionAndSeparatePeople(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPublisher{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{}, &model.BookPostLink{}, &model.AuditLog{})
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPublisher{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{}, &model.BookPostLink{}, &model.AuditLog{}, &model.UserBookImport{}, &model.UserBookAsset{}, &model.PublishedBookAsset{})
 	user := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
 	service := NewService(db)
-	input := CreatePublicBookInput{Title: "书名", Language: "中文", Authors: []string{"作者甲", "作者乙", "作者甲"}, SourceURL: "https://example.test/book"}
+	bookImport := model.UserBookImport{UserID: user.ID, Title: "上传文件名", Format: "epub", Status: model.BookImportStatusScanning}
+	require.NoError(t, db.Create(&bookImport).Error)
+	sourceAsset := model.UserBookAsset{ImportID: bookImport.ID, UserID: user.ID, OriginalFilename: "book.epub", ContentType: "application/epub+zip", Format: "epub", SizeBytes: 100, SHA256: "source-hash", ObjectKey: "private/book.epub", ProcessingStatus: model.BookAssetStatusScanning}
+	require.NoError(t, db.Create(&sourceAsset).Error)
+	published := model.PublishedBookAsset{SourceAssetID: sourceAsset.ID, Format: "epub", ObjectKey: "public/book.epub", SHA256: "public-hash", Status: model.BookPublicationStatusPublished}
+	require.NoError(t, db.Create(&published).Error)
+	input := CreatePublicBookInput{ImportID: bookImport.ID.String(), Title: "书名", Language: "中文", Authors: []string{"作者甲", "作者乙", "作者甲"}, SourceURL: "https://example.test/book"}
 	input.Edition.Publisher = "Publisher Name"
 	input.Edition.ISBN13 = "9787111000001"
 	input.Edition.PublishedDate = "2026-10-13"
@@ -30,6 +36,16 @@ func TestCreatePublicBookCreatesVisibleWorkEditionAndSeparatePeople(t *testing.T
 	require.Equal(t, "Publisher Name", created.Editions[0].Publisher)
 	require.Len(t, created.Authors, 2)
 	require.Equal(t, []string{"作者甲", "作者乙"}, []string{created.Authors[0].Name, created.Authors[1].Name})
+	var linkedImport model.UserBookImport
+	require.NoError(t, db.First(&linkedImport, "id = ?", bookImport.ID).Error)
+	require.NotNil(t, linkedImport.WorkID)
+	require.Equal(t, created.ID, linkedImport.WorkID.String())
+	require.NotNil(t, linkedImport.EditionID)
+	var linkedAsset model.PublishedBookAsset
+	require.NoError(t, db.First(&linkedAsset, "id = ?", published.ID).Error)
+	require.NotNil(t, linkedAsset.WorkID)
+	require.NotNil(t, linkedAsset.EditionID)
+	require.Equal(t, created.ID, linkedAsset.WorkID.String())
 	var sourceCount int64
 	require.NoError(t, db.Model(&model.BookSource{}).Count(&sourceCount).Error)
 	require.EqualValues(t, 2, sourceCount)

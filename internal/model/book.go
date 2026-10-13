@@ -298,7 +298,7 @@ type BookRightsDeclaration struct {
 
 func (BookRightsDeclaration) TableName() string { return "book_rights_declarations" }
 
-// PublishedBookAsset is created independently after a publication request passes review.
+// PublishedBookAsset is the public copy created after upload safety processing.
 type PublishedBookAsset struct {
 	Base
 	PublicationRequestID uuid.UUID  `json:"-" gorm:"type:uuid;not null;index"`

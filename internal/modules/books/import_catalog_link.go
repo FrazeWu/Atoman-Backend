@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type LinkBookImportInput struct {
@@ -48,20 +49,30 @@ func (s *Service) LinkBookImportToCatalog(user authctx.CurrentUser, importID uui
 		}
 	}
 	var session model.UserBookImport
-	if err := s.db.Where("id = ? AND user_id = ?", importID, user.ID).First(&session).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return BookImportSessionDTO{}, bookImportNotFound(err)
+	var asset *model.UserBookAsset
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", importID, user.ID).First(&session).Error; err != nil {
+			return bookImportNotFound(err)
 		}
-		return BookImportSessionDTO{}, err
-	}
-	if session.Status == model.BookImportStatusDeleted {
-		return BookImportSessionDTO{}, apperr.NotFound("books.import_not_found", "Book import not found")
-	}
-	if err := s.db.Model(&session).Updates(map[string]any{"work_id": workID, "edition_id": editionID}).Error; err != nil {
-		return BookImportSessionDTO{}, err
-	}
-	session.WorkID, session.EditionID = workID, editionID
-	asset, err := s.findBookAsset(session.ID)
+		if session.Status == model.BookImportStatusDeleted {
+			return apperr.NotFound("books.import_not_found", "Book import not found")
+		}
+		session.WorkID, session.EditionID = workID, editionID
+		if err := tx.Model(&session).Updates(map[string]any{"work_id": workID, "edition_id": editionID}).Error; err != nil {
+			return err
+		}
+		var source model.UserBookAsset
+		if err := tx.Where("import_id = ? AND user_id = ?", session.ID, user.ID).First(&source).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		asset = &source
+		return tx.Model(&model.PublishedBookAsset{}).Where("source_asset_id = ?", source.ID).Updates(map[string]any{
+			"work_id": workID, "edition_id": editionID,
+		}).Error
+	})
 	if err != nil {
 		return BookImportSessionDTO{}, err
 	}

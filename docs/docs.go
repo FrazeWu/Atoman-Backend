@@ -5953,7 +5953,7 @@ const docTemplate = `{
                     {"BearerAuth": []},
                     {"CookieAuth": []}
                 ],
-                "description": "创建后立即进入公共目录；书目正文文件请通过私有电子书导入流程单独上传。",
+                "description": "创建后立即进入公共目录；关联的电子书正文在安全处理完成后自动公开。",
                 "consumes": ["application/json"],
                 "produces": ["application/json"],
                 "tags": ["books-catalog"],
@@ -29519,9 +29519,11 @@ const docTemplate = `{
         },
         "books.CreatePublicBookInput": {
             "type": "object",
+            "required": ["import_id", "title"],
             "properties": {
                 "authors": {"type": "array", "items": {"type": "string"}},
                 "description": {"type": "string"},
+                "import_id": {"type": "string"},
                 "edition": {
                     "type": "object",
                     "properties": {
