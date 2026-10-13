@@ -33,6 +33,11 @@ type BookPublicPublisherDTO struct {
 	Name string `json:"name"`
 }
 
+type BookPublicProducerDTO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type BookPublicPostDTO struct {
 	ID          string     `json:"id"`
 	Title       string     `json:"title"`
@@ -47,6 +52,9 @@ type BookPublicEditionDTO struct {
 	PublisherID   string                  `json:"publisher_id,omitempty"`
 	Publisher     string                  `json:"publisher,omitempty"`
 	PublisherInfo *BookPublicPublisherDTO `json:"publisher_info,omitempty"`
+	ProducerID    string                  `json:"producer_id,omitempty"`
+	Producer      string                  `json:"producer,omitempty"`
+	ProducerInfo  *BookPublicProducerDTO  `json:"producer_info,omitempty"`
 	ISBN10        string                  `json:"isbn10,omitempty"`
 	ISBN13        string                  `json:"isbn13,omitempty"`
 	Language      string                  `json:"language,omitempty"`
@@ -173,7 +181,7 @@ func (s *Service) GetPublicEdition(ctx context.Context, editionID uuid.UUID) (Bo
 		return BookPublicEditionDetailDTO{}, err
 	}
 	return BookPublicEditionDetailDTO{
-		Edition: buildBookPublicEditionDTO(edition, s.findBookPublisher(ctx, edition.PublisherID)),
+		Edition: buildBookPublicEditionDTO(edition, s.findBookPublisher(ctx, edition.PublisherID), s.findBookProducer(ctx, edition.ProducerID)),
 		Work:    work,
 		Sources: buildBookPublicSources(sources),
 	}, nil
@@ -242,6 +250,24 @@ func (s *Service) buildPublicWorkDTOs(ctx context.Context, works []model.BookWor
 			}
 		}
 	}
+	producers := make(map[uuid.UUID]model.BookProducer)
+	if s.db.Migrator().HasTable(&model.BookProducer{}) {
+		producerIDs := make([]uuid.UUID, 0, len(editions))
+		for _, edition := range editions {
+			if edition.ProducerID != nil {
+				producerIDs = append(producerIDs, *edition.ProducerID)
+			}
+		}
+		if len(producerIDs) > 0 {
+			var rows []model.BookProducer
+			if err := s.db.WithContext(ctx).Where("id IN ? AND lifecycle_status = ?", producerIDs, model.BookLifecycleStatusActive).Find(&rows).Error; err != nil {
+				return nil, err
+			}
+			for _, producer := range rows {
+				producers[producer.ID] = producer
+			}
+		}
+	}
 	var sources []model.BookSource
 	if includeSources {
 		if err := s.db.WithContext(ctx).Where("target_type IN ? AND target_id IN ?", []string{"work", "book_work"}, workIDs).Order("created_at ASC").Find(&sources).Error; err != nil {
@@ -295,7 +321,11 @@ func (s *Service) buildPublicWorkDTOs(ctx context.Context, works []model.BookWor
 				if edition.PublisherID != nil {
 					publisher = publishers[*edition.PublisherID]
 				}
-				dto.Editions = append(dto.Editions, buildBookPublicEditionDTO(edition, &publisher))
+				producer := producers[uuid.Nil]
+				if edition.ProducerID != nil {
+					producer = producers[*edition.ProducerID]
+				}
+				dto.Editions = append(dto.Editions, buildBookPublicEditionDTO(edition, &publisher, &producer))
 			}
 		}
 		if includeSources {
@@ -334,11 +364,7 @@ func escapeBookCatalogQuery(query string) string {
 	return strings.ReplaceAll(query, "_", `\_`)
 }
 
-func buildBookPublicEditionDTO(edition model.BookEdition, publishers ...*model.BookPublisher) BookPublicEditionDTO {
-	var publisher *model.BookPublisher
-	if len(publishers) > 0 {
-		publisher = publishers[0]
-	}
+func buildBookPublicEditionDTO(edition model.BookEdition, publisher *model.BookPublisher, producer *model.BookProducer) BookPublicEditionDTO {
 	coverURL := strings.TrimSpace(edition.CoverURL)
 	if coverURL == "" {
 		coverURL = openLibraryISBNImageURL(edition.ISBN13)
@@ -349,12 +375,17 @@ func buildBookPublicEditionDTO(edition model.BookEdition, publishers ...*model.B
 	dto := BookPublicEditionDTO{
 		ID: edition.ID.String(), WorkID: edition.WorkID.String(), Title: edition.Title,
 		PublisherID: uuidPointerString(edition.PublisherID), Publisher: edition.Publisher, ISBN10: edition.ISBN10, ISBN13: edition.ISBN13,
+		ProducerID: uuidPointerString(edition.ProducerID), Producer: edition.Producer,
 		Language: edition.Language, PublishedDate: edition.PublishedDate, PageCount: edition.PageCount,
 		Binding: edition.Binding, CoverURL: coverURL,
 	}
 	if publisher != nil && publisher.ID != uuid.Nil {
 		dto.Publisher = publisher.Name
 		dto.PublisherInfo = &BookPublicPublisherDTO{ID: publisher.ID.String(), Name: publisher.Name}
+	}
+	if producer != nil && producer.ID != uuid.Nil {
+		dto.Producer = producer.Name
+		dto.ProducerInfo = &BookPublicProducerDTO{ID: producer.ID.String(), Name: producer.Name}
 	}
 	return dto
 }
@@ -368,6 +399,17 @@ func (s *Service) findBookPublisher(ctx context.Context, id *uuid.UUID) *model.B
 		return nil
 	}
 	return &publisher
+}
+
+func (s *Service) findBookProducer(ctx context.Context, id *uuid.UUID) *model.BookProducer {
+	if id == nil || !s.db.Migrator().HasTable(&model.BookProducer{}) {
+		return nil
+	}
+	var producer model.BookProducer
+	if err := s.db.WithContext(ctx).Where("id = ? AND lifecycle_status = ?", *id, model.BookLifecycleStatusActive).First(&producer).Error; err != nil {
+		return nil
+	}
+	return &producer
 }
 
 func uuidPointerString(value *uuid.UUID) string {

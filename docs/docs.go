@@ -29385,12 +29385,28 @@ const docTemplate = `{
                 "publisher": {
                     "type": "string"
                 },
+                "producer": {
+                    "type": "string"
+                },
+                "producer_id": {
+                    "type": "string"
+                },
+                "producer_info": {
+                    "$ref": "#/definitions/books.BookPublicProducerDTO"
+                },
                 "title": {
                     "type": "string"
                 },
                 "work_id": {
                     "type": "string"
                 }
+            }
+        },
+        "books.BookPublicProducerDTO": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"}
             }
         },
         "books.BookPublicEditionDetailDTO": {
@@ -29535,6 +29551,7 @@ const docTemplate = `{
                         "page_count": {"type": "integer"},
                         "published_date": {"type": "string"},
                         "publisher": {"type": "string"},
+                        "producer": {"type": "string"},
                         "title": {"type": "string"}
                     }
                 },

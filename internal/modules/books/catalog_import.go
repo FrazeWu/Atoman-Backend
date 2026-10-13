@@ -290,6 +290,24 @@ func findOrCreateBookPublisher(tx *gorm.DB, rawName string) (*uuid.UUID, error) 
 	return &publisher.ID, nil
 }
 
+func findOrCreateBookProducer(tx *gorm.DB, rawName string) (*uuid.UUID, error) {
+	name := strings.TrimSpace(rawName)
+	if name == "" || !tx.Migrator().HasTable(&model.BookProducer{}) {
+		return nil, nil
+	}
+	var producer model.BookProducer
+	err := tx.Where("name = ? AND deleted_at IS NULL", name).First(&producer).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		producer = model.BookProducer{Name: name, SortName: name, LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+		if err := tx.Create(&producer).Error; err != nil {
+			return nil, fmt.Errorf("create producer: %w", err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("find producer: %w", err)
+	}
+	return &producer.ID, nil
+}
+
 func findOrCreateBookPerson(tx *gorm.DB, author CatalogAuthor) (model.BookPerson, bool, error) {
 	name := strings.TrimSpace(author.Name)
 	if name == "" {

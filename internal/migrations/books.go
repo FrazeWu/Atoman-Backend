@@ -18,6 +18,7 @@ func RunBooksMigration(db *gorm.DB) error {
 		&model.BookWork{},
 		&model.BookEdition{},
 		&model.BookPublisher{},
+		&model.BookProducer{},
 		&model.BookPerson{},
 		&model.BookContribution{},
 		&model.BookSource{},
@@ -40,6 +41,9 @@ func RunBooksMigration(db *gorm.DB) error {
 	}
 	if err := backfillBookPublishers(db); err != nil {
 		return fmt.Errorf("backfill book publishers: %w", err)
+	}
+	if err := seedBookOrganizations(db); err != nil {
+		return fmt.Errorf("seed book organizations: %w", err)
 	}
 	if err := db.Exec(`
 ALTER TABLE user_book_assets DROP CONSTRAINT IF EXISTS chk_user_book_assets_format;
@@ -83,6 +87,53 @@ ON book_sources (target_type, url) WHERE deleted_at IS NULL;`).Error; err != nil
 		return fmt.Errorf("ensure book catalog indexes: %w", err)
 	}
 	return nil
+}
+
+func seedBookOrganizations(db *gorm.DB) error {
+	for _, name := range []string{
+		"人民文学出版社", "商务印书馆", "中华书局", "生活·读书·新知三联书店", "人民出版社",
+		"上海译文出版社", "译林出版社", "作家出版社", "北京十月文艺出版社", "江苏凤凰文艺出版社",
+		"长江文艺出版社", "湖南文艺出版社", "浙江文艺出版社", "上海文艺出版社", "南海出版公司",
+		"广西师范大学出版社", "北京大学出版社", "清华大学出版社", "上海交通大学出版社", "复旦大学出版社",
+		"机械工业出版社", "电子工业出版社", "人民邮电出版社", "中信出版集团", "法律出版社",
+		"社会科学文献出版社", "人民教育出版社", "高等教育出版社", "教育科学出版社", "接力出版社",
+		"二十一世纪出版社集团", "天地出版社", "化学工业出版社", "北京联合出版公司", "新星出版社",
+	} {
+		if err := ensureBookPublisher(db, name); err != nil {
+			return err
+		}
+	}
+	for _, name := range []string{
+		"果麦文化", "磨铁图书", "读客文化", "新经典文化", "后浪出版公司",
+		"博集天卷", "时代华语", "青豆书坊", "浦睿文化", "湛庐文化",
+	} {
+		if err := ensureBookProducer(db, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureBookPublisher(db *gorm.DB, name string) error {
+	var count int64
+	if err := db.Model(&model.BookPublisher{}).Where("name = ? AND deleted_at IS NULL", name).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return db.Create(&model.BookPublisher{Name: name, SortName: name, LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error
+}
+
+func ensureBookProducer(db *gorm.DB, name string) error {
+	var count int64
+	if err := db.Model(&model.BookProducer{}).Where("name = ? AND deleted_at IS NULL", name).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return db.Create(&model.BookProducer{Name: name, SortName: name, LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}).Error
 }
 
 func backfillBookPublishers(db *gorm.DB) error {
