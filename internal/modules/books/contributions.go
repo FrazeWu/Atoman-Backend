@@ -111,6 +111,17 @@ func (s *Service) createBookEdit(user authctx.CurrentUser, input SubmitBookEditI
 				return err
 			}
 		}
+		if input.Type == model.BookEditTypeCreate {
+			if err := s.applyBookEdit(tx, &edit); err != nil {
+				return err
+			}
+			now := time.Now().UTC()
+			edit.Status = model.BookEditStatusApproved
+			edit.ReviewedAt = &now
+			if err := tx.Save(&edit).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -462,6 +473,8 @@ func createBookEntity(tx *gorm.DB, edit *model.BookEdit, payload map[string]any)
 			return err
 		}
 		edit.EntityID = &work.ID
+		attachWorkAuthors(tx, work.ID, edit.SubmittedBy, payload)
+		attachWorkEdition(tx, work, edit.SubmittedBy, payload)
 		return updateBookEditSourceTargets(tx, edit.ID, work.ID)
 	}
 	workID, err := uuid.Parse(payloadString(payload, "work_id"))
@@ -603,4 +616,172 @@ func buildBookEditDTO(db *gorm.DB, edit model.BookEdit) BookEditDTO {
 		}
 	}
 	return dto
+}
+
+type parsedAuthor struct {
+	Name string
+	Role string
+}
+
+func parseAuthorItem(raw string) parsedAuthor {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return parsedAuthor{}
+	}
+	roles := []string{"著", "绘", "译", "编", "摄影", "主编", "编著", "摄影师", "撰文", "绘制", "插画", "注", "校", "评"}
+	for _, r := range roles {
+		if strings.HasSuffix(trimmed, " "+r) || strings.HasSuffix(trimmed, "\t"+r) {
+			name := strings.TrimSpace(strings.TrimSuffix(trimmed, r))
+			roleCode := "author"
+			switch r {
+			case "绘", "绘制", "插画":
+				roleCode = "illustrator"
+			case "译":
+				roleCode = "translator"
+			case "编", "主编", "编著":
+				roleCode = "editor"
+			case "摄影", "摄影师":
+				roleCode = "photographer"
+			}
+			return parsedAuthor{Name: name, Role: roleCode}
+		}
+	}
+	return parsedAuthor{Name: trimmed, Role: "author"}
+}
+
+func extractAuthors(payload map[string]any) []parsedAuthor {
+	var results []parsedAuthor
+	if rawAuthors, ok := payload["authors"].([]any); ok && len(rawAuthors) > 0 {
+		for _, item := range rawAuthors {
+			switch v := item.(type) {
+			case string:
+				if p := parseAuthorItem(v); p.Name != "" {
+					results = append(results, p)
+				}
+			case map[string]any:
+				name, _ := v["name"].(string)
+				role, _ := v["role"].(string)
+				if name != "" {
+					roleCode := "author"
+					switch role {
+					case "绘", "illustrator":
+						roleCode = "illustrator"
+					case "译", "translator":
+						roleCode = "translator"
+					case "编", "editor":
+						roleCode = "editor"
+					case "摄影", "photographer":
+						roleCode = "photographer"
+					}
+					results = append(results, parsedAuthor{Name: strings.TrimSpace(name), Role: roleCode})
+				}
+			}
+		}
+	}
+	if len(results) == 0 {
+		authorText := payloadString(payload, "author_name")
+		if authorText == "" {
+			authorText = payloadString(payload, "author")
+		}
+		if authorText != "" {
+			parts := strings.FieldsFunc(authorText, func(r rune) bool {
+				return r == '/' || r == ',' || r == '，' || r == '、' || r == '\n' || r == ';' || r == '；'
+			})
+			for _, part := range parts {
+				if p := parseAuthorItem(part); p.Name != "" {
+					results = append(results, p)
+				}
+			}
+		}
+	}
+	return results
+}
+
+func attachWorkAuthors(tx *gorm.DB, workID uuid.UUID, submittedBy uuid.UUID, payload map[string]any) {
+	authors := extractAuthors(payload)
+	for idx, auth := range authors {
+		if auth.Name == "" {
+			continue
+		}
+		var person model.BookPerson
+		if err := tx.Where("name = ?", auth.Name).First(&person).Error; err != nil {
+			person = model.BookPerson{
+				Name:            auth.Name,
+				LifecycleStatus: model.BookLifecycleStatusActive,
+				CreatedBy:       &submittedBy,
+			}
+			if err := tx.Create(&person).Error; err != nil {
+				continue
+			}
+		}
+		contribution := model.BookContribution{
+			WorkID:   &workID,
+			PersonID: person.ID,
+			Role:     auth.Role,
+			Position: idx + 1,
+		}
+		_ = tx.Create(&contribution)
+	}
+}
+
+func parsePublishedDate(raw string) *time.Time {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	formats := []string{"2006-01-02", "2006-1-2", "2006-01", "2006-1", "2006"}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, trimmed); err == nil {
+			return &t
+		}
+	}
+	return nil
+}
+
+func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, payload map[string]any) {
+	publisher := payloadString(payload, "publisher")
+	producer := payloadString(payload, "producer")
+	if publisher == "" && producer != "" {
+		publisher = producer
+	} else if producer != "" && publisher != "" && producer != publisher {
+		publisher = publisher + " / " + producer
+	}
+	isbn := payloadString(payload, "isbn")
+	isbn13 := payloadString(payload, "isbn13")
+	if isbn13 == "" && len(isbn) == 13 {
+		isbn13 = isbn
+	}
+	isbn10 := payloadString(payload, "isbn10")
+	if isbn10 == "" && len(isbn) == 10 {
+		isbn10 = isbn
+	}
+	binding := payloadString(payload, "binding")
+	coverURL := payloadString(payload, "cover_url")
+	pageCount := 0
+	if pc, ok := payload["page_count"].(float64); ok {
+		pageCount = int(pc)
+	} else if pc, ok := payload["page_count"].(int); ok {
+		pageCount = pc
+	}
+
+	publishedDate := parsePublishedDate(payloadString(payload, "published_date"))
+
+	if publisher != "" || isbn13 != "" || isbn10 != "" || binding != "" || coverURL != "" || pageCount > 0 || publishedDate != nil {
+		edition := model.BookEdition{
+			WorkID:          work.ID,
+			Title:           work.Title,
+			Publisher:       publisher,
+			ISBN10:          isbn10,
+			ISBN13:          isbn13,
+			Language:        work.Language,
+			PublishedDate:   publishedDate,
+			PageCount:       pageCount,
+			Binding:         binding,
+			CoverURL:        coverURL,
+			LifecycleStatus: model.BookLifecycleStatusActive,
+			EditStatus:      model.BookEditStatusDevelopment,
+			CreatedBy:       &submittedBy,
+		}
+		_ = tx.Create(&edition)
+	}
 }
