@@ -14,7 +14,7 @@ import (
 
 func TestCreatePublicBookCreatesVisibleWorkEditionAndSeparatePeople(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPublisher{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{}, &model.BookPostLink{}, &model.AuditLog{}, &model.UserBookImport{}, &model.UserBookAsset{}, &model.PublishedBookAsset{})
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPublisher{}, &model.BookProducer{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{}, &model.BookPostLink{}, &model.AuditLog{}, &model.UserBookImport{}, &model.UserBookAsset{}, &model.PublishedBookAsset{})
 	user := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
 	service := NewService(db)
 	bookImport := model.UserBookImport{UserID: user.ID, Title: "上传文件名", Format: "epub", Status: model.BookImportStatusScanning}
@@ -25,6 +25,7 @@ func TestCreatePublicBookCreatesVisibleWorkEditionAndSeparatePeople(t *testing.T
 	require.NoError(t, db.Create(&published).Error)
 	input := CreatePublicBookInput{ImportID: bookImport.ID.String(), Title: "书名", Language: "中文", Authors: []string{"作者甲", "作者乙", "作者甲"}, SourceURL: "https://example.test/book"}
 	input.Edition.Publisher = "Publisher Name"
+	input.Edition.Producer = "Producer Name"
 	input.Edition.ISBN13 = "9787111000001"
 	input.Edition.PublishedDate = "2026-10-13"
 
@@ -34,6 +35,7 @@ func TestCreatePublicBookCreatesVisibleWorkEditionAndSeparatePeople(t *testing.T
 	require.Equal(t, model.BookLifecycleStatusActive, created.LifecycleStatus)
 	require.Len(t, created.Editions, 1)
 	require.Equal(t, "Publisher Name", created.Editions[0].Publisher)
+	require.Equal(t, "Producer Name", created.Editions[0].Producer)
 	require.Len(t, created.Authors, 2)
 	require.Equal(t, []string{"作者甲", "作者乙"}, []string{created.Authors[0].Name, created.Authors[1].Name})
 	var linkedImport model.UserBookImport

@@ -103,6 +103,8 @@ type BookEdition struct {
 	Title           string     `json:"title,omitempty"`
 	PublisherID     *uuid.UUID `json:"publisher_id,omitempty" gorm:"type:uuid;index"`
 	Publisher       string     `json:"publisher,omitempty"`
+	ProducerID      *uuid.UUID `json:"producer_id,omitempty" gorm:"type:uuid;index"`
+	Producer        string     `json:"producer,omitempty"`
 	ISBN10          string     `json:"isbn10,omitempty" gorm:"index"`
 	ISBN13          string     `json:"isbn13,omitempty" gorm:"index"`
 	Language        string     `json:"language,omitempty"`
@@ -133,6 +135,20 @@ type BookPublisher struct {
 }
 
 func (BookPublisher) TableName() string { return "book_publishers" }
+
+// BookProducer is a shared producer entity for publishing imprints and media producers.
+type BookProducer struct {
+	Base
+	Name            string     `json:"name" gorm:"not null;index"`
+	SortName        string     `json:"sort_name,omitempty" gorm:"index"`
+	Description     string     `json:"description,omitempty" gorm:"type:text"`
+	LifecycleStatus string     `json:"lifecycle_status" gorm:"not null;default:'draft';index;check:chk_book_producers_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
+	EditStatus      string     `json:"edit_status" gorm:"not null;default:'development';index;check:chk_book_producers_edit_status,edit_status IN ('development','locked','closed')"`
+	CreatedBy       *uuid.UUID `json:"created_by,omitempty" gorm:"type:uuid;index"`
+	RedirectTo      *uuid.UUID `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
+}
+
+func (BookProducer) TableName() string { return "book_producers" }
 
 type BookPerson struct {
 	Base

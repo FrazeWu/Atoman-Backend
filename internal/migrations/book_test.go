@@ -20,6 +20,7 @@ func TestRunBooksMigrationCreatesIndependentCatalogAndPrivateResourceTables(t *t
 		"book_works",
 		"book_editions",
 		"book_publishers",
+		"book_producers",
 		"book_people",
 		"book_contributions",
 		"book_sources",
@@ -37,6 +38,17 @@ func TestRunBooksMigrationCreatesIndependentCatalogAndPrivateResourceTables(t *t
 		"book_publication_appeals"} {
 		require.True(t, db.Migrator().HasTable(table), table)
 	}
+	var publisherCount, producerCount int64
+	require.NoError(t, db.Model(&model.BookPublisher{}).Where("deleted_at IS NULL").Count(&publisherCount).Error)
+	require.NoError(t, db.Model(&model.BookProducer{}).Where("deleted_at IS NULL").Count(&producerCount).Error)
+	require.GreaterOrEqual(t, publisherCount, int64(30))
+	require.GreaterOrEqual(t, producerCount, int64(10))
+	seededPublisherCount, seededProducerCount := publisherCount, producerCount
+	require.NoError(t, RunBooksMigration(db))
+	require.NoError(t, db.Model(&model.BookPublisher{}).Where("deleted_at IS NULL").Count(&publisherCount).Error)
+	require.NoError(t, db.Model(&model.BookProducer{}).Where("deleted_at IS NULL").Count(&producerCount).Error)
+	require.Equal(t, seededPublisherCount, publisherCount)
+	require.Equal(t, seededProducerCount, producerCount)
 
 	owner := model.User{UUID: uuid.New(), Username: "book-owner", Email: "book-owner@example.com", Password: "hash", IsActive: true}
 	require.NoError(t, db.Create(&owner).Error)

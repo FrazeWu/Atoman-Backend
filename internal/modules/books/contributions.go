@@ -308,7 +308,7 @@ func (s *Service) applyBookEdit(tx *gorm.DB, edit *model.BookEdit) error {
 	updates := map[string]any{}
 	fields := map[string][]string{
 		"work":      {"title", "subtitle", "original_title", "description", "language"},
-		"edition":   {"title", "language", "publisher", "publisher_id", "isbn10", "isbn13", "binding", "cover_url", "page_count", "published_date"},
+		"edition":   {"title", "language", "publisher", "publisher_id", "producer", "producer_id", "isbn10", "isbn13", "binding", "cover_url", "page_count", "published_date"},
 		"person":    {"name", "sort_name", "description"},
 		"publisher": {"name", "sort_name", "description"},
 	}
@@ -337,6 +337,27 @@ func (s *Service) applyBookEdit(tx *gorm.DB, edit *model.BookEdit) error {
 					return err
 				}
 				updates["publisher"] = publisher.Name
+			}
+		}
+		if value, ok := updates["producer"]; ok {
+			name := strings.TrimSpace(fmt.Sprint(value))
+			producerID, err := findOrCreateBookProducer(tx, name)
+			if err != nil {
+				return err
+			}
+			updates["producer"] = name
+			updates["producer_id"] = producerID
+		}
+		if value, ok := updates["producer_id"]; ok {
+			if value == "" || value == nil || value == (*uuid.UUID)(nil) {
+				updates["producer_id"] = nil
+				updates["producer"] = ""
+			} else {
+				var producer model.BookProducer
+				if err := tx.First(&producer, "id = ?", value).Error; err != nil {
+					return err
+				}
+				updates["producer"] = producer.Name
 			}
 		}
 	}
@@ -418,6 +439,20 @@ func validateBookRelations(db *gorm.DB, entityType string, payload map[string]an
 				return apperr.BadRequest("validation.invalid_request", "publisher is unavailable")
 			}
 		}
+		if value, ok := payload["producer_id"]; ok && value != nil && value != "" {
+			name, ok := value.(string)
+			id, err := uuid.Parse(name)
+			if !ok || err != nil || id == uuid.Nil {
+				return apperr.BadRequest("validation.invalid_request", "producer_id is invalid")
+			}
+			var count int64
+			if err := db.Model(&model.BookProducer{}).Where("id = ? AND lifecycle_status = ?", id, model.BookLifecycleStatusActive).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 1 {
+				return apperr.BadRequest("validation.invalid_request", "producer is unavailable")
+			}
+		}
 	}
 	if entityType == "work" {
 		if value, ok := payload["author_ids"]; ok {
@@ -474,7 +509,9 @@ func createBookEntity(tx *gorm.DB, edit *model.BookEdit, payload map[string]any)
 		}
 		edit.EntityID = &work.ID
 		attachWorkAuthors(tx, work.ID, edit.SubmittedBy, payload)
-		attachWorkEdition(tx, work, edit.SubmittedBy, payload)
+		if err := attachWorkEdition(tx, work, edit.SubmittedBy, payload); err != nil {
+			return err
+		}
 		return updateBookEditSourceTargets(tx, edit.ID, work.ID)
 	}
 	workID, err := uuid.Parse(payloadString(payload, "work_id"))
@@ -486,7 +523,12 @@ func createBookEntity(tx *gorm.DB, edit *model.BookEdit, payload map[string]any)
 	if err != nil {
 		return err
 	}
-	edition := model.BookEdition{WorkID: workID, Title: strings.TrimSpace(title), PublisherID: publisherID, Publisher: publisherName, ISBN10: payloadString(payload, "isbn10"), ISBN13: payloadString(payload, "isbn13"), Language: payloadString(payload, "language"), Binding: payloadString(payload, "binding"), CoverURL: payloadString(payload, "cover_url"), LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment, CreatedBy: &edit.SubmittedBy}
+	producerName := payloadString(payload, "producer")
+	producerID, err := findOrCreateBookProducer(tx, producerName)
+	if err != nil {
+		return err
+	}
+	edition := model.BookEdition{WorkID: workID, Title: strings.TrimSpace(title), PublisherID: publisherID, Publisher: publisherName, ProducerID: producerID, Producer: producerName, ISBN10: payloadString(payload, "isbn10"), ISBN13: payloadString(payload, "isbn13"), Language: payloadString(payload, "language"), Binding: payloadString(payload, "binding"), CoverURL: payloadString(payload, "cover_url"), LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment, CreatedBy: &edit.SubmittedBy}
 	if err := tx.Create(&edition).Error; err != nil {
 		return err
 	}
@@ -738,13 +780,16 @@ func parsePublishedDate(raw string) *time.Time {
 	return nil
 }
 
-func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, payload map[string]any) {
-	publisher := payloadString(payload, "publisher")
-	producer := payloadString(payload, "producer")
-	if publisher == "" && producer != "" {
-		publisher = producer
-	} else if producer != "" && publisher != "" && producer != publisher {
-		publisher = publisher + " / " + producer
+func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, payload map[string]any) error {
+	publisher := strings.TrimSpace(payloadString(payload, "publisher"))
+	producer := strings.TrimSpace(payloadString(payload, "producer"))
+	publisherID, err := findOrCreateBookPublisher(tx, publisher)
+	if err != nil {
+		return err
+	}
+	producerID, err := findOrCreateBookProducer(tx, producer)
+	if err != nil {
+		return err
 	}
 	isbn := payloadString(payload, "isbn")
 	isbn13 := payloadString(payload, "isbn13")
@@ -766,11 +811,14 @@ func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, 
 
 	publishedDate := parsePublishedDate(payloadString(payload, "published_date"))
 
-	if publisher != "" || isbn13 != "" || isbn10 != "" || binding != "" || coverURL != "" || pageCount > 0 || publishedDate != nil {
+	if publisher != "" || producer != "" || isbn13 != "" || isbn10 != "" || binding != "" || coverURL != "" || pageCount > 0 || publishedDate != nil {
 		edition := model.BookEdition{
 			WorkID:          work.ID,
 			Title:           work.Title,
+			PublisherID:     publisherID,
 			Publisher:       publisher,
+			ProducerID:      producerID,
+			Producer:        producer,
 			ISBN10:          isbn10,
 			ISBN13:          isbn13,
 			Language:        work.Language,
@@ -782,6 +830,7 @@ func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, 
 			EditStatus:      model.BookEditStatusDevelopment,
 			CreatedBy:       &submittedBy,
 		}
-		_ = tx.Create(&edition)
+		return tx.Create(&edition).Error
 	}
+	return nil
 }
