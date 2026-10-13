@@ -753,6 +753,46 @@ definitions:
       title:
         type: string
     type: object
+  books.CreatePublicBookInput:
+    properties:
+      authors:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      edition:
+        properties:
+          binding:
+            type: string
+          cover_url:
+            type: string
+          isbn10:
+            type: string
+          isbn13:
+            type: string
+          language:
+            type: string
+          page_count:
+            type: integer
+          published_date:
+            type: string
+          publisher:
+            type: string
+          title:
+            type: string
+        type: object
+      language:
+        type: string
+      original_title:
+        type: string
+      source_url:
+        type: string
+      subtitle:
+        type: string
+      title:
+        type: string
+    type: object
   books.BookPublicationAppealDTO:
     properties:
       created_at:
@@ -12888,6 +12928,39 @@ paths:
             additionalProperties: true
             type: object
       summary: 搜索公共书目
+      tags:
+      - books-catalog
+  /api/v1/books/catalog/works:
+    post:
+      consumes:
+      - application/json
+      description: 创建后立即进入公共目录；书目正文文件请通过私有电子书导入流程单独上传。
+      parameters:
+      - description: 图书元数据
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.CreatePublicBookInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/books.BookPublicWorkDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 创建公共图书及首个版本
       tags:
       - books-catalog
   /api/v1/books/catalog/works/{workId}:

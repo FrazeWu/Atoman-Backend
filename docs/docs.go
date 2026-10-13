@@ -5947,6 +5947,33 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/books/catalog/works": {
+            "post": {
+                "security": [
+                    {"BearerAuth": []},
+                    {"CookieAuth": []}
+                ],
+                "description": "创建后立即进入公共目录；书目正文文件请通过私有电子书导入流程单独上传。",
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["books-catalog"],
+                "summary": "创建公共图书及首个版本",
+                "parameters": [
+                    {
+                        "description": "图书元数据",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {"$ref": "#/definitions/books.CreatePublicBookInput"}
+                    }
+                ],
+                "responses": {
+                    "201": {"description": "Created", "schema": {"$ref": "#/definitions/books.BookPublicWorkDTO"}},
+                    "400": {"description": "Bad Request", "schema": {"$ref": "#/definitions/handlers.ErrorResponse"}},
+                    "401": {"description": "Unauthorized", "schema": {"$ref": "#/definitions/handlers.ErrorResponse"}}
+                }
+            }
+        },
         "/api/v1/books/catalog/works/{workId}": {
             "get": {
                 "produces": [
@@ -29488,6 +29515,32 @@ const docTemplate = `{
                 "title": {
                     "type": "string"
                 }
+            }
+        },
+        "books.CreatePublicBookInput": {
+            "type": "object",
+            "properties": {
+                "authors": {"type": "array", "items": {"type": "string"}},
+                "description": {"type": "string"},
+                "edition": {
+                    "type": "object",
+                    "properties": {
+                        "binding": {"type": "string"},
+                        "cover_url": {"type": "string"},
+                        "isbn10": {"type": "string"},
+                        "isbn13": {"type": "string"},
+                        "language": {"type": "string"},
+                        "page_count": {"type": "integer"},
+                        "published_date": {"type": "string"},
+                        "publisher": {"type": "string"},
+                        "title": {"type": "string"}
+                    }
+                },
+                "language": {"type": "string"},
+                "original_title": {"type": "string"},
+                "source_url": {"type": "string"},
+                "subtitle": {"type": "string"},
+                "title": {"type": "string"}
             }
         },
         "books.BookPublicationAppealDTO": {

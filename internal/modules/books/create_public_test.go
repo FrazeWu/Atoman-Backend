@@ -1,0 +1,41 @@
+package books
+
+import (
+	"context"
+	"testing"
+
+	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
+	"atoman/internal/testdb"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+)
+
+func TestCreatePublicBookCreatesVisibleWorkEditionAndSeparatePeople(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPublisher{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{}, &model.BookPostLink{}, &model.AuditLog{})
+	user := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
+	service := NewService(db)
+	input := CreatePublicBookInput{Title: "书名", Language: "中文", Authors: []string{"作者甲", "作者乙", "作者甲"}, SourceURL: "https://example.test/book"}
+	input.Edition.Publisher = "Publisher Name"
+	input.Edition.ISBN13 = "9787111000001"
+	input.Edition.PublishedDate = "2026-10-13"
+
+	created, err := service.CreatePublicBook(context.Background(), user, input)
+	require.NoError(t, err)
+	require.Equal(t, "书名", created.Title)
+	require.Equal(t, model.BookLifecycleStatusActive, created.LifecycleStatus)
+	require.Len(t, created.Editions, 1)
+	require.Equal(t, "Publisher Name", created.Editions[0].Publisher)
+	require.Len(t, created.Authors, 2)
+	require.Equal(t, []string{"作者甲", "作者乙"}, []string{created.Authors[0].Name, created.Authors[1].Name})
+	var sourceCount int64
+	require.NoError(t, db.Model(&model.BookSource{}).Count(&sourceCount).Error)
+	require.EqualValues(t, 2, sourceCount)
+
+	searchResult, total, err := service.SearchPublicCatalog(context.Background(), "书名", 10, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, searchResult, 1)
+}

@@ -6,11 +6,44 @@ import (
 	"strings"
 
 	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// createPublicWork godoc
+// @Summary 创建公共图书及首个版本
+// @Description 创建后立即进入公共目录；书目正文文件请通过私有电子书导入流程单独上传。
+// @Tags books-catalog
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param input body CreatePublicBookInput true "图书元数据"
+// @Success 201 {object} BookPublicWorkDTO
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Router /api/v1/books/catalog/works [post]
+func (h *Handler) createPublicWork(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var input CreatePublicBookInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	work, err := h.service.CreatePublicBook(c.Request.Context(), user, input)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, work)
+}
 
 // searchPublicCatalog godoc
 // @Summary 搜索公共书目

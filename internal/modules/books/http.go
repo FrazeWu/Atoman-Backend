@@ -67,6 +67,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 	submit := protected.Group("")
 	submit.Use(middleware.RequireSiteFeature(service.db, "books", "books.submit"))
+	submit.POST("/catalog/works", handler.createPublicWork)
 	submit.POST("/contributions", handler.submitBookEdit)
 	submit.GET("/contributions", handler.listMyBookEdits)
 	submit.POST("/contributions/:editId/withdraw", handler.withdrawBookEdit)
