@@ -12,12 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBookContributionRequiresSourceAndSupportsReviewWorkflow(t *testing.T) {
+func TestBookContributionRequiresSourceAndAutoAppliesCreate(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookSource{}, &model.BookEdit{}, &model.AuditLog{})
 	service := NewService(db)
 	submitter := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
-	moderator := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleModerator}
 
 	_, err := service.SubmitBookEdit(submitter, SubmitBookEditInput{Type: model.BookEditTypeCreate, EntityType: "work", Payload: map[string]any{"title": "No source"}})
 	require.Error(t, err)
@@ -28,28 +27,39 @@ func TestBookContributionRequiresSourceAndSupportsReviewWorkflow(t *testing.T) {
 		Sources: []BookEditSourceInput{{URL: "https://example.test/books/reviewed-work", Title: "Publisher"}},
 	})
 	require.NoError(t, err)
-	require.Equal(t, model.BookEditStatusPending, edit.Status)
+	require.Equal(t, model.BookEditStatusApproved, edit.Status)
+	require.NotEmpty(t, edit.EntityID)
 
 	own, total, err := service.ListBookEdits(context.Background(), submitter, false, 20, 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, own, 1)
-	_, err = service.ReviewBookEdit(submitter, uuid.MustParse(edit.ID), model.BookEditStatusApproved, "self review")
-	require.Error(t, err)
-
-	approved, err := service.ReviewBookEdit(moderator, uuid.MustParse(edit.ID), model.BookEditStatusApproved, "source checked")
-	require.NoError(t, err)
-	require.Equal(t, model.BookEditStatusApproved, approved.Status)
-	require.NotEmpty(t, approved.EntityID)
 	var work model.BookWork
-	require.NoError(t, db.First(&work, "id = ?", approved.EntityID).Error)
+	require.NoError(t, db.First(&work, "id = ?", edit.EntityID).Error)
 	require.Equal(t, model.BookLifecycleStatusActive, work.LifecycleStatus)
 	var source model.BookSource
 	require.NoError(t, db.Where("book_edit_id = ?", edit.ID).First(&source).Error)
 	require.Equal(t, work.ID, source.TargetID)
-	var auditEntry model.AuditLog
-	require.NoError(t, db.Where("entity_type = ? AND entity_id = ?", "book_edit", uuid.MustParse(edit.ID)).First(&auditEntry).Error)
-	require.Equal(t, "books.edit.approved", auditEntry.Action)
+}
+
+func TestAttachWorkEditionKeepsPublisherAndProducerSeparate(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPublisher{}, &model.BookProducer{})
+	work := model.BookWork{Title: "中国历代政治得失", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	require.NoError(t, db.Create(&work).Error)
+
+	err := attachWorkEdition(db, work, uuid.New(), map[string]any{
+		"publisher": "生活·读书·新知三联书店",
+		"producer":  "后浪出版公司",
+	})
+	require.NoError(t, err)
+
+	var edition model.BookEdition
+	require.NoError(t, db.Where("work_id = ?", work.ID).First(&edition).Error)
+	require.Equal(t, "生活·读书·新知三联书店", edition.Publisher)
+	require.Equal(t, "后浪出版公司", edition.Producer)
+	require.NotNil(t, edition.PublisherID)
+	require.NotNil(t, edition.ProducerID)
 }
 
 func TestBookWorkMergeMovesPrivateInteractionsAndRedirectsOldWork(t *testing.T) {
