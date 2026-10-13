@@ -509,7 +509,9 @@ func createBookEntity(tx *gorm.DB, edit *model.BookEdit, payload map[string]any)
 		}
 		edit.EntityID = &work.ID
 		attachWorkAuthors(tx, work.ID, edit.SubmittedBy, payload)
-		attachWorkEdition(tx, work, edit.SubmittedBy, payload)
+		if err := attachWorkEdition(tx, work, edit.SubmittedBy, payload); err != nil {
+			return err
+		}
 		return updateBookEditSourceTargets(tx, edit.ID, work.ID)
 	}
 	workID, err := uuid.Parse(payloadString(payload, "work_id"))
@@ -778,13 +780,16 @@ func parsePublishedDate(raw string) *time.Time {
 	return nil
 }
 
-func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, payload map[string]any) {
-	publisher := payloadString(payload, "publisher")
-	producer := payloadString(payload, "producer")
-	if publisher == "" && producer != "" {
-		publisher = producer
-	} else if producer != "" && publisher != "" && producer != publisher {
-		publisher = publisher + " / " + producer
+func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, payload map[string]any) error {
+	publisher := strings.TrimSpace(payloadString(payload, "publisher"))
+	producer := strings.TrimSpace(payloadString(payload, "producer"))
+	publisherID, err := findOrCreateBookPublisher(tx, publisher)
+	if err != nil {
+		return err
+	}
+	producerID, err := findOrCreateBookProducer(tx, producer)
+	if err != nil {
+		return err
 	}
 	isbn := payloadString(payload, "isbn")
 	isbn13 := payloadString(payload, "isbn13")
@@ -806,11 +811,14 @@ func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, 
 
 	publishedDate := parsePublishedDate(payloadString(payload, "published_date"))
 
-	if publisher != "" || isbn13 != "" || isbn10 != "" || binding != "" || coverURL != "" || pageCount > 0 || publishedDate != nil {
+	if publisher != "" || producer != "" || isbn13 != "" || isbn10 != "" || binding != "" || coverURL != "" || pageCount > 0 || publishedDate != nil {
 		edition := model.BookEdition{
 			WorkID:          work.ID,
 			Title:           work.Title,
+			PublisherID:     publisherID,
 			Publisher:       publisher,
+			ProducerID:      producerID,
+			Producer:        producer,
 			ISBN10:          isbn10,
 			ISBN13:          isbn13,
 			Language:        work.Language,
@@ -822,6 +830,7 @@ func attachWorkEdition(tx *gorm.DB, work model.BookWork, submittedBy uuid.UUID, 
 			EditStatus:      model.BookEditStatusDevelopment,
 			CreatedBy:       &submittedBy,
 		}
-		_ = tx.Create(&edition)
+		return tx.Create(&edition).Error
 	}
+	return nil
 }
