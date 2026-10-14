@@ -76,6 +76,14 @@ const (
 	BookPublicationAppealStatusPending  = "pending"
 	BookPublicationAppealStatusApproved = "approved"
 	BookPublicationAppealStatusRejected = "rejected"
+
+	BookAnnotationColorYellow = "yellow"
+	BookAnnotationColorGreen  = "green"
+	BookAnnotationColorBlue   = "blue"
+	BookAnnotationColorPink   = "pink"
+
+	BookAnnotationStyleHighlight = "highlight"
+	BookAnnotationStyleUnderline = "underline"
 )
 
 // BookWork is the public bibliographic work layer. It never contains book text.
@@ -265,6 +273,27 @@ type UserBookReadingState struct {
 }
 
 func (UserBookReadingState) TableName() string { return "user_book_reading_states" }
+
+// UserBookAnnotation is private per-user highlight, underline, and note attached to a book asset.
+type UserBookAnnotation struct {
+	Base
+	UserID         uuid.UUID  `json:"-" gorm:"type:uuid;not null;index"`
+	AssetID        uuid.UUID  `json:"asset_id" gorm:"type:uuid;not null;index"`
+	WorkID         *uuid.UUID `json:"work_id,omitempty" gorm:"type:uuid;index"`
+	Format         string     `json:"format" gorm:"not null;check:chk_user_book_annotations_format,format IN ('epub','pdf','txt')"`
+	EPUBCFI        string     `json:"epub_cfi,omitempty" gorm:"type:text;not null;default:''"`
+	PDFPage        int        `json:"pdf_page,omitempty" gorm:"not null;default:0"`
+	PDFRects       string     `json:"pdf_rects,omitempty" gorm:"type:jsonb;not null;default:'[]'"`
+	TXTOffsetStart int64      `json:"txt_offset_start,omitempty" gorm:"not null;default:0"`
+	TXTOffsetEnd   int64      `json:"txt_offset_end,omitempty" gorm:"not null;default:0"`
+	Text           string     `json:"text" gorm:"type:text;not null"`
+	Color          string     `json:"color" gorm:"not null;default:'yellow';check:chk_user_book_annotations_color,color IN ('yellow','green','blue','pink')"`
+	Style          string     `json:"style" gorm:"not null;default:'highlight';check:chk_user_book_annotations_style,style IN ('highlight','underline')"`
+	Note           string     `json:"note" gorm:"type:text;not null;default:''"`
+	ChapterTitle   string     `json:"chapter_title,omitempty" gorm:"type:varchar(255);not null;default:''"`
+}
+
+func (UserBookAnnotation) TableName() string { return "user_book_annotations" }
 
 type UserBookShelf struct {
 	Base

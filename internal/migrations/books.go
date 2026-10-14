@@ -36,8 +36,12 @@ func RunBooksMigration(db *gorm.DB) error {
 		&model.BookEditVote{},
 		&model.BookPublicationReport{},
 		&model.BookPublicationAppeal{},
+		&model.UserBookAnnotation{},
 	); err != nil {
 		return fmt.Errorf("migrate books schema: %w", err)
+	}
+	if err := MigrateUserBookAnnotations(db); err != nil {
+		return fmt.Errorf("migrate user book annotations: %w", err)
 	}
 	if err := backfillBookPublishers(db); err != nil {
 		return fmt.Errorf("backfill book publishers: %w", err)

@@ -18,11 +18,14 @@ func TestBookContributionRequiresSourceAndAutoAppliesCreate(t *testing.T) {
 	service := NewService(db)
 	submitter := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
 
-	_, err := service.SubmitBookEdit(submitter, SubmitBookEditInput{Type: model.BookEditTypeCreate, EntityType: "work", Payload: map[string]any{"title": "No source"}})
+	work := model.BookWork{Title: "Initial work", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	require.NoError(t, db.Create(&work).Error)
+
+	_, err := service.SubmitBookEdit(submitter, SubmitBookEditInput{Type: model.BookEditTypeUpdate, EntityType: "work", EntityID: work.ID.String(), Payload: map[string]any{"title": "No source"}})
 	require.Error(t, err)
 
 	edit, err := service.SubmitBookEdit(submitter, SubmitBookEditInput{
-		Type: model.BookEditTypeCreate, EntityType: "work", Reason: "Add a public work",
+		Type: model.BookEditTypeUpdate, EntityType: "work", EntityID: work.ID.String(), Reason: "Update a public work",
 		Payload: map[string]any{"title": "Reviewed work", "description": "Description"},
 		Sources: []BookEditSourceInput{{URL: "https://example.test/books/reviewed-work", Title: "Publisher"}},
 	})

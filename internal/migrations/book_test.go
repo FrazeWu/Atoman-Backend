@@ -35,7 +35,8 @@ func TestRunBooksMigrationCreatesIndependentCatalogAndPrivateResourceTables(t *t
 		"book_ratings",
 		"book_reviews",
 		"book_post_links",
-		"book_publication_appeals"} {
+		"book_publication_appeals",
+		"user_book_annotations"} {
 		require.True(t, db.Migrator().HasTable(table), table)
 	}
 	var publisherCount, producerCount int64
