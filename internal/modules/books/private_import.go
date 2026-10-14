@@ -567,6 +567,11 @@ func (s *Service) DeleteBookImport(user authctx.CurrentUser, id uuid.UUID) error
 			if err := tx.Where("asset_id = ? AND user_id = ?", asset.ID, user.ID).Delete(&model.UserBookReadingState{}).Error; err != nil {
 				return err
 			}
+			if tx.Migrator().HasTable(&model.UserBookAnnotation{}) {
+				if err := tx.Where("asset_id = ? AND user_id = ?", asset.ID, user.ID).Delete(&model.UserBookAnnotation{}).Error; err != nil {
+					return err
+				}
+			}
 		}
 		if err := tx.Model(&model.UserBookAsset{}).Where("import_id = ? AND user_id = ?", session.ID, user.ID).
 			Updates(map[string]any{"processing_status": model.BookAssetStatusRemoved, "error_message": "deleted by owner"}).Error; err != nil {
