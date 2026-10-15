@@ -12,6 +12,691 @@
     },
     "basePath": "/api/v1",
     "paths": {
+        "/api/v1/books/me/library": {
+            "get": {
+                "summary": "列出作品级私人书架",
+                "description": "",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "type": "string",
+                        "description": "书架状态",
+                        "required": false
+                    },
+                    {
+                        "name": "tag",
+                        "in": "query",
+                        "type": "string",
+                        "description": "私人标签",
+                        "required": false
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "每页数量，最多 100",
+                        "required": false
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "分页偏移",
+                        "required": false
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "items": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/books.BookLibraryEntryDTO"
+                                            }
+                                        },
+                                        "total": {
+                                            "type": "integer"
+                                        },
+                                        "limit": {
+                                            "type": "integer"
+                                        },
+                                        "offset": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/library/works/{workId}": {
+            "put": {
+                "summary": "创建或更新私人书架条目",
+                "description": "不会修改个人文件选择或阅读进度。条目 ID 可防止旧作品合并后的过期写入修改目标条目。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.SaveBookLibraryEntryInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookLibraryEntryDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/library/entries/{entryId}": {
+            "delete": {
+                "summary": "移出书架，保留阅读记录与笔记",
+                "description": "",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "entryId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "base_version",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "当前版本",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarkTombstone"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes": {
+            "get": {
+                "summary": "筛选本人跨修订笔记或 30 天回收站",
+                "description": "",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "work_id",
+                        "in": "query",
+                        "type": "string",
+                        "description": "作品 UUID，含合并别名",
+                        "required": false
+                    },
+                    {
+                        "name": "tag",
+                        "in": "query",
+                        "type": "string",
+                        "description": "私人标签",
+                        "required": false
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "type": "string",
+                        "description": "标题或正文原文搜索",
+                        "required": false
+                    },
+                    {
+                        "name": "trash",
+                        "in": "query",
+                        "type": "boolean",
+                        "description": "仅读取 30 天内回收站",
+                        "required": false
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "每页数量，最多 100",
+                        "required": false
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "分页偏移",
+                        "required": false
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "items": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/books.BookPrivateNoteDTO"
+                                            }
+                                        },
+                                        "total": {
+                                            "type": "integer"
+                                        },
+                                        "limit": {
+                                            "type": "integer"
+                                        },
+                                        "offset": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/{noteId}": {
+            "get": {
+                "summary": "读取本人笔记",
+                "description": "回收站过期返回 410。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookPrivateNoteDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    },
+                    "410": {
+                        "description": "30 天保留期已过，内容不可恢复"
+                    }
+                }
+            },
+            "put": {
+                "summary": "幂等保存私人笔记",
+                "description": "客户端生成 noteId。最近一次相同 PUT 重试不增加版本；旧版本或删除后的 PUT 返回 409，绝不隐式恢复。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.SaveBookPrivateNoteInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookPrivateNoteDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            },
+            "delete": {
+                "summary": "将笔记移入 30 天回收站",
+                "description": "保留删除 ID；重复删除不会重置保留期。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "base_version",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "当前版本",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarkTombstone"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/{noteId}/restore": {
+            "post": {
+                "summary": "恢复 30 天内删除的私人笔记",
+                "description": "使用删除后的版本，过期返回 410。过期正文、标题、标签和文件来源将被清除，仅保留删除标识，不能被离线旧请求复活。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "base_version"
+                            ],
+                            "properties": {
+                                "base_version": {
+                                    "type": "integer",
+                                    "format": "int64",
+                                    "minimum": 0
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookPrivateNoteDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    },
+                    "410": {
+                        "description": "30 天保留期已过，内容不可恢复"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/export": {
+            "get": {
+                "summary": "JSON 导出本人有效笔记",
+                "description": "",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookNoteExport"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/import": {
+            "post": {
+                "summary": "幂等导入 JSON 笔记，不覆盖已有数据",
+                "description": "整个批次在一个事务内提交。内容冲突逐项报告并保留原笔记；无效条目导致整个批次回滚。导出结果 notes 和 schema_version 配合新的 request_id 可用于导入。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.ImportBookPrivateNotesInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookNoteImportResult"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
         "/api/v1/books/me/reading-marks/{revisionId}": {
             "get": {
                 "summary": "获取本人修订级阅读标记及无损高亮分组",
@@ -30800,6 +31485,294 @@
         }
     },
     "definitions": {
+        "books.SaveBookLibraryEntryInput": {
+            "type": "object",
+            "required": [
+                "status",
+                "base_version"
+            ],
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "base_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "want_to_read",
+                        "reading",
+                        "read",
+                        "on_hold",
+                        "dropped"
+                    ]
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                }
+            },
+            "description": "首次创建 base_version=0，entry_id 不填；更新需原条目 ID 和当前版本。已删除条目用其 ID 和删除后的版本显式重新加入。"
+        },
+        "books.BookLibraryEntryDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "work_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "work_title": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "books.SaveBookPrivateNoteInput": {
+            "type": "object",
+            "required": [
+                "work_id",
+                "base_version"
+            ],
+            "properties": {
+                "base_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "work_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "source_revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "body": {
+                    "type": "string",
+                    "maxLength": 200000
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                }
+            },
+            "description": "标题和正文至少一个非空。笔记与作品关联，source_revision_id 仅为可选来源。创建 base_version=0，编辑使用当前版本；不得跨作品迁移或隐式发布。"
+        },
+        "books.BookPrivateNoteDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "work_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "source_revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "body": {
+                    "type": "string",
+                    "maxLength": 200000
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "trashed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            },
+            "description": "work_id 是原始作品 ID，合并时不改写，作品筛选会解析合并别名。私人标签和正文只返回给本人。"
+        },
+        "books.BookNoteTransferItem": {
+            "type": "object",
+            "required": [
+                "id",
+                "work_id"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "work_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "source_revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "body": {
+                    "type": "string",
+                    "maxLength": 200000
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                }
+            }
+        },
+        "books.BookNoteExport": {
+            "type": "object",
+            "properties": {
+                "schema_version": {
+                    "type": "integer",
+                    "enum": [
+                        1
+                    ]
+                },
+                "exported_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "notes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookNoteTransferItem"
+                    }
+                }
+            },
+            "description": "仅导出当前用户的有效私人笔记，不含回收站、用户身份和私人阅读进度。"
+        },
+        "books.ImportBookPrivateNotesInput": {
+            "type": "object",
+            "required": [
+                "request_id",
+                "schema_version",
+                "notes"
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "schema_version": {
+                    "type": "integer",
+                    "enum": [
+                        1
+                    ]
+                },
+                "notes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "items": {
+                        "$ref": "#/definitions/books.BookNoteTransferItem"
+                    }
+                }
+            },
+            "description": "每批最多 500 条和 8 MiB；来源作品和可选文件修订必须存在且可访问，不创建外部书目。"
+        },
+        "books.BookNoteImportResult": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "description": "新建的本人笔记 UUID"
+                },
+                "skipped": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "description": "内容相同的来源 UUID"
+                },
+                "conflicts": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "description": "已有不同内容或已删除的来源 UUID，不覆盖"
+                },
+                "duplicate": {
+                    "type": "boolean"
+                }
+            },
+            "description": "不同用户的导入笔记使用独立 ID。相同请求 UUID 重试返回原结果，复用请求 UUID 修改内容返回 409。"
+        },
         "books.BookReadingMarkAnchor": {
             "type": "object",
             "description": "只填写对应格式字段。EPUB 为两个文档/文本点 CFI（不接受逗号范围或音视频空间 CFI）；PDF/漫画页码从 1 开始，矩形按未旋转页面坐标归一化到 0..1；TXT 为 UTF-16 半开区间。书签只填起点或页码。",

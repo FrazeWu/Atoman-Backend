@@ -25,6 +25,14 @@ func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &spec))
 	for path, methods := range map[string][]string{
+		"/api/v1/books/me/library":                                             {"get"},
+		"/api/v1/books/me/library/works/{workId}":                              {"put"},
+		"/api/v1/books/me/library/entries/{entryId}":                           {"delete"},
+		"/api/v1/books/me/private-notes":                                       {"get"},
+		"/api/v1/books/me/private-notes/{noteId}":                              {"get", "put", "delete"},
+		"/api/v1/books/me/private-notes/{noteId}/restore":                      {"post"},
+		"/api/v1/books/me/private-notes/export":                                {"get"},
+		"/api/v1/books/me/private-notes/import":                                {"post"},
 		"/api/v1/books/me/reading-marks/{revisionId}":                          {"get"},
 		"/api/v1/books/me/reading-marks/{revisionId}/{markId}":                 {"put", "delete"},
 		"/api/v1/books/me/selections/{workId}":                                 {"get", "put"},

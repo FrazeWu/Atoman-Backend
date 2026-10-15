@@ -56,6 +56,7 @@ var bookWorkMergeTables = []bookMergeTable{
 	{"book_ratings", "work_id IN ?"},
 	{"book_reviews", "work_id IN ?"},
 	{"user_book_shelves", "work_id IN ?"},
+	{"book_library_entries", "work_id IN ?"},
 	{"book_post_links", "work_id IN ?"},
 }
 
@@ -237,6 +238,7 @@ func moveBookWorkRelations(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 	for _, unique := range []struct{ table, key string }{
 		{"book_ratings", "user_id"}, {"book_reviews", "user_id"}, {"user_book_shelves", "user_id"}, {"book_post_links", "post_id"},
 		{"book_default_assets", "language"}, {"book_reading_selections", "user_id"},
+		{"book_library_entries", "user_id"},
 	} {
 		if !tx.Migrator().HasTable(unique.table) {
 			continue

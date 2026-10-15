@@ -14,7 +14,8 @@ func RunBooksV2Migration(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(&model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
 			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{},
-			&model.BookReadingSession{}, &model.BookReadingWrite{}, &model.BookReadingMark{}); err != nil {
+			&model.BookReadingSession{}, &model.BookReadingWrite{}, &model.BookReadingMark{},
+			&model.BookLibraryEntry{}, &model.BookPrivateNote{}, &model.BookNoteImportReceipt{}); err != nil {
 			return fmt.Errorf("migrate book resources: %w", err)
 		}
 		if err := tx.Exec(`
@@ -44,6 +45,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_reading_session_identity ON book_read
 			{"book_reading_writes", "fk_book_reading_write_state", "FOREIGN KEY (user_id, revision_id) REFERENCES book_reading_states(user_id, revision_id)"},
 			{"book_reading_marks", "fk_book_reading_mark_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
 			{"book_reading_marks", "fk_book_reading_mark_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_library_entries", "fk_book_library_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_library_entries", "fk_book_library_work", "FOREIGN KEY (work_id) REFERENCES book_works(id) DEFERRABLE INITIALLY DEFERRED"},
+			{"book_private_notes", "fk_book_note_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_private_notes", "fk_book_note_work", "FOREIGN KEY (work_id) REFERENCES book_works(id) DEFERRABLE INITIALLY DEFERRED"},
+			{"book_private_notes", "fk_book_note_revision", "FOREIGN KEY (source_revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_note_import_receipts", "fk_book_note_import_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
 		}
 		for _, constraint := range constraints {
 			var exists bool

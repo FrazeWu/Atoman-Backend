@@ -79,6 +79,9 @@ func StartProcessingWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-
 				log.Printf("book cleanup worker removed %d import object(s)", cleaned)
 			}
 			if retentionSweepAt.IsZero() || !time.Now().UTC().Before(retentionSweepAt) {
+				if err := service.purgeBookPrivateNotes(ctx, nil, time.Now().UTC()); err != nil {
+					log.Printf("WARN: private book note retention failed: %v", err)
+				}
 				retained, retentionErr := service.ProcessBookRetention(ctx)
 				if retentionErr != nil {
 					log.Printf("WARN: book retention worker failed: %v", retentionErr)

@@ -60,6 +60,16 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	require.Error(t, db.Model(&mark).Update("user_id", uuid.New()).Error)
 	require.Error(t, db.Model(&mark).Update("kind", "public").Error)
 	require.Error(t, db.Model(&mark).Update("version", 0).Error)
+	library := model.BookLibraryEntry{UserID: user.UUID, WorkID: work.ID, Status: "reading", Version: 1}
+	require.NoError(t, db.Create(&library).Error)
+	require.Error(t, db.Model(&library).Update("work_id", uuid.New()).Error)
+	require.Error(t, db.Model(&library).Update("status", "public").Error)
+	noteRevisionID := revision.ID
+	note := model.BookPrivateNote{UserID: user.UUID, WorkID: work.ID, SourceRevisionID: &noteRevisionID, Title: "私有笔记", Version: 1}
+	require.NoError(t, db.Create(&note).Error)
+	require.Error(t, db.Model(&note).Update("source_revision_id", uuid.New()).Error)
+	require.Error(t, db.Model(&note).Update("user_id", uuid.New()).Error)
+	require.Error(t, db.Model(&note).Update("version", 0).Error)
 	require.Error(t, db.Model(&state).Update("current_percent", .9).Error)
 	require.Error(t, db.Model(&revision).Update("sha256", strings.Repeat("b", 64)).Error)
 	require.Error(t, db.Model(&revision).Update("asset_id", otherAsset.ID).Error)
