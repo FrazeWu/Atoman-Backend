@@ -171,6 +171,7 @@ func (s *Service) WithdrawBookEdit(user authctx.CurrentUser, editID uuid.UUID) e
 	if result.RowsAffected == 0 {
 		return apperr.NotFound("books.edit_not_found", "Book edit not found or cannot be withdrawn")
 	}
+	s.InvalidateCatalog()
 	return nil
 }
 
@@ -565,7 +566,14 @@ func mergeBookWorks(tx *gorm.DB, oldID, targetID uuid.UUID) error {
 			return err
 		}
 	}
-	if err := tx.Model(&model.BookSource{}).Where("target_type = ? AND target_id = ?", "work", oldID).Updates(map[string]any{"target_id": targetID}).Error; err != nil {
+	for _, table := range []any{&model.UserBookImport{}, &model.PublishedBookAsset{}, &model.BookPublicationRequest{}} {
+		if tx.Migrator().HasTable(table) {
+			if err := tx.Model(table).Where("work_id = ?", oldID).Updates(map[string]any{"work_id": targetID}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	if err := tx.Model(&model.BookSource{}).Where("target_type IN ? AND target_id = ?", []string{"work", "book_work"}, oldID).Updates(map[string]any{"target_id": targetID}).Error; err != nil {
 		return err
 	}
 	return tx.Model(&old).Updates(map[string]any{"lifecycle_status": model.BookLifecycleStatusMerged, "edit_status": model.BookEditStatusClosed, "redirect_to": targetID}).Error

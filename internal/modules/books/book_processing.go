@@ -26,6 +26,8 @@ import (
 
 const (
 	bookProcessingBatchSize            = 16
+	bookProcessingTimeout              = 15 * time.Minute
+	bookProcessingStaleAfter           = 30 * time.Minute
 	bookEPUBMaxEntries                 = 10000
 	bookEPUBMaxExpandedBytes     int64 = 512 * 1024 * 1024
 	bookEPUBMaxCompressionRatio        = 100
@@ -44,6 +46,9 @@ func (s *Service) ProcessBookAssets(ctx context.Context) (int, error) {
 		return 0, errors.New("book processing database is required")
 	}
 	if err := requireBookUploadStore(s.bookUpload); err != nil {
+		return 0, err
+	}
+	if err := s.recoverStaleBookAssets(ctx); err != nil {
 		return 0, err
 	}
 	var candidates []model.UserBookAsset
@@ -67,15 +72,29 @@ func (s *Service) ProcessBookAssets(ctx context.Context) (int, error) {
 			continue
 		}
 		processed++
-		if err := s.processBookAsset(ctx, candidate.ID); err != nil {
-			if markErr := s.markBookAssetFailed(ctx, candidate.ID, err); markErr != nil {
+		assetCtx, cancel := context.WithTimeout(ctx, bookProcessingTimeout)
+		processErr := s.processBookAsset(assetCtx, candidate.ID)
+		cancel()
+		if processErr != nil {
+			if markErr := s.markBookAssetFailed(ctx, candidate.ID, processErr); markErr != nil {
 				processingErr = errors.Join(processingErr, fmt.Errorf("mark book asset %s failed: %w", candidate.ID, markErr))
 			} else {
-				processingErr = errors.Join(processingErr, fmt.Errorf("process book asset %s: %w", candidate.ID, err))
+				processingErr = errors.Join(processingErr, fmt.Errorf("process book asset %s: %w", candidate.ID, processErr))
 			}
 		}
 	}
 	return processed, processingErr
+}
+
+func (s *Service) recoverStaleBookAssets(ctx context.Context) error {
+	cutoff := time.Now().UTC().Add(-bookProcessingStaleAfter)
+	return s.db.WithContext(ctx).Model(&model.UserBookAsset{}).
+		Where("processing_status = ? AND updated_at < ?", model.BookAssetStatusProcessing, cutoff).
+		Updates(map[string]any{
+			"processing_status": model.BookAssetStatusScanning,
+			"scan_status":       "pending",
+			"error_message":     "",
+		}).Error
 }
 
 func (s *Service) claimBookAsset(ctx context.Context, assetID uuid.UUID) (bool, error) {
@@ -107,6 +126,7 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 	var sha string
 	readerFormat := asset.Format
 	readerContentType := asset.ContentType
+	readerSizeBytes := asset.SizeBytes
 	derivedObjectKey := asset.DerivedObjectKey
 	if asset.Format == "epub" || asset.Format == "cbz" || asset.Format == "cbr" || asset.Format == "mobi" || asset.Format == "azw3" {
 		temporary, err := os.CreateTemp("", "atoman-book-*"+path.Ext("."+asset.Format))
@@ -171,6 +191,7 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 			if validationErr == nil {
 				readerFormat = "epub"
 				readerContentType = "application/epub+zip"
+				readerSizeBytes = convertedInfo.Size()
 			}
 		}
 		closeErr := file.Close()
@@ -229,6 +250,8 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 	assetForPublish := asset
 	assetForPublish.Format = readerFormat
 	assetForPublish.ContentType = readerContentType
+	assetForPublish.SizeBytes = readerSizeBytes
+	assetForPublish.SHA256 = sha
 	assetForPublish.DerivedObjectKey = derivedObjectKey
 	if err := s.publishScannedBookAsset(ctx, assetForPublish); err != nil {
 		return err
@@ -246,6 +269,7 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 			"sha256":             sha,
 			"format":             readerFormat,
 			"content_type":       readerContentType,
+			"size_bytes":         readerSizeBytes,
 			"derived_object_key": derivedObjectKey,
 			"scan_status":        scanStatus,
 			"processing_status":  model.BookAssetStatusPrivateAvailable,
@@ -260,6 +284,13 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 			"error_message": "",
 		}).Error
 	})
+}
+
+func readableBookObjectKey(asset model.UserBookAsset) string {
+	if strings.TrimSpace(asset.DerivedObjectKey) != "" {
+		return asset.DerivedObjectKey
+	}
+	return asset.ObjectKey
 }
 
 func convertBookToEPUB(ctx context.Context, inputPath string) (string, error) {
@@ -317,11 +348,7 @@ func (s *Service) publishScannedBookAsset(ctx context.Context, source model.User
 
 	publishedID := uuid.New()
 	publicKey := storage.BuildBookPublishedObjectKey(publishedID.String(), source.Format)
-	sourceKey := source.ObjectKey
-	if strings.TrimSpace(source.DerivedObjectKey) != "" {
-		sourceKey = source.DerivedObjectKey
-	}
-	if err := s.bookUpload.CopyObject(sourceKey, publicKey, source.ContentType); err != nil {
+	if err := s.bookUpload.CopyObject(readableBookObjectKey(source), publicKey, source.ContentType); err != nil {
 		return err
 	}
 
