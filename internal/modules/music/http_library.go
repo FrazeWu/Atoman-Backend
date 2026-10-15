@@ -291,30 +291,26 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 	for index := range playlists {
 		playlistRows = append(playlistRows, &playlists[index])
 	}
-	if err := h.enrichPlaylistCovers(playlistRows...); err != nil {
+	if err := h.service.repo.HydratePlaylistStats(playlists); err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	playlistIDs := make([]uuid.UUID, 0, len(playlists))
-	for _, playlist := range playlists {
-		playlistIDs = append(playlistIDs, playlist.ID)
-	}
-	songCounts, err := h.service.repo.CountPlaylistSongs(playlistIDs)
-	if err != nil {
+	if err := h.enrichPlaylistCovers(playlistRows...); err != nil {
 		httpx.Error(c, err)
 		return
 	}
 	rows := make([]PlaylistSummaryResponse, 0, len(playlists))
 	for _, playlist := range playlists {
 		rows = append(rows, PlaylistSummaryResponse{
-			ID:          playlist.ID,
-			UserID:      playlist.UserID,
-			Name:        playlist.Name,
-			Description: playlist.Description,
-			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
-			IsPublic:    playlist.IsPublic,
-			Kind:        playlist.Kind,
-			SongCount:   songCounts[playlist.ID],
+			ID:            playlist.ID,
+			UserID:        playlist.UserID,
+			Name:          playlist.Name,
+			Description:   playlist.Description,
+			CoverURL:      resolveMusicMediaURL(playlist.CoverURL),
+			IsPublic:      playlist.IsPublic,
+			Kind:          playlist.Kind,
+			SongCount:     playlist.SongCount,
+			BookmarkCount: playlist.BookmarkCount,
 		})
 	}
 	httpx.List(c, rows, page, pageSize, total)
@@ -330,7 +326,7 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 // @Router /api/v1/music/playlists/public [get]
 func (h *Handler) listPublicPlaylists(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
-	playlists, songCounts, total, err := h.service.ListPublicPlaylists(page, pageSize)
+	playlists, total, err := h.service.ListPublicPlaylists(page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -347,29 +343,31 @@ func (h *Handler) listPublicPlaylists(c *gin.Context) {
 	rows := make([]PlaylistSummaryResponse, 0, len(playlists))
 	for _, playlist := range playlists {
 		rows = append(rows, PlaylistSummaryResponse{
-			ID:          playlist.ID,
-			UserID:      playlist.UserID,
-			Name:        playlist.Name,
-			Description: playlist.Description,
-			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
-			IsPublic:    playlist.IsPublic,
-			Kind:        playlist.Kind,
-			SongCount:   songCounts[playlist.ID],
+			ID:            playlist.ID,
+			UserID:        playlist.UserID,
+			Name:          playlist.Name,
+			Description:   playlist.Description,
+			CoverURL:      resolveMusicMediaURL(playlist.CoverURL),
+			IsPublic:      playlist.IsPublic,
+			Kind:          playlist.Kind,
+			SongCount:     playlist.SongCount,
+			BookmarkCount: playlist.BookmarkCount,
 		})
 	}
 	httpx.List(c, rows, page, pageSize, total)
 }
 
-func buildPlaylistSummaryResponse(playlist model.Playlist, songCount int64) PlaylistSummaryResponse {
+func buildPlaylistSummaryResponse(playlist model.Playlist) PlaylistSummaryResponse {
 	return PlaylistSummaryResponse{
-		ID:          playlist.ID,
-		UserID:      playlist.UserID,
-		Name:        playlist.Name,
-		Description: playlist.Description,
-		CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
-		IsPublic:    playlist.IsPublic,
-		Kind:        playlist.Kind,
-		SongCount:   songCount,
+		ID:            playlist.ID,
+		UserID:        playlist.UserID,
+		Name:          playlist.Name,
+		Description:   playlist.Description,
+		CoverURL:      resolveMusicMediaURL(playlist.CoverURL),
+		IsPublic:      playlist.IsPublic,
+		Kind:          playlist.Kind,
+		SongCount:     playlist.SongCount,
+		BookmarkCount: playlist.BookmarkCount,
 	}
 }
 
@@ -403,7 +401,7 @@ func (h *Handler) createPlaylist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusCreated, buildPlaylistSummaryResponse(playlist, 0))
+	httpx.OK(c, http.StatusCreated, buildPlaylistSummaryResponse(playlist))
 }
 
 func (h *Handler) deletePlaylist(c *gin.Context) {
@@ -447,12 +445,12 @@ func (h *Handler) getPlaylist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	songCounts, err := h.service.repo.CountPlaylistSongs([]uuid.UUID{playlist.ID})
-	if err != nil {
+	playlistRows := []model.Playlist{playlist}
+	if err := h.service.repo.HydratePlaylistStats(playlistRows); err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlist, songCounts[playlist.ID]))
+	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlistRows[0]))
 }
 
 func (h *Handler) updatePlaylist(c *gin.Context) {
@@ -476,12 +474,12 @@ func (h *Handler) updatePlaylist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	songCounts, err := h.service.repo.CountPlaylistSongs([]uuid.UUID{playlist.ID})
-	if err != nil {
+	playlistRows := []model.Playlist{playlist}
+	if err := h.service.repo.HydratePlaylistStats(playlistRows); err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlist, songCounts[playlist.ID]))
+	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlistRows[0]))
 }
 
 // listPlaylistSongs godoc

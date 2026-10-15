@@ -312,6 +312,10 @@ func (h *Handler) search(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
+		if err := h.service.repo.HydratePlaylistStats(result.Playlists); err != nil {
+			httpx.Error(c, err)
+			return
+		}
 		for i := range result.Playlists {
 			result.Playlists[i].CoverURL = resolveMusicMediaURL(result.Playlists[i].CoverURL)
 		}

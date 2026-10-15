@@ -5586,6 +5586,8 @@ definitions:
     type: object
   model.Playlist:
     properties:
+      bookmark_count:
+        type: integer
       cover_url:
         type: string
       created_at:
@@ -7727,6 +7729,8 @@ definitions:
     type: object
   music.PlaylistSummaryResponse:
     properties:
+      bookmark_count:
+        type: integer
       cover_url:
         type: string
       description:

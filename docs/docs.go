@@ -36716,6 +36716,9 @@ const docTemplate = `{
         "model.Playlist": {
             "type": "object",
             "properties": {
+                "bookmark_count": {
+                    "type": "integer"
+                },
                 "cover_url": {
                     "type": "string"
                 },
@@ -39955,6 +39958,9 @@ const docTemplate = `{
         "music.PlaylistSummaryResponse": {
             "type": "object",
             "properties": {
+                "bookmark_count": {
+                    "type": "integer"
+                },
                 "cover_url": {
                     "type": "string"
                 },

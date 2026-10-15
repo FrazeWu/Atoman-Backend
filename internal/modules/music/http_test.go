@@ -635,6 +635,7 @@ func TestRegisterRoutesPlaylistBookmarksMatchFrontendContract(t *testing.T) {
 				Name          string `json:"name"`
 				OwnerUsername string `json:"owner_username"`
 				SongCount     int64  `json:"song_count"`
+				BookmarkCount int64  `json:"bookmark_count"`
 			} `json:"playlist"`
 		} `json:"data"`
 		Meta struct {
@@ -648,7 +649,7 @@ func TestRegisterRoutesPlaylistBookmarksMatchFrontendContract(t *testing.T) {
 		t.Fatalf("expected only current user's bookmark, got %#v", listResp)
 	}
 	bookmark := listResp.Data[0]
-	if bookmark.PlaylistID != playlist.ID.String() || bookmark.UserID != user.ID.String() || bookmark.Playlist.ID != playlist.ID.String() || bookmark.Playlist.Name != playlist.Name || bookmark.Playlist.OwnerUsername != owner.Username || bookmark.Playlist.SongCount != 1 {
+	if bookmark.PlaylistID != playlist.ID.String() || bookmark.UserID != user.ID.String() || bookmark.Playlist.ID != playlist.ID.String() || bookmark.Playlist.Name != playlist.Name || bookmark.Playlist.OwnerUsername != owner.Username || bookmark.Playlist.SongCount != 1 || bookmark.Playlist.BookmarkCount != 2 {
 		t.Fatalf("unexpected playlist bookmark payload: %#v", bookmark)
 	}
 
@@ -3990,12 +3991,15 @@ func TestRegisterRoutesMusicHomeOmitsPublicDiscoveryPayload(t *testing.T) {
 }
 
 func TestRegisterRoutesPublicPlaylistsReturnsDiscoverablePlaylists(t *testing.T) {
-	service, _, user := newMusicHTTPTestService(t)
+	service, db, user := newMusicHTTPTestService(t)
 	userRouter := newMusicHTTPRouter(service, &user)
 
 	older := createMusicPlaylistViaAPI(t, userRouter, `{"name":"Older Public Playlist","description":"older","cover_url":"/uploads/public-old.jpg","is_public":true}`)
 	newer := createMusicPlaylistViaAPI(t, userRouter, `{"name":"Newest Public Playlist","description":"newer","cover_url":"/uploads/public-new.jpg","is_public":true}`)
 	_ = createMusicPlaylistViaAPI(t, userRouter, `{"name":"Private Playlist","description":"hidden","cover_url":"/uploads/private.jpg","is_public":false}`)
+	if err := db.Create(&model.PlaylistBookmark{UserID: user.ID, PlaylistID: uuid.MustParse(newer.ID)}).Error; err != nil {
+		t.Fatalf("bookmark public playlist: %v", err)
+	}
 
 	r := newMusicHTTPRouter(service, nil)
 	w := httptest.NewRecorder()
@@ -4008,12 +4012,13 @@ func TestRegisterRoutesPublicPlaylistsReturnsDiscoverablePlaylists(t *testing.T)
 
 	var resp struct {
 		Data []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			CoverURL  string `json:"cover_url"`
-			IsPublic  bool   `json:"is_public"`
-			UserID    string `json:"user_id"`
-			SongCount int64  `json:"song_count"`
+			ID            string `json:"id"`
+			Name          string `json:"name"`
+			CoverURL      string `json:"cover_url"`
+			IsPublic      bool   `json:"is_public"`
+			UserID        string `json:"user_id"`
+			SongCount     int64  `json:"song_count"`
+			BookmarkCount int64  `json:"bookmark_count"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
@@ -4030,6 +4035,47 @@ func TestRegisterRoutesPublicPlaylistsReturnsDiscoverablePlaylists(t *testing.T)
 	}
 	if !resp.Data[0].IsPublic || !resp.Data[1].IsPublic || resp.Data[0].CoverURL == "" {
 		t.Fatalf("expected public playlists only, got %#v", resp.Data)
+	}
+	if resp.Data[0].BookmarkCount != 1 || resp.Data[1].BookmarkCount != 0 {
+		t.Fatalf("expected playlist bookmark counts to be included, got %#v", resp.Data)
+	}
+}
+
+func TestRegisterRoutesMusicSearchIncludesPlaylistStats(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	playlist := model.Playlist{UserID: user.ID, Name: "Playlist Stats", IsPublic: true}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	song := model.Song{Title: "Playlist Stats Song", AudioURL: "/audio/playlist-stats.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: song.ID}).Error; err != nil {
+		t.Fatalf("create playlist song: %v", err)
+	}
+	if err := db.Create(&model.PlaylistBookmark{UserID: user.ID, PlaylistID: playlist.ID}).Error; err != nil {
+		t.Fatalf("bookmark playlist: %v", err)
+	}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodGet, "/api/v1/music/search?q=Playlist+Stats&type=playlist", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected search 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Playlists []struct {
+				Name          string `json:"name"`
+				SongCount     int64  `json:"song_count"`
+				BookmarkCount int64  `json:"bookmark_count"`
+			} `json:"playlists"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode playlist search: %v", err)
+	}
+	if len(payload.Data.Playlists) != 1 || payload.Data.Playlists[0].Name != playlist.Name || payload.Data.Playlists[0].SongCount != 1 || payload.Data.Playlists[0].BookmarkCount != 1 {
+		t.Fatalf("expected playlist search stats, got %#v", payload.Data.Playlists)
 	}
 }
 
