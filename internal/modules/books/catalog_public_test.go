@@ -97,7 +97,7 @@ func TestPublicEditionUsesISBNCoverWhenImportedCoverIsMissing(t *testing.T) {
 	require.Equal(t, "https://covers.openlibrary.org/b/isbn/978-7-111-00000-1-M.jpg", dto.CoverURL)
 }
 
-func TestDiscoveryOnlyReturnsChineseBooksWithActualCover(t *testing.T) {
+func TestDiscoveryShowsAllActiveBooksRegardlessOfCoverOrLanguage(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{})
 	visible := model.BookWork{Title: "中文书", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
@@ -115,9 +115,13 @@ func TestDiscoveryOnlyReturnsChineseBooksWithActualCover(t *testing.T) {
 	service := NewService(db)
 	items, total, err := service.SearchPublicCatalog(context.Background(), "", 20, 0)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), total)
-	require.Len(t, items, 1)
-	require.Equal(t, visible.ID.String(), items[0].ID)
+	require.Equal(t, int64(4), total)
+	require.Len(t, items, 4)
+	itemIDs := []string{items[0].ID, items[1].ID, items[2].ID, items[3].ID}
+	require.Contains(t, itemIDs, visible.ID.String())
+	require.Contains(t, itemIDs, noCover.ID.String())
+	require.Contains(t, itemIDs, isbnOnly.ID.String())
+	require.Contains(t, itemIDs, latin.ID.String())
 
 	items, total, err = service.SearchPublicCatalog(context.Background(), "另一本书", 20, 0)
 	require.NoError(t, err)

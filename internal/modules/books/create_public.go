@@ -16,14 +16,15 @@ import (
 )
 
 type CreatePublicBookInput struct {
-	ImportID      string   `json:"import_id"`
-	Title         string   `json:"title"`
-	Subtitle      string   `json:"subtitle,omitempty"`
-	OriginalTitle string   `json:"original_title,omitempty"`
-	Description   string   `json:"description,omitempty"`
-	Language      string   `json:"language,omitempty"`
-	Authors       []string `json:"authors,omitempty"`
-	Edition       struct {
+	ImportID                    string   `json:"import_id"`
+	Title                       string   `json:"title"`
+	Subtitle                    string   `json:"subtitle,omitempty"`
+	OriginalTitle               string   `json:"original_title,omitempty"`
+	Description                 string   `json:"description,omitempty"`
+	Language                    string   `json:"language,omitempty"`
+	Authors                     []string `json:"authors,omitempty"`
+	PublicDistributionConfirmed bool     `json:"public_distribution_confirmed"`
+	Edition                     struct {
 		Title         string `json:"title,omitempty"`
 		Publisher     string `json:"publisher,omitempty"`
 		Producer      string `json:"producer,omitempty"`
@@ -41,6 +42,9 @@ type CreatePublicBookInput struct {
 func (s *Service) CreatePublicBook(ctx context.Context, user authctx.CurrentUser, input CreatePublicBookInput) (BookPublicWorkDTO, error) {
 	if user.ID == uuid.Nil {
 		return BookPublicWorkDTO{}, apperr.Unauthorized("Login required")
+	}
+	if !input.PublicDistributionConfirmed {
+		return BookPublicWorkDTO{}, apperr.BadRequest("books.public_distribution_confirmation_required", "Confirm that you have permission to share this book publicly")
 	}
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
@@ -168,7 +172,7 @@ func (s *Service) CreatePublicBook(ctx context.Context, user authctx.CurrentUser
 				}
 			}
 		}
-		return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "books.work.created", EntityType: "book_work", EntityID: &work.ID})
+		return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "books.work.created", EntityType: "book_work", EntityID: &work.ID, Metadata: map[string]any{"public_distribution_confirmed": true}})
 	})
 	if err != nil {
 		return BookPublicWorkDTO{}, err
