@@ -12,6 +12,293 @@
     },
     "basePath": "/api/v1",
     "paths": {
+        "/api/v1/books/wiki/merges/preview": {
+            "post": {
+                "summary": "预览作品合并：仅返回记录数量与预览令牌",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                }
+                            },
+                            "required": [
+                                "source_id",
+                                "target_id"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "重复交互保留目标记录，电子书全部保留",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "preview_token": {
+                                    "type": "string"
+                                },
+                                "conflict_policy": {
+                                    "type": "string",
+                                    "enum": [
+                                        "keep_target"
+                                    ]
+                                },
+                                "record_counts": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "作品不存在或不是新版活动作品"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/wiki/merges": {
+            "post": {
+                "summary": "执行可撤销的作品合并，无人工审核",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "preview_token": {
+                                    "type": "string"
+                                },
+                                "source_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                }
+                            },
+                            "required": [
+                                "source_id",
+                                "target_id",
+                                "preview_token",
+                                "source_revision_id",
+                                "target_revision_id"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "合并记录（不包含内部恢复快照或私人数据）",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "created_by": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "merged",
+                                        "reverted"
+                                    ]
+                                },
+                                "reverted_by": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "reverted_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "预览后关联数据或修订已改变，请重新预览"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/wiki/merges/{mergeId}/revert": {
+            "post": {
+                "summary": "撤销作品合并，后续关联数据有变化则拒绝覆盖",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "mergeId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "合并已撤销；文件修订级进度不受影响",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "created_by": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "merged",
+                                        "reverted"
+                                    ]
+                                },
+                                "reverted_by": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "reverted_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "合并不存在"
+                    },
+                    "409": {
+                        "description": "已撤销，或合并后发生新修改"
+                    }
+                }
+            }
+        },
         "/api/v1/books/wiki/{entityType}/{entityId}/revisions": {
             "get": {
                 "summary": "获取书目修订、快照和真实字段差异",
@@ -419,6 +706,9 @@
                     },
                     "404": {
                         "description": "作品不存在"
+                    },
+                    "308": {
+                        "description": "作品已合并，Location 指向规范作品地址"
                     }
                 }
             }

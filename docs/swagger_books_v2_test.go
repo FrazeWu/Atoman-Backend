@@ -33,6 +33,9 @@ func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T)
 		"/api/v1/books/asset-revisions/{revisionId}/content":   {"get"},
 		"/api/v1/books/wiki/{entityType}/{entityId}/revisions": {"get"},
 		"/api/v1/books/wiki/revisions/{revisionId}/revert":     {"post"},
+		"/api/v1/books/wiki/merges/preview":                    {"post"},
+		"/api/v1/books/wiki/merges":                            {"post"},
+		"/api/v1/books/wiki/merges/{mergeId}/revert":           {"post"},
 	} {
 		for _, method := range methods {
 			require.Contains(t, spec.Paths[path], method, path)

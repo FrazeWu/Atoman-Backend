@@ -68,6 +68,7 @@ func (h *Handler) createBookWork(c *gin.Context) {
 // @Produce json
 // @Param workId path string true "作品 UUID"
 // @Success 200 {object} BookWorkDetail
+// @Success 308 {string} string "作品已合并，Location 指向规范作品"
 // @Failure 404 {object} handlers.ErrorResponse
 // @Router /api/v1/books/works/{workId} [get]
 func (h *Handler) getBookWork(c *gin.Context) {
@@ -78,6 +79,10 @@ func (h *Handler) getBookWork(c *gin.Context) {
 	work, err := h.service.GetBookWork(c.Request.Context(), id)
 	if err != nil {
 		httpx.Error(c, err)
+		return
+	}
+	if work.RedirectedFrom != "" {
+		c.Redirect(http.StatusPermanentRedirect, "/api/v1/books/works/"+work.ID)
 		return
 	}
 	httpx.OK(c, http.StatusOK, work)

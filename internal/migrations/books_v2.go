@@ -13,7 +13,7 @@ import (
 func RunBooksV2Migration(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(&model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
-			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}); err != nil {
+			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}); err != nil {
 			return fmt.Errorf("migrate book resources: %w", err)
 		}
 		if err := tx.Exec(`
@@ -45,6 +45,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_revisions_asset ON book_asset_revisio
 					return fmt.Errorf("add %s: %w", constraint.name, err)
 				}
 			}
+		}
+		// Resource moves during a merge must be checked at commit, after both
+		// asset ownership and dependent defaults/selections have been updated.
+		if err := tx.Exec(`
+ALTER TABLE book_assets ALTER CONSTRAINT fk_book_assets_work DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE book_asset_revisions ALTER CONSTRAINT fk_book_revisions_asset DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE book_default_assets ALTER CONSTRAINT fk_book_default_asset DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE book_reading_selections ALTER CONSTRAINT fk_book_selection_asset DEFERRABLE INITIALLY IMMEDIATE;`).Error; err != nil {
+			return err
 		}
 		// Scan/down-take status can change, but the identity of a revision cannot.
 		return tx.Exec(`

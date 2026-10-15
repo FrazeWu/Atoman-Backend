@@ -51,17 +51,19 @@ type CreateBookEditionInput struct {
 }
 
 type bookWorkSnapshot struct {
-	Title         string      `json:"title"`
-	Subtitle      string      `json:"subtitle"`
-	OriginalTitle string      `json:"original_title"`
-	Description   string      `json:"description"`
-	Language      string      `json:"language"`
-	AuthorIDs     []uuid.UUID `json:"author_ids"`
+	Title           string      `json:"title"`
+	Subtitle        string      `json:"subtitle"`
+	OriginalTitle   string      `json:"original_title"`
+	Description     string      `json:"description"`
+	Language        string      `json:"language"`
+	AuthorIDs       []uuid.UUID `json:"author_ids"`
+	LifecycleStatus string      `json:"lifecycle_status"`
+	RedirectTo      *uuid.UUID  `json:"redirect_to"`
 }
 
 func loadBookWorkSnapshot(tx *gorm.DB, work model.BookWork) (bookWorkSnapshot, error) {
-	snapshot := bookWorkSnapshot{Title: work.Title, Subtitle: work.Subtitle, OriginalTitle: work.OriginalTitle, Description: work.Description, Language: work.Language, AuthorIDs: []uuid.UUID{}}
-	err := tx.Model(&model.BookContribution{}).Where("work_id = ? AND edition_id IS NULL AND role = 'author'", work.ID).Order("position ASC").Pluck("person_id", &snapshot.AuthorIDs).Error
+	snapshot := bookWorkSnapshot{Title: work.Title, Subtitle: work.Subtitle, OriginalTitle: work.OriginalTitle, Description: work.Description, Language: work.Language, AuthorIDs: []uuid.UUID{}, LifecycleStatus: work.LifecycleStatus, RedirectTo: work.RedirectTo}
+	err := tx.Model(&model.BookContribution{}).Where("work_id = ? AND edition_id IS NULL AND role = 'author'", work.ID).Order("position ASC, id ASC").Pluck("person_id", &snapshot.AuthorIDs).Error
 	return snapshot, err
 }
 
@@ -188,15 +190,30 @@ func (s *Service) GetBookWork(ctx context.Context, workID uuid.UUID) (BookWorkDe
 	var detail BookWorkDetail
 	// Keep the metadata and revision token in the same database snapshot.
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var work model.BookWork
-		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ?", workID).First(&work).Error; err != nil {
-			return publicBookNotFound(err)
+		canonicalID := workID
+		visited := map[uuid.UUID]bool{}
+		for {
+			if visited[canonicalID] {
+				return apperr.Conflict("books.redirect_cycle", "Invalid work redirect")
+			}
+			visited[canonicalID] = true
+			var work model.BookWork
+			if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ?", canonicalID).First(&work).Error; err != nil {
+				return publicBookNotFound(err)
+			}
+			if work.LifecycleStatus != model.BookLifecycleStatusMerged || work.RedirectTo == nil {
+				break
+			}
+			canonicalID = *work.RedirectTo
 		}
 		service := *s
 		service.db = tx
-		dto, err := service.GetPublicWork(ctx, workID)
+		dto, err := service.GetPublicWork(ctx, canonicalID)
 		if err != nil {
 			return err
+		}
+		if canonicalID != workID {
+			dto.RedirectedFrom = workID.String()
 		}
 		detail.BookPublicWorkDTO = dto
 		var current model.Revision

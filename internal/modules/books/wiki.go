@@ -60,7 +60,7 @@ func bookWikiDiff(before, after []byte) []BookWikiChange {
 	_ = json.Unmarshal(after, &next)
 	changes := make([]BookWikiChange, 0)
 	// Stable order and only editable metadata, never audit timestamps.
-	for _, field := range []string{"title", "subtitle", "original_title", "description", "language", "author_ids", "name", "publisher", "producer", "isbn10", "isbn13", "published_date", "page_count", "binding", "cover_url"} {
+	for _, field := range []string{"title", "subtitle", "original_title", "description", "language", "author_ids", "name", "publisher", "producer", "isbn10", "isbn13", "published_date", "page_count", "binding", "cover_url", "lifecycle_status", "redirect_to"} {
 		a, aOK := old[field]
 		b, bOK := next[field]
 		if !aOK && !bOK {
