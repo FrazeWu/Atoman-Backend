@@ -1,0 +1,63 @@
+package migrations
+
+import (
+	"fmt"
+
+	"atoman/internal/model"
+
+	"gorm.io/gorm"
+)
+
+// RunBooksV2Migration adds the new resource graph without copying legacy books.
+// Composite foreign keys enforce ownership even when writes bypass the service.
+func RunBooksV2Migration(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(&model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
+			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}); err != nil {
+			return fmt.Errorf("migrate book resources: %w", err)
+		}
+		if err := tx.Exec(`
+CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_work_language ON book_assets (id, work_id, language);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_work ON book_assets (id, work_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_book_revisions_asset ON book_asset_revisions (id, asset_id);
+`).Error; err != nil {
+			return err
+		}
+		constraints := []struct{ table, name, definition string }{
+			{"book_assets", "fk_book_assets_work", "FOREIGN KEY (work_id) REFERENCES book_works(id)"},
+			{"book_assets", "fk_book_assets_current_revision", "FOREIGN KEY (current_revision_id, id) REFERENCES book_asset_revisions(id, asset_id) DEFERRABLE INITIALLY DEFERRED"},
+			{"book_asset_revisions", "fk_book_revisions_asset", "FOREIGN KEY (asset_id) REFERENCES book_assets(id)"},
+			{"book_asset_revisions", "fk_book_revisions_media", "FOREIGN KEY (media_asset_id) REFERENCES media_assets(id)"},
+			{"book_default_assets", "fk_book_default_asset", "FOREIGN KEY (asset_id, work_id, language) REFERENCES book_assets(id, work_id, language)"},
+			{"book_reading_selections", "fk_book_selection_asset", "FOREIGN KEY (asset_id, work_id) REFERENCES book_assets(id, work_id)"},
+			{"book_reading_selections", "fk_book_selection_revision", "FOREIGN KEY (revision_id, asset_id) REFERENCES book_asset_revisions(id, asset_id)"},
+			{"book_reading_selections", "fk_book_selection_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_reading_states", "fk_book_state_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_reading_states", "fk_book_state_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
+		}
+		for _, constraint := range constraints {
+			var exists bool
+			if err := tx.Raw(`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = ?::regclass AND conname = ?)`, constraint.table, constraint.name).Scan(&exists).Error; err != nil {
+				return err
+			}
+			if !exists {
+				if err := tx.Exec("ALTER TABLE " + constraint.table + " ADD CONSTRAINT " + constraint.name + " " + constraint.definition).Error; err != nil {
+					return fmt.Errorf("add %s: %w", constraint.name, err)
+				}
+			}
+		}
+		// Scan/down-take status can change, but the identity of a revision cannot.
+		return tx.Exec(`
+CREATE OR REPLACE FUNCTION guard_book_revision_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF ROW(NEW.id, NEW.asset_id, NEW.number, NEW.media_asset_id, NEW.sha256, NEW.original_filename, NEW.created_by, NEW.created_at)
+ IS DISTINCT FROM ROW(OLD.id, OLD.asset_id, OLD.number, OLD.media_asset_id, OLD.sha256, OLD.original_filename, OLD.created_by, OLD.created_at) THEN
+  RAISE EXCEPTION 'book file revisions are immutable';
+ END IF;
+ RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS book_revision_identity ON book_asset_revisions;
+CREATE TRIGGER book_revision_identity BEFORE UPDATE ON book_asset_revisions
+FOR EACH ROW EXECUTE FUNCTION guard_book_revision_identity();`).Error
+	})
+}
