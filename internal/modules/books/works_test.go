@@ -32,9 +32,13 @@ func TestCreateBookWorkNeedsOnlyTitleAndAuthor(t *testing.T) {
 	require.Len(t, work.Authors, 1)
 	require.Empty(t, work.Editions)
 	require.NotEqual(t, uuid.Nil, work.RevisionID)
-	_, count, err := service.SearchPublicCatalog(ctx, "图书", 20, 0)
+	legacy := model.BookWork{Title: "旧图书", LifecycleStatus: model.BookLifecycleStatusActive}
+	require.NoError(t, service.db.Create(&legacy).Error)
+	_, count, err := service.SearchBookWorks(ctx, "图书", 20, 0)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, count)
+	_, err = service.GetBookWork(ctx, legacy.ID)
+	require.Error(t, err, "legacy records are not silently migrated")
 	var revisions []model.Revision
 	require.NoError(t, service.db.Where("content_id = ?", work.ID).Find(&revisions).Error)
 	require.Len(t, revisions, 1)
@@ -54,6 +58,12 @@ func TestCreateBookWorkNeedsOnlyTitleAndAuthor(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, updated.Editions, 1)
 	require.Equal(t, work.RevisionID, updated.RevisionID, "edition history is separate from work history")
+	_, err = service.CreateBookEdition(ctx, user, uuid.MustParse(work.ID), CreateBookEditionInput{PublishedDate: "invalid"})
+	require.Error(t, err)
+	stillVisible, err := service.GetBookWork(ctx, uuid.MustParse(work.ID))
+	require.NoError(t, err)
+	require.Len(t, stillVisible.Editions, 1)
+	require.Equal(t, work.RevisionID, stillVisible.RevisionID)
 }
 
 func TestCreateBookWorkValidationAndRollback(t *testing.T) {

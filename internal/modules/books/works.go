@@ -201,7 +201,7 @@ func (s *Service) GetBookWork(ctx context.Context, workID uuid.UUID) (BookWorkDe
 		detail.BookPublicWorkDTO = dto
 		var current model.Revision
 		if err := tx.Where("content_type = 'book_work' AND content_id = ? AND is_current = true", dto.ID).First(&current).Error; err != nil {
-			return err
+			return publicBookNotFound(err)
 		}
 		detail.RevisionID = current.ID
 		return nil
@@ -228,6 +228,9 @@ func (s *Service) CreateBookEdition(ctx context.Context, user authctx.CurrentUse
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var work model.BookWork
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND lifecycle_status = ? AND edit_status <> ?", workID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&work).Error; err != nil {
+			return publicBookNotFound(err)
+		}
+		if _, err := currentBookWikiRevision(tx, "work", workID); err != nil {
 			return publicBookNotFound(err)
 		}
 		var err error

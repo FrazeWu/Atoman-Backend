@@ -15,6 +15,106 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/books/wiki/{entityType}/{entityId}/revisions": {
+            "get": {
+                "summary": "获取书目修订、快照和真实字段差异",
+                "tags": [
+                    "books-wiki"
+                ],
+                "parameters": [
+                    {
+                        "name": "entityType",
+                        "in": "path",
+                        "type": "string",
+                        "enum": [
+                            "work",
+                            "edition",
+                            "person"
+                        ],
+                        "required": true
+                    },
+                    {
+                        "name": "entityId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer"
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "修订列表（含 changes 与 snapshot）"
+                    },
+                    "404": {
+                        "description": "条目不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/wiki/revisions/{revisionId}/revert": {
+            "post": {
+                "summary": "回退作品元数据并创建新修订",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "base_revision_id"
+                            ],
+                            "properties": {
+                                "base_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "summary": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "回退后的作品及新 revision_id"
+                    },
+                    "409": {
+                        "description": "当前作品已被其他编辑修改"
+                    }
+                }
+            }
+        },
         "/api/v1/books/asset-revisions/{revisionId}/content": {
             "get": {
                 "summary": "读取通过安全检查且未下架的文件修订",
@@ -209,6 +309,84 @@ const docTemplate = `{
             }
         },
         "/api/v1/books/works/{workId}": {
+            "patch": {
+                "summary": "即时编辑作品并检查并发冲突",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "base_revision_id"
+                            ],
+                            "properties": {
+                                "base_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "summary": {
+                                    "type": "string"
+                                },
+                                "title": {
+                                    "type": "string"
+                                },
+                                "subtitle": {
+                                    "type": "string"
+                                },
+                                "original_title": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "language": {
+                                    "type": "string"
+                                },
+                                "author_ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "编辑后的公开作品及新 revision_id"
+                    },
+                    "400": {
+                        "description": "基础修订或字段无效"
+                    },
+                    "409": {
+                        "description": "条目已经修改，details.current_revision_id 为最新修订"
+                    }
+                }
+            },
             "get": {
                 "summary": "获取公开作品和当前修订标识",
                 "tags": [

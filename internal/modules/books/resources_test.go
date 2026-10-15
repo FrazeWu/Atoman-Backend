@@ -70,7 +70,8 @@ func TestBookRevisionContentChecksAllLifecycleLayers(t *testing.T) {
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, url, nil))
 	require.Equal(t, http.StatusNotFound, response.Code)
 	require.NoError(t, db.Model(&work).Update("lifecycle_status", model.BookLifecycleStatusActive).Error)
-	require.NoError(t, db.Model(&media).Update("url", "https://cdn.example.test/unsafe.txt").Error)
+	require.Error(t, db.Model(&media).Update("url", "https://cdn.example.test/unsafe.txt").Error)
+	require.NoError(t, db.Delete(&media).Error)
 	_, err = service.OpenBookRevision(context.Background(), revision.ID)
 	require.Error(t, err)
 }

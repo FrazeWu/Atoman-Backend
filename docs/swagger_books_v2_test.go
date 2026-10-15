@@ -25,12 +25,14 @@ func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &spec))
 	for path, methods := range map[string][]string{
-		"/api/v1/books/works":                                {"get", "post"},
-		"/api/v1/books/works/{workId}":                       {"get"},
-		"/api/v1/books/people":                               {"get", "post"},
-		"/api/v1/books/works/{workId}/editions":              {"post"},
-		"/api/v1/books/assets/{assetId}/revisions":           {"get"},
-		"/api/v1/books/asset-revisions/{revisionId}/content": {"get"},
+		"/api/v1/books/works":                                  {"get", "post"},
+		"/api/v1/books/works/{workId}":                         {"get", "patch"},
+		"/api/v1/books/people":                                 {"get", "post"},
+		"/api/v1/books/works/{workId}/editions":                {"post"},
+		"/api/v1/books/assets/{assetId}/revisions":             {"get"},
+		"/api/v1/books/asset-revisions/{revisionId}/content":   {"get"},
+		"/api/v1/books/wiki/{entityType}/{entityId}/revisions": {"get"},
+		"/api/v1/books/wiki/revisions/{revisionId}/revert":     {"post"},
 	} {
 		for _, method := range methods {
 			require.Contains(t, spec.Paths[path], method, path)

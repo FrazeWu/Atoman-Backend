@@ -11,6 +11,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// searchBookWorks godoc
+// @Summary 搜索新版公开作品，不迁移或兼容旧版条目
+// @Tags books-catalog
+// @Produce json
+// @Param q query string false "标题或作者"
+// @Param limit query int false "每页数量"
+// @Param offset query int false "偏移量"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/books/works [get]
+func (h *Handler) searchBookWorks(c *gin.Context) {
+	limit, offset, ok := catalogPaginationParams(c)
+	if !ok {
+		return
+	}
+	items, total, err := h.service.SearchBookWorks(c.Request.Context(), c.Query("q"), limit, offset)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"items": items, "total": total, "limit": limit, "offset": offset})
+}
+
 // createBookWork godoc
 // @Summary 使用书名和作者创建公开作品，无需文件或出版版本
 // @Tags books-catalog

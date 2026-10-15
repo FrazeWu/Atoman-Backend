@@ -49,6 +49,11 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	require.Error(t, db.Model(&state).Update("current_percent", .9).Error)
 	require.Error(t, db.Model(&revision).Update("sha256", strings.Repeat("b", 64)).Error)
 	require.Error(t, db.Model(&revision).Update("asset_id", otherAsset.ID).Error)
+	require.Error(t, db.Model(&media).Update("key", "a-different-file").Error)
+	require.Error(t, db.Model(&media).Update("url", "https://cdn.example.test/file").Error)
+	ordinaryMedia := model.MediaAsset{Purpose: "blog.image", Key: "blog/image", ContentType: "image/png", Size: 12}
+	require.NoError(t, db.Create(&ordinaryMedia).Error)
+	require.NoError(t, db.Model(&ordinaryMedia).Update("key", "blog/updated").Error)
 	require.NoError(t, db.Model(&revision).Update("status", model.BookRevisionStatusReady).Error)
 
 	// Replacing a file appends a revision without touching the old identity/state.

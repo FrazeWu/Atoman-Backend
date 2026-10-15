@@ -58,6 +58,18 @@ BEGIN
 END; $$;
 DROP TRIGGER IF EXISTS book_revision_identity ON book_asset_revisions;
 CREATE TRIGGER book_revision_identity BEFORE UPDATE ON book_asset_revisions
-FOR EACH ROW EXECUTE FUNCTION guard_book_revision_identity();`).Error
+FOR EACH ROW EXECUTE FUNCTION guard_book_revision_identity();
+CREATE OR REPLACE FUNCTION guard_book_file_media() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF EXISTS (SELECT 1 FROM book_asset_revisions WHERE media_asset_id = OLD.id)
+ AND ROW(NEW.id, NEW.key, NEW.url, NEW.content_type, NEW.size, NEW.purpose)
+ IS DISTINCT FROM ROW(OLD.id, OLD.key, OLD.url, OLD.content_type, OLD.size, OLD.purpose) THEN
+  RAISE EXCEPTION 'media referenced by a book revision is immutable';
+ END IF;
+ RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS book_file_media_identity ON media_assets;
+CREATE TRIGGER book_file_media_identity BEFORE UPDATE ON media_assets
+FOR EACH ROW EXECUTE FUNCTION guard_book_file_media();`).Error
 	})
 }
