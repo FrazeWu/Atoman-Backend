@@ -15,6 +15,403 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/books/asset-revisions/{revisionId}/content": {
+            "get": {
+                "summary": "读取通过安全检查且未下架的文件修订",
+                "description": "正文从独立私有桶读取，不返回存储 URL；响应 Cache-Control: private, no-store。",
+                "tags": [
+                    "books-reading"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "正文",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "修订不可读或已下架"
+                    },
+                    "503": {
+                        "description": "私有存储不可用"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/assets/{assetId}/revisions": {
+            "get": {
+                "summary": "获取公共电子书的可读修订",
+                "tags": [
+                    "books-reading"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "assetId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "修订列表（不包含存储地址）",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "资源不存在或已下架"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works": {
+            "get": {
+                "summary": "搜索公开作品",
+                "tags": [
+                    "books-catalog"
+                ],
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "type": "string"
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer"
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "作品列表"
+                    }
+                }
+            },
+            "post": {
+                "summary": "使用书名和作者创建公开作品",
+                "description": "无需电子书、导入任务或出版版本。author_ids 与 authors 至少一项非空；authors 用于快速创建作者。",
+                "tags": [
+                    "books-catalog"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "title"
+                            ],
+                            "properties": {
+                                "title": {
+                                    "type": "string"
+                                },
+                                "subtitle": {
+                                    "type": "string"
+                                },
+                                "original_title": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "language": {
+                                    "type": "string"
+                                },
+                                "author_ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                    }
+                                },
+                                "authors": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "作品及 revision_id",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/books.BookPublicWorkDTO"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "revision_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "书名或作者无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/{workId}": {
+            "get": {
+                "summary": "获取公开作品和当前修订标识",
+                "tags": [
+                    "books-catalog"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "作品及 revision_id",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/books.BookPublicWorkDTO"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "revision_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "作品不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/people": {
+            "get": {
+                "summary": "搜索公开作者",
+                "tags": [
+                    "books-catalog"
+                ],
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "type": "string"
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer"
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "作者列表"
+                    }
+                }
+            },
+            "post": {
+                "summary": "快速创建公开作者",
+                "tags": [
+                    "books-catalog"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "name"
+                            ],
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "新建作者"
+                    },
+                    "400": {
+                        "description": "作者名无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/{workId}/editions": {
+            "post": {
+                "summary": "为作品独立添加出版版本",
+                "tags": [
+                    "books-catalog"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "title": {
+                                    "type": "string"
+                                },
+                                "publisher": {
+                                    "type": "string"
+                                },
+                                "producer": {
+                                    "type": "string"
+                                },
+                                "isbn10": {
+                                    "type": "string"
+                                },
+                                "isbn13": {
+                                    "type": "string"
+                                },
+                                "language": {
+                                    "type": "string"
+                                },
+                                "published_date": {
+                                    "type": "string"
+                                },
+                                "binding": {
+                                    "type": "string"
+                                },
+                                "cover_url": {
+                                    "type": "string"
+                                },
+                                "page_count": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "出版版本",
+                        "schema": {
+                            "$ref": "#/definitions/books.BookPublicEditionDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "版本信息无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品不存在"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/announcements": {
             "get": {
                 "security": [
