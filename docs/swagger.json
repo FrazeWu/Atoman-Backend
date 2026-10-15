@@ -29532,11 +29532,12 @@
         },
         "books.CreatePublicBookInput": {
             "type": "object",
-            "required": ["import_id", "title"],
+            "required": ["import_id", "title", "public_distribution_confirmed"],
             "properties": {
                 "authors": {"type": "array", "items": {"type": "string"}},
                 "description": {"type": "string"},
                 "import_id": {"type": "string"},
+                "public_distribution_confirmed": {"type": "boolean"},
                 "edition": {
                     "type": "object",
                     "properties": {

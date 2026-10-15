@@ -776,6 +776,8 @@ definitions:
         type: string
       import_id:
         type: string
+      public_distribution_confirmed:
+        type: boolean
       edition:
         properties:
           binding:
@@ -812,6 +814,7 @@ definitions:
     required:
     - import_id
     - title
+    - public_distribution_confirmed
     type: object
   books.BookPublicationAppealDTO:
     properties:

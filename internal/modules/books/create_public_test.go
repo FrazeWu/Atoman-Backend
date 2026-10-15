@@ -23,7 +23,7 @@ func TestCreatePublicBookCreatesVisibleWorkEditionAndSeparatePeople(t *testing.T
 	require.NoError(t, db.Create(&sourceAsset).Error)
 	published := model.PublishedBookAsset{SourceAssetID: sourceAsset.ID, Format: "epub", ObjectKey: "public/book.epub", SHA256: "public-hash", Status: model.BookPublicationStatusPublished}
 	require.NoError(t, db.Create(&published).Error)
-	input := CreatePublicBookInput{ImportID: bookImport.ID.String(), Title: "书名", Language: "中文", Authors: []string{"作者甲", "作者乙", "作者甲"}, SourceURL: "https://example.test/book"}
+	input := CreatePublicBookInput{ImportID: bookImport.ID.String(), Title: "书名", Language: "中文", Authors: []string{"作者甲", "作者乙", "作者甲"}, SourceURL: "https://example.test/book", PublicDistributionConfirmed: true}
 	input.Edition.Publisher = "Publisher Name"
 	input.Edition.Producer = "Producer Name"
 	input.Edition.ISBN13 = "9787111000001"
@@ -51,9 +51,21 @@ func TestCreatePublicBookCreatesVisibleWorkEditionAndSeparatePeople(t *testing.T
 	var sourceCount int64
 	require.NoError(t, db.Model(&model.BookSource{}).Count(&sourceCount).Error)
 	require.EqualValues(t, 2, sourceCount)
+	var auditLog model.AuditLog
+	require.NoError(t, db.Where("action = ? AND entity_id = ?", "books.work.created", created.ID).First(&auditLog).Error)
+	require.Contains(t, auditLog.Metadata, `"public_distribution_confirmed":true`)
 
 	searchResult, total, err := service.SearchPublicCatalog(context.Background(), "书名", 10, 0)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, searchResult, 1)
+}
+
+func TestCreatePublicBookRequiresPublicDistributionConfirmation(t *testing.T) {
+	user := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
+
+	_, err := NewService(nil).CreatePublicBook(context.Background(), user, CreatePublicBookInput{Title: "书名"})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "permission to share this book publicly")
 }
