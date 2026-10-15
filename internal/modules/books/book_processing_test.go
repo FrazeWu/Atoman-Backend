@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
@@ -15,6 +16,31 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRecoverStaleProcessingBookAssets(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.UserBookImport{}, &model.UserBookAsset{})
+	old := time.Now().UTC().Add(-bookProcessingStaleAfter - time.Minute)
+	staleImportID, staleAssetID := uuid.New(), uuid.New()
+	freshImportID, freshAssetID := uuid.New(), uuid.New()
+	for _, record := range []model.UserBookImport{
+		{Base: model.Base{ID: staleImportID}, UserID: uuid.New(), Title: "stale", OriginalFilename: "stale.epub", Format: "epub", ContentType: "application/epub+zip", ObjectKey: "stale", Status: model.BookImportStatusScanning},
+		{Base: model.Base{ID: freshImportID}, UserID: uuid.New(), Title: "fresh", OriginalFilename: "fresh.epub", Format: "epub", ContentType: "application/epub+zip", ObjectKey: "fresh", Status: model.BookImportStatusScanning},
+	} {
+		require.NoError(t, db.Create(&record).Error)
+	}
+	stale := model.UserBookAsset{Base: model.Base{ID: staleAssetID, CreatedAt: old, UpdatedAt: old}, ImportID: staleImportID, UserID: uuid.New(), OriginalFilename: "stale.epub", ContentType: "application/epub+zip", Format: "epub", SizeBytes: 1, SHA256: "stale", ObjectKey: "stale", ProcessingStatus: model.BookAssetStatusProcessing, ScanStatus: "processing"}
+	fresh := model.UserBookAsset{Base: model.Base{ID: freshAssetID}, ImportID: freshImportID, UserID: uuid.New(), OriginalFilename: "fresh.epub", ContentType: "application/epub+zip", Format: "epub", SizeBytes: 1, SHA256: "fresh", ObjectKey: "fresh", ProcessingStatus: model.BookAssetStatusProcessing, ScanStatus: "processing"}
+	require.NoError(t, db.Create(&stale).Error)
+	require.NoError(t, db.Create(&fresh).Error)
+
+	require.NoError(t, NewService(db).recoverStaleBookAssets(context.Background()))
+	require.NoError(t, db.First(&stale, "id = ?", staleAssetID).Error)
+	require.Equal(t, model.BookAssetStatusScanning, stale.ProcessingStatus)
+	require.Equal(t, "pending", stale.ScanStatus)
+	require.NoError(t, db.First(&fresh, "id = ?", freshAssetID).Error)
+	require.Equal(t, model.BookAssetStatusProcessing, fresh.ProcessingStatus)
+}
 
 func TestProcessBookAssetsMakesSafeEPUBPrivateAvailable(t *testing.T) {
 	db := testdb.Open(t)

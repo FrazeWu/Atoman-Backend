@@ -47,27 +47,40 @@ func (s *Service) SubmitPublicationAppeal(user authctx.CurrentUser, requestID uu
 	var appeal model.BookPublicationAppeal
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var request model.BookPublicationRequest
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND submitted_by = ?", requestID, user.ID).First(&request).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("books.publication_request_not_found", "Publication request not found")
-			}
-			return err
-		}
 		var asset model.PublishedBookAsset
-		if err := tx.Where("publication_request_id = ? AND status = ?", request.ID, model.BookPublicationStatusRemoved).First(&asset).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.Conflict("books.appeal_not_available", "Only removed public book assets can be appealed")
+		appealRequestID := requestID
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND submitted_by = ?", requestID, user.ID).First(&request).Error; err == nil {
+			if err := tx.Where("publication_request_id = ? AND status = ?", request.ID, model.BookPublicationStatusRemoved).First(&asset).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return apperr.Conflict("books.appeal_not_available", "Only removed public book assets can be appealed")
+				}
+				return err
 			}
+		} else if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Auto-published assets have no legacy request. Accept their asset ID,
+			// but verify ownership through the private source asset.
+			if err := tx.Where("id = ? AND status = ?", requestID, model.BookPublicationStatusRemoved).First(&asset).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return apperr.NotFound("books.publication_request_not_found", "Publication request or removed asset not found")
+				}
+				return err
+			}
+			var source model.UserBookAsset
+			if err := tx.Where("id = ? AND user_id = ?", asset.SourceAssetID, user.ID).First(&source).Error; err != nil {
+				return apperr.NotFound("books.publication_request_not_found", "Publication request or removed asset not found")
+			}
+			appealRequestID = asset.PublicationRequestID
+		} else {
 			return err
 		}
 		var pending model.BookPublicationAppeal
-		if err := tx.Where("publication_request_id = ? AND status = ?", request.ID, model.BookPublicationAppealStatusPending).First(&pending).Error; err == nil {
+		if err := tx.Where("publication_request_id = ? AND published_asset_id = ? AND status = ?", appealRequestID, asset.ID, model.BookPublicationAppealStatusPending).First(&pending).Error; err == nil {
 			return apperr.Conflict("books.appeal_already_pending", "A publication appeal is already pending")
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
 		appeal = model.BookPublicationAppeal{
-			PublicationRequestID: request.ID,
+			PublicationRequestID: appealRequestID,
 			PublishedAssetID:     asset.ID,
 			SubmittedBy:          user.ID,
 			Reason:               reason,
@@ -147,7 +160,11 @@ func (s *Service) ReviewPublicationAppeal(reviewer authctx.CurrentUser, appealID
 			return apperr.Conflict("books.appeal_already_reviewed", "Publication appeal is no longer pending")
 		}
 		if decision == model.BookPublicationAppealStatusApproved {
-			result := tx.Model(&model.PublishedBookAsset{}).Where("id = ? AND publication_request_id = ? AND status = ?", appeal.PublishedAssetID, appeal.PublicationRequestID, model.BookPublicationStatusRemoved).Updates(map[string]any{
+			assetQuery := tx.Model(&model.PublishedBookAsset{}).Where("id = ? AND status = ?", appeal.PublishedAssetID, model.BookPublicationStatusRemoved)
+			if appeal.PublicationRequestID != uuid.Nil {
+				assetQuery = assetQuery.Where("publication_request_id = ?", appeal.PublicationRequestID)
+			}
+			result := assetQuery.Updates(map[string]any{
 				"status":         model.BookPublicationStatusPublished,
 				"removed_at":     nil,
 				"removal_reason": "",
@@ -158,8 +175,10 @@ func (s *Service) ReviewPublicationAppeal(reviewer authctx.CurrentUser, appealID
 			if result.RowsAffected == 0 {
 				return apperr.Conflict("books.appeal_asset_changed", "The public book asset is no longer available for restoration")
 			}
-			if err := tx.Model(&model.BookPublicationRequest{}).Where("id = ?", appeal.PublicationRequestID).Update("status", model.BookPublicationStatusPublished).Error; err != nil {
-				return err
+			if appeal.PublicationRequestID != uuid.Nil {
+				if err := tx.Model(&model.BookPublicationRequest{}).Where("id = ?", appeal.PublicationRequestID).Update("status", model.BookPublicationStatusPublished).Error; err != nil {
+					return err
+				}
 			}
 		}
 		now := time.Now().UTC()

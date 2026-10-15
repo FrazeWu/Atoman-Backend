@@ -197,7 +197,7 @@ func (s *Service) ReviewPublicationRequest(reviewer authctx.CurrentUser, request
 			if s.bookUpload == nil {
 				return apperr.New(http.StatusServiceUnavailable, "storage.unavailable", "Storage is unavailable", nil)
 			}
-			if err := s.bookUpload.CopyObject(source.ObjectKey, publicKey, source.ContentType); err != nil {
+			if err := s.bookUpload.CopyObject(readableBookObjectKey(source), publicKey, source.ContentType); err != nil {
 				return apperr.Wrap(http.StatusServiceUnavailable, "storage.unavailable", "Storage is unavailable", err)
 			}
 			if err := tx.Model(&published).Updates(map[string]any{"object_key": publicKey, "status": model.BookPublicationStatusPublished}).Error; err != nil {

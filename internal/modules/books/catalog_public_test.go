@@ -51,7 +51,7 @@ func TestCatalogCountCacheReusesQueriesAndInvalidatesAfterWrite(t *testing.T) {
 
 func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{})
+	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookEdit{}, &model.BookRating{})
 	work := model.BookWork{Base: model.Base{ID: uuid.New()}, Title: "Visible Book", Description: "Public description", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
 	draft := model.BookWork{Base: model.Base{ID: uuid.New()}, Title: "Draft Book", LifecycleStatus: model.BookLifecycleStatusDraft, EditStatus: model.BookEditStatusDevelopment}
 	person := model.BookPerson{Base: model.Base{ID: uuid.New()}, Name: "Visible Author", LifecycleStatus: model.BookLifecycleStatusActive}
@@ -62,6 +62,12 @@ func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
 	require.NoError(t, db.Create(&edition).Error)
 	require.NoError(t, db.Create(&model.BookContribution{Base: model.Base{ID: uuid.New()}, WorkID: &work.ID, PersonID: person.ID, Role: "author", Position: 1}).Error)
 	require.NoError(t, db.Create(&model.BookSource{Base: model.Base{ID: uuid.New()}, TargetType: "work", TargetID: work.ID, Kind: "bibliographic", URL: "https://example.test/book"}).Error)
+	owner := uuid.New()
+	for _, status := range []string{model.BookEditStatusPending, model.BookEditStatusRejected, model.BookEditStatusApproved} {
+		edit := model.BookEdit{SubmittedBy: owner, Type: model.BookEditTypeUpdate, EntityType: "work", EntityID: &work.ID, Status: status, PayloadJSON: "{}", ChangesJSON: "{}"}
+		require.NoError(t, db.Create(&edit).Error)
+		require.NoError(t, db.Create(&model.BookSource{TargetType: "work", TargetID: work.ID, BookEditID: &edit.ID, URL: "https://example.test/" + status}).Error)
+	}
 
 	items, total, err := NewService(db).SearchPublicCatalog(context.Background(), "Visible Author", 20, 0)
 
@@ -71,6 +77,11 @@ func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
 	require.Equal(t, work.ID.String(), items[0].ID)
 	require.Equal(t, "Visible Author", items[0].Authors[0].Name)
 	require.Len(t, items[0].Editions, 1)
+	publicWork, err := NewService(db).GetPublicWork(context.Background(), work.ID)
+	require.NoError(t, err)
+	require.Len(t, publicWork.Sources, 2)
+	require.NotContains(t, []string{publicWork.Sources[0].URL, publicWork.Sources[1].URL}, "https://example.test/pending")
+	require.NotContains(t, []string{publicWork.Sources[0].URL, publicWork.Sources[1].URL}, "https://example.test/rejected")
 	encoded, marshalErr := json.Marshal(items[0])
 	require.NoError(t, marshalErr)
 	require.NotContains(t, string(encoded), "object_key")

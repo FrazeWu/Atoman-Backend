@@ -80,6 +80,32 @@ func TestPublicationAppealRestoresRemovedAssetWithAudit(t *testing.T) {
 	require.Equal(t, int64(2), auditCount)
 }
 
+func TestPublicationAppealSupportsAutoPublishedAssetByOwner(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.UserBookAsset{}, &model.BookPublicationRequest{}, &model.PublishedBookAsset{}, &model.BookPublicationAppeal{}, &model.AuditLog{})
+	owner := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
+	moderator := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleModerator}
+	source := model.UserBookAsset{Base: model.Base{ID: uuid.New()}, ImportID: uuid.New(), UserID: owner.ID, OriginalFilename: "public.epub", ContentType: "application/epub+zip", Format: "epub", SizeBytes: 8, SHA256: "sha", ObjectKey: "private/source.epub", ProcessingStatus: model.BookAssetStatusPrivateAvailable}
+	asset := model.PublishedBookAsset{SourceAssetID: source.ID, Format: "epub", ObjectKey: "public/asset.epub", SHA256: "sha", Status: model.BookPublicationStatusRemoved}
+	require.NoError(t, db.Create(&source).Error)
+	require.NoError(t, db.Create(&asset).Error)
+	service := NewService(db)
+
+	appeal, err := service.SubmitPublicationAppeal(owner, asset.ID, "此资源由我上传，请复核下架原因")
+	require.NoError(t, err)
+	require.Equal(t, asset.ID.String(), appeal.PublishedAssetID)
+	require.Equal(t, model.BookPublicationAppealStatusPending, appeal.Status)
+
+	approved, err := service.ReviewPublicationAppeal(moderator, uuid.MustParse(appeal.ID), model.BookPublicationAppealStatusApproved, "复核通过")
+	require.NoError(t, err)
+	require.Equal(t, model.BookPublicationAppealStatusApproved, approved.Status)
+	var restored model.PublishedBookAsset
+	require.NoError(t, db.First(&restored, "id = ?", asset.ID).Error)
+	require.Equal(t, model.BookPublicationStatusPublished, restored.Status)
+	_, err = service.SubmitPublicationAppeal(authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}, asset.ID, "不属于我的资源")
+	require.Error(t, err)
+}
+
 func TestPublicationRequestRequiresRightsAndCreatesIndependentPublicAsset(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{}, &model.UserBookImport{}, &model.UserBookAsset{}, &model.BookPublicationRequest{}, &model.BookRightsDeclaration{}, &model.PublishedBookAsset{}, &model.UserBookReadingState{})
@@ -93,8 +119,11 @@ func TestPublicationRequestRequiresRightsAndCreatesIndependentPublicAsset(t *tes
 	sourceKey := "books/private/source.txt"
 	body := []byte("public domain text")
 	store.objects[sourceKey] = body
+	derivedKey := "books/private/derived.epub"
+	derivedBody := []byte("converted EPUB body")
+	store.objects[derivedKey] = derivedBody
 	require.NoError(t, db.Create(&model.UserBookImport{Base: model.Base{ID: importID}, UserID: owner.ID, Title: "Private source", OriginalFilename: "source.txt", Format: "txt", ContentType: "text/plain", SizeBytes: int64(len(body)), ObjectKey: sourceKey, Status: model.BookImportStatusMetadataReady}).Error)
-	require.NoError(t, db.Create(&model.UserBookAsset{Base: model.Base{ID: assetID}, ImportID: importID, UserID: owner.ID, OriginalFilename: "source.txt", Format: "txt", ContentType: "text/plain", SizeBytes: int64(len(body)), ObjectKey: sourceKey, ProcessingStatus: model.BookAssetStatusPrivateAvailable}).Error)
+	require.NoError(t, db.Create(&model.UserBookAsset{Base: model.Base{ID: assetID}, ImportID: importID, UserID: owner.ID, OriginalFilename: "source.txt", Format: "epub", ContentType: "application/epub+zip", SizeBytes: int64(len(derivedBody)), ObjectKey: sourceKey, DerivedObjectKey: derivedKey, ProcessingStatus: model.BookAssetStatusPrivateAvailable}).Error)
 
 	_, err := service.SubmitPublicationRequest(owner, assetID, SubmitPublicationInput{WorkID: work.ID.String(), LicenseType: "public_domain", Declaration: "missing source"})
 	require.Error(t, err)
@@ -109,6 +138,8 @@ func TestPublicationRequestRequiresRightsAndCreatesIndependentPublicAsset(t *tes
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Len(t, published, 1)
+	require.Equal(t, int64(len(derivedBody)), published[0].Size)
+	require.Equal(t, "application/epub+zip", published[0].ContentType)
 	require.NotEqual(t, sourceKey, published[0].FileName)
 	publicID := uuid.MustParse(published[0].ID)
 	var publishedRow model.PublishedBookAsset
@@ -119,7 +150,7 @@ func TestPublicationRequestRequiresRightsAndCreatesIndependentPublicAsset(t *tes
 	readBody, err := io.ReadAll(bodyReader)
 	require.NoError(t, err)
 	require.NoError(t, bodyReader.Close())
-	require.Equal(t, body, readBody)
+	require.Equal(t, derivedBody, readBody)
 
 	require.NoError(t, service.DeleteBookImport(owner, importID))
 	_, bodyReader, err = service.OpenPublishedBookAsset(context.Background(), publicID)
@@ -127,5 +158,5 @@ func TestPublicationRequestRequiresRightsAndCreatesIndependentPublicAsset(t *tes
 	readBody, err = io.ReadAll(bodyReader)
 	require.NoError(t, err)
 	require.NoError(t, bodyReader.Close())
-	require.Equal(t, body, readBody)
+	require.Equal(t, derivedBody, readBody)
 }

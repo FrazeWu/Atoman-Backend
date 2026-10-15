@@ -270,7 +270,13 @@ func (s *Service) buildPublicWorkDTOs(ctx context.Context, works []model.BookWor
 	}
 	var sources []model.BookSource
 	if includeSources {
-		if err := s.db.WithContext(ctx).Where("target_type IN ? AND target_id IN ?", []string{"work", "book_work"}, workIDs).Order("created_at ASC").Find(&sources).Error; err != nil {
+		sourceQuery := s.db.WithContext(ctx).Where("target_type IN ? AND target_id IN ?", []string{"work", "book_work"}, workIDs)
+		if s.db.Migrator().HasTable(&model.BookEdit{}) {
+			sourceQuery = sourceQuery.Where("book_edit_id IS NULL OR EXISTS (SELECT 1 FROM book_edits WHERE book_edits.id = book_sources.book_edit_id AND book_edits.status = ?)", model.BookEditStatusApproved)
+		} else {
+			sourceQuery = sourceQuery.Where("book_edit_id IS NULL")
+		}
+		if err := sourceQuery.Order("created_at ASC").Find(&sources).Error; err != nil {
 			return nil, err
 		}
 	}
