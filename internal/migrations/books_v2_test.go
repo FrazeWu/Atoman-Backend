@@ -46,6 +46,14 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	state := model.BookReadingState{UserID: user.UUID, RevisionID: revision.ID, CurrentPercent: .2, FurthestPercent: .8}
 	require.NoError(t, db.Create(&state).Error)
 	require.Error(t, db.Create(&state).Error)
+	session := model.BookReadingSession{UserID: user.UUID, ClientSessionID: uuid.New(), RevisionID: revision.ID, DeviceID: "web"}
+	require.NoError(t, db.Create(&session).Error)
+	require.Error(t, db.Model(&session).Update("last_sequence", -1).Error)
+	receipt := model.BookReadingWrite{UserID: user.UUID, RevisionID: revision.ID, RequestID: uuid.New(), SessionID: session.ID, RequestHash: strings.Repeat("a", 64), ResultJSON: `{}`}
+	require.NoError(t, db.Create(&receipt).Error)
+	receipt.RequestID = uuid.New()
+	receipt.SessionID = uuid.New()
+	require.Error(t, db.Create(&receipt).Error, "a receipt must belong to its user's revision session")
 	require.Error(t, db.Model(&state).Update("current_percent", .9).Error)
 	require.Error(t, db.Model(&revision).Update("sha256", strings.Repeat("b", 64)).Error)
 	require.Error(t, db.Model(&revision).Update("asset_id", otherAsset.ID).Error)
