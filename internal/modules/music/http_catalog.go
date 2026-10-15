@@ -648,7 +648,7 @@ func uniqueAlbums(albums []model.Album) []model.Album {
 
 // recordSongPlay godoc
 // @Summary 记录有效播放
-// @Description 播放器在实际播放满 5 秒后调用。匿名用户增加总播放次数，登录用户同时更新个人播放历史。
+// @Description 播放器在实际播放满 5 秒后调用。匿名用户增加总播放次数，登录用户同时更新个人播放历史；携带 playlist_id 时，仅统计该歌单中实际播放的歌曲。
 // @Tags music
 // @Accept json
 // @Produce json
@@ -681,8 +681,14 @@ func (h *Handler) recordSongPlay(c *gin.Context) {
 		httpx.Error(c, apperr.New(http.StatusTooManyRequests, "music.play_rate_limited", "Too many play reports", map[string]any{"retry_after": seconds}))
 		return
 	}
-	if err := h.service.RecordSongPlayForViewer(viewer, req.SongID); err != nil {
-		httpx.Error(c, err)
+	var recordErr error
+	if req.PlaylistID != nil && *req.PlaylistID != uuid.Nil {
+		recordErr = h.service.RecordSongPlayInPlaylistForViewer(viewer, req.SongID, *req.PlaylistID)
+	} else {
+		recordErr = h.service.RecordSongPlayForViewer(viewer, req.SongID)
+	}
+	if recordErr != nil {
+		httpx.Error(c, recordErr)
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"recorded": true})

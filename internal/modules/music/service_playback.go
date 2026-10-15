@@ -24,14 +24,18 @@ func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
 	if userID != nil && *userID != uuid.Nil {
 		viewer = &authctx.CurrentUser{ID: *userID, Role: authctx.RoleUser}
 	}
-	return s.recordSongPlay(viewer, songID)
+	return s.recordSongPlay(viewer, songID, nil)
 }
 
 func (s *Service) RecordSongPlayForViewer(viewer *authctx.CurrentUser, songID uuid.UUID) error {
-	return s.recordSongPlay(viewer, songID)
+	return s.recordSongPlay(viewer, songID, nil)
 }
 
-func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID) error {
+func (s *Service) RecordSongPlayInPlaylistForViewer(viewer *authctx.CurrentUser, songID, playlistID uuid.UUID) error {
+	return s.recordSongPlay(viewer, songID, &playlistID)
+}
+
+func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID, playlistID *uuid.UUID) error {
 	if songID == uuid.Nil {
 		return apperr.BadRequest("validation.invalid_request", "song_id is required")
 	}
@@ -50,6 +54,15 @@ func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID) 
 		repo := NewRepo(tx)
 		if err := repo.IncrementSongPlayCount(songID); err != nil {
 			return err
+		}
+		if playlistID != nil && *playlistID != uuid.Nil {
+			var viewerID *uuid.UUID
+			if viewer != nil && viewer.ID != uuid.Nil {
+				viewerID = &viewer.ID
+			}
+			if err := repo.IncrementPlaylistPlayCount(*playlistID, songID, viewerID); err != nil {
+				return err
+			}
 		}
 		if viewer == nil || viewer.ID == uuid.Nil {
 			return nil

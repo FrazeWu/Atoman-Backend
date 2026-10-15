@@ -2138,6 +2138,77 @@ func TestRegisterRoutesRecordSongPlayIncrementsCount(t *testing.T) {
 	}
 }
 
+func TestRecordSongPlayCountsOnlyPlaysAttributedToPlaylist(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	playlist := model.Playlist{UserID: user.ID, Name: "Playlist Plays", IsPublic: true}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	memberSong := model.Song{Title: "Playlist Song", AudioURL: "/audio/playlist-song.mp3", AudioStatus: "ready", Status: "open", PlayCount: 40}
+	nonMemberSong := model.Song{Title: "Other Song", AudioURL: "/audio/other-song.mp3", AudioStatus: "ready", Status: "open", PlayCount: 10}
+	if err := db.Create(&memberSong).Error; err != nil {
+		t.Fatalf("create playlist song: %v", err)
+	}
+	if err := db.Create(&nonMemberSong).Error; err != nil {
+		t.Fatalf("create other song: %v", err)
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: memberSong.ID, Position: 1}).Error; err != nil {
+		t.Fatalf("add song to playlist: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+	postPlay := func(songID uuid.UUID, playlistID *uuid.UUID) *httptest.ResponseRecorder {
+		body := `{"song_id":"` + songID.String() + `"}`
+		if playlistID != nil {
+			body = `{"song_id":"` + songID.String() + `","playlist_id":"` + playlistID.String() + `"}`
+		}
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/music/plays", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+	if response := postPlay(memberSong.ID, &playlist.ID); response.Code != http.StatusOK {
+		t.Fatalf("expected playlist play 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if response := postPlay(nonMemberSong.ID, &playlist.ID); response.Code != http.StatusOK {
+		t.Fatalf("expected non-member song play 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if response := postPlay(memberSong.ID, nil); response.Code != http.StatusOK {
+		t.Fatalf("expected regular song play 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var updatedPlaylist model.Playlist
+	if err := db.First(&updatedPlaylist, "id = ?", playlist.ID).Error; err != nil {
+		t.Fatalf("reload playlist: %v", err)
+	}
+	if updatedPlaylist.PlayCount != 1 {
+		t.Fatalf("expected one play attributed to playlist, got %d", updatedPlaylist.PlayCount)
+	}
+	getSummary := httptest.NewRecorder()
+	getSummaryReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+playlist.ID.String(), nil)
+	r.ServeHTTP(getSummary, getSummaryReq)
+	if getSummary.Code != http.StatusOK {
+		t.Fatalf("expected playlist summary 200, got %d: %s", getSummary.Code, getSummary.Body.String())
+	}
+	var summary struct {
+		Data struct {
+			PlayCount int64 `json:"play_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(getSummary.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("decode playlist summary: %v", err)
+	}
+	if summary.Data.PlayCount != 1 {
+		t.Fatalf("expected playlist summary play_count=1, got %d", summary.Data.PlayCount)
+	}
+	var updatedSong model.Song
+	if err := db.First(&updatedSong, "id = ?", memberSong.ID).Error; err != nil {
+		t.Fatalf("reload playlist song: %v", err)
+	}
+	if updatedSong.PlayCount != 42 {
+		t.Fatalf("expected song lifetime play count 42, got %d", updatedSong.PlayCount)
+	}
+}
+
 func TestRegisterRoutesReordersPlaylistSongs(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	playlist := model.Playlist{UserID: user.ID, Name: "Ordered Playlist"}

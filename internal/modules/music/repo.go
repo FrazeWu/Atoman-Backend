@@ -554,6 +554,23 @@ func (r *Repo) IncrementSongPlayCount(songID uuid.UUID) error {
 		Error
 }
 
+func (r *Repo) IncrementPlaylistPlayCount(playlistID, songID uuid.UUID, viewerID *uuid.UUID) error {
+	query := r.db.Model(&model.Playlist{}).
+		Where("id = ?", playlistID).
+		Where(`EXISTS (
+			SELECT 1 FROM music_playlist_songs
+			WHERE music_playlist_songs.playlist_id = music_playlists.id
+			  AND music_playlist_songs.song_id = ?
+			  AND music_playlist_songs.deleted_at IS NULL
+		)`, songID)
+	if viewerID == nil || *viewerID == uuid.Nil {
+		query = query.Where("is_public = ?", true)
+	} else {
+		query = query.Where("(is_public = ? OR user_id = ?)", true, *viewerID)
+	}
+	return query.UpdateColumn("play_count", gorm.Expr("play_count + 1")).Error
+}
+
 func (r *Repo) RecordListeningHistory(userID, songID uuid.UUID, playedAt time.Time) error {
 	history := model.MusicListeningHistory{
 		UserID: userID, SongID: songID, PlayCount: 1, LastPlayedAt: playedAt,

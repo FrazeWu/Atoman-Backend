@@ -145,7 +145,8 @@ type ReorderPlaylistSongsRequest struct {
 }
 
 type RecordSongPlayRequest struct {
-	SongID uuid.UUID `json:"song_id"`
+	SongID     uuid.UUID  `json:"song_id"`
+	PlaylistID *uuid.UUID `json:"playlist_id,omitempty"`
 }
 
 type MusicRecommendationEventName string
@@ -212,6 +213,7 @@ type PlaylistSummaryResponse struct {
 	Kind          string    `json:"kind"`
 	SongCount     int64     `json:"song_count"`
 	BookmarkCount int64     `json:"bookmark_count"`
+	PlayCount     int64     `json:"play_count"`
 }
 
 type PaginationMetaResponse struct {

@@ -311,6 +311,7 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 			Kind:          playlist.Kind,
 			SongCount:     playlist.SongCount,
 			BookmarkCount: playlist.BookmarkCount,
+			PlayCount:     playlist.PlayCount,
 		})
 	}
 	httpx.List(c, rows, page, pageSize, total)
@@ -352,6 +353,7 @@ func (h *Handler) listPublicPlaylists(c *gin.Context) {
 			Kind:          playlist.Kind,
 			SongCount:     playlist.SongCount,
 			BookmarkCount: playlist.BookmarkCount,
+			PlayCount:     playlist.PlayCount,
 		})
 	}
 	httpx.List(c, rows, page, pageSize, total)
@@ -368,6 +370,7 @@ func buildPlaylistSummaryResponse(playlist model.Playlist) PlaylistSummaryRespon
 		Kind:          playlist.Kind,
 		SongCount:     playlist.SongCount,
 		BookmarkCount: playlist.BookmarkCount,
+		PlayCount:     playlist.PlayCount,
 	}
 }
 
