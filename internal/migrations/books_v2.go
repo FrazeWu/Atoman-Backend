@@ -13,7 +13,7 @@ import (
 func RunBooksV2Migration(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(&model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
-			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}); err != nil {
+			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{}); err != nil {
 			return fmt.Errorf("migrate book resources: %w", err)
 		}
 		if err := tx.Exec(`
@@ -34,6 +34,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_revisions_asset ON book_asset_revisio
 			{"book_reading_selections", "fk_book_selection_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
 			{"book_reading_states", "fk_book_state_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
 			{"book_reading_states", "fk_book_state_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_upload_sessions", "fk_book_upload_asset", "FOREIGN KEY (asset_id) REFERENCES book_assets(id) DEFERRABLE INITIALLY IMMEDIATE"},
+			{"book_upload_sessions", "fk_book_upload_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
 		}
 		for _, constraint := range constraints {
 			var exists bool

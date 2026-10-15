@@ -169,7 +169,7 @@ func lockBookMergeGraph(tx *gorm.DB) error {
 			return err
 		}
 	}
-	return tx.Exec("SET CONSTRAINTS fk_book_assets_work, fk_book_revisions_asset, fk_book_default_asset, fk_book_selection_asset DEFERRED").Error
+	return tx.Exec("SET CONSTRAINTS fk_book_assets_work, fk_book_revisions_asset, fk_book_default_asset, fk_book_selection_asset, fk_book_upload_asset DEFERRED").Error
 }
 
 func (s *Service) MergeBookWorks(ctx context.Context, user authctx.CurrentUser, input MergeBookWorksInput) (model.BookWikiMerge, error) {

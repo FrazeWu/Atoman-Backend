@@ -15,6 +15,716 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/books/works/{workId}/assets": {
+            "get": {
+                "summary": "列出作品可读的独立电子书",
+                "tags": [
+                    "books-assets"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "可读电子书列表，不包含内部存储地址"
+                    },
+                    "404": {
+                        "description": "作品不存在"
+                    }
+                }
+            },
+            "post": {
+                "summary": "创建独立电子书，不要求出版版本",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "title": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string",
+                                    "enum": [
+                                        "epub",
+                                        "pdf",
+                                        "txt",
+                                        "cbz",
+                                        "cbr"
+                                    ]
+                                },
+                                "language": {
+                                    "type": "string",
+                                    "description": "BCP 47 语言代码，省略时为 und"
+                                }
+                            },
+                            "required": [
+                                "format"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "独立电子书元数据；上传后通过安全检查才可读"
+                    },
+                    "400": {
+                        "description": "无效格式或语言"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/assets/{assetId}/upload-sessions": {
+            "post": {
+                "summary": "为指定电子书追加文件修订，不覆盖旧修订",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "assetId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "public_distribution_confirmed": {
+                                    "type": "boolean",
+                                    "enum": [
+                                        true
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "file_name",
+                                "content_type",
+                                "size",
+                                "public_distribution_confirmed"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "分片上传会话",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer"
+                                },
+                                "part_size": {
+                                    "type": "integer"
+                                },
+                                "completed_parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_number": {
+                                                "type": "integer"
+                                            },
+                                            "etag": {
+                                                "type": "string"
+                                            },
+                                            "size": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    }
+                                },
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "uploading",
+                                        "completing",
+                                        "uploaded",
+                                        "scanning",
+                                        "ready",
+                                        "failed",
+                                        "quarantined"
+                                    ]
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "error_message": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "未确认分享权限或文件格式不匹配"
+                    },
+                    "503": {
+                        "description": "私有存储不可用"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/upload-sessions/{uploadId}": {
+            "get": {
+                "summary": "获取本人上传与自动安全检查状态",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "本人会话",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer"
+                                },
+                                "part_size": {
+                                    "type": "integer"
+                                },
+                                "completed_parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_number": {
+                                                "type": "integer"
+                                            },
+                                            "etag": {
+                                                "type": "string"
+                                            },
+                                            "size": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    }
+                                },
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "uploading",
+                                        "completing",
+                                        "uploaded",
+                                        "scanning",
+                                        "ready",
+                                        "failed",
+                                        "quarantined"
+                                    ]
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "error_message": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "会话不存在或不属于当前用户"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/upload-sessions/{uploadId}/parts/{partNumber}": {
+            "post": {
+                "summary": "获取分片的短期上传地址",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true,
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "上传地址",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "part_number": {
+                                    "type": "integer"
+                                },
+                                "upload_url": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "上传已过期或状态不可用"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/upload-sessions/{uploadId}/parts/{partNumber}/complete": {
+            "post": {
+                "summary": "幂等登记一个已上传的分片",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true,
+                        "type": "integer"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "etag": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                }
+                            },
+                            "required": [
+                                "etag",
+                                "size"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "会话及已登记分片",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer"
+                                },
+                                "part_size": {
+                                    "type": "integer"
+                                },
+                                "completed_parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_number": {
+                                                "type": "integer"
+                                            },
+                                            "etag": {
+                                                "type": "string"
+                                            },
+                                            "size": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    }
+                                },
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "uploading",
+                                        "completing",
+                                        "uploaded",
+                                        "scanning",
+                                        "ready",
+                                        "failed",
+                                        "quarantined"
+                                    ]
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "error_message": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "分片号、大小或 ETag 无效"
+                    },
+                    "404": {
+                        "description": "会话不属于当前用户"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/upload-sessions/{uploadId}/complete": {
+            "post": {
+                "summary": "完成上传并排入自动安全检查，不经人工审核",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "轮询会话；ready 时包含 revision_id。扫描不可用则保持排队，不公开。",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer"
+                                },
+                                "part_size": {
+                                    "type": "integer"
+                                },
+                                "completed_parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_number": {
+                                                "type": "integer"
+                                            },
+                                            "etag": {
+                                                "type": "string"
+                                            },
+                                            "size": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    }
+                                },
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "uploading",
+                                        "completing",
+                                        "uploaded",
+                                        "scanning",
+                                        "ready",
+                                        "failed",
+                                        "quarantined"
+                                    ]
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "error_message": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "分片未齐、状态不可用或已过期"
+                    },
+                    "503": {
+                        "description": "合并或校验上传失败，可重试完成"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/{workId}/default-assets/{language}": {
+            "put": {
+                "summary": "按语言设置社区默认文件，不修改读者个人选择",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "language",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                }
+                            },
+                            "required": [
+                                "asset_id"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "社区默认文件"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "资源不可读，或不属于该作品/语言"
+                    }
+                }
+            }
+        },
         "/api/v1/books/wiki/merges/preview": {
             "post": {
                 "summary": "预览作品合并：仅返回记录数量与预览令牌",

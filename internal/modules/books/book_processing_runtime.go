@@ -29,7 +29,7 @@ func StartProcessingWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-
 		close(done)
 		return done
 	}
-	service := NewService(db).WithBookUploadStore(store)
+	service := NewService(db).WithS3(s3Client)
 	if binary := strings.TrimSpace(os.Getenv("BOOK_CLAMSCAN_PATH")); binary != "" {
 		scanner, err := NewClamAVBookVirusScanner(binary)
 		if err != nil {
@@ -37,6 +37,9 @@ func StartProcessingWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-
 		} else {
 			service.WithVirusScanner(scanner)
 		}
+	}
+	if service.bookResources != nil && service.virusScanner == nil {
+		log.Println("WARN: public book uploads will remain queued: configure BOOK_CLAMSCAN_PATH before publishing")
 	}
 	interval := defaultBookProcessingWorkerPollInterval
 	if raw := strings.TrimSpace(os.Getenv("BOOK_PROCESSING_WORKER_POLL_INTERVAL")); raw != "" {
@@ -52,6 +55,15 @@ func StartProcessingWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-
 		log.Printf("book processing worker started with %s poll interval", interval)
 		retentionSweepAt := time.Time{}
 		run := func() {
+			if service.bookResources != nil && service.virusScanner != nil {
+				processed, err := service.ProcessBookResourceUploads(ctx)
+				if err != nil {
+					log.Printf("WARN: public book processing failed: %v", err)
+				}
+				if processed > 0 {
+					log.Printf("public book processing handled %d upload(s)", processed)
+				}
+			}
 			processed, err := service.ProcessBookAssets(ctx)
 			if err != nil {
 				log.Printf("WARN: book processing worker failed: %v", err)
