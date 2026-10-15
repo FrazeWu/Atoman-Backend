@@ -38,6 +38,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 	protected := group.Group("")
 	protected.Use(requireCurrentUser())
+	protected.POST("/me/reading-sessions/:sessionId/heartbeat", handler.recordBookReadingHeartbeat)
+	protected.GET("/me/reading-statistics", handler.getBookReadingStatistics)
+	protected.POST("/me/private-notes/:noteId/publish", handler.publishBookPrivateNote)
 	protected.GET("/me/library", handler.listBookLibraryEntries)
 	protected.PUT("/me/library/works/:workId", handler.saveBookLibraryEntry)
 	protected.DELETE("/me/library/entries/:entryId", handler.deleteBookLibraryEntry)

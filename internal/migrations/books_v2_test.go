@@ -3,6 +3,7 @@ package migrations
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
@@ -70,6 +71,20 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	require.Error(t, db.Model(&note).Update("source_revision_id", uuid.New()).Error)
 	require.Error(t, db.Model(&note).Update("user_id", uuid.New()).Error)
 	require.Error(t, db.Model(&note).Update("version", 0).Error)
+	clock := model.BookReaderClock{UserID: user.UUID, SessionID: session.ID, RevisionID: revision.ID, LastSeenAt: time.Now().UTC(), Active: true}
+	require.NoError(t, db.Create(&clock).Error)
+	require.Error(t, db.Model(&clock).Update("revision_id", uuid.New()).Error)
+	daily := model.BookReadingDaily{UserID: user.UUID, RevisionID: revision.ID, Day: "2026-10-15", Seconds: 15}
+	require.NoError(t, db.Create(&daily).Error)
+	require.Error(t, db.Model(&model.BookReadingDaily{}).Where("user_id = ? AND revision_id = ? AND day = ?", user.UUID, revision.ID, daily.Day).Update("seconds", -1).Error)
+	publication := model.BookNotePublication{UserID: user.UUID, RequestID: uuid.New(), NoteID: note.ID, NoteVersion: 1, WorkID: work.ID, ContentID: uuid.New(), RequestHash: strings.Repeat("a", 64)}
+	require.NoError(t, db.Create(&publication).Error)
+	otherReader := model.User{UUID: uuid.New(), Username: "other-reader", Email: "other-reader@example.test", Password: "hash"}
+	require.NoError(t, db.Create(&otherReader).Error)
+	publication.UserID = otherReader.UUID
+	publication.RequestID = uuid.New()
+	publication.ContentID = uuid.New()
+	require.Error(t, db.Create(&publication).Error, "publication metadata must belong to the source note owner")
 	require.Error(t, db.Model(&state).Update("current_percent", .9).Error)
 	require.Error(t, db.Model(&revision).Update("sha256", strings.Repeat("b", 64)).Error)
 	require.Error(t, db.Model(&revision).Update("asset_id", otherAsset.ID).Error)

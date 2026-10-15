@@ -15,6 +15,194 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/books/me/reading-sessions/{sessionId}/heartbeat": {
+            "post": {
+                "summary": "提交有效阅读心跳",
+                "description": "服务器逐用户串行计时，多个设备或标签页不重复累计同一段时间；后台设备不会中断前台会话；长断线不补算。重复和乱序序号不会改时钟。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "sessionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.BookReadingHeartbeatInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingHeartbeatResult"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "本人会话、笔记或公开作品不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/reading-statistics": {
+            "get": {
+                "summary": "查询本人有效阅读统计",
+                "description": "按 UTC 日期和作品汇总，含首尾，最多 366 天。文件更换和下架不会丢失私人统计。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "from",
+                        "in": "query",
+                        "type": "string",
+                        "format": "date",
+                        "description": "起始 UTC 日期 YYYY-MM-DD，默认截止前 29 天"
+                    },
+                    {
+                        "name": "to",
+                        "in": "query",
+                        "type": "string",
+                        "format": "date",
+                        "description": "截止 UTC 日期 YYYY-MM-DD，默认今天"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingStatistics"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "本人会话、笔记或公开作品不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/{noteId}/publish": {
+            "post": {
+                "summary": "确认后发布私人笔记的独立公开副本",
+                "description": "复用现有频道权限、频道可用性、合集、引用、媒体、版本和发布队列检查。请求 UUID 重试只返回原内容标识，不读取新的私人正文，也不重新发布已撤回的公开副本。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.PublishBookPrivateNoteInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookNotePublicationDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "403": {
+                        "description": "非本人频道或频道被禁用"
+                    },
+                    "404": {
+                        "description": "本人会话、笔记或公开作品不存在"
+                    },
+                    "409": {
+                        "description": "私人笔记版本已变化，或请求 UUID 被复用于其他发布"
+                    }
+                }
+            }
+        },
         "/api/v1/books/me/library": {
             "get": {
                 "summary": "列出作品级私人书架",
@@ -1131,6 +1319,11 @@ const docTemplate = `{
                                                     "type": "string"
                                                 },
                                                 "last_sequence": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                },
+                                                "heartbeat_sequence": {
                                                     "type": "integer",
                                                     "format": "int64",
                                                     "minimum": 0
@@ -31488,6 +31681,166 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "books.BookReadingHeartbeatInput": {
+            "type": "object",
+            "required": [
+                "sequence",
+                "visible",
+                "active"
+            ],
+            "properties": {
+                "sequence": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                },
+                "visible": {
+                    "type": "boolean",
+                    "description": "客户端报告阅读器处于前台"
+                },
+                "active": {
+                    "type": "boolean",
+                    "description": "客户端报告近期有人机交互，不是防作弊证明"
+                }
+            },
+            "description": "建议每 15 秒发送。服务端不接受客户端时长和时间戳，只累计同会话前后均活跃、间隔不超过 30 秒的整秒时长。"
+        },
+        "books.BookReadingHeartbeatResult": {
+            "type": "object",
+            "properties": {
+                "last_sequence": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "credited_seconds": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "ignored": {
+                    "type": "boolean"
+                }
+            },
+            "description": "credited_seconds 仅为此次新增加的秒数，重复或乱序请求为 0；总量应从统计接口获取。"
+        },
+        "books.BookReadingStatistics": {
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "enum": [
+                        "UTC"
+                    ]
+                },
+                "from": {
+                    "type": "string",
+                    "format": "date"
+                },
+                "to": {
+                    "type": "string",
+                    "format": "date"
+                },
+                "total_seconds": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "days": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "day": {
+                                "type": "string",
+                                "format": "date"
+                            },
+                            "seconds": {
+                                "type": "integer",
+                                "format": "int64",
+                                "minimum": 0
+                            }
+                        }
+                    }
+                },
+                "works": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "work_id": {
+                                "type": "string",
+                                "format": "uuid"
+                            },
+                            "title": {
+                                "type": "string"
+                            },
+                            "seconds": {
+                                "type": "integer",
+                                "format": "int64",
+                                "minimum": 0
+                            }
+                        }
+                    }
+                }
+            },
+            "description": "仅当前用户的数据；按 UTC 自然日和当前作品归属汇总，含首尾最多 366 天。作品合并撤销不回滚修订级计时。"
+        },
+        "books.PublishBookPrivateNoteInput": {
+            "type": "object",
+            "required": [
+                "request_id",
+                "base_version",
+                "channel_id",
+                "confirm_public"
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "base_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                },
+                "channel_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "collection_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "confirm_public": {
+                    "type": "boolean",
+                    "enum": [
+                        true
+                    ]
+                }
+            },
+            "description": "必须明确确认公开，并提供已查看的私人笔记版本和本人频道。可指定该频道的合集，缺省使用系统默认合集。"
+        },
+        "books.BookNotePublicationDTO": {
+            "type": "object",
+            "properties": {
+                "content_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "target_path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "duplicate": {
+                    "type": "boolean"
+                }
+            },
+            "description": "内容以 ContentEntry 和博客正文扩展为唯一权威。只复制标题和正文，不复制私人标签、笔记 ID、文件来源或阅读状态。私人笔记后续编辑、删除和过期清理不修改公开副本。"
+        },
         "books.SaveBookLibraryEntryInput": {
             "type": "object",
             "required": [

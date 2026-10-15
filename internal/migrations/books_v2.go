@@ -15,7 +15,8 @@ func RunBooksV2Migration(db *gorm.DB) error {
 		if err := tx.AutoMigrate(&model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
 			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{},
 			&model.BookReadingSession{}, &model.BookReadingWrite{}, &model.BookReadingMark{},
-			&model.BookLibraryEntry{}, &model.BookPrivateNote{}, &model.BookNoteImportReceipt{}); err != nil {
+			&model.BookLibraryEntry{}, &model.BookPrivateNote{}, &model.BookNoteImportReceipt{},
+			&model.BookReaderClock{}, &model.BookReadingDaily{}, &model.BookNotePublication{}); err != nil {
 			return fmt.Errorf("migrate book resources: %w", err)
 		}
 		if err := tx.Exec(`
@@ -23,6 +24,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_work_language ON book_assets (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_work ON book_assets (id, work_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_revisions_asset ON book_asset_revisions (id, asset_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_reading_session_identity ON book_reading_sessions (id, user_id, revision_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private_notes (id, user_id, work_id);
 `).Error; err != nil {
 			return err
 		}
@@ -51,6 +53,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_reading_session_identity ON book_read
 			{"book_private_notes", "fk_book_note_work", "FOREIGN KEY (work_id) REFERENCES book_works(id) DEFERRABLE INITIALLY DEFERRED"},
 			{"book_private_notes", "fk_book_note_revision", "FOREIGN KEY (source_revision_id) REFERENCES book_asset_revisions(id)"},
 			{"book_note_import_receipts", "fk_book_note_import_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_reader_clocks", "fk_book_reader_clock_session", "FOREIGN KEY (session_id, user_id, revision_id) REFERENCES book_reading_sessions(id, user_id, revision_id)"},
+			{"book_reading_daily", "fk_book_reading_daily_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_reading_daily", "fk_book_reading_daily_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_note_publications", "fk_book_note_publication_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_note_publications", "fk_book_note_publication_note", "FOREIGN KEY (note_id, user_id, work_id) REFERENCES book_private_notes(id, user_id, work_id)"},
+			{"book_note_publications", "fk_book_note_publication_work", "FOREIGN KEY (work_id) REFERENCES book_works(id) DEFERRABLE INITIALLY DEFERRED"},
 		}
 		for _, constraint := range constraints {
 			var exists bool
