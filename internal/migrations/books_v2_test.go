@@ -54,6 +54,12 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	receipt.RequestID = uuid.New()
 	receipt.SessionID = uuid.New()
 	require.Error(t, db.Create(&receipt).Error, "a receipt must belong to its user's revision session")
+	mark := model.BookReadingMark{UserID: user.UUID, RevisionID: revision.ID, Kind: "bookmark", AnchorJSON: `{"epub_start_cfi":"epubcfi(/6/2!/4/1:0)"}`, Version: 1}
+	require.NoError(t, db.Create(&mark).Error)
+	require.Error(t, db.Model(&mark).Update("revision_id", uuid.New()).Error)
+	require.Error(t, db.Model(&mark).Update("user_id", uuid.New()).Error)
+	require.Error(t, db.Model(&mark).Update("kind", "public").Error)
+	require.Error(t, db.Model(&mark).Update("version", 0).Error)
 	require.Error(t, db.Model(&state).Update("current_percent", .9).Error)
 	require.Error(t, db.Model(&revision).Update("sha256", strings.Repeat("b", 64)).Error)
 	require.Error(t, db.Model(&revision).Update("asset_id", otherAsset.ID).Error)

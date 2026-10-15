@@ -121,7 +121,8 @@ func validateBookCloudPosition(input SaveBookCloudReadingStateInput, format stri
 	}
 	switch format {
 	case "epub":
-		if input.PDFPage != 0 || input.TXTOffset != 0 || !strings.HasPrefix(input.EPUBCFI, "epubcfi(") || !strings.HasSuffix(input.EPUBCFI, ")") {
+		_, cfiErr := parseBookPointCFI(input.EPUBCFI)
+		if input.PDFPage != 0 || input.TXTOffset != 0 || cfiErr != nil {
 			return apperr.BadRequest("books.invalid_reading_position", "An EPUB CFI is required for this revision")
 		}
 	case "pdf", "cbz", "cbr":

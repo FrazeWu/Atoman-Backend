@@ -149,6 +149,7 @@ func TestBookCloudReadingPositionFormats(t *testing.T) {
 	}{
 		{"epub", SaveBookCloudReadingStateInput{EPUBCFI: "epubcfi(/6/2!/4/1:5)"}, true},
 		{"epub", SaveBookCloudReadingStateInput{PDFPage: 1}, false},
+		{"epub", SaveBookCloudReadingStateInput{EPUBCFI: "epubcfi(not-a-position)"}, false},
 		{"pdf", SaveBookCloudReadingStateInput{PDFPage: 1}, true},
 		{"pdf", SaveBookCloudReadingStateInput{}, false},
 		{"txt", SaveBookCloudReadingStateInput{TXTOffset: 0}, true},
@@ -174,6 +175,8 @@ func TestBookCloudReadingSurvivesWorkMergeAndUndo(t *testing.T) {
 	_, err := service.SetBookReadingSelection(ctx, user, sourceID, SetBookReadingSelectionInput{AssetID: asset.ID, RevisionID: revision.ID})
 	require.NoError(t, err)
 	session := newBookCloudTestSession(t, service, user, revision.ID, "web")
+	mark, err := service.SaveBookReadingMark(ctx, user, revision.ID, uuid.New(), txtBookHighlight(1, 8, "合并前的私人想法"))
+	require.NoError(t, err)
 	first := SaveBookCloudReadingStateInput{SessionID: session.Session.ID, RequestID: uuid.New(), Sequence: 1, TXTOffset: 40, CurrentPercent: .4}
 	_, err = service.SaveBookCloudReadingState(ctx, user, revision.ID, first)
 	require.NoError(t, err)
@@ -181,6 +184,8 @@ func TestBookCloudReadingSurvivesWorkMergeAndUndo(t *testing.T) {
 	selection, err := service.GetBookReadingSelection(ctx, user, sourceID)
 	require.NoError(t, err)
 	require.Equal(t, targetID, selection.WorkID)
+	_, err = service.SaveBookReadingMark(ctx, user, revision.ID, mark.ID, SaveBookReadingMarkInput{BaseVersion: 1, Kind: "highlight", Anchor: mark.Anchor, Quote: mark.Quote, Note: "合并期间新整理的私人想法"})
+	require.NoError(t, err)
 	_, err = service.SaveBookCloudReadingState(ctx, user, revision.ID, SaveBookCloudReadingStateInput{SessionID: session.Session.ID, RequestID: uuid.New(), Sequence: 2, BaseVersion: 1, TXTOffset: 10, CurrentPercent: .1})
 	require.NoError(t, err)
 	_, err = service.RevertBookWorkMerge(ctx, user, merge.ID)
@@ -188,6 +193,10 @@ func TestBookCloudReadingSurvivesWorkMergeAndUndo(t *testing.T) {
 	selection, err = service.GetBookReadingSelection(ctx, user, sourceID)
 	require.NoError(t, err)
 	require.Equal(t, sourceID, selection.WorkID)
+	marks, err := service.ListBookReadingMarks(ctx, user, revision.ID)
+	require.NoError(t, err)
+	require.Len(t, marks.Items, 1)
+	require.Equal(t, "合并期间新整理的私人想法", marks.Items[0].Note)
 	state, err := service.GetBookCloudReadingState(ctx, user, revision.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, state.Version)

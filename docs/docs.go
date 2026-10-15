@@ -15,6 +15,199 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/books/me/reading-marks/{revisionId}": {
+            "get": {
+                "summary": "获取本人修订级阅读标记及无损高亮分组",
+                "description": "按修订和当前用户严格隔离。已有私人记录在下架后仍可整理；无个人历史且文件不可读时返回 404。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功，Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarksResult"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "文件或本人标记不存在"
+                    },
+                    "409": {
+                        "description": "版本冲突，details 包含 current_version 和 deleted；不覆盖、不复活删除项"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/reading-marks/{revisionId}/{markId}": {
+            "put": {
+                "summary": "幂等保存书签、高亮和批注",
+                "description": "客户端生成固定 markId；创建 base_version=0，更新使用当前 version。完全相同的最近请求重试不增加版本。正文下架后不能创建新标记，但可编辑已有私人标记。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "markId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.SaveBookReadingMarkInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功，Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarkDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "文件或本人标记不存在"
+                    },
+                    "409": {
+                        "description": "版本冲突，details 包含 current_version 和 deleted；不覆盖、不复活删除项"
+                    }
+                }
+            },
+            "delete": {
+                "summary": "带版本删除标记，防止离线旧请求复活",
+                "description": "删除记录保留版本，原请求可重试。过期版本不能删除新编辑；旧 PUT 不得重新创建已删除标记。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "markId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "base_version",
+                        "in": "query",
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 1,
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功，Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarkTombstone"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "文件或本人标记不存在"
+                    },
+                    "409": {
+                        "description": "版本冲突，details 包含 current_version 和 deleted；不覆盖、不复活删除项"
+                    }
+                }
+            }
+        },
         "/api/v1/books/me/selections/{workId}": {
             "get": {
                 "summary": "读取个人固定修订",
@@ -30610,6 +30803,238 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "books.BookReadingMarkAnchor": {
+            "type": "object",
+            "description": "只填写对应格式字段。EPUB 为两个文档/文本点 CFI（不接受逗号范围或音视频空间 CFI）；PDF/漫画页码从 1 开始，矩形按未旋转页面坐标归一化到 0..1；TXT 为 UTF-16 半开区间。书签只填起点或页码。",
+            "properties": {
+                "epub_start_cfi": {
+                    "type": "string"
+                },
+                "epub_end_cfi": {
+                    "type": "string"
+                },
+                "pdf_page": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "pdf_rects": {
+                    "type": "array",
+                    "maxItems": 1000,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "x",
+                            "y",
+                            "width",
+                            "height"
+                        ],
+                        "properties": {
+                            "x": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            },
+                            "y": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            },
+                            "width": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            },
+                            "height": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            }
+                        }
+                    }
+                },
+                "txt_offset_start": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "txt_offset_end": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                }
+            }
+        },
+        "books.SaveBookReadingMarkInput": {
+            "type": "object",
+            "required": [
+                "base_version",
+                "kind",
+                "anchor"
+            ],
+            "properties": {
+                "base_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "bookmark",
+                        "highlight"
+                    ]
+                },
+                "anchor": {
+                    "$ref": "#/definitions/books.BookReadingMarkAnchor"
+                },
+                "label": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "quote": {
+                    "type": "string",
+                    "maxLength": 50000,
+                    "description": "高亮必填原文；书签不填"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "color": {
+                    "type": "string",
+                    "enum": [
+                        "yellow",
+                        "green",
+                        "blue",
+                        "pink"
+                    ],
+                    "description": "仅高亮，默认 yellow"
+                },
+                "style": {
+                    "type": "string",
+                    "enum": [
+                        "highlight",
+                        "underline"
+                    ],
+                    "description": "仅高亮，默认 highlight"
+                }
+            }
+        },
+        "books.BookReadingMarkDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "bookmark",
+                        "highlight"
+                    ]
+                },
+                "anchor": {
+                    "$ref": "#/definitions/books.BookReadingMarkAnchor"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "quote": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "style": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "books.BookReadingMarkTombstone": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                "deleted_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "books.BookHighlightGroup": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "member_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "anchor": {
+                    "$ref": "#/definitions/books.BookReadingMarkAnchor"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "style": {
+                    "type": "string"
+                }
+            }
+        },
+        "books.BookReadingMarksResult": {
+            "type": "object",
+            "description": "items 保留每条原始划线、书签和批注；highlight_groups 仅用于同色同样式重叠高亮的合并显示，不丢失原始记录；deleted 供客户端移除缓存。",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookReadingMarkDTO"
+                    }
+                },
+                "highlight_groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookHighlightGroup"
+                    }
+                },
+                "deleted": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookReadingMarkTombstone"
+                    }
+                }
+            }
+        },
         "blog.BlogBookmarkDTO": {
             "type": "object",
             "properties": {
