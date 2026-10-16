@@ -21,7 +21,7 @@ const bookReviewMaxLength = 5000
 type BookRatingSummary struct {
 	RatingScore  float64 `json:"rating_score"`
 	RatingCount  int64   `json:"rating_count"`
-	ViewerRating *int    `json:"viewer_rating,omitempty"`
+	ViewerRating *int    `json:"viewer_rating"`
 }
 
 type BookReviewDTO struct {

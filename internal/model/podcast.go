@@ -21,8 +21,11 @@ type PodcastEpisode struct {
 	// Episode cover: optional; falls back to channel cover in RSS
 	EpisodeCoverURL string `json:"episode_cover_url" gorm:"type:text"`
 	// Episode ordering
-	SeasonNumber  int `json:"season_number" gorm:"default:1"`
-	EpisodeNumber int `json:"episode_number" gorm:"default:0"`
+	SeasonNumber  int     `json:"season_number" gorm:"default:1"`
+	EpisodeNumber int     `json:"episode_number" gorm:"default:0"`
+	RatingScore   float64 `json:"rating_score" gorm:"-"`
+	RatingCount   int64   `json:"rating_count" gorm:"-"`
+	ViewerRating  *int    `json:"viewer_rating" gorm:"-"`
 }
 
 func (episode *PodcastEpisode) BeforeSave(_ *gorm.DB) error {

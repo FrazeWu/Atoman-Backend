@@ -195,7 +195,7 @@ func TestBookRatingRoutesLoadClearAndRestoreViewerRating(t *testing.T) {
 
 	cleared := request(http.MethodDelete, "")
 	require.Equal(t, http.StatusOK, cleared.Code)
-	require.NotContains(t, cleared.Body.String(), "viewer_rating")
+	require.Contains(t, cleared.Body.String(), `"viewer_rating":null`)
 	require.Contains(t, cleared.Body.String(), `"rating_count":0`)
 
 	restored := request(http.MethodPut, `{"score":7}`)

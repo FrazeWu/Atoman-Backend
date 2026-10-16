@@ -25,7 +25,7 @@ func (s *Service) CountPostLikes(postID uuid.UUID) (int64, error) {
 type PostRatingSummary struct {
 	RatingScore  float64 `json:"rating_score"`
 	RatingCount  int64   `json:"rating_count"`
-	ViewerRating *int    `json:"viewer_rating,omitempty"`
+	ViewerRating *int    `json:"viewer_rating"`
 }
 
 func postRatingUpsertConflict(score int) clause.OnConflict {
@@ -114,10 +114,7 @@ func (s *Service) ensurePostRatingAccess(userID, postID uuid.UUID) error {
 		return err
 	}
 	if post.Status != "published" {
-		if post.UserID != userID {
-			return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this unpublished post")
-		}
-		return nil
+		return apperr.NotFound("blog.post_not_found", "Post not found")
 	}
 	allowed, err := CanViewPublishedBlogContent(s.db, &userID, post)
 	if err != nil {

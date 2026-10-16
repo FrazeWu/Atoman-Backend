@@ -294,6 +294,19 @@ func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 		}
+		if ep.Post.Status == "published" {
+			contentID, err := contentmodule.PodcastContentID(db, ep.ID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve episode content"})
+				return
+			}
+			summary, err := contentRatingSummaryForContent(db, contentID, currentPodcastViewerID(c))
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load podcast rating"})
+				return
+			}
+			ep.RatingScore, ep.RatingCount, ep.ViewerRating = summary.RatingScore, summary.RatingCount, summary.ViewerRating
+		}
 		c.JSON(http.StatusOK, ep)
 	}
 }

@@ -291,7 +291,7 @@ func GetVideo(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
-		rating, err := videoRatingSummaryForContent(db, contentID, viewerID)
+		rating, err := contentRatingSummaryForContent(db, contentID, viewerID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load video rating"})
 			return
