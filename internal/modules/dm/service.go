@@ -181,7 +181,8 @@ func (s *Service) MarkRead(ctx context.Context, actor authctx.CurrentUser, conve
 	if err != nil {
 		return ReadResultDTO{}, err
 	}
-	if err := repo.MarkConversationRead(actor.ID, access.Conversation, time.Now()); err != nil {
+	readNow := time.Now()
+	if err := repo.MarkConversationRead(actor.ID, access.Conversation, readNow); err != nil {
 		return ReadResultDTO{}, err
 	}
 	conversationUnread, err := repo.CountUnreadForConversation(actor.ID, access.Conversation)
@@ -209,11 +210,36 @@ func (s *Service) MarkRead(ctx context.Context, actor authctx.CurrentUser, conve
 	}
 	result := ReadResultDTO{ConversationUnread: conversationUnread, MailboxUnread: mailboxUnread, DMUnread: dmUnread, TotalUnread: totalUnread}
 	if s.publish != nil {
+		readAtStr := readNow.UTC().Format(time.RFC3339Nano)
 		parties, err := repo.LoadParties(mailbox)
 		if err != nil {
 			return ReadResultDTO{}, err
 		}
-		s.publish.Push(actor.ID, "dm.message.read", MessageReadEventDTO{ConversationID: conversationID.String(), ReadAt: time.Now().UTC().Format(time.RFC3339Nano), Mailbox: MailboxDTO{Party: partyForRef(parties, mailbox), Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread})
+		s.publish.Push(actor.ID, "dm.message.read", MessageReadEventDTO{ConversationID: conversationID.String(), ReadAt: readAtStr, Mailbox: MailboxDTO{Party: partyForRef(parties, mailbox), Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread})
+
+		otherUserID, err := repo.OtherUserForConversation(access, actor.ID)
+		if err == nil && otherUserID != uuid.Nil && otherUserID != actor.ID {
+			otherMailbox := TargetRef{Type: model.DMPartyUser, ID: otherUserID}
+			if access.Conversation.ParticipantBType == model.DMPartyChannel && access.Conversation.ParticipantB == otherUserID {
+				otherMailbox = TargetRef{Type: model.DMPartyChannel, ID: access.Conversation.ParticipantB}
+			}
+			otherParties, _ := repo.LoadParties(otherMailbox)
+			otherMailboxUnread, _ := repo.CountUnreadForMailbox(otherUserID, otherMailbox)
+			otherDMUnread, _ := repo.CountUnreadDM(otherUserID)
+			otherTotalUnread := otherDMUnread
+			if s.unread != nil {
+				if t, err := s.unread.CountSiteUnread(otherUserID); err == nil {
+					otherTotalUnread = t
+				}
+			}
+			s.publish.Push(otherUserID, "dm.message.read", MessageReadEventDTO{
+				ConversationID: conversationID.String(),
+				ReadAt:         readAtStr,
+				Mailbox:        MailboxDTO{Party: partyForRef(otherParties, otherMailbox), Unread: otherMailboxUnread},
+				DMUnread:       otherDMUnread,
+				TotalUnread:    otherTotalUnread,
+			})
+		}
 	}
 	return result, nil
 }
@@ -723,7 +749,7 @@ func (s *Service) createMessage(repo *Repo, conversation model.DMConversation, s
 }
 
 func messageDTO(message model.DMMessage) MessageDTO {
-	return MessageDTO{ID: message.ID, ConversationID: message.ConversationID, SenderType: message.SenderType, SenderID: message.SenderID, ClientMessageID: message.ClientMessageID, Content: message.Content, ImageID: message.ImageID, CreatedAt: message.CreatedAt}
+	return MessageDTO{ID: message.ID, ConversationID: message.ConversationID, SenderType: message.SenderType, SenderID: message.SenderID, ClientMessageID: message.ClientMessageID, Content: message.Content, ImageID: message.ImageID, ReadAt: message.ReadAt, CreatedAt: message.CreatedAt}
 }
 
 func (s *Service) messageDTO(ctx context.Context, message model.DMMessage) (MessageDTO, error) {

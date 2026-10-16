@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
@@ -99,6 +100,67 @@ type recordingPublisher struct{ events []recordedDMEvent }
 
 func (p *recordingPublisher) Push(userID uuid.UUID, event string, payload any) {
 	p.events = append(p.events, recordedDMEvent{userID: userID, event: event, payload: payload})
+}
+
+func TestMarkReadUpdatesReadAtAndNotifiesSender(t *testing.T) {
+	db := testDB(t)
+	sender, recipient := testUser(t, db), testUser(t, db)
+	publisher := &recordingPublisher{}
+	service := NewService(NewRepo(db), nil, publisher, nil)
+
+	// Sender sends a message to Recipient
+	msg, err := service.SendToTarget(context.Background(), sender, TargetRef{Type: model.DMPartyUser, ID: recipient}, SendInput{
+		Content:         "hello from sender",
+		ClientMessageID: uuid.New(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Sender lists messages: ReadAt should be nil initially
+	pageBefore, err := service.ListMessages(context.Background(), authctx.CurrentUser{ID: sender}, msg.ConversationID, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pageBefore.Items) != 1 || pageBefore.Items[0].ReadAt != nil {
+		t.Fatalf("expected ReadAt to be nil before read, got %#v", pageBefore.Items[0].ReadAt)
+	}
+
+	// 2. Recipient marks conversation as read
+	publisher.events = nil
+	_, err = service.MarkRead(context.Background(), authctx.CurrentUser{ID: recipient}, msg.ConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Sender lists messages: ReadAt should now be populated!
+	pageAfter, err := service.ListMessages(context.Background(), authctx.CurrentUser{ID: sender}, msg.ConversationID, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pageAfter.Items) != 1 || pageAfter.Items[0].ReadAt == nil {
+		t.Fatalf("expected ReadAt to be populated after read, got %#v", pageAfter.Items)
+	}
+
+	// 4. Verify publisher pushed "dm.message.read" to both recipient AND sender!
+	foundSenderEvent := false
+	foundRecipientEvent := false
+	for _, ev := range publisher.events {
+		if ev.event == "dm.message.read" {
+			if ev.userID == sender {
+				foundSenderEvent = true
+			}
+			if ev.userID == recipient {
+				foundRecipientEvent = true
+			}
+		}
+	}
+	if !foundRecipientEvent {
+		t.Fatal("expected dm.message.read pushed to recipient")
+	}
+	if !foundSenderEvent {
+		t.Fatal("expected dm.message.read pushed to sender")
+	}
 }
 
 func TestServiceRejectsSelfAndOwnedChannelTargets(t *testing.T) {

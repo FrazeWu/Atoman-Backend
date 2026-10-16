@@ -127,6 +127,7 @@ type MessageDTO struct {
 	Content         string     `json:"content"`
 	ImageID         *uuid.UUID `json:"image_id,omitempty"`
 	ImageURL        string     `json:"image_url,omitempty"`
+	ReadAt          *time.Time `json:"read_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
