@@ -9,6 +9,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestSwaggerBookRatingContractsMatchAcrossFormats(t *testing.T) {
+	raw, err := os.ReadFile("swagger.json")
+	require.NoError(t, err)
+	var expected map[string]any
+	require.NoError(t, json.Unmarshal(raw, &expected))
+	yamlRaw, err := os.ReadFile("swagger.yaml")
+	require.NoError(t, err)
+	var fromYAML map[string]any
+	require.NoError(t, yaml.Unmarshal(yamlRaw, &fromYAML))
+	// Normalize YAML integer types before comparing JSON schemas.
+	normalized, err := json.Marshal(fromYAML)
+	require.NoError(t, err)
+	for _, source := range []string{SwaggerInfo.ReadDoc(), string(normalized)} {
+		var spec map[string]any
+		require.NoError(t, json.Unmarshal([]byte(source), &spec))
+		for _, path := range []string{"/api/v1/books/works/{workId}/rating", "/api/v1/books/rankings/high-rated"} {
+			require.Equal(t, expected["paths"].(map[string]any)[path], spec["paths"].(map[string]any)[path])
+		}
+		for _, definition := range []string{"books.BookWorkRatingDTO", "books.BookRatingRankingItem", "books.BookRatingRankingResult"} {
+			require.Equal(t, expected["definitions"].(map[string]any)[definition], spec["definitions"].(map[string]any)[definition])
+		}
+	}
+}
+
 func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T) {
 	var spec struct {
 		Paths map[string]map[string]struct {
@@ -25,6 +49,8 @@ func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &spec))
 	for path, methods := range map[string][]string{
+		"/api/v1/books/works/{workId}/rating":                                  {"get", "put", "delete"},
+		"/api/v1/books/rankings/high-rated":                                    {"get"},
 		"/api/v1/books/me/reading-sessions/{sessionId}/heartbeat":              {"post"},
 		"/api/v1/books/me/reading-statistics":                                  {"get"},
 		"/api/v1/books/me/private-notes/{noteId}/publish":                      {"post"},
