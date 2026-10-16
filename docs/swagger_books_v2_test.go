@@ -28,6 +28,15 @@ func TestSwaggerBookInteractionContractsMatchAcrossFormats(t *testing.T) {
 			"/api/v1/books/works/{workId}/rating", "/api/v1/books/rankings/high-rated",
 			"/api/v1/books/asset-revisions/{revisionId}/passages", "/api/v1/books/passages/{passageId}",
 			"/api/v1/books/works/{workId}/reviews", "/api/v1/books/works/{workId}/reviews/{contentId}",
+			"/api/v1/books/booklists",
+			"/api/v1/books/booklists/{listId}",
+			"/api/v1/books/me/booklists",
+			"/api/v1/books/me/booklists/{listId}/draft",
+			"/api/v1/books/me/booklists/{listId}/publish",
+			"/api/v1/books/me/booklists/{listId}/unpublish",
+			"/api/v1/books/me/booklists/{listId}",
+			"/api/v1/books/booklists/{listId}/bookmark",
+			"/api/v1/books/me/booklist-bookmarks",
 		} {
 			require.Contains(t, expected["paths"], path)
 			require.Equal(t, expected["paths"].(map[string]any)[path], spec["paths"].(map[string]any)[path])
@@ -36,6 +45,21 @@ func TestSwaggerBookInteractionContractsMatchAcrossFormats(t *testing.T) {
 			"books.BookWorkRatingDTO", "books.BookRatingRankingItem", "books.BookRatingRankingResult",
 			"books.CreateBookDiscussionPassageInput", "books.BookDiscussionPassageDTO", "books.BookDiscussionPassageList",
 			"books.LinkBookContentReviewInput", "model.BookContentReview", "books.BookContentReviewDTO", "books.BookContentReviewList",
+			"books.BookListEntry",
+			"books.BookListSnapshot",
+			"books.SaveBookListDraftInput",
+			"books.PublishBookListInput",
+			"books.BookListVersionInput",
+			"books.BookListDraftDTO",
+			"books.BookListChanges",
+			"books.BookListCard",
+			"books.BookListItemDTO",
+			"books.BookListDetail",
+			"books.BookListSearchResult",
+			"books.BookListDraftResult",
+			"books.SaveBookListBookmarkInput",
+			"books.BookListBookmarkDTO",
+			"books.BookListBookmarkResult",
 		} {
 			require.Contains(t, expected["definitions"], definition)
 			require.Equal(t, expected["definitions"].(map[string]any)[definition], spec["definitions"].(map[string]any)[definition])
@@ -59,6 +83,15 @@ func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &spec))
 	for path, methods := range map[string][]string{
+		"/api/v1/books/booklists":                                              {"get"},
+		"/api/v1/books/booklists/{listId}":                                     {"get"},
+		"/api/v1/books/me/booklists":                                           {"get"},
+		"/api/v1/books/me/booklists/{listId}/draft":                            {"get", "put"},
+		"/api/v1/books/me/booklists/{listId}/publish":                          {"post"},
+		"/api/v1/books/me/booklists/{listId}/unpublish":                        {"post"},
+		"/api/v1/books/me/booklists/{listId}":                                  {"delete"},
+		"/api/v1/books/booklists/{listId}/bookmark":                            {"put", "delete"},
+		"/api/v1/books/me/booklist-bookmarks":                                  {"get"},
 		"/api/v1/books/asset-revisions/{revisionId}/passages":                  {"get", "post"},
 		"/api/v1/books/passages/{passageId}":                                   {"get"},
 		"/api/v1/books/works/{workId}/reviews":                                 {"get"},

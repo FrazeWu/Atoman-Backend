@@ -18,6 +18,8 @@ import (
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	handler := &Handler{service: service}
 	public := group.Group("")
+	public.GET("/booklists", handler.searchBookLists)
+	public.GET("/booklists/:listId", handler.getBookList)
 	public.GET("/asset-revisions/:revisionId/passages", handler.listBookDiscussionPassages)
 	public.GET("/passages/:passageId", handler.getBookDiscussionPassage)
 	public.GET("/works/:workId/reviews", handler.listBookContentReviews)
@@ -43,6 +45,15 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 	protected := group.Group("")
 	protected.Use(requireCurrentUser())
+	protected.GET("/me/booklists", handler.listMyBookLists)
+	protected.GET("/me/booklists/:listId/draft", handler.getBookListDraft)
+	protected.PUT("/me/booklists/:listId/draft", handler.saveBookListDraft)
+	protected.POST("/me/booklists/:listId/publish", handler.publishBookList)
+	protected.POST("/me/booklists/:listId/unpublish", handler.unpublishBookList)
+	protected.DELETE("/me/booklists/:listId", handler.deleteBookList)
+	protected.GET("/me/booklist-bookmarks", handler.listBookListBookmarks)
+	protected.PUT("/booklists/:listId/bookmark", handler.saveBookListBookmark)
+	protected.DELETE("/booklists/:listId/bookmark", handler.deleteBookListBookmark)
 	protected.POST("/asset-revisions/:revisionId/passages", handler.createBookDiscussionPassage)
 	protected.PUT("/works/:workId/reviews/:contentId", handler.linkBookContentReview)
 	protected.DELETE("/works/:workId/reviews/:contentId", handler.unlinkBookContentReview)

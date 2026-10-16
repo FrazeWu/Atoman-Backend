@@ -19,6 +19,16 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	require.NoError(t, RunBooksV2Migration(db))
 	user := model.User{UUID: uuid.New(), Username: "reader", Email: "reader@example.test", Password: "hash"}
 	require.NoError(t, db.Create(&user).Error)
+	list := model.BookList{UserID: user.UUID, Version: 1, DraftJSON: `{"title":"书单","items":[]}`, Visibility: "private"}
+	require.NoError(t, db.Create(&list).Error)
+	for column, value := range map[string]any{"version": 0, "published_version": -1, "visibility": "unlisted", "user_id": uuid.New()} {
+		require.Error(t, db.Model(&model.BookList{}).Where("id = ?", list.ID).Update(column, value).Error)
+	}
+	bookmark := model.BookListBookmark{UserID: user.UUID, ListID: list.ID}
+	require.NoError(t, db.Create(&bookmark).Error)
+	require.Error(t, db.Create(&bookmark).Error, "one bookmark per reader and list")
+	require.Error(t, db.Model(&model.BookListBookmark{}).Where("user_id = ? AND list_id = ?", user.UUID, list.ID).Update("seen_version", -1).Error)
+	require.Error(t, db.Create(&model.BookListBookmark{UserID: user.UUID, ListID: uuid.New()}).Error)
 	work := model.BookWork{Title: "无出版版本的作品", LifecycleStatus: model.BookLifecycleStatusActive}
 	otherWork := model.BookWork{Title: "另一个作品", LifecycleStatus: model.BookLifecycleStatusActive}
 	require.NoError(t, db.Create(&work).Error)

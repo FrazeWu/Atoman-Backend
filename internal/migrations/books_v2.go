@@ -17,7 +17,7 @@ func RunBooksV2Migration(db *gorm.DB) error {
 			&model.BookReadingSession{}, &model.BookReadingWrite{}, &model.BookReadingMark{},
 			&model.BookLibraryEntry{}, &model.BookPrivateNote{}, &model.BookNoteImportReceipt{},
 			&model.BookReaderClock{}, &model.BookReadingDaily{}, &model.BookNotePublication{},
-			&model.BookDiscussionPassage{}, &model.BookContentReview{}); err != nil {
+			&model.BookDiscussionPassage{}, &model.BookContentReview{}, &model.BookList{}, &model.BookListBookmark{}); err != nil {
 			return fmt.Errorf("migrate book resources: %w", err)
 		}
 		if err := tx.Exec(`
@@ -30,6 +30,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private
 			return err
 		}
 		constraints := []struct{ table, name, definition string }{
+			{"book_lists", "fk_book_list_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_list_bookmarks", "fk_book_list_bookmark_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_list_bookmarks", "fk_book_list_bookmark_list", "FOREIGN KEY (list_id) REFERENCES book_lists(id)"},
 			{"book_discussion_passages", "fk_book_passage_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
 			{"book_discussion_passages", "fk_book_passage_creator", "FOREIGN KEY (created_by) REFERENCES \"Users\"(uuid)"},
 			{"book_content_reviews", "fk_book_content_review_work", "FOREIGN KEY (work_id) REFERENCES book_works(id) DEFERRABLE INITIALLY DEFERRED"},
