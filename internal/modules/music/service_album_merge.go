@@ -129,7 +129,7 @@ func (s *Service) MergeAlbums(user authctx.CurrentUser, targetAlbumID, sourceAlb
 				if err := mergeSongRelations(tx, sourceSong.ID, targetSongID); err != nil {
 					return err
 				}
-				if err := tx.Model(&model.Song{}).Where("id = ?", sourceSong.ID).Updates(map[string]any{"status": "closed", "lifecycle_status": model.MusicLifecycleRetired}).Error; err != nil {
+				if err := tx.Model(&model.Song{}).Where("id = ?", sourceSong.ID).Updates(map[string]any{"status": "closed", "lifecycle_status": model.MusicLifecycleMerged, "redirect_to": targetSongID}).Error; err != nil {
 					return err
 				}
 				continue

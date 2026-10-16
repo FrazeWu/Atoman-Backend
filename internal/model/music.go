@@ -109,6 +109,7 @@ type Album struct {
 	ExternalMetadataJSON   json.RawMessage `json:"external_metadata,omitempty" gorm:"type:jsonb;default:'{}'"`
 	Sources                []MusicSource   `json:"sources,omitempty" gorm:"-"`
 	RedirectTo             *uuid.UUID      `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
+	RedirectSongID         *uuid.UUID      `json:"redirect_song_id,omitempty" gorm:"type:uuid;index"`
 	UploadedBy             *uuid.UUID      `json:"uploaded_by" gorm:"type:uuid"`
 	User                   *User           `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
 	Artists                []Artist        `json:"artists,omitempty" gorm:"many2many:album_artists;"`
@@ -193,6 +194,7 @@ func (AlbumArtist) TableName() string {
 
 type Song struct {
 	Base
+	RedirectTo             *uuid.UUID      `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
 	Title                  string          `json:"title" gorm:"not null"`
 	Description            string          `json:"description" gorm:"type:text"`
 	ReleaseType            *string         `json:"release_type,omitempty" gorm:"type:varchar(16);index"`

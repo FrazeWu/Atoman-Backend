@@ -14,6 +14,10 @@ func UpsertRebindNotification(tx *gorm.DB, actorID, songID uuid.UUID, annotation
 	if actorID == annotation.CreatedBy {
 		return nil
 	}
+	var actor *uuid.UUID
+	if actorID != uuid.Nil {
+		actor = &actorID
+	}
 	meta := model.NotificationMeta{
 		"song_id": songID.String(), "annotation_id": annotation.ID.String(),
 		"title": "歌词修改影响了你的注释绑定",
@@ -31,7 +35,7 @@ func UpsertRebindNotification(tx *gorm.DB, actorID, songID uuid.UUID, annotation
 		First(&existing).Error
 	if err == nil {
 		return tx.Model(&existing).Updates(map[string]any{
-			"actor_id": actorID, "type": "collaboration.required", "meta": meta, "read_at": nil,
+			"actor_id": actor, "type": "collaboration.required", "meta": meta, "read_at": nil,
 		}).Error
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -39,7 +43,7 @@ func UpsertRebindNotification(tx *gorm.DB, actorID, songID uuid.UUID, annotation
 	}
 	notification := model.Notification{
 		RecipientID: annotation.CreatedBy,
-		ActorID:     &actorID,
+		ActorID:     actor,
 		Type:        "collaboration.required",
 		SourceType:  "music_lyrics",
 		SourceID:    annotation.ID,

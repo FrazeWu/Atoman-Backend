@@ -34,9 +34,11 @@ func runSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID stri
 		}
 		return false, err
 	}
+	// 每次领取都使用新令牌，即使同一个 Worker 再次领取也不能复用旧租约。
+	leaseToken := workerID + ":" + uuid.NewString()
 	result := db.WithContext(ctx).Model(&model.SongAudioReplacement{}).
 		Where("id = ? AND "+claimable, candidate.ID, "pending", "processing", staleBefore).
-		Updates(map[string]any{"status": "processing", "locked_by": workerID, "started_at": now})
+		Updates(map[string]any{"status": "processing", "locked_by": leaseToken, "started_at": now})
 	if result.Error != nil || result.RowsAffected == 0 {
 		return false, result.Error
 	}
@@ -45,7 +47,7 @@ func runSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID stri
 	if mediaService != nil {
 		var song model.Song
 		if err := db.WithContext(ctx).First(&song, "id = ?", candidate.SongID).Error; err != nil {
-			return failSongAudioReplacement(db, candidate.ID, err)
+			return failSongAudioReplacement(db, candidate.ID, leaseToken, err)
 		}
 		destinationKey := storage.BuildMusicSongAudioVersionKey(song.ID.String(), uuid.NewString(), path.Ext(candidate.AudioURL))
 		if song.AlbumID != nil {
@@ -53,24 +55,19 @@ func runSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID stri
 		}
 		asset, err := storage.PromoteMusicUploadAsset(mediaService.s3, candidate.AudioURL, destinationKey)
 		if err != nil {
-			return failSongAudioReplacement(db, candidate.ID, err)
+			return failSongAudioReplacement(db, candidate.ID, leaseToken, err)
 		}
 		if asset.DestinationKey != "" {
 			candidate.AudioURL = asset.URL
 			oldObjectKey, newObjectKey = asset.SourceKey, asset.DestinationKey
-			if err := db.WithContext(ctx).Model(&model.SongAudioReplacement{}).Where("id = ?", candidate.ID).Update("audio_url", asset.URL).Error; err != nil {
-				storage.DeleteMusicObjects(mediaService.s3, []string{newObjectKey})
-				return failSongAudioReplacement(db, candidate.ID, err)
-			}
 		}
 	}
-	if err := service.NewRevisionService(db).ApplySongAudioReplacement(candidate.ID); err != nil {
+	// 发布 URL 与音频切换一同提交；重新领取的 Worker 不会误用旧 Worker 待清理的文件。
+	if err := service.NewRevisionService(db.WithContext(ctx)).ApplySongAudioReplacement(candidate.ID, leaseToken, candidate.AudioURL); err != nil {
 		if mediaService != nil {
 			storage.DeleteMusicObjects(mediaService.s3, []string{newObjectKey})
 		}
-		db.WithContext(ctx).Model(&model.SongAudioReplacement{}).Where("id = ?", candidate.ID).
-			Updates(map[string]any{"status": "failed", "error_message": err.Error(), "finished_at": time.Now().UTC()})
-		return true, err
+		return failSongAudioReplacement(db, candidate.ID, leaseToken, err)
 	}
 	if mediaService != nil {
 		deleteSource := candidate.AssetID == nil
@@ -89,8 +86,8 @@ func runSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID stri
 	return true, nil
 }
 
-func failSongAudioReplacement(db *gorm.DB, jobID uuid.UUID, err error) (bool, error) {
-	db.Model(&model.SongAudioReplacement{}).Where("id = ?", jobID).
+func failSongAudioReplacement(db *gorm.DB, jobID uuid.UUID, leaseToken string, err error) (bool, error) {
+	db.Model(&model.SongAudioReplacement{}).Where("id = ? AND status = ? AND locked_by = ?", jobID, "processing", leaseToken).
 		Updates(map[string]any{"status": "failed", "error_message": err.Error(), "finished_at": time.Now().UTC()})
 	return true, err
 }

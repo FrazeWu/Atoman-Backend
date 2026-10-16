@@ -463,6 +463,7 @@ func (h *Handler) createSongAudioReplacement(c *gin.Context) {
 
 // getSongDetail godoc
 // @Summary 获取歌曲详情
+// @Description 合并前的歌曲 ID 解析到规范歌曲，响应 song.id 为规范 ID。
 // @Tags music
 // @Produce json
 // @Param songId path string true "歌曲 ID"
@@ -475,6 +476,14 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 	}
 	viewer, hasViewer := currentMusicUser(c)
 	viewerPtr := musicViewer(viewer, hasViewer)
+	songID, err = resolveMusicSongID(h.service.db, songID, viewerPtr)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			err = apperr.NotFound("music.song_not_found", "Song not found")
+		}
+		httpx.Error(c, err)
+		return
+	}
 	var song model.Song
 	query := scopeVisibleMusicEntries(h.service.db, "\"Songs\"", "uploaded_by", viewerPtr, false)
 	if err := query.Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Album.Artists", visibleArtistPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).First(&song, "\"Songs\".id = ?", songID).Error; err != nil {

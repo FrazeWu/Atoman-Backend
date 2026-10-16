@@ -436,10 +436,8 @@ func (s *Service) AddMusicTag(user authctx.CurrentUser, entityType string, entit
 }
 
 func replaceAlbumImportTags(tx *gorm.DB, userID, albumID uuid.UUID, tags []AlbumImportTagPayload) error {
-	if err := tx.Where("entity_type = ? AND entity_id = ?", musicTagEntityAlbum, albumID).Delete(&model.MusicTagAssignment{}).Error; err != nil {
-		return err
-	}
 	seen := make(map[string]struct{}, len(tags))
+	keepTagIDs := make([]uuid.UUID, 0, len(tags))
 	for _, input := range tags {
 		if err := validateMusicTagKind(input.Kind); err != nil {
 			return err
@@ -482,8 +480,15 @@ func replaceAlbumImportTags(tx *gorm.DB, userID, albumID uuid.UUID, tags []Album
 		if err := tx.Where("entity_type = ? AND entity_id = ? AND tag_id = ?", musicTagEntityAlbum, albumID, tag.ID).FirstOrCreate(&assignment).Error; err != nil {
 			return err
 		}
+		keepTagIDs = append(keepTagIDs, tag.ID)
 	}
-	return nil
+	// 导入修复保持已有关系 ID；有社区投票的标签不能因外部资料缺失被删除。
+	obsolete := tx.Where("entity_type = ? AND entity_id = ?", musicTagEntityAlbum, albumID).
+		Where("NOT EXISTS (SELECT 1 FROM music_tag_votes v WHERE v.assignment_id = music_tag_assignments.id AND v.deleted_at IS NULL)")
+	if len(keepTagIDs) > 0 {
+		obsolete = obsolete.Where("tag_id NOT IN ?", keepTagIDs)
+	}
+	return obsolete.Delete(&model.MusicTagAssignment{}).Error
 }
 
 func (s *Service) DeleteMusicTag(user authctx.CurrentUser, entityType string, entityID, tagID uuid.UUID) error {

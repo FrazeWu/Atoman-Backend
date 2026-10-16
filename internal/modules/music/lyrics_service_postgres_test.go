@@ -119,7 +119,7 @@ func TestPostgresListPendingLyricAnnotationsUsesQuotedSongsTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list pending lyric annotations: %v", err)
 	}
-	if len(items) != 1 || items[0].AnnotationID != annotation.ID.String() || items[0].SongID != song.ID.String() || items[0].AlbumID != album.ID.String() {
+	if len(items) != 1 || items[0].AnnotationID != annotation.ID.String() || items[0].SongID != song.ID.String() || items[0].AlbumID == nil || *items[0].AlbumID != album.ID.String() {
 		t.Fatalf("unexpected pending lyric annotations: %#v", items)
 	}
 }

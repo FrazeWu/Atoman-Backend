@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type CatalogMetadataBackfillResult struct {
@@ -175,6 +176,10 @@ func backfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent, discog
 
 func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAlbumMetadataEnricher, album *model.Album, apply bool, preferredReleaseIDs ...string) CatalogMetadataBackfillResult {
 	result := CatalogMetadataBackfillResult{AlbumID: album.ID, AlbumTitle: album.Title}
+	if album.MetadataManualOverride {
+		result.Reason = "manual metadata override is protected"
+		return result
+	}
 	artist := ""
 	artists := []string{}
 	for _, credit := range album.ArtistCredits {
@@ -245,6 +250,15 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 		return result
 	}
 	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.Album
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", album.ID).Error; err != nil {
+			return err
+		}
+		if current.MetadataManualOverride {
+			result.Reason = "manual metadata override is protected"
+			return nil
+		}
+		album = &current
 		revisions := service.NewRevisionService(tx)
 		if _, err := revisions.EnsureInitialRevision("album", album.ID, actorID); err != nil {
 			return err
@@ -278,7 +292,7 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 		if err := tx.Model(&model.Album{}).Where("id = ?", album.ID).Updates(updates).Error; err != nil {
 			return err
 		}
-		if err := upsertMusicMatchRecord(tx, "album", album.ID, result.MetadataSource, enriched.ExternalID, enriched.SourceURL, enriched.MatchStatus, enriched.MatchConfidence, album.MetadataManualOverride, map[string]any{
+		if err := upsertMusicMatchRecord(tx, "album", album.ID, result.MetadataSource, enriched.ExternalID, enriched.SourceURL, enriched.MatchStatus, enriched.MatchConfidence, false, map[string]any{
 			"album_title": enriched.AlbumTitle,
 			"source":      result.MetadataSource,
 		}); err != nil {
@@ -290,7 +304,7 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 				return err
 			}
 			var song model.Song
-			if err := tx.First(&song, "id = ? AND album_id = ?", songID, album.ID).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&song, "id = ? AND album_id = ?", songID, album.ID).Error; err != nil {
 				return err
 			}
 			if !song.MetadataManualOverride {
@@ -298,7 +312,7 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 					return err
 				}
 			}
-			if err := upsertMusicMatchRecord(tx, "song", song.ID, result.MetadataSource, track.MatchExternalID, enriched.SourceURL, track.MatchStatus, track.MatchConfidence, song.MetadataManualOverride, map[string]any{
+			if err := upsertMusicMatchRecord(tx, "song", song.ID, result.MetadataSource, track.MatchExternalID, enriched.SourceURL, track.MatchStatus, track.MatchConfidence, false, map[string]any{
 				"title": track.Title, "track_number": track.TrackNumber, "disc_number": track.DiscNumber,
 			}); err != nil {
 				return err
@@ -318,7 +332,7 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 		result.LyricsAdded = 0
 		return result
 	}
-	result.Applied = true
+	result.Applied = result.Reason == ""
 	return result
 }
 

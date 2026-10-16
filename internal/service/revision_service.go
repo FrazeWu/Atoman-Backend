@@ -1206,15 +1206,21 @@ func (s *RevisionService) RevertToRevision(
 	})
 }
 
-func (s *RevisionService) ApplySongAudioReplacement(jobID uuid.UUID) error {
+func (s *RevisionService) ApplySongAudioReplacement(jobID uuid.UUID, leaseToken, preparedAudioURL string) error {
+	if strings.TrimSpace(leaseToken) == "" {
+		return errors.New("audio replacement lease token is required")
+	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var job model.SongAudioReplacement
-		query := tx.Where("id = ? AND status = ?", jobID, "processing")
+		query := tx.Where("id = ? AND status = ? AND locked_by = ?", jobID, "processing", leaseToken)
 		if supportsRowLock(tx) {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&job).Error; err != nil {
 			return err
+		}
+		if strings.TrimSpace(preparedAudioURL) != "" {
+			job.AudioURL = strings.TrimSpace(preparedAudioURL)
 		}
 		if err := ValidateMusicEntryEdit(tx, "song", job.SongID, job.RequestedBy, "audio_url"); err != nil {
 			return err
@@ -1266,7 +1272,7 @@ func (s *RevisionService) ApplySongAudioReplacement(jobID uuid.UUID) error {
 		}
 		now := time.Now().UTC()
 		return tx.Model(&model.SongAudioReplacement{}).Where("id = ?", job.ID).Updates(map[string]any{
-			"status": "completed", "revision_id": revision.ID, "finished_at": now, "error_message": "",
+			"status": "completed", "revision_id": revision.ID, "finished_at": now, "error_message": "", "audio_url": job.AudioURL,
 		}).Error
 	})
 }

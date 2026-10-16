@@ -24,18 +24,29 @@ func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
 	if userID != nil && *userID != uuid.Nil {
 		viewer = &authctx.CurrentUser{ID: *userID, Role: authctx.RoleUser}
 	}
-	return s.recordSongPlay(viewer, songID, nil)
+	return s.recordSongPlay(viewer, songID, nil, nil)
 }
 
 func (s *Service) RecordSongPlayForViewer(viewer *authctx.CurrentUser, songID uuid.UUID) error {
-	return s.recordSongPlay(viewer, songID, nil)
+	return s.recordSongPlay(viewer, songID, nil, nil)
 }
 
 func (s *Service) RecordSongPlayInPlaylistForViewer(viewer *authctx.CurrentUser, songID, playlistID uuid.UUID) error {
-	return s.recordSongPlay(viewer, songID, &playlistID)
+	return s.recordSongPlay(viewer, songID, &playlistID, nil)
 }
 
-func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID, playlistID *uuid.UUID) error {
+func (s *Service) RecordSongPlayEventForViewer(viewer *authctx.CurrentUser, songID uuid.UUID, playlistID, eventID *uuid.UUID, identity string) error {
+	var event *model.MusicPlayEvent
+	if eventID != nil {
+		if *eventID == uuid.Nil || strings.TrimSpace(identity) == "" {
+			return apperr.BadRequest("validation.invalid_request", "play_event_id must be a non-zero UUID")
+		}
+		event = &model.MusicPlayEvent{Identity: identity, EventID: *eventID, SongID: songID, PlaylistID: playlistID}
+	}
+	return s.recordSongPlay(viewer, songID, playlistID, event)
+}
+
+func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID, playlistID *uuid.UUID, event *model.MusicPlayEvent) error {
 	if songID == uuid.Nil {
 		return apperr.BadRequest("validation.invalid_request", "song_id is required")
 	}
@@ -51,6 +62,22 @@ func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID, 
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		if event != nil {
+			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(event)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				var previous model.MusicPlayEvent
+				if err := tx.First(&previous, "identity = ? AND event_id = ?", event.Identity, event.EventID).Error; err != nil {
+					return err
+				}
+				if previous.SongID != songID || !sameOptionalMusicID(previous.PlaylistID, playlistID) {
+					return apperr.Conflict("music.play_event_conflict", "play event already belongs to another playback")
+				}
+				return nil
+			}
+		}
 		repo := NewRepo(tx)
 		if err := repo.IncrementSongPlayCount(songID); err != nil {
 			return err
@@ -69,6 +96,10 @@ func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID, 
 		}
 		return repo.RecordListeningHistory(viewer.ID, songID, time.Now())
 	})
+}
+
+func sameOptionalMusicID(left, right *uuid.UUID) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }
 
 func normalizePlaybackReportedAt(reportedAt time.Time) (time.Time, error) {

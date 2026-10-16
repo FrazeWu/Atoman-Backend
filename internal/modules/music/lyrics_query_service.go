@@ -63,16 +63,19 @@ func (s *Service) ListPendingLyricAnnotations(user authctx.CurrentUser) ([]Pendi
 	if err := s.db.Table("music_lyric_annotations AS a").
 		Select("a.id AS annotation_id, a.song_id, s.album_id").
 		Joins(`JOIN "Songs" AS s ON s.id = a.song_id AND s.deleted_at IS NULL AND s.lifecycle_status = 'active'`).
-		Joins(`JOIN "Albums" AS al ON al.id = s.album_id AND al.deleted_at IS NULL AND al.lifecycle_status = 'active'`).
-		Where("a.created_by = ? AND a.status = ? AND a.deleted_at IS NULL AND s.album_id IS NOT NULL", user.ID, "needs_rebind").
+		Joins(`LEFT JOIN "Albums" AS al ON al.id = s.album_id AND al.deleted_at IS NULL AND al.lifecycle_status = 'active'`).
+		Where("a.created_by = ? AND a.status = ? AND a.deleted_at IS NULL AND (s.album_id IS NULL OR al.id IS NOT NULL)", user.ID, "needs_rebind").
 		Order("a.updated_at DESC").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	items := make([]PendingLyricAnnotationDTO, 0, len(rows))
 	for _, row := range rows {
+		item := PendingLyricAnnotationDTO{AnnotationID: row.AnnotationID.String(), SongID: row.SongID.String()}
 		if row.AlbumID != nil {
-			items = append(items, PendingLyricAnnotationDTO{AnnotationID: row.AnnotationID.String(), SongID: row.SongID.String(), AlbumID: row.AlbumID.String()})
+			id := row.AlbumID.String()
+			item.AlbumID = &id
 		}
+		items = append(items, item)
 	}
 	return items, nil
 }

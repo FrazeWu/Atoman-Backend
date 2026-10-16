@@ -65,9 +65,9 @@ type MusicLyricAnnotationResponse struct {
 }
 
 type PendingLyricAnnotationDTO struct {
-	AnnotationID string `json:"annotation_id"`
-	SongID       string `json:"song_id"`
-	AlbumID      string `json:"album_id"`
+	AnnotationID string  `json:"annotation_id"`
+	SongID       string  `json:"song_id"`
+	AlbumID      *string `json:"album_id" extensions:"x-nullable"` // 独立歌曲为 null。
 }
 
 type PendingLyricAnnotationsResponse struct {

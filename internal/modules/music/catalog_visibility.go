@@ -32,6 +32,24 @@ func scopeVisibleMusicEntries(db *gorm.DB, table, ownerColumn string, user *auth
 	return db.Where(condition, args...)
 }
 
+// 旧歌曲 ID 只经由明确的合并关联解析；目标仍须通过普通可见性校验。
+func resolveMusicSongID(db *gorm.DB, id uuid.UUID, user *authctx.CurrentUser) (uuid.UUID, error) {
+	seen := map[uuid.UUID]bool{}
+	for !seen[id] {
+		seen[id] = true
+		var song model.Song
+		if err := scopeVisibleMusicEntries(db, `"Songs"`, "uploaded_by", user, true).
+			Select("id", "redirect_to", "lifecycle_status").First(&song, `"Songs".id = ?`, id).Error; err != nil {
+			return uuid.Nil, err
+		}
+		if song.LifecycleStatus != model.MusicLifecycleMerged || song.RedirectTo == nil {
+			return id, nil
+		}
+		id = *song.RedirectTo
+	}
+	return uuid.Nil, gorm.ErrRecordNotFound
+}
+
 func visibleArtistPreload(user *authctx.CurrentUser) func(*gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		return scopeVisibleMusicEntries(db, `"Artists"`, "created_by", user, true)

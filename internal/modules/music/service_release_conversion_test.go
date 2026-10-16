@@ -1,14 +1,12 @@
 package music
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"atoman/internal/model"
-
-	"gorm.io/gorm"
+	revisionservice "atoman/internal/service"
 )
 
 func TestConvertStandaloneSongToAlbumMovesOwnership(t *testing.T) {
@@ -69,7 +67,7 @@ func TestConvertStandaloneSongToAlbumMovesOwnership(t *testing.T) {
 	}
 }
 
-func TestConvertAlbumToStandaloneSongRequiresOneTrackAndRemovesAlbum(t *testing.T) {
+func TestConvertAlbumToStandaloneSongPreservesAlbumHistoryAndBookmarks(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Single Artist", EntryStatus: "open", LifecycleStatus: model.MusicLifecycleActive}
 	if err := db.Create(&artist).Error; err != nil {
@@ -98,6 +96,13 @@ func TestConvertAlbumToStandaloneSongRequiresOneTrackAndRemovesAlbum(t *testing.
 		t.Fatalf("create import session: %v", err)
 	}
 
+	if err := db.Create(&model.AlbumBookmark{UserID: user.ID, AlbumID: album.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := revisionservice.NewRevisionService(db).EnsureInitialRevision("album", album.ID, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	songID, err := service.ConvertAlbumToStandaloneSong(user, album.ID, MusicReleaseConversionRequest{
 		Title: "One Track Album", Description: "Optional", ReleaseDate: "2025-02-03",
 		ReleaseType: "leak", CoverURL: "https://cdn.test/single.jpg",
@@ -111,8 +116,22 @@ func TestConvertAlbumToStandaloneSongRequiresOneTrackAndRemovesAlbum(t *testing.
 	if songID != song.ID {
 		t.Fatalf("converted song id = %s, want %s", songID, song.ID)
 	}
-	if err := db.Unscoped().First(&model.Album{}, "id = ?", album.ID).Error; !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("expected album deletion, got %v", err)
+	var preserved model.Album
+	if err := db.First(&preserved, "id = ?", album.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if preserved.RedirectSongID == nil || *preserved.RedirectSongID != song.ID || preserved.LifecycleStatus != model.MusicLifecycleMerged {
+		t.Fatalf("missing conversion redirect: %#v", preserved)
+	}
+	if err := db.First(&model.Revision{}, "id = ?", baseline.ID).Error; err != nil {
+		t.Fatalf("album revision lost: %v", err)
+	}
+	if err := db.Where("album_id = ? AND user_id = ?", album.ID, user.ID).First(&model.AlbumBookmark{}).Error; err != nil {
+		t.Fatalf("bookmark lost: %v", err)
+	}
+	bookmarks, total, err := service.ListAlbumBookmarks(user, 1, 20, "latest")
+	if err != nil || total != 1 || len(bookmarks) != 1 {
+		t.Fatalf("converted bookmark must remain accessible: %d %v", total, err)
 	}
 	var converted model.Song
 	if err := db.Preload("ArtistCredits").First(&converted, "id = ?", song.ID).Error; err != nil {

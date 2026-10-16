@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func mergeMusicEntityRelations(tx *gorm.DB, entityType string, sourceID, targetID uuid.UUID) error {
@@ -48,8 +49,10 @@ func mergeMusicEntityRelationsBetween(tx *gorm.DB, sourceType string, sourceID u
 	if err := mergeMusicCatalogLinks(tx, sourceType, sourceID, targetType, targetID); err != nil {
 		return err
 	}
-	if err := mergeMusicEditReferences(tx, sourceType, sourceID, targetType, targetID); err != nil {
-		return err
+	if sourceType == targetType {
+		if err := mergeMusicEditReferences(tx, sourceType, sourceID, targetType, targetID); err != nil {
+			return err
+		}
 	}
 	if err := mergeMusicDiscussionTargets(tx, sourceType, sourceID, targetType, targetID); err != nil {
 		return err
@@ -77,7 +80,43 @@ func mergeMusicTagAssignments(tx *gorm.DB, sourceType string, sourceID uuid.UUID
 		if err != nil {
 			return err
 		}
+		if err := mergeMusicTagVotes(tx, row.ID, existing.ID); err != nil {
+			return err
+		}
 		if err := tx.Delete(&row).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func mergeMusicTagVotes(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
+	if !tx.Migrator().HasTable(&model.MusicTagVote{}) {
+		return nil
+	}
+	var votes []model.MusicTagVote
+	if err := tx.Where("assignment_id = ?", sourceID).Find(&votes).Error; err != nil {
+		return err
+	}
+	for _, vote := range votes {
+		var target model.MusicTagVote
+		err := tx.Where("assignment_id = ? AND user_id = ?", targetID, vote.UserID).First(&target).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if err := tx.Model(&vote).Updates(map[string]any{"assignment_id": targetID, "updated_at": vote.UpdatedAt}).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		// 同一用户只保留最新一次投票，旧记录留在软删除历史中。
+		if vote.UpdatedAt.After(target.UpdatedAt) {
+			if err := tx.Model(&target).Updates(map[string]any{"vote": vote.Vote, "updated_at": vote.UpdatedAt}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Delete(&vote).Error; err != nil {
 			return err
 		}
 	}
@@ -128,7 +167,13 @@ func musicMatchRecordPreferred(left, right model.MusicMatchRecord) bool {
 	if left.UserOverridden != right.UserOverridden {
 		return left.UserOverridden
 	}
-	return left.UpdatedAt.After(right.UpdatedAt)
+	if musicMatchStatusRank(left.Status) != musicMatchStatusRank(right.Status) {
+		return musicMatchStatusRank(left.Status) > musicMatchStatusRank(right.Status)
+	}
+	if !left.UpdatedAt.Equal(right.UpdatedAt) {
+		return left.UpdatedAt.After(right.UpdatedAt)
+	}
+	return musicMatchProviderRank(left.Provider) > musicMatchProviderRank(right.Provider)
 }
 
 func mergeMusicCatalogLinks(tx *gorm.DB, sourceType string, sourceID uuid.UUID, targetType string, targetID uuid.UUID) error {
@@ -186,8 +231,61 @@ func mergeMusicDiscussionTargets(tx *gorm.DB, sourceType string, sourceID uuid.U
 	}
 	sourceKind := "music_" + sourceType
 	targetKind := "music_" + targetType
-	return tx.Model(&model.DiscussionTarget{}).Where("kind = ? AND resource_id = ?", sourceKind, sourceID).
-		Updates(map[string]any{"kind": targetKind, "resource_id": targetID, "resource_key": targetID.String()}).Error
+	var targets []model.DiscussionTarget
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("(kind = ? AND resource_key = ?) OR (kind = ? AND resource_key = ?)", sourceKind, sourceID.String(), targetKind, targetID.String()).
+		Order("id").Find(&targets).Error; err != nil {
+		return err
+	}
+	var source, target *model.DiscussionTarget
+	for i := range targets {
+		if targets[i].Kind == sourceKind && targets[i].ResourceKey == sourceID.String() {
+			source = &targets[i]
+		} else {
+			target = &targets[i]
+		}
+	}
+	if source == nil {
+		return nil
+	}
+	if target == nil {
+		return tx.Model(source).Updates(map[string]any{"kind": targetKind, "resource_id": targetID, "resource_key": targetID.String()}).Error
+	}
+	// 根评论楼层顺延；评论 ID、回复关系、点赞和附件不变。
+	var floor int
+	if err := tx.Unscoped().Model(&model.CommentEntry{}).Where("target_id = ?", target.ID).Select("COALESCE(MAX(floor_number), 0)").Scan(&floor).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Model(&model.CommentEntry{}).Where("target_id = ? AND floor_number IS NOT NULL", source.ID).
+		Update("floor_number", gorm.Expr("floor_number + ?", floor)).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Model(&model.CommentEntry{}).Where("target_id = ?", source.ID).Update("target_id", target.ID).Error; err != nil {
+		return err
+	}
+	if tx.Migrator().HasTable(&model.CommentPublishRecord{}) {
+		if err := tx.Model(&model.CommentPublishRecord{}).Where("target_id = ?", source.ID).Update("target_id", target.ID).Error; err != nil {
+			return err
+		}
+	}
+	var commentCount, rootCount int64
+	if err := tx.Model(&model.CommentEntry{}).Where("target_id = ? AND status IN ?", target.ID, []string{"active", "auto_folded"}).Count(&commentCount).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&model.CommentEntry{}).Where("target_id = ? AND root_id IS NULL AND status IN ?", target.ID, []string{"active", "auto_folded"}).Count(&rootCount).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Model(&model.CommentEntry{}).Where("target_id = ?", target.ID).Select("COALESCE(MAX(floor_number), 0)").Scan(&floor).Error; err != nil {
+		return err
+	}
+	updates := map[string]any{"comment_count": commentCount, "root_count": rootCount, "next_floor": floor + 1}
+	if target.PinnedCommentID == nil && source.PinnedCommentID != nil {
+		updates["pinned_comment_id"] = source.PinnedCommentID
+	}
+	if err := tx.Model(target).Updates(updates).Error; err != nil {
+		return err
+	}
+	return tx.Delete(source).Error
 }
 
 func mergeMusicProtection(tx *gorm.DB, sourceType string, sourceID uuid.UUID, targetType string, targetID uuid.UUID) error {
@@ -321,6 +419,16 @@ func mergeSongLyrics(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 	if !tx.Migrator().HasTable(&model.MusicSongLyric{}) {
 		return nil
 	}
+	// 与普通歌词编辑共用歌曲行锁，防止迁移期间产生同版本号。
+	ids := []uuid.UUID{sourceID, targetID}
+	if ids[0].String() > ids[1].String() {
+		ids[0], ids[1] = ids[1], ids[0]
+	}
+	for _, id := range ids {
+		if err := lockLyricsSong(tx, id); err != nil {
+			return err
+		}
+	}
 	var source model.MusicSongLyric
 	err := tx.Where("song_id = ?", sourceID).First(&source).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -333,6 +441,9 @@ func mergeSongLyrics(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 	err = tx.Where("song_id = ?", targetID).First(&target).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		if err := tx.Model(&source).Update("song_id", targetID).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Song{}).Where("id = ?", targetID).Update("lyrics", source.Content).Error; err != nil {
 			return err
 		}
 		if err := moveSongLyricChildren(tx, source.ID, sourceID, targetID); err != nil {
@@ -349,33 +460,56 @@ func mergeSongLyrics(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 			"translation":          source.Translation,
 			"translation_language": source.TranslationLanguage,
 			"format":               source.Format,
-			"version":              source.Version,
 			"updated_by":           source.UpdatedBy,
 			"edit_summary":         source.EditSummary,
 			"source":               source.Source,
 		}).Error; err != nil {
 			return err
 		}
+		var lines []model.MusicSongLyricLine
+		if err := tx.Where("lyric_id = ?", source.ID).Find(&lines).Error; err != nil {
+			return err
+		}
+		if _, err := replaceCurrentLyricLines(tx, target.ID, modelLinesToParsed(lines)); err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Song{}).Where("id = ?", targetID).Update("lyrics", source.Content).Error; err != nil {
+			return err
+		}
 	}
-	return moveSongLyricChildren(tx, source.ID, sourceID, targetID)
+	if err := moveSongLyricChildren(tx, source.ID, sourceID, targetID); err != nil {
+		return err
+	}
+	// 合并后仍以目标歌词为当前内容，版本号必须高于所有迁入历史。
+	if err := tx.First(&target, "id = ?", target.ID).Error; err != nil {
+		return err
+	}
+	var maxVersion int
+	if err := tx.Model(&model.MusicSongLyricVersion{}).Where("song_id = ?", targetID).Select("COALESCE(MAX(version), 0)").Scan(&maxVersion).Error; err != nil {
+		return err
+	}
+	target.Version = maxVersion + 1
+	if err := tx.Model(&target).Update("version", target.Version).Error; err != nil {
+		return err
+	}
+	return tx.Create(&model.MusicSongLyricVersion{SongID: targetID, Version: target.Version, Content: target.Content,
+		Translation: target.Translation, Language: target.TranslationLanguage, Format: target.Format, Target: "all",
+		CreatedBy: target.UpdatedBy, EditSummary: "合并歌曲，保留目标歌词"}).Error
 }
 
 func moveSongLyricChildren(tx *gorm.DB, lyricID, sourceSongID, targetSongID uuid.UUID) error {
 	if tx.Migrator().HasTable(&model.MusicSongLyricVersion{}) {
 		var versions []model.MusicSongLyricVersion
-		if err := tx.Where("song_id = ?", sourceSongID).Find(&versions).Error; err != nil {
+		if err := tx.Where("song_id = ?", sourceSongID).Order("version ASC").Find(&versions).Error; err != nil {
+			return err
+		}
+		var next int
+		if err := tx.Model(&model.MusicSongLyricVersion{}).Where("song_id = ?", targetSongID).Select("COALESCE(MAX(version), 0)").Scan(&next).Error; err != nil {
 			return err
 		}
 		for _, version := range versions {
-			var existing model.MusicSongLyricVersion
-			err := tx.Where("song_id = ? AND version = ?", targetSongID, version.Version).First(&existing).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				if err := tx.Model(&version).Update("song_id", targetSongID).Error; err != nil {
-					return err
-				}
-				continue
-			}
-			if err != nil {
+			next++
+			if err := tx.Model(&version).Updates(map[string]any{"song_id": targetSongID, "version": next}).Error; err != nil {
 				return err
 			}
 		}
@@ -383,7 +517,19 @@ func moveSongLyricChildren(tx *gorm.DB, lyricID, sourceSongID, targetSongID uuid
 	if !tx.Migrator().HasTable(&model.MusicLyricAnnotation{}) {
 		return nil
 	}
-	return tx.Model(&model.MusicLyricAnnotation{}).Where("song_id = ?", sourceSongID).Update("song_id", targetSongID).Error
+	if err := tx.Model(&model.MusicLyricAnnotation{}).Where("song_id = ?", sourceSongID).Update("song_id", targetSongID).Error; err != nil {
+		return err
+	}
+	var target model.MusicSongLyric
+	if err := tx.First(&target, "song_id = ?", targetSongID).Error; err != nil {
+		return err
+	}
+	var lines []model.MusicSongLyricLine
+	if err := tx.Where("lyric_id = ?", target.ID).Order("line_index ASC").Find(&lines).Error; err != nil {
+		return err
+	}
+	// 不猜测跨歌词行的对应关系；无法验证的锚点交给原有待重绑定流程。
+	return resolveInvalidAnnotationAnchors(tx, uuid.Nil, targetSongID, lines, nil, true)
 }
 
 func mergeSongPlayback(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
@@ -402,14 +548,10 @@ func mergeSongPlayback(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 			} else if err != nil {
 				return err
 			} else {
-				if progress.PositionSeconds > target.PositionSeconds {
-					target.PositionSeconds = progress.PositionSeconds
-				}
-				if progress.DurationSeconds > target.DurationSeconds {
-					target.DurationSeconds = progress.DurationSeconds
-				}
-				target.Completed = target.Completed || progress.Completed
 				if progress.ReportedAt.After(target.ReportedAt) {
+					target.PositionSeconds = progress.PositionSeconds
+					target.DurationSeconds = progress.DurationSeconds
+					target.Completed = progress.Completed
 					target.ReportedAt = progress.ReportedAt
 				}
 				if err := tx.Save(&target).Error; err != nil {

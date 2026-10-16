@@ -50,13 +50,6 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 			return err
 		}
 
-		if source.EntryStatus == "closed" {
-			return apperr.Unprocessable("music.artist_not_open", "Source artist is not available")
-		}
-		if target.EntryStatus == "closed" {
-			return apperr.Unprocessable("music.artist_not_open", "Target artist is not available")
-		}
-
 		if err := tx.Exec(`
 			INSERT INTO album_artists (album_id, artist_id, role, custom_role, position, created_at, updated_at)
 			SELECT aa.album_id, ?, aa.role, aa.custom_role, aa.position, aa.created_at, aa.updated_at
