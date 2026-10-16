@@ -656,6 +656,7 @@ func uniqueAlbums(albums []model.Album) []model.Album {
 // @Success 200 {object} map[string]bool
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
+// @Failure 409 {object} handlers.ErrorResponse "播放事件 ID 已被不同上下文使用"
 // @Failure 429 {object} handlers.ErrorResponse
 // @Failure 500 {object} handlers.ErrorResponse
 // @Router /api/v1/music/plays [post]
