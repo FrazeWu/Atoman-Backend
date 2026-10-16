@@ -454,6 +454,8 @@ type Playlist struct {
 	Kind          string    `json:"kind" gorm:"default:'user';index"`
 	OwnerUsername string    `json:"owner_username,omitempty" gorm:"-"`
 	SongCount     int64     `json:"song_count" gorm:"-"`
+	BookmarkCount int64     `json:"bookmark_count" gorm:"-"`
+	PlayCount     int64     `json:"play_count" gorm:"not null;default:0"`
 }
 
 func (Playlist) TableName() string {

@@ -18565,7 +18565,7 @@ const docTemplate = `{
         },
         "/api/v1/music/plays": {
             "post": {
-                "description": "播放器在实际播放满 5 秒后调用。匿名用户增加总播放次数，登录用户同时更新个人播放历史。",
+                "description": "播放器在实际播放满 5 秒后调用。匿名用户增加总播放次数，登录用户同时更新个人播放历史；携带 playlist_id 时，仅统计该歌单中实际播放的歌曲。",
                 "consumes": [
                     "application/json"
                 ],
@@ -36716,6 +36716,9 @@ const docTemplate = `{
         "model.Playlist": {
             "type": "object",
             "properties": {
+                "bookmark_count": {
+                    "type": "integer"
+                },
                 "cover_url": {
                     "type": "string"
                 },
@@ -39955,6 +39958,9 @@ const docTemplate = `{
         "music.PlaylistSummaryResponse": {
             "type": "object",
             "properties": {
+                "bookmark_count": {
+                    "type": "integer"
+                },
                 "cover_url": {
                     "type": "string"
                 },
@@ -39972,6 +39978,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "play_count": {
+                    "type": "integer"
                 },
                 "song_count": {
                     "type": "integer"
@@ -40001,6 +40010,9 @@ const docTemplate = `{
         "music.RecordSongPlayRequest": {
             "type": "object",
             "properties": {
+                "playlist_id": {
+                    "type": "string"
+                },
                 "song_id": {
                     "type": "string"
                 }

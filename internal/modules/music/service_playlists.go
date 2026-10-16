@@ -256,22 +256,16 @@ func (s *Service) ReorderPlaylistSongs(user authctx.CurrentUser, playlistID uuid
 	return s.repo.ReorderPlaylistSongs(playlistID, songIDs)
 }
 
-func (s *Service) ListPublicPlaylists(page int, pageSize int) ([]model.Playlist, map[uuid.UUID]int64, int64, error) {
+func (s *Service) ListPublicPlaylists(page int, pageSize int) ([]model.Playlist, int64, error) {
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
 
 	playlists, total, err := s.repo.ListPublicPlaylists(page, pageSize)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, 0, err
+	}
+	if err := s.repo.HydratePlaylistStats(playlists); err != nil {
+		return nil, 0, err
 	}
 
-	playlistIDs := make([]uuid.UUID, 0, len(playlists))
-	for _, playlist := range playlists {
-		playlistIDs = append(playlistIDs, playlist.ID)
-	}
-	songCounts, err := s.repo.CountPlaylistSongs(playlistIDs)
-	if err != nil {
-		return nil, nil, 0, err
-	}
-
-	return playlists, songCounts, total, nil
+	return playlists, total, nil
 }

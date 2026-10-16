@@ -145,7 +145,8 @@ type ReorderPlaylistSongsRequest struct {
 }
 
 type RecordSongPlayRequest struct {
-	SongID uuid.UUID `json:"song_id"`
+	SongID     uuid.UUID  `json:"song_id"`
+	PlaylistID *uuid.UUID `json:"playlist_id,omitempty"`
 }
 
 type MusicRecommendationEventName string
@@ -203,14 +204,16 @@ type PlaylistSongStatusResponse struct {
 }
 
 type PlaylistSummaryResponse struct {
-	ID          uuid.UUID `json:"id"`
-	UserID      uuid.UUID `json:"user_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	CoverURL    string    `json:"cover_url,omitempty"`
-	IsPublic    bool      `json:"is_public"`
-	Kind        string    `json:"kind"`
-	SongCount   int64     `json:"song_count"`
+	ID            uuid.UUID `json:"id"`
+	UserID        uuid.UUID `json:"user_id"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description,omitempty"`
+	CoverURL      string    `json:"cover_url,omitempty"`
+	IsPublic      bool      `json:"is_public"`
+	Kind          string    `json:"kind"`
+	SongCount     int64     `json:"song_count"`
+	BookmarkCount int64     `json:"bookmark_count"`
+	PlayCount     int64     `json:"play_count"`
 }
 
 type PaginationMetaResponse struct {

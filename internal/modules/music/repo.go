@@ -244,22 +244,26 @@ func (r *Repo) ListPlaylistBookmarksFiltered(userID uuid.UUID, page int, pageSiz
 	if err := db.Preload("Playlist.User").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error; err != nil {
 		return nil, 0, err
 	}
-	playlistIDs := make([]uuid.UUID, 0, len(bookmarks))
-	for _, bookmark := range bookmarks {
-		playlistIDs = append(playlistIDs, bookmark.PlaylistID)
-	}
-	songCounts, err := r.CountPlaylistSongs(playlistIDs)
-	if err != nil {
-		return nil, 0, err
-	}
-	for index := range bookmarks {
-		if bookmarks[index].Playlist == nil {
+	playlistRows := make([]model.Playlist, 0, len(bookmarks))
+	playlistIndexes := make([]int, 0, len(bookmarks))
+	for index, bookmark := range bookmarks {
+		if bookmark.Playlist == nil {
 			continue
 		}
-		bookmarks[index].Playlist.SongCount = songCounts[bookmarks[index].PlaylistID]
-		if bookmarks[index].Playlist.User != nil {
-			bookmarks[index].Playlist.OwnerUsername = bookmarks[index].Playlist.User.Username
+		playlistRows = append(playlistRows, *bookmark.Playlist)
+		playlistIndexes = append(playlistIndexes, index)
+	}
+	if err := r.HydratePlaylistStats(playlistRows); err != nil {
+		return nil, 0, err
+	}
+	for rowIndex, bookmarkIndex := range playlistIndexes {
+		playlist := playlistRows[rowIndex]
+		if playlist.User != nil {
+			playlist.OwnerUsername = playlist.User.Username
 		}
+		bookmarks[bookmarkIndex].Playlist.SongCount = playlist.SongCount
+		bookmarks[bookmarkIndex].Playlist.BookmarkCount = playlist.BookmarkCount
+		bookmarks[bookmarkIndex].Playlist.OwnerUsername = playlist.OwnerUsername
 	}
 	return bookmarks, total, nil
 }
@@ -388,6 +392,49 @@ func (r *Repo) CountPlaylistSongs(playlistIDs []uuid.UUID) (map[uuid.UUID]int64,
 	return counts, nil
 }
 
+func (r *Repo) CountPlaylistBookmarks(playlistIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	counts := make(map[uuid.UUID]int64, len(playlistIDs))
+	if len(playlistIDs) == 0 {
+		return counts, nil
+	}
+
+	var rows []struct {
+		PlaylistID uuid.UUID
+		Count      int64
+	}
+	if err := r.db.Model(&model.PlaylistBookmark{}).
+		Select("playlist_id, COUNT(*) AS count").
+		Where("playlist_id IN ?", playlistIDs).
+		Group("playlist_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.PlaylistID] = row.Count
+	}
+	return counts, nil
+}
+
+func (r *Repo) HydratePlaylistStats(playlists []model.Playlist) error {
+	playlistIDs := make([]uuid.UUID, 0, len(playlists))
+	for _, playlist := range playlists {
+		playlistIDs = append(playlistIDs, playlist.ID)
+	}
+	songCounts, err := r.CountPlaylistSongs(playlistIDs)
+	if err != nil {
+		return err
+	}
+	bookmarkCounts, err := r.CountPlaylistBookmarks(playlistIDs)
+	if err != nil {
+		return err
+	}
+	for i := range playlists {
+		playlists[i].SongCount = songCounts[playlists[i].ID]
+		playlists[i].BookmarkCount = bookmarkCounts[playlists[i].ID]
+	}
+	return nil
+}
+
 func (r *Repo) PlaylistFirstSongCovers(playlistIDs []uuid.UUID) (map[uuid.UUID]string, error) {
 	covers := make(map[uuid.UUID]string, len(playlistIDs))
 	if len(playlistIDs) == 0 {
@@ -505,6 +552,23 @@ func (r *Repo) IncrementSongPlayCount(songID uuid.UUID) error {
 		Where("id = ?", songID).
 		UpdateColumn("play_count", gorm.Expr("play_count + 1")).
 		Error
+}
+
+func (r *Repo) IncrementPlaylistPlayCount(playlistID, songID uuid.UUID, viewerID *uuid.UUID) error {
+	query := r.db.Model(&model.Playlist{}).
+		Where("id = ?", playlistID).
+		Where(`EXISTS (
+			SELECT 1 FROM music_playlist_songs
+			WHERE music_playlist_songs.playlist_id = music_playlists.id
+			  AND music_playlist_songs.song_id = ?
+			  AND music_playlist_songs.deleted_at IS NULL
+		)`, songID)
+	if viewerID == nil || *viewerID == uuid.Nil {
+		query = query.Where("is_public = ?", true)
+	} else {
+		query = query.Where("(is_public = ? OR user_id = ?)", true, *viewerID)
+	}
+	return query.UpdateColumn("play_count", gorm.Expr("play_count + 1")).Error
 }
 
 func (r *Repo) RecordListeningHistory(userID, songID uuid.UUID, playedAt time.Time) error {
