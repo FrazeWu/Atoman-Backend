@@ -1503,6 +1503,9 @@ func upsertMusicMatchRecord(tx *gorm.DB, entityType string, entityID uuid.UUID, 
 		}
 	} else if queryErr != nil {
 		return queryErr
+	} else if (record.UserOverridden && !userOverridden) || (!userOverridden && musicMatchStatusRank(status) < musicMatchStatusRank(record.Status)) {
+		// 自动失败结果不能擦除人工确认或已经建立的可靠匹配。
+		return nil
 	}
 	record.ExternalID = strings.TrimSpace(externalID)
 	record.SourceURL = strings.TrimSpace(sourceURL)

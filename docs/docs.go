@@ -18565,7 +18565,7 @@ const docTemplate = `{
         },
         "/api/v1/music/plays": {
             "post": {
-                "description": "播放器在实际播放满 5 秒后调用。匿名用户增加总播放次数，登录用户同时更新个人播放历史；携带 playlist_id 时，仅统计该歌单中实际播放的歌曲。",
+                "description": "播放器在实际播放满 5 秒后调用。匿名用户增加总播放次数，登录用户同时更新个人播放历史；携带 playlist_id 时，仅统计该歌单中实际播放的歌曲。新客户端为每次播放生成 play_event_id，重试复用该 ID，服务端原子去重；省略该字段兼容旧客户端。",
                 "consumes": [
                     "application/json"
                 ],
@@ -18840,6 +18840,7 @@ const docTemplate = `{
         },
         "/api/v1/music/songs/{songId}": {
             "get": {
+                "description": "合并前的歌曲 ID 解析到规范歌曲，响应 song.id 为规范 ID。",
                 "produces": [
                     "application/json"
                 ],
@@ -35173,6 +35174,10 @@ const docTemplate = `{
         "model.Album": {
             "type": "object",
             "properties": {
+                "redirect_song_id": {
+                    "description": "转换为独立歌曲后的规范歌曲 ID；旧专辑历史与收藏保留。",
+                    "type": "string"
+                },
                 "album_type": {
                     "type": "string"
                 },
@@ -37064,6 +37069,10 @@ const docTemplate = `{
         "model.Song": {
             "type": "object",
             "properties": {
+                "redirect_to": {
+                    "description": "合并后的规范歌曲 ID。",
+                    "type": "string"
+                },
                 "album": {
                     "$ref": "#/definitions/model.Album"
                 },
@@ -39804,6 +39813,8 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "album_id": {
+                    "description": "独立歌曲为 null。",
+                    "x-nullable": true,
                     "type": "string"
                 },
                 "annotation_id": {
@@ -40010,6 +40021,11 @@ const docTemplate = `{
         "music.RecordSongPlayRequest": {
             "type": "object",
             "properties": {
+                "play_event_id": {
+                    "description": "可选的播放事件 UUID；同一次播放重试复用，服务端按调用者原子去重。",
+                    "type": "string",
+                    "format": "uuid"
+                },
                 "playlist_id": {
                     "type": "string"
                 },

@@ -216,7 +216,10 @@ func (s *Service) ConvertAlbumToStandaloneSong(user authctx.CurrentUser, albumID
 				return err
 			}
 		}
-		if err := removeStandaloneAlbumWrapper(tx, album.ID); err != nil {
+		// 原专辑保留为可追溯入口，历史修订、收藏和纠错不删除。
+		if err := tx.Model(&model.Album{}).Where("id = ?", album.ID).Updates(map[string]any{
+			"lifecycle_status": model.MusicLifecycleMerged, "status": "closed", "entry_status": "closed", "redirect_song_id": song.ID,
+		}).Error; err != nil {
 			return err
 		}
 		_, err := revisions.CreateCurrentSnapshotRevision("song", song.ID, user.ID, reason)
@@ -246,45 +249,4 @@ func validateReleaseConversionProtection(tx *gorm.DB, entityType string, entityI
 		return apperr.Forbidden("music.edit_forbidden", "This music entry is fully protected")
 	}
 	return nil
-}
-
-func removeStandaloneAlbumWrapper(tx *gorm.DB, albumID uuid.UUID) error {
-	if err := removeMusicEntityRelations(tx, "album", albumID); err != nil {
-		return err
-	}
-	if tx.Migrator().HasTable(&model.EditConflict{}) {
-		if err := tx.Unscoped().Where("content_type = ? AND content_id = ?", "album", albumID).Delete(&model.EditConflict{}).Error; err != nil {
-			return err
-		}
-	}
-	if tx.Migrator().HasTable(&model.Revision{}) {
-		if err := tx.Model(&model.Revision{}).Where("content_type = ? AND content_id = ?", "album", albumID).Update("previous_revision_id", nil).Error; err != nil {
-			return err
-		}
-		if err := tx.Unscoped().Where("content_type = ? AND content_id = ?", "album", albumID).Delete(&model.Revision{}).Error; err != nil {
-			return err
-		}
-	}
-	if tx.Migrator().HasTable(&model.ContentProtection{}) {
-		if err := tx.Unscoped().Where("content_type = ? AND content_id = ?", "album", albumID).Delete(&model.ContentProtection{}).Error; err != nil {
-			return err
-		}
-	}
-	if tx.Migrator().HasTable(&model.AlbumBookmark{}) {
-		if err := tx.Unscoped().Where("album_id = ?", albumID).Delete(&model.AlbumBookmark{}).Error; err != nil {
-			return err
-		}
-	}
-	if tx.Migrator().HasTable(&model.AlbumCorrection{}) {
-		if err := tx.Unscoped().Where("album_id = ?", albumID).Delete(&model.AlbumCorrection{}).Error; err != nil {
-			return err
-		}
-	}
-	if err := tx.Where("album_id = ?", albumID).Delete(&model.AlbumArtist{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Model(&model.Album{}).Where("canonical_album_id = ?", albumID).Update("canonical_album_id", nil).Error; err != nil {
-		return err
-	}
-	return tx.Unscoped().Delete(&model.Album{}, "id = ?", albumID).Error
 }

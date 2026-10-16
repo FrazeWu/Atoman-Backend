@@ -151,7 +151,7 @@ func (r *Repo) ListAlbumBookmarks(userID uuid.UUID, page int, pageSize int, sort
 func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string, viewer *authctx.CurrentUser) ([]model.AlbumBookmark, int64, error) {
 	var total int64
 	db := r.db.Model(&model.AlbumBookmark{}).
-		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".deleted_at IS NULL AND \"Albums\".lifecycle_status = 'active'").
+		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".deleted_at IS NULL AND (\"Albums\".lifecycle_status = 'active' OR (\"Albums\".lifecycle_status = 'merged' AND \"Albums\".redirect_song_id IS NOT NULL))").
 		Where("music_album_bookmarks.user_id = ?", userID)
 	if query = strings.TrimSpace(query); query != "" {
 		db = db.Where("LOWER(\"Albums\".title) LIKE ?", "%"+strings.ToLower(query)+"%")
@@ -176,7 +176,7 @@ func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize i
 
 func (r *Repo) ListLatestAlbumBookmarksAfter(userID uuid.UUID, pageSize int, cursor *musicCreatedAtCursor, viewer *authctx.CurrentUser) ([]model.AlbumBookmark, bool, error) {
 	db := r.db.Model(&model.AlbumBookmark{}).
-		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".deleted_at IS NULL AND \"Albums\".lifecycle_status = 'active'").
+		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".deleted_at IS NULL AND (\"Albums\".lifecycle_status = 'active' OR (\"Albums\".lifecycle_status = 'merged' AND \"Albums\".redirect_song_id IS NOT NULL))").
 		Where("music_album_bookmarks.user_id = ?", userID).
 		Order("music_album_bookmarks.created_at DESC").
 		Order("music_album_bookmarks.id DESC")

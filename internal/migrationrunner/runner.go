@@ -480,7 +480,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.MusicContributionEvent{}, &model.MusicContributionEvidence{},
 		&model.AuditLog{}, &model.ActivityLog{}, &model.MediaAsset{}, &model.ContentMediaAsset{},
 		&model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.SongArtist{}, &model.SongRating{}, &model.AlbumRating{}, &model.SongCorrection{}, &model.AlbumCorrection{},
-		&model.SongAudioReplacement{}, &model.MusicEntryStateRequest{}, &model.MusicEntryStateEvent{},
+		&model.SongAudioReplacement{}, &model.MusicPlayEvent{}, &model.MusicEntryStateRequest{}, &model.MusicEntryStateEvent{},
 		&model.ArtistCorrection{}, &model.ArtistAlias{}, &model.ArtistMerge{},
 		&model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{},
 		&model.MusicTag{}, &model.MusicTagAssignment{}, &model.MusicTagVote{},

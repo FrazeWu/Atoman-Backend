@@ -1155,7 +1155,7 @@ func TestRegisterRoutesListsPendingLyricAnnotationsForCurrentUser(t *testing.T) 
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode pending annotations: %v", err)
 	}
-	if len(payload.Data) != 1 || payload.Data[0].AnnotationID != annotation.ID.String() || payload.Data[0].SongID != song.ID.String() || payload.Data[0].AlbumID != album.ID.String() {
+	if len(payload.Data) != 1 || payload.Data[0].AnnotationID != annotation.ID.String() || payload.Data[0].SongID != song.ID.String() || payload.Data[0].AlbumID == nil || *payload.Data[0].AlbumID != album.ID.String() {
 		t.Fatalf("unexpected pending annotations: %#v", payload.Data)
 	}
 }

@@ -145,8 +145,9 @@ type ReorderPlaylistSongsRequest struct {
 }
 
 type RecordSongPlayRequest struct {
-	SongID     uuid.UUID  `json:"song_id"`
-	PlaylistID *uuid.UUID `json:"playlist_id,omitempty"`
+	SongID      uuid.UUID  `json:"song_id"`
+	PlaylistID  *uuid.UUID `json:"playlist_id,omitempty"`
+	PlayEventID *uuid.UUID `json:"play_event_id,omitempty"` // 可选的播放事件 UUID；同一次播放重试复用，服务端按调用者原子去重。
 }
 
 type MusicRecommendationEventName string

@@ -225,14 +225,14 @@ func TestSaveAndRevertNotifyOnlyFirstNeedsRebindTransition(t *testing.T) {
 	}
 }
 
-func TestListPendingLyricAnnotationsReturnsOnlyCurrentNeedsRebindWithAlbum(t *testing.T) {
+func TestListPendingLyricAnnotationsIncludesStandaloneSongs(t *testing.T) {
 	svc, db, user, song := newLyricsTestService(t)
 	lyrics, _ := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
 	pending, _ := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "pending"})
 	active, _ := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "active"})
 	_ = db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", pending.ID).Update("status", "needs_rebind").Error
 	items, err := svc.ListPendingLyricAnnotations(user)
-	if err != nil || len(items) != 1 || items[0].AnnotationID != pending.ID.String() || items[0].SongID != song.ID.String() || items[0].AlbumID != song.AlbumID.String() {
+	if err != nil || len(items) != 1 || items[0].AnnotationID != pending.ID.String() || items[0].SongID != song.ID.String() || items[0].AlbumID == nil || *items[0].AlbumID != song.AlbumID.String() {
 		t.Fatalf("pending = %#v, %v", items, err)
 	}
 	_ = db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", pending.ID).Update("status", "active").Error
@@ -242,8 +242,8 @@ func TestListPendingLyricAnnotationsReturnsOnlyCurrentNeedsRebindWithAlbum(t *te
 	noAlbum, _ := svc.CreateLyricAnnotation(user, noAlbumSong.ID, CreateAnnotationInput{LineID: noAlbumLyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "none"})
 	_ = db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", noAlbum.ID).Update("status", "needs_rebind").Error
 	items, err = svc.ListPendingLyricAnnotations(user)
-	if err != nil || len(items) != 0 {
-		t.Fatalf("active should disappear: %#v, %v", items, err)
+	if err != nil || len(items) != 1 || items[0].AnnotationID != noAlbum.ID.String() || items[0].AlbumID != nil {
+		t.Fatalf("only standalone pending annotation should remain: %#v, %v", items, err)
 	}
 	_ = active
 }

@@ -66,16 +66,7 @@ func chooseMusicMatchRecord(records []model.MusicMatchRecord) *model.MusicMatchR
 		return nil
 	}
 	sort.SliceStable(records, func(left, right int) bool {
-		if records[left].UserOverridden != records[right].UserOverridden {
-			return records[left].UserOverridden
-		}
-		if !records[left].UpdatedAt.Equal(records[right].UpdatedAt) {
-			return records[left].UpdatedAt.After(records[right].UpdatedAt)
-		}
-		if musicMatchProviderRank(records[left].Provider) != musicMatchProviderRank(records[right].Provider) {
-			return musicMatchProviderRank(records[left].Provider) > musicMatchProviderRank(records[right].Provider)
-		}
-		return musicMatchStatusRank(records[left].Status) > musicMatchStatusRank(records[right].Status)
+		return musicMatchRecordPreferred(records[left], records[right])
 	})
 	return &records[0]
 }
