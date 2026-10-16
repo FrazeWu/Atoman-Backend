@@ -4498,6 +4498,25 @@ definitions:
       url:
         type: string
     type: object
+  handlers.podcastRatingInput:
+    type: object
+    required:
+    - score
+    properties:
+      score:
+        type: integer
+        minimum: 1
+        maximum: 10
+  handlers.podcastRatingSummary:
+    type: object
+    properties:
+      rating_score:
+        type: number
+      rating_count:
+        type: integer
+      viewer_rating:
+        type: integer
+        x-nullable: true
   handlers.videoRatingInput:
     properties:
       score:
@@ -5631,6 +5650,13 @@ definitions:
     type: object
   model.PodcastEpisode:
     properties:
+      rating_score:
+        type: number
+      rating_count:
+        type: integer
+      viewer_rating:
+        type: integer
+        x-nullable: true
       audio_url:
         description: 'Audio file: always local upload (S3/MinIO)'
         type: string
@@ -22412,6 +22438,82 @@ paths:
       summary: 更新播客单集
       tags:
       - podcast
+  /api/v1/podcast/episodes/{id}/rating:
+    get:
+      tags:
+      - podcast
+      summary: 获取播客单集评分
+      description: 仅限已发布且当前用户可访问的单集；匿名读取不包含个人评分，viewer_rating 为 null。五人公开均分门槛不影响首次评分写入。
+      produces:
+      - application/json
+      parameters:
+      - in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.podcastRatingSummary'
+        "404":
+          description: Not Found
+    put:
+      tags:
+      - podcast
+      summary: 设置播客单集评分
+      description: 仅限已发布且可访问的单集；1–10 分（0.5–5 星），每用户每单集一个有效评分。
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      parameters:
+      - in: path
+        name: id
+        required: true
+        type: string
+      - in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.podcastRatingInput'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.podcastRatingSummary'
+        "400":
+          description: Bad Request
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not Found
+    delete:
+      tags:
+      - podcast
+      summary: 撤销播客单集评分
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      produces:
+      - application/json
+      parameters:
+      - in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.podcastRatingSummary'
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not Found
   /api/v1/podcast/episodes/{id}/playback:
     post:
       consumes:

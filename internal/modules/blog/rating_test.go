@@ -81,6 +81,25 @@ func TestPostRatingCanBeCreatedUpdatedAndDeleted(t *testing.T) {
 	}
 }
 
+func TestPostRatingRejectsOwnerDraft(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Draft", Content: "Draft", Status: "draft", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	canonicalizeBlogTestPost(t, db, post)
+	if _, err := service.SetPostRating(user, post.ID, 8); err == nil {
+		t.Fatal("draft should not be rateable, even by its author")
+	}
+	if err := service.DeletePostRating(user, post.ID); err == nil {
+		t.Fatal("draft should reject rating deletion")
+	}
+}
+
 func TestPostRatingRejectsScoresOutsideOneToTen(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	post := model.Post{UserID: user.ID, Title: "Rated post", Content: "Content", Status: "published", Visibility: "public"}

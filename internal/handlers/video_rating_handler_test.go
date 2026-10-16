@@ -76,3 +76,22 @@ func TestVideoRatingPersistsAndAppearsOnDetail(t *testing.T) {
 	require.EqualValues(t, 0, clearRating.RatingCount)
 	require.Nil(t, clearRating.ViewerRating)
 }
+
+func TestVideoRatingRejectsOwnerDraft(t *testing.T) {
+	db := newVideoTestDB(t)
+	testdb.Migrate(t, db, &model.PostRating{})
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	owner := seedVideoUser(t, db)
+	video := seedVideoWithState(t, db, owner.UUID, "draft", "public")
+	router := gin.New()
+	SetupVideoRoutes(router, db, nil)
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		req := httptest.NewRequest(method, "/api/v1/videos/"+video.ID.String()+"/rating", bytes.NewBufferString(`{"score":8}`))
+		req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, owner))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	}
+}

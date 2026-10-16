@@ -17,13 +17,13 @@ import (
 type SongRatingSummary struct {
 	RatingScore  float64 `json:"rating_score"`
 	RatingCount  int64   `json:"rating_count"`
-	ViewerRating *int    `json:"viewer_rating,omitempty"`
+	ViewerRating *int    `json:"viewer_rating"`
 }
 
 type AlbumRatingSummary struct {
 	RatingScore  float64 `json:"rating_score"`
 	RatingCount  int64   `json:"rating_count"`
-	ViewerRating *int    `json:"viewer_rating,omitempty"`
+	ViewerRating *int    `json:"viewer_rating"`
 }
 
 func (s *Service) SetSongRating(user authctx.CurrentUser, songID uuid.UUID, score int) (SongRatingSummary, error) {

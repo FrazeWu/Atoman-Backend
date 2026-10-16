@@ -171,7 +171,7 @@ func PodcastContentID(db *gorm.DB, episodeID uuid.UUID) (uuid.UUID, error) {
 		ContentID uuid.UUID `gorm:"column:content_id"`
 	}
 	if !CurrentMediaSchema(db).ContentEpisodeExtensionTable {
-		if err := db.Table("podcast_episodes").Select("post_id AS content_id").Where("id = ?", episodeID).First(&row).Error; err != nil {
+		if err := db.Table("podcast_episodes").Select("post_id AS content_id").Where("id = ? AND deleted_at IS NULL", episodeID).Take(&row).Error; err != nil {
 			return uuid.Nil, err
 		}
 		return row.ContentID, nil
@@ -187,7 +187,7 @@ func VideoContentID(db *gorm.DB, videoID uuid.UUID) (uuid.UUID, error) {
 		ContentID uuid.UUID `gorm:"column:content_id"`
 	}
 	if !CurrentMediaSchema(db).ContentVideoExtensionTable {
-		if err := db.Table("videos").Select("id AS content_id").Where("id = ?", videoID).First(&row).Error; err != nil {
+		if err := db.Table("videos").Select("id AS content_id").Where("id = ? AND deleted_at IS NULL", videoID).Take(&row).Error; err != nil {
 			return uuid.Nil, err
 		}
 		return row.ContentID, nil

@@ -20972,6 +20972,152 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/podcast/episodes/{id}/rating": {
+            "get": {
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "获取播客单集评分",
+                "description": "仅限已发布且当前用户可访问的单集。1–10 分；每用户一个有效评分；无个人评分时 viewer_rating 为 null。公开均分由客户端在五人后展示，不影响首次评分写入。",
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "description": "单集 UUID"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.podcastRatingSummary"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "设置播客单集评分",
+                "description": "仅限已发布且当前用户可访问的单集。1–10 分；每用户一个有效评分；无个人评分时 viewer_rating 为 null。公开均分由客户端在五人后展示，不影响首次评分写入。",
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "description": "单集 UUID"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.podcastRatingInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.podcastRatingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "撤销播客单集评分",
+                "description": "仅限已发布且当前用户可访问的单集。1–10 分；每用户一个有效评分；无个人评分时 viewer_rating 为 null。公开均分由客户端在五人后展示，不影响首次评分写入。",
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "description": "单集 UUID"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.podcastRatingSummary"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/podcast/episodes/{id}/playback": {
             "post": {
                 "consumes": [
@@ -35087,6 +35233,34 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.podcastRatingInput": {
+            "type": "object",
+            "required": [
+                "score"
+            ],
+            "properties": {
+                "score": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                }
+            }
+        },
+        "handlers.podcastRatingSummary": {
+            "type": "object",
+            "properties": {
+                "rating_score": {
+                    "type": "number"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "viewer_rating": {
+                    "type": "integer",
+                    "x-nullable": true
+                }
+            }
+        },
         "handlers.videoRatingInput": {
             "type": "object",
             "required": [
@@ -36832,6 +37006,16 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "viewer_rating": {
+                    "type": "integer",
+                    "x-nullable": true
                 }
             }
         },
