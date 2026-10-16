@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestSwaggerBookRatingContractsMatchAcrossFormats(t *testing.T) {
+func TestSwaggerBookInteractionContractsMatchAcrossFormats(t *testing.T) {
 	raw, err := os.ReadFile("swagger.json")
 	require.NoError(t, err)
 	var expected map[string]any
@@ -24,10 +24,20 @@ func TestSwaggerBookRatingContractsMatchAcrossFormats(t *testing.T) {
 	for _, source := range []string{SwaggerInfo.ReadDoc(), string(normalized)} {
 		var spec map[string]any
 		require.NoError(t, json.Unmarshal([]byte(source), &spec))
-		for _, path := range []string{"/api/v1/books/works/{workId}/rating", "/api/v1/books/rankings/high-rated"} {
+		for _, path := range []string{
+			"/api/v1/books/works/{workId}/rating", "/api/v1/books/rankings/high-rated",
+			"/api/v1/books/asset-revisions/{revisionId}/passages", "/api/v1/books/passages/{passageId}",
+			"/api/v1/books/works/{workId}/reviews", "/api/v1/books/works/{workId}/reviews/{contentId}",
+		} {
+			require.Contains(t, expected["paths"], path)
 			require.Equal(t, expected["paths"].(map[string]any)[path], spec["paths"].(map[string]any)[path])
 		}
-		for _, definition := range []string{"books.BookWorkRatingDTO", "books.BookRatingRankingItem", "books.BookRatingRankingResult"} {
+		for _, definition := range []string{
+			"books.BookWorkRatingDTO", "books.BookRatingRankingItem", "books.BookRatingRankingResult",
+			"books.CreateBookDiscussionPassageInput", "books.BookDiscussionPassageDTO", "books.BookDiscussionPassageList",
+			"books.LinkBookContentReviewInput", "model.BookContentReview", "books.BookContentReviewDTO", "books.BookContentReviewList",
+		} {
+			require.Contains(t, expected["definitions"], definition)
 			require.Equal(t, expected["definitions"].(map[string]any)[definition], spec["definitions"].(map[string]any)[definition])
 		}
 	}
@@ -49,6 +59,10 @@ func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &spec))
 	for path, methods := range map[string][]string{
+		"/api/v1/books/asset-revisions/{revisionId}/passages":                  {"get", "post"},
+		"/api/v1/books/passages/{passageId}":                                   {"get"},
+		"/api/v1/books/works/{workId}/reviews":                                 {"get"},
+		"/api/v1/books/works/{workId}/reviews/{contentId}":                     {"put", "delete"},
 		"/api/v1/books/works/{workId}/rating":                                  {"get", "put", "delete"},
 		"/api/v1/books/rankings/high-rated":                                    {"get"},
 		"/api/v1/books/me/reading-sessions/{sessionId}/heartbeat":              {"post"},

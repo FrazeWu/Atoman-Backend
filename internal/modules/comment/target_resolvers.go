@@ -41,6 +41,7 @@ func NewTargetRegistry(db *gorm.DB) *TargetRegistry {
 		TargetKindTimelineEvent:  targetResolverFunc(resolvers.resolveTimelineEvent),
 		TargetKindTimelinePerson: targetResolverFunc(resolvers.resolveTimelinePerson),
 		TargetKindBookWork:       targetResolverFunc(resolvers.resolveBookWork),
+		TargetKindBookPassage:    targetResolverFunc(resolvers.resolveBookPassage),
 	}}
 }
 

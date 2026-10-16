@@ -31,6 +31,13 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	require.NoError(t, db.Create(&media).Error)
 	revision := model.BookAssetRevision{AssetID: asset.ID, Number: 1, MediaAssetID: media.ID, SHA256: strings.Repeat("a", 64), OriginalFilename: "book.epub", CreatedBy: user.UUID}
 	require.NoError(t, db.Create(&revision).Error)
+	passage := model.BookDiscussionPassage{RevisionID: revision.ID, AnchorJSON: `{}`, AnchorDigest: strings.Repeat("a", 64), CreatedBy: user.UUID}
+	require.NoError(t, db.Create(&passage).Error)
+	require.Error(t, db.Model(&model.BookDiscussionPassage{}).Where("id = ?", passage.ID).Update("anchor_json", `{"txt_offset_end":5}`).Error)
+	require.Error(t, db.Model(&model.BookDiscussionPassage{}).Where("id = ?", passage.ID).Update("revision_id", uuid.New()).Error)
+	reviewLink := model.BookContentReview{ContentID: uuid.New(), WorkID: work.ID, CreatedBy: user.UUID}
+	require.NoError(t, db.Create(&reviewLink).Error)
+	require.Error(t, db.Model(&model.BookContentReview{}).Where("content_id = ?", reviewLink.ContentID).Update("work_id", uuid.New()).Error)
 	require.NoError(t, db.Model(&asset).Update("current_revision_id", revision.ID).Error)
 	require.Error(t, db.Model(&otherAsset).Update("current_revision_id", revision.ID).Error)
 	require.Error(t, db.Create(&model.BookAsset{WorkID: uuid.New(), Language: "zh", Format: "epub", CreatedBy: user.UUID}).Error)

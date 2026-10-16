@@ -18,6 +18,9 @@ import (
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	handler := &Handler{service: service}
 	public := group.Group("")
+	public.GET("/asset-revisions/:revisionId/passages", handler.listBookDiscussionPassages)
+	public.GET("/passages/:passageId", handler.getBookDiscussionPassage)
+	public.GET("/works/:workId/reviews", handler.listBookContentReviews)
 	public.GET("/works/:workId/rating", handler.getBookWorkRating)
 	public.GET("/rankings/high-rated", handler.listHighRatedBookWorks)
 	public.GET("/asset-revisions/:revisionId/content", handler.getBookRevisionContent)
@@ -40,6 +43,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 	protected := group.Group("")
 	protected.Use(requireCurrentUser())
+	protected.POST("/asset-revisions/:revisionId/passages", handler.createBookDiscussionPassage)
+	protected.PUT("/works/:workId/reviews/:contentId", handler.linkBookContentReview)
+	protected.DELETE("/works/:workId/reviews/:contentId", handler.unlinkBookContentReview)
 	protected.PUT("/works/:workId/rating", handler.setBookWorkRating)
 	protected.DELETE("/works/:workId/rating", handler.deleteBookWorkRating)
 	protected.POST("/me/reading-sessions/:sessionId/heartbeat", handler.recordBookReadingHeartbeat)

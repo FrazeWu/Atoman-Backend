@@ -16,7 +16,8 @@ func RunBooksV2Migration(db *gorm.DB) error {
 			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{},
 			&model.BookReadingSession{}, &model.BookReadingWrite{}, &model.BookReadingMark{},
 			&model.BookLibraryEntry{}, &model.BookPrivateNote{}, &model.BookNoteImportReceipt{},
-			&model.BookReaderClock{}, &model.BookReadingDaily{}, &model.BookNotePublication{}); err != nil {
+			&model.BookReaderClock{}, &model.BookReadingDaily{}, &model.BookNotePublication{},
+			&model.BookDiscussionPassage{}, &model.BookContentReview{}); err != nil {
 			return fmt.Errorf("migrate book resources: %w", err)
 		}
 		if err := tx.Exec(`
@@ -29,6 +30,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private
 			return err
 		}
 		constraints := []struct{ table, name, definition string }{
+			{"book_discussion_passages", "fk_book_passage_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_discussion_passages", "fk_book_passage_creator", "FOREIGN KEY (created_by) REFERENCES \"Users\"(uuid)"},
+			{"book_content_reviews", "fk_book_content_review_work", "FOREIGN KEY (work_id) REFERENCES book_works(id) DEFERRABLE INITIALLY DEFERRED"},
+			{"book_content_reviews", "fk_book_content_review_creator", "FOREIGN KEY (created_by) REFERENCES \"Users\"(uuid)"},
 			{"book_assets", "fk_book_assets_work", "FOREIGN KEY (work_id) REFERENCES book_works(id)"},
 			{"book_assets", "fk_book_assets_current_revision", "FOREIGN KEY (current_revision_id, id) REFERENCES book_asset_revisions(id, asset_id) DEFERRABLE INITIALLY DEFERRED"},
 			{"book_asset_revisions", "fk_book_revisions_asset", "FOREIGN KEY (asset_id) REFERENCES book_assets(id)"},
@@ -82,6 +87,17 @@ ALTER TABLE book_reading_selections ALTER CONSTRAINT fk_book_selection_asset DEF
 		}
 		// Scan/down-take status can change, but the identity of a revision cannot.
 		return tx.Exec(`
+CREATE OR REPLACE FUNCTION guard_book_passage_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF ROW(NEW.id, NEW.revision_id, NEW.anchor_json, NEW.anchor_digest, NEW.created_by, NEW.created_at)
+ IS DISTINCT FROM ROW(OLD.id, OLD.revision_id, OLD.anchor_json, OLD.anchor_digest, OLD.created_by, OLD.created_at) THEN
+  RAISE EXCEPTION 'book discussion passages are immutable';
+ END IF;
+ RETURN NEW;
+END; $$;
+DROP TRIGGER IF EXISTS book_passage_identity ON book_discussion_passages;
+CREATE TRIGGER book_passage_identity BEFORE UPDATE ON book_discussion_passages
+FOR EACH ROW EXECUTE FUNCTION guard_book_passage_identity();
 CREATE OR REPLACE FUNCTION guard_book_revision_identity() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF ROW(NEW.id, NEW.asset_id, NEW.number, NEW.media_asset_id, NEW.sha256, NEW.original_filename, NEW.created_by, NEW.created_at)

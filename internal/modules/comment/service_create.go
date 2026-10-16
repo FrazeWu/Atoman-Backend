@@ -182,6 +182,10 @@ func (s *Service) replaceContentReferences(tx *gorm.DB, entry model.CommentEntry
 }
 
 func (s *Service) validateCreateTargetTx(tx *gorm.DB, resolved ResolvedTarget) error {
+	if resolved.Kind == TargetKindBookPassage {
+		_, err := NewTargetRegistry(tx).Resolve(Viewer{}, TargetRef{Kind: resolved.Kind, ResourceID: resolved.ResourceID})
+		return err
+	}
 	if resolved.Kind != TargetKindForumTopic {
 		return nil
 	}

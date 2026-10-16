@@ -63,8 +63,7 @@ func normalizeBookReadingMark(input SaveBookReadingMarkInput, format string) (Sa
 	input.Label = strings.TrimSpace(input.Label)
 	input.Color = strings.ToLower(strings.TrimSpace(input.Color))
 	input.Style = strings.ToLower(strings.TrimSpace(input.Style))
-	input.Anchor.EPUBStartCFI = strings.TrimSpace(input.Anchor.EPUBStartCFI)
-	input.Anchor.EPUBEndCFI = strings.TrimSpace(input.Anchor.EPUBEndCFI)
+	input.Anchor = normalizeBookReadingMarkAnchor(input.Anchor)
 	if input.BaseVersion < 0 || (input.Kind != "bookmark" && input.Kind != "highlight") {
 		return input, apperr.BadRequest("books.invalid_reading_mark", "Use bookmark or highlight and a nonnegative base version")
 	}
@@ -88,6 +87,12 @@ func normalizeBookReadingMark(input SaveBookReadingMarkInput, format string) (Sa
 		return input, apperr.BadRequest("books.invalid_reading_mark", "A bookmark stores a position and label, not highlight styling or text")
 	}
 	return input, validateBookReadingMarkAnchor(input.Anchor, format, input.Kind)
+}
+
+func normalizeBookReadingMarkAnchor(anchor BookReadingMarkAnchor) BookReadingMarkAnchor {
+	anchor.EPUBStartCFI = strings.TrimSpace(anchor.EPUBStartCFI)
+	anchor.EPUBEndCFI = strings.TrimSpace(anchor.EPUBEndCFI)
+	return anchor
 }
 
 func (s *Service) bookReadingMarkFormat(ctx context.Context, revisionID uuid.UUID) (string, error) {
