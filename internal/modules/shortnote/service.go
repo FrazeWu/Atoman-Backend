@@ -360,12 +360,7 @@ func (s *Service) resolveMediaAttachment(note model.ShortNote) (*MediaAttachment
 			AudioURL    string    `gorm:"column:audio_url"`
 			CoverURL    string    `gorm:"column:cover_url"`
 		}
-		err := s.db.Table("songs").Select("id, title, duration_sec, audio_url, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
-		if err != nil {
-			if err2 := s.db.Table("\"Songs\"").Select("id, title, duration_sec, audio_url, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error; err2 == nil {
-				err = nil
-			}
-		}
+		err := s.db.Model(&model.Song{}).Select("id, title, duration_sec, audio_url, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return &MediaAttachmentDTO{Type: "song", ID: *note.MediaAttachmentID}, nil
@@ -386,12 +381,7 @@ func (s *Service) resolveMediaAttachment(note model.ShortNote) (*MediaAttachment
 			Title    string    `gorm:"column:title"`
 			CoverURL string    `gorm:"column:cover_url"`
 		}
-		err := s.db.Table("albums").Select("id, title, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
-		if err != nil {
-			if err2 := s.db.Table("\"Albums\"").Select("id, title, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error; err2 == nil {
-				err = nil
-			}
-		}
+		err := s.db.Model(&model.Album{}).Select("id, title, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return &MediaAttachmentDTO{Type: "album", ID: *note.MediaAttachmentID}, nil
@@ -411,7 +401,7 @@ func (s *Service) resolveMediaAttachment(note model.ShortNote) (*MediaAttachment
 			ThumbnailURL string    `gorm:"column:thumbnail_url"`
 			DurationSec  int       `gorm:"column:duration_sec"`
 		}
-		err := s.db.Table("videos").Select("id, title, thumbnail_url, duration_sec").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
+		err := s.db.Model(&model.Video{}).Select("id, title, thumbnail_url, duration_sec").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return &MediaAttachmentDTO{Type: "video", ID: *note.MediaAttachmentID}, nil
