@@ -1,4 +1,4 @@
-.PHONY: build-low-memory test-focused migrate swagger
+.PHONY: build-low-memory test-focused migrate swagger swagger-check
 
 # Limit Go package-level parallelism on memory-constrained development machines.
 build-low-memory:
@@ -13,3 +13,14 @@ migrate:
 
 swagger:
 	go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/start_server/main.go --packageName docs
+
+# Fail when docs/ no longer matches the Swagger annotations in the source (CI gate).
+swagger-check:
+	@before=$$(shasum docs/docs.go docs/swagger.json docs/swagger.yaml | shasum | awk '{print $$1}'); \
+	$(MAKE) --no-print-directory swagger >/dev/null || { echo "swag generation failed"; exit 1; }; \
+	after=$$(shasum docs/docs.go docs/swagger.json docs/swagger.yaml | shasum | awk '{print $$1}'); \
+	if [ "$$before" != "$$after" ]; then \
+		echo "swagger docs are out of date: run 'make swagger' and commit docs/"; \
+		exit 1; \
+	fi; \
+	echo "swagger docs match the source annotations"
