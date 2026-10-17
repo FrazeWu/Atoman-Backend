@@ -509,7 +509,9 @@ func createBookEntity(tx *gorm.DB, edit *model.BookEdit, payload map[string]any)
 			return err
 		}
 		edit.EntityID = &work.ID
-		attachWorkAuthors(tx, work.ID, edit.SubmittedBy, payload)
+		if err := attachWorkAuthors(tx, work.ID, edit.SubmittedBy, payload); err != nil {
+			return err
+		}
 		if err := attachWorkEdition(tx, work, edit.SubmittedBy, payload); err != nil {
 			return err
 		}
@@ -747,7 +749,7 @@ func extractAuthors(payload map[string]any) []parsedAuthor {
 	return results
 }
 
-func attachWorkAuthors(tx *gorm.DB, workID uuid.UUID, submittedBy uuid.UUID, payload map[string]any) {
+func attachWorkAuthors(tx *gorm.DB, workID uuid.UUID, submittedBy uuid.UUID, payload map[string]any) error {
 	authors := extractAuthors(payload)
 	for idx, auth := range authors {
 		if auth.Name == "" {
@@ -761,7 +763,7 @@ func attachWorkAuthors(tx *gorm.DB, workID uuid.UUID, submittedBy uuid.UUID, pay
 				CreatedBy:       &submittedBy,
 			}
 			if err := tx.Create(&person).Error; err != nil {
-				continue
+				return fmt.Errorf("create work author %q: %w", auth.Name, err)
 			}
 		}
 		contribution := model.BookContribution{
@@ -770,8 +772,11 @@ func attachWorkAuthors(tx *gorm.DB, workID uuid.UUID, submittedBy uuid.UUID, pay
 			Role:     auth.Role,
 			Position: idx + 1,
 		}
-		_ = tx.Create(&contribution)
+		if err := tx.Create(&contribution).Error; err != nil {
+			return fmt.Errorf("create work contribution for %q: %w", auth.Name, err)
+		}
 	}
+	return nil
 }
 
 func parsePublishedDate(raw string) *time.Time {

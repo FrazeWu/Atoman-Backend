@@ -98,7 +98,11 @@ func MigrateLegacyDMImages(ctx context.Context, db *gorm.DB, store dm.ImageStore
 	for _, item := range items {
 		var body io.ReadCloser
 		if item.local != "" {
-			body, err = os.Open(item.local)
+			opened, openErr := os.Open(item.local)
+			if openErr != nil {
+				return fmt.Errorf("message %s open legacy image: %w", item.message.ID, openErr)
+			}
+			body = opened
 		} else {
 			if publicS3 == nil || config.PublicBucket == "" {
 				return fmt.Errorf("message %s legacy object storage unavailable", item.message.ID)
