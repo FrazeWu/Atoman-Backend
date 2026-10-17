@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -18,8 +17,6 @@ import (
 const (
 	defaultSubscriptionGroupName = "默认分组"
 	defaultBookmarkFolderName    = "默认收藏夹"
-	minChannelSlugLength         = 2
-	maxChannelSlugLength         = 30
 )
 
 type UserBootstrapService struct {
@@ -166,88 +163,4 @@ func buildUserBootstrapFeedSourceHash(sourceType string, sourceID uuid.UUID) str
 	raw := fmt.Sprintf("%s:%s", sourceType, sourceID.String())
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
-}
-
-func (s *UserBootstrapService) uniqueChannelSlug(base string) (string, error) {
-	baseSlug := slugifyChannelName(base)
-	candidate := baseSlug
-	counter := 2
-	namespace := NewSiteNamespaceService(s.db)
-	for {
-		err := namespace.ValidateChannelSlugAvailable(context.Background(), candidate, nil)
-		if err == nil {
-			return candidate, nil
-		}
-		if !errors.Is(err, ErrSiteHandleReserved) && !errors.Is(err, ErrSiteHandleTaken) {
-			return "", err
-		}
-		candidate = channelSlugWithSuffix(baseSlug, fmt.Sprintf("-%d", counter))
-		counter++
-	}
-}
-
-func (s *UserBootstrapService) uniqueChannelName(base string) (string, error) {
-	candidate := base
-	counter := 2
-	for {
-		var count int64
-		if err := s.db.Model(&model.Channel{}).Where("LOWER(name) = LOWER(?)", candidate).Count(&count).Error; err != nil {
-			return "", err
-		}
-		if count == 0 {
-			return candidate, nil
-		}
-		candidate = fmt.Sprintf("%s %d", base, counter)
-		counter++
-	}
-}
-
-func slugifyChannelName(value string) string {
-	slug := strings.ToLower(strings.TrimSpace(value))
-	var b strings.Builder
-	lastDash := false
-	hasNonASCII := false
-	for _, r := range slug {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-			lastDash = false
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-			lastDash = false
-		default:
-			if r > 127 {
-				hasNonASCII = true
-			}
-			if b.Len() == 0 || lastDash {
-				continue
-			}
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	result := strings.Trim(b.String(), "-")
-	if result == "" {
-		result = "channel"
-	}
-	if hasNonASCII {
-		sum := sha256.Sum256([]byte(slug))
-		suffix := hex.EncodeToString(sum[:])[:10]
-		return channelSlugWithSuffix(result, "-"+suffix)
-	}
-	return channelSlugWithSuffix(result, "")
-}
-
-func channelSlugWithSuffix(base, suffix string) string {
-	maxBaseLength := maxChannelSlugLength - len(suffix)
-	base = strings.TrimRight(base[:min(len(base), maxBaseLength)], "-")
-	if base == "" {
-		base = "channel"
-		base = base[:min(len(base), maxBaseLength)]
-	}
-	candidate := base + suffix
-	if len(candidate) < minChannelSlugLength {
-		candidate += "-channel"
-	}
-	return candidate
 }

@@ -188,12 +188,12 @@ func createDeleteSongTestSong(t *testing.T, db *gorm.DB, owner model.User) model
 }
 
 func TestDeleteSongHandlerRejectsNonOwnerUser(t *testing.T) {
-	r, db := newDeleteSongTestRouter(t, authctx.CurrentUser{})
+	_, db := newDeleteSongTestRouter(t, authctx.CurrentUser{})
 	owner := createDeleteSongTestUser(t, db, "owner", authctx.RoleUser)
 	viewer := createDeleteSongTestUser(t, db, "viewer", authctx.RoleUser)
 	song := createDeleteSongTestSong(t, db, owner)
 
-	r = gin.New()
+	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: viewer.UUID, Username: viewer.Username, Role: viewer.Role})
 		c.Next()
@@ -230,7 +230,7 @@ func TestDeleteSongHandlerAllowsOwnerAdminAndSiteOwner(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, db := newDeleteSongTestRouter(t, authctx.CurrentUser{})
+			_, db := newDeleteSongTestRouter(t, authctx.CurrentUser{})
 			owner := createDeleteSongTestUser(t, db, "owner", authctx.RoleUser)
 			current := owner
 			if tt.role != authctx.RoleUser {
@@ -238,7 +238,7 @@ func TestDeleteSongHandlerAllowsOwnerAdminAndSiteOwner(t *testing.T) {
 			}
 			song := createDeleteSongTestSong(t, db, owner)
 
-			r = gin.New()
+			r := gin.New()
 			r.Use(func(c *gin.Context) {
 				authctx.SetCurrentUser(c, authctx.CurrentUser{ID: current.UUID, Username: current.Username, Role: current.Role})
 				c.Next()

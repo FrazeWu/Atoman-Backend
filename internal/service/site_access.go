@@ -157,13 +157,6 @@ func defaultAccessModule(features ...string) SiteAccessModule {
 	return SiteAccessModule{Enabled: &enabled, Features: featureMap}
 }
 
-func disabledAccessModule(features ...string) SiteAccessModule {
-	module := defaultAccessModule(features...)
-	disabled := false
-	module.Enabled = &disabled
-	return module
-}
-
 func (s *SiteAccessService) Load() (SiteAccessMatrix, error) {
 	matrix := DefaultSiteAccessMatrix()
 

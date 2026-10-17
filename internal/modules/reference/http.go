@@ -3,7 +3,6 @@ package reference
 import (
 	"net/http"
 	"strconv"
-	"strings"
 
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
@@ -76,5 +75,3 @@ func viewerFromContext(c *gin.Context) Viewer {
 	}
 	return Viewer{UserID: user.ID}
 }
-
-func normalizedReferenceType(value string) string { return strings.TrimSpace(value) }

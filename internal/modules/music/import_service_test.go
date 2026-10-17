@@ -2194,7 +2194,6 @@ func TestUploadAlbumImportArchiveRecordsCleanupWhenEmptyStreamDeleteFails(t *tes
 
 func TestUploadAlbumImportArchiveQueuesCoverSourceWithoutDeriving(t *testing.T) {
 	testQueuedArchiveUploadContract(t, AlbumImportPayload{Artist: AlbumImportArtistPayload{Name: "Burial"}}, "Untrue.zip", map[string]string{"cover.jpg": "cover-bytes"})
-	return
 	/*
 		svc, _, user := newMusicTestService(t)
 		var uploadedPath string
@@ -2243,7 +2242,6 @@ func TestUploadAlbumImportArchiveQueuesCoverSourceWithoutDeriving(t *testing.T) 
 
 func TestUploadAlbumImportArchiveQueuesAudioSourceAndPreservesMetadata(t *testing.T) {
 	testQueuedArchiveUploadContract(t, AlbumImportPayload{Artist: AlbumImportArtistPayload{Name: "Ye"}, Album: AlbumImportAlbumPayload{Title: "2049"}}, "2049.zip", map[string]string{"01 - Bound 2049.mp3": "audio-1"})
-	return
 	/*
 			svc, db, user := newMusicTestService(t)
 			var uploadedPath string
@@ -2469,55 +2467,6 @@ func newImportTestZipArchive(t *testing.T, files map[string]string) []byte {
 		t.Fatalf("close zip: %v", err)
 	}
 	return buf.Bytes()
-}
-
-func assertDerivedTrackPresent(t *testing.T, tracks []any, title string, trackNumber int) {
-	t.Helper()
-
-	for _, raw := range tracks {
-		track, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if track["title"] == title && track["track_number"] == float64(trackNumber) {
-			return
-		}
-	}
-	t.Fatalf("expected derived track %q #%d in %#v", title, trackNumber, tracks)
-}
-
-func fakeMusicImportS3Client(t *testing.T, capturedPath *string, capturedContentType *string) *s3.S3 {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodPut {
-			t.Fatalf("expected S3 PUT or DELETE, got %s", r.Method)
-		}
-		_, _ = io.Copy(io.Discard, r.Body)
-		if r.Header.Get("X-Amz-Copy-Source") != "" {
-			w.Header().Set("Content-Type", "application/xml")
-			_, _ = io.WriteString(w, `<CopyObjectResult><ETag>"etag"</ETag><LastModified>2026-07-15T00:00:00Z</LastModified></CopyObjectResult>`)
-			return
-		}
-		*capturedPath = r.URL.EscapedPath()
-		*capturedContentType = r.Header.Get("Content-Type")
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(server.Close)
-
-	sess, err := session.NewSession(&aws.Config{
-		Region:           aws.String("us-test-1"),
-		Endpoint:         aws.String(server.URL),
-		Credentials:      credentials.NewStaticCredentials("access", "secret", ""),
-		S3ForcePathStyle: aws.Bool(true),
-	})
-	if err != nil {
-		t.Fatalf("new s3 session: %v", err)
-	}
-	return s3.New(sess)
 }
 
 func fakeMusicPromotionS3Client(t *testing.T, sources, destinations, deleted *[]string) *s3.S3 {

@@ -693,15 +693,6 @@ func TestSubmitEditAutoAppliesCreateGroupArtistForMainWikiFlow(t *testing.T) {
 	}
 }
 
-func mustParseDate(t *testing.T, value string) time.Time {
-	t.Helper()
-	parsed, err := time.Parse("2006-01-02", value)
-	if err != nil {
-		t.Fatalf("parse date %q: %v", value, err)
-	}
-	return parsed
-}
-
 func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	target := model.Artist{Name: "Ye", LegalName: "Kanye Omari West", EntryStatus: "open"}

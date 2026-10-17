@@ -223,11 +223,6 @@ func normalizeArtistForm(raw string) string {
 	}
 }
 
-func fieldPresent(raw map[string]json.RawMessage, key string) bool {
-	_, ok := raw[key]
-	return ok
-}
-
 func replaceArtistMembers(tx *gorm.DB, groupArtistID uuid.UUID, members []ArtistMemberPayload) error {
 	if err := tx.Where("group_artist_id = ?", groupArtistID).Delete(&model.ArtistMember{}).Error; err != nil {
 		return err

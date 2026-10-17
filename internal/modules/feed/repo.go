@@ -224,13 +224,6 @@ func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID, cont
 
 }
 
-func filterPostContentType(db *gorm.DB, contentType string) *gorm.DB {
-	if contentType == "podcast" || contentType == "video" {
-		return db.Where("1 = 0")
-	}
-	return db
-}
-
 func hasCanonicalBlogExtensions(db *gorm.DB) bool {
 	return db.Migrator().HasTable(&model.ContentBlogExtension{})
 }
@@ -759,42 +752,6 @@ func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter t
 		Order("COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC").
 		Limit(limit)
 	db = applyRecommendationLanguageFilter(db, "blog_extensions.language_code", languageCode)
-	db = applyRecommendationTextFilter(db, "posts.title", "posts.summary", keywords)
-	db = applyRecommendationSearchFilter(db, []string{"posts.title", "posts.summary"}, search)
-	err := db.Scan(&posts).Error
-	return posts, err
-}
-
-func (r *Repo) listLegacyRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticlePostRow, error) {
-	columns := []string{
-		"posts.id",
-		"posts.user_id",
-		"posts.channel_id",
-		"posts.created_at",
-		"COALESCE(posts.published_at, posts.created_at) AS published_at",
-		"LENGTH(COALESCE(posts.content, '')) AS content_length",
-		"posts.content",
-		"COALESCE(posts.summary, '') <> '' AS has_summary",
-		"COALESCE(posts.cover_url, '') <> '' AS has_cover",
-		"'' AS title",
-		"'' AS summary",
-		"posts.language_code",
-	}
-	if includeText {
-		columns[9] = "posts.title"
-		columns[10] = "posts.summary"
-	}
-
-	var posts []RecommendationArticlePostRow
-	db := r.db.Table("posts").
-		Select(columns).
-		Where("posts.deleted_at IS NULL AND posts.status = ?", "published").
-		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
-		Where(recommendationArticlePostQualityPredicate("posts.content"), recommendationInternalArticleMinimumLength).
-		Where("COALESCE(posts.published_at, posts.created_at) >= ?", publishedAfter).
-		Order("COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC").
-		Limit(limit)
-	db = applyRecommendationLanguageFilter(db, "posts.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "posts.title", "posts.summary", keywords)
 	db = applyRecommendationSearchFilter(db, []string{"posts.title", "posts.summary"}, search)
 	err := db.Scan(&posts).Error

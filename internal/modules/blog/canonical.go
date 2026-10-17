@@ -266,22 +266,6 @@ func canonicalBlogCollectionID(db *gorm.DB, collectionID uuid.UUID) (uuid.UUID, 
 	return collection.ID, nil
 }
 
-func buildBlogVersionResponse(version model.ContentBlogVersion) model.BlogPostVersion {
-	return model.BlogPostVersion{
-		Base:         version.Base,
-		PostID:       version.ContentID,
-		Version:      version.Version,
-		EditorID:     version.EditorID,
-		Title:        version.Title,
-		Content:      version.Content,
-		Summary:      version.Summary,
-		CoverURL:     version.CoverURL,
-		Visibility:   version.Visibility,
-		CollectionID: version.CollectionID,
-		PublishedAt:  version.PublishedAt,
-	}
-}
-
 func blogCollectionDTO(collection model.ContentCollection) model.Collection {
 	return model.Collection{
 		Base:        collection.Base,
@@ -294,14 +278,6 @@ func blogCollectionDTO(collection model.ContentCollection) model.Collection {
 		CoverURL:    collection.CoverURL,
 		IsDefault:   collection.IsDefault,
 	}
-}
-
-func blogCollectionDTOs(collections []model.ContentCollection) []model.Collection {
-	result := make([]model.Collection, 0, len(collections))
-	for _, collection := range collections {
-		result = append(result, blogCollectionDTO(collection))
-	}
-	return result
 }
 
 func resolveBlogCollection(db *gorm.DB, userID, channelID uuid.UUID, requestedID *uuid.UUID, publishing bool) (*model.ContentCollection, error) {

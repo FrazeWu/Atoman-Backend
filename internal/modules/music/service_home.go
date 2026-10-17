@@ -290,14 +290,6 @@ func (s *Service) addHomeAlbumArtistAffinityWeighted(weights map[uuid.UUID]float
 	return nil
 }
 
-func (s *Service) addHomeSongArtistAffinity(songIDs []uuid.UUID, affinity map[uuid.UUID]float64) error {
-	weights := make(map[uuid.UUID]float64, len(songIDs))
-	for _, songID := range songIDs {
-		weights[songID] += 4
-	}
-	return s.addHomeSongArtistAffinityWeighted(weights, affinity)
-}
-
 func (s *Service) addHomeSongArtistAffinityWeighted(weights map[uuid.UUID]float64, affinity map[uuid.UUID]float64) error {
 	if len(weights) == 0 {
 		return nil

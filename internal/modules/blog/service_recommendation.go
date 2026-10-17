@@ -434,15 +434,6 @@ func percentileScores(values []float64) []float64 {
 	return scores
 }
 
-func percentileScore(value float64, values []float64) float64 {
-	if len(values) <= 1 {
-		return 0.5
-	}
-	sortedValues := append([]float64(nil), values...)
-	sort.Float64s(sortedValues)
-	return float64(sort.SearchFloat64s(sortedValues, value)) / float64(len(values)-1)
-}
-
 func blogCompositeScore(signals blogEngagementSignals) float64 {
 	return 0.20*signals.Reads + 0.30*signals.Bookmarks + 0.20*signals.Likes + 0.20*signals.Comments + 0.10*signals.Subscribers
 }
@@ -468,13 +459,6 @@ func blogContentPublishedAt(content BlogContent) time.Time {
 		return *content.PublishedAt
 	}
 	return content.CreatedAt
-}
-
-func blogPublishedAt(post model.Post) time.Time {
-	if post.PublishedAt != nil {
-		return *post.PublishedAt
-	}
-	return post.CreatedAt
 }
 
 func rerankBlogDiversity(items []blogRankedPost, maxConsecutive int) []blogRankedPost {
@@ -508,57 +492,6 @@ func blogContentRecommendationSourceKey(content BlogContent) string {
 		return content.ChannelID.String()
 	}
 	return content.UserID.String()
-}
-
-func blogRecommendationSourceKey(post model.Post) string {
-	if post.ChannelID != nil {
-		return post.ChannelID.String()
-	}
-	return post.UserID.String()
-}
-
-func normalizeBlogRecommendationQuality(post model.Post) float64 {
-	readComponent := clampBlogRecommendation(math.Log1p(float64(post.ViewCount)) / math.Log1p(1000))
-	summaryComponent := 0.0
-	if strings.TrimSpace(post.Summary) != "" {
-		summaryComponent = 0.15
-	}
-	return clampBlogRecommendation(0.85*readComponent + summaryComponent)
-}
-
-func normalizeBlogRecommendationTrend(post model.Post) float64 {
-	return clampBlogRecommendation(0.6*normalizeBlogRecommendationFreshness(post.CreatedAt, 7*24*time.Hour) + 0.4*clampBlogRecommendation(math.Log1p(float64(post.ViewCount))/math.Log1p(1000)))
-}
-
-func normalizeBlogRecommendationFreshness(createdAt time.Time, horizon time.Duration) float64 {
-	if createdAt.IsZero() || horizon <= 0 {
-		return 0
-	}
-	age := time.Since(createdAt)
-	if age <= 0 {
-		return 1
-	}
-	return clampBlogRecommendation(1 - float64(age)/float64(horizon))
-}
-
-func normalizeBlogRecommendationAuthority(post model.Post) float64 {
-	if post.Pinned {
-		return 0.8
-	}
-	if post.ChannelID != nil {
-		return 0.6
-	}
-	return 0.4
-}
-
-func clampBlogRecommendation(value float64) float64 {
-	if value < 0 {
-		return 0
-	}
-	if value > 1 {
-		return 1
-	}
-	return value
 }
 
 func blogRecommendationLabel(mode recommendation.Mode, score float64) string {

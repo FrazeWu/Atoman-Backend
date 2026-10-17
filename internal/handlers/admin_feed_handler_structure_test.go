@@ -25,7 +25,6 @@ func TestAdminFeedHandlersAreSplitByResponsibility(t *testing.T) {
 			"SyncAdminFeedSource",
 		},
 		"admin_feed_fulltext_settings_handler.go": {
-			"defaultAdminFeedFullTextSettings",
 			"loadAdminFeedFullTextSettings",
 			"saveAdminFeedFullTextSettings",
 			"GetAdminFeedFullTextSettings",

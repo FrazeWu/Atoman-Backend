@@ -49,7 +49,7 @@ func newTargetTestRegistry(t *testing.T) (*TargetRegistry, *gorm.DB) {
 		if !ok {
 			return
 		}
-		channelID := uuid.Nil
+		var channelID uuid.UUID
 		if post.ChannelID != nil {
 			channelID = *post.ChannelID
 		} else {

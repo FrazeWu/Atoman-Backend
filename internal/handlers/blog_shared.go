@@ -1,9 +1,6 @@
 package handlers
 
 import (
-	"crypto/sha256"
-	"fmt"
-
 	"atoman/internal/model"
 
 	"github.com/gin-gonic/gin"
@@ -76,44 +73,5 @@ func RequireBlogPostEditAccess(db *gorm.DB, h gin.HandlerFunc) gin.HandlerFunc {
 		}
 
 		h(c)
-	}
-}
-
-func canViewPublishedBlogPost(db *gorm.DB, viewerID *uuid.UUID, post model.Post) (bool, error) {
-	switch post.Visibility {
-	case "", "public":
-		return true, nil
-	case "private":
-		return viewerID != nil && post.UserID == *viewerID, nil
-	case "followers":
-		if viewerID == nil {
-			return false, nil
-		}
-		if post.UserID == *viewerID {
-			return true, nil
-		}
-		if post.ChannelID == nil {
-			return false, nil
-		}
-
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte("internal_channel:"+post.ChannelID.String())))
-		var source model.FeedSource
-		if err := db.Where("hash = ?", hash).First(&source).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return false, nil
-			}
-			return false, err
-		}
-
-		var sub model.Subscription
-		if err := db.Where("user_id = ? AND feed_source_id = ?", *viewerID, source.ID).First(&sub).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return false, nil
-			}
-			return false, err
-		}
-		return true, nil
-	default:
-		return false, nil
 	}
 }

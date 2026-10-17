@@ -384,7 +384,7 @@ func (importer *InternetArchiveImporter) downloadArchive(ctx context.Context, pl
 			return nil, fmt.Errorf("download %s: status %d", file.Name, response.StatusCode)
 		}
 		header := &zip.FileHeader{Name: file.ArchiveName, Method: zip.Store}
-		header.SetModTime(time.Now().UTC())
+		header.Modified = time.Now().UTC()
 		entry, err := writer.CreateHeader(header)
 		if err != nil {
 			response.Body.Close()

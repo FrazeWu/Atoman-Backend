@@ -436,20 +436,6 @@ func (s *Service) enrichContentMetrics(module Module, items []StudioContentItem)
 	return nil
 }
 
-func applyPostContentFilters(db *gorm.DB, query ContentQuery) *gorm.DB {
-	if query.Status != "" {
-		db = db.Where("posts.status = ?", strings.TrimSpace(query.Status))
-	}
-	if visibility, _ := studioVisibilityToDB(query.Visibility); visibility != "" {
-		db = db.Where("posts.visibility = ?", visibility)
-	}
-	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
-		like := "%" + search + "%"
-		db = db.Where("LOWER(posts.title) LIKE ? OR LOWER(posts.summary) LIKE ?", like, like)
-	}
-	return db
-}
-
 func studioPostItem(module Module, id uuid.UUID, post model.Post, collections []model.Collection) StudioContentItem {
 	channelID := uuid.Nil
 	if post.ChannelID != nil {

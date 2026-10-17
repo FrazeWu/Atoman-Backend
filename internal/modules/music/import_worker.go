@@ -749,48 +749,6 @@ type importCleanupTarget struct {
 	UploadID string `json:"upload_id"`
 }
 
-func cleanupTargets(session model.AlbumImportSession) ([]importCleanupTarget, error) {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(session.PayloadJSON), &payload); err != nil {
-		return nil, err
-	}
-	var targets []importCleanupTarget
-	if raw := payload["cleanup_targets"]; len(raw) > 0 {
-		if err := json.Unmarshal(raw, &targets); err != nil {
-			return nil, err
-		}
-	}
-	for _, file := range session.Files {
-		if strings.TrimSpace(file.CleanupJSON) != "" {
-			var fileTargets []importCleanupTarget
-			if err := json.Unmarshal([]byte(file.CleanupJSON), &fileTargets); err != nil {
-				return nil, err
-			}
-			targets = append(targets, fileTargets...)
-		}
-		if file.SourceKey != "" && file.UploadStatus == AlbumImportFileUploadStatusUploaded {
-			targets = append(targets, importCleanupTarget{Action: "delete", Key: file.SourceKey})
-		} else if file.SourceKey != "" && file.UploadID != "" {
-			targets = append(targets, importCleanupTarget{Action: "abort", Key: file.SourceKey, UploadID: file.UploadID})
-		}
-	}
-	return uniqueCleanupTargets(targets), nil
-}
-
-func uniqueCleanupTargets(targets []importCleanupTarget) []importCleanupTarget {
-	seen := make(map[string]struct{}, len(targets))
-	unique := make([]importCleanupTarget, 0, len(targets))
-	for _, target := range targets {
-		key := target.Action + "\x00" + target.Key + "\x00" + target.UploadID
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		unique = append(unique, target)
-	}
-	return unique
-}
-
 func cleanupTarget(store MusicImportObjectStore, target importCleanupTarget) error {
 	var err error
 	switch target.Action {

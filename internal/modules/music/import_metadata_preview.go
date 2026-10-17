@@ -188,10 +188,6 @@ func metadataResultFromPreview(preview AlbumImportMetadataPreviewDTO) AlbumImpor
 	return result
 }
 
-func (s *Service) persistAlbumImportMetadataMatch(ctx context.Context, session *model.AlbumImportSession, result AlbumImportMetadataResult) error {
-	return s.persistAlbumImportMetadataMatchGeneration(ctx, session, result, 0)
-}
-
 func (s *Service) persistAlbumImportMetadataMatchGeneration(ctx context.Context, session *model.AlbumImportSession, result AlbumImportMetadataResult, generation int64) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var latest model.AlbumImportSession

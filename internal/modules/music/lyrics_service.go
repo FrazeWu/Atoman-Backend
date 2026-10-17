@@ -785,14 +785,13 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, actorID, songID uuid.UUID, lin
 			continue
 		}
 		invalid = append(invalid, annotation)
-		resolution, ok := resolutionByID[annotation.ID]
+		_, ok := resolutionByID[annotation.ID]
 		if annotation.Status == "needs_rebind" && !ok {
 			continue
 		}
 		if autoNeedsRebind && annotation.Status == "active" && !ok {
-			resolution = AnnotationResolutionInput{AnnotationID: annotation.ID, Action: "needs_rebind"}
+			resolutionByID[annotation.ID] = AnnotationResolutionInput{AnnotationID: annotation.ID, Action: "needs_rebind"}
 			ok = true
-			resolutionByID[annotation.ID] = resolution
 		}
 		if !ok {
 			unresolvedIDs = append(unresolvedIDs, annotation.ID.String())

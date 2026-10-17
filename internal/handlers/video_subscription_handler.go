@@ -57,6 +57,7 @@ func GetSubscribedVideos(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+//lint:ignore U1000 referenced by the @Success swagger annotation on GetSubscribedVideos
 type videoSubscriptionListResponse struct {
 	Data []model.Video  `json:"data"`
 	Meta httpx.PageMeta `json:"meta"`

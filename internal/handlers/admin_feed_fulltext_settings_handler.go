@@ -25,10 +25,6 @@ type adminFeedFullTextSettingsInput struct {
 	ReaderCrawlBatchSize   *int  `json:"reader_crawl_batch_size"`
 }
 
-func defaultAdminFeedFullTextSettings() adminFeedFullTextSettings {
-	return service.DefaultFeedFullTextSettings()
-}
-
 func loadAdminFeedFullTextSettings(db *gorm.DB) (adminFeedFullTextSettings, error) {
 	return service.LoadFeedFullTextSettings(db)
 }

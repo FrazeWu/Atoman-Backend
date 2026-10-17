@@ -1367,45 +1367,6 @@ func countMatchedMusicBrainzTracks(mapping []int) int {
 	return matched
 }
 
-func matchMusicBrainzTracksByDurationMajority(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
-	if len(remote) == 0 {
-		return nil, false
-	}
-	mapping := make([]int, len(remote))
-	for index := range mapping {
-		mapping[index] = -1
-	}
-	used := make([]bool, len(uploaded))
-	matched := 0
-	for remoteIndex := range remote {
-		candidates := unmatchedTrackCandidates(uploaded, used, func(track AlbumImportMetadataTrack) bool {
-			return trackDurationsMatch(remote[remoteIndex], track)
-		})
-		if len(candidates) == 1 && unmatchedRemoteDurationCandidates(remote, mapping, uploaded[candidates[0]]) == 1 {
-			mapping[remoteIndex] = candidates[0]
-			used[candidates[0]] = true
-			matched++
-		}
-	}
-	if matched*100/len(remote) < 70 {
-		return nil, false
-	}
-	for remoteIndex := range remote {
-		if mapping[remoteIndex] >= 0 {
-			continue
-		}
-		candidates := unmatchedTrackCandidates(uploaded, used, func(track AlbumImportMetadataTrack) bool {
-			return comparableMusicBrainzTrackTitle(remote[remoteIndex].Title) == comparableMusicBrainzTrackTitle(track.Title)
-		})
-		if len(candidates) != 1 {
-			return nil, false
-		}
-		mapping[remoteIndex] = candidates[0]
-		used[candidates[0]] = true
-	}
-	return mapping, true
-}
-
 func missingMusicBrainzArtists(credits []musicBrainzArtistCredit, localArtists []string) []string {
 	missing := []string{}
 	local := map[string]bool{}
@@ -1657,29 +1618,6 @@ func matchMusicBrainzTracksBySignals(remote []flattenedMusicBrainzTrack, uploade
 		return nil, false
 	}
 	return bestMapping, true
-}
-
-func matchMusicBrainzTracksByPosition(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
-	mapping := make([]int, len(remote))
-	used := make([]bool, len(uploaded))
-	for remoteIndex, remoteTrack := range remote {
-		candidate := -1
-		for uploadedIndex, uploadedTrack := range uploaded {
-			if used[uploadedIndex] || normalizedDiscNumber(uploadedTrack.DiscNumber) != remoteTrack.Disc || uploadedTrack.TrackNumber != remoteTrack.Position {
-				continue
-			}
-			if candidate >= 0 {
-				return nil, false
-			}
-			candidate = uploadedIndex
-		}
-		if candidate < 0 || (comparableMusicTitle(remoteTrack.Title) != comparableMusicTitle(uploaded[candidate].Title) && !trackDurationsMatch(remoteTrack, uploaded[candidate])) {
-			return nil, false
-		}
-		mapping[remoteIndex] = candidate
-		used[candidate] = true
-	}
-	return mapping, true
 }
 
 func unmatchedTrackCandidates(tracks []AlbumImportMetadataTrack, used []bool, matches func(AlbumImportMetadataTrack) bool) []int {

@@ -119,7 +119,7 @@ func registerFeedCanonicalTestSeeds(t *testing.T, db *gorm.DB) {
 		if !ok {
 			return
 		}
-		channelID := uuid.Nil
+		var channelID uuid.UUID
 		if video.ChannelID != nil {
 			channelID = *video.ChannelID
 		} else {
@@ -1595,7 +1595,7 @@ func TestGetSubscribedFeedSearchesTitleSummaryAndSource(t *testing.T) {
 }
 
 func TestGetSubscribedFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
-	service, db, user := newFeedTestService(t)
+	_, db, user := newFeedTestService(t)
 
 	if err := db.Exec("DELETE FROM subscriptions WHERE feed_source_id IN (SELECT id FROM feed_sources WHERE source_type <> ?)", "external_rss").Error; err != nil {
 		t.Fatalf("delete internal subscriptions: %v", err)
@@ -1628,7 +1628,7 @@ func TestGetSubscribedFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
 			Colorful: false,
 		}),
 	})
-	service = NewService(loggedDB)
+	service := NewService(loggedDB)
 
 	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 1})
 	if err != nil {
@@ -1720,7 +1720,7 @@ func TestGetSubscribedFeedPaginatesEqualTimestampsDeterministically(t *testing.T
 }
 
 func TestGetPublicFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
-	service, db, _ := newFeedTestService(t)
+	_, db, _ := newFeedTestService(t)
 
 	var source model.FeedSource
 	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
@@ -1749,7 +1749,7 @@ func TestGetPublicFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
 			Colorful: false,
 		}),
 	})
-	service = NewService(loggedDB)
+	service := NewService(loggedDB)
 
 	items, total, err := service.GetPublicFeed(FeedQuery{Page: 1, PageSize: 1})
 	if err != nil {

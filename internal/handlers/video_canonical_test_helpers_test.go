@@ -94,7 +94,7 @@ func syncVideoTestRecord(db *gorm.DB, videoID uuid.UUID) {
 	if db.First(&video, "id = ?", videoID).Error != nil {
 		return
 	}
-	channelID := uuid.Nil
+	var channelID uuid.UUID
 	if video.ChannelID != nil {
 		channelID = *video.ChannelID
 	} else {

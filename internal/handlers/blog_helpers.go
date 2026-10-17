@@ -24,10 +24,6 @@ func ownsChannel(channelUserID *uuid.UUID, userID uuid.UUID) bool {
 	return channelUserID != nil && *channelUserID == userID
 }
 
-func normalizeName(name string) string {
-	return strings.TrimSpace(name)
-}
-
 func slugify(value string) string {
 	slug := strings.ToLower(strings.TrimSpace(value))
 	slug = slugInvalidChars.ReplaceAllString(slug, "-")
@@ -56,44 +52,6 @@ func uniqueChannelSlug(db *gorm.DB, base string, excludeID *uuid.UUID) (string, 
 		candidate = fmt.Sprintf("%s-%d", baseSlug, counter)
 		counter++
 	}
-}
-
-func validateExplicitChannelSlug(db *gorm.DB, raw string, excludeID *uuid.UUID) (string, error) {
-	slug := slugify(raw)
-	if err := service.NewSiteNamespaceService(db).ValidateChannelSlugAvailable(context.Background(), slug, excludeID); err != nil {
-		return "", err
-	}
-	return slug, nil
-}
-
-func channelNameExists(db *gorm.DB, name string, excludeID *uuid.UUID) (bool, error) {
-	query := db.Model(&model.Channel{}).Where("LOWER(name) = LOWER(?)", normalizeName(name))
-	if excludeID != nil {
-		query = query.Where("id <> ?", *excludeID)
-	}
-
-	var count int64
-	if err := query.Count(&count).Error; err != nil {
-		return false, err
-	}
-
-	return count > 0, nil
-}
-
-func collectionNameExists(db *gorm.DB, channelID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error) {
-	query := db.Model(&model.ContentCollection{}).
-		Where("channel_id = ?", channelID).
-		Where("name = ?", normalizeName(name))
-	if excludeID != nil {
-		query = query.Where("id <> ?", *excludeID)
-	}
-
-	var count int64
-	if err := query.Count(&count).Error; err != nil {
-		return false, err
-	}
-
-	return count > 0, nil
 }
 
 func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.ContentCollection, error) {

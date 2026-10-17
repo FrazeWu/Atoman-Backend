@@ -7,12 +7,12 @@ import (
 )
 
 type Change struct {
-	SourceID     string
-	Title        string
-	RSSURL       string
-	Current      string
-	Next         string
-	RecentLinks  []string
+	SourceID    string
+	Title       string
+	RSSURL      string
+	Current     string
+	Next        string
+	RecentLinks []string
 }
 
 func CollectChanges(db *gorm.DB) ([]Change, error) {

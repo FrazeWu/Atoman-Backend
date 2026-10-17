@@ -78,16 +78,6 @@ func performVideoImportRequest(t *testing.T, router http.Handler, method, path s
 	return response
 }
 
-func performVideoImportPartUpload(t *testing.T, router http.Handler, path string, body []byte) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "video/mp4")
-	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, req)
-	return response
-}
-
 func TestVideoImportCompletesUploadAndPublishesOnce(t *testing.T) {
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com")

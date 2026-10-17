@@ -209,13 +209,6 @@ func buildFeedSourceHash(targetType string, targetID *uuid.UUID, rssURL string) 
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func normalizeExternalRSSURL(parsed *url.URL) string {
-	if parsed == nil {
-		return ""
-	}
-	return service.NormalizeFeedSourceURL(parsed.String())
-}
-
 func normalizeExternalRSSURLString(raw string) string {
 	return service.NormalizeFeedSourceURL(raw)
 }

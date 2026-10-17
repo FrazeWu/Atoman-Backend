@@ -426,20 +426,6 @@ func CanViewPublishedBlogContent(db *gorm.DB, viewerID *uuid.UUID, post BlogCont
 	}
 }
 
-func boundedListLimit(raw string, fallback int, max int) int {
-	if raw == "" {
-		return fallback
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value < 1 {
-		return fallback
-	}
-	if max > 0 && value > max {
-		return max
-	}
-	return value
-}
-
 // createPost godoc
 // @Summary 创建文章
 // @Description 使用模块化博客服务创建文章。

@@ -1,11 +1,8 @@
 package feed
 
 import (
-	"errors"
-
 	"atoman/internal/model"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -32,14 +29,4 @@ func ensureSubscription(db *gorm.DB, desired model.Subscription) (model.Subscrip
 		return model.Subscription{}, false, err
 	}
 	return existing, false, nil
-}
-
-func getLiveSubscription(db *gorm.DB, userID, feedSourceID uuid.UUID) (model.Subscription, error) {
-	var subscription model.Subscription
-	err := db.Where("user_id = ? AND feed_source_id = ?", userID, feedSourceID).First(&subscription).Error
-	return subscription, err
-}
-
-func isSubscriptionNotFound(err error) bool {
-	return errors.Is(err, gorm.ErrRecordNotFound)
 }

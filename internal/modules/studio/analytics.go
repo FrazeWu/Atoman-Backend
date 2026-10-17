@@ -52,7 +52,7 @@ func (s *Service) GetAnalytics(user authctx.CurrentUser, module Module, query An
 		pointByDate[date] = pointMetrics
 		trend = append(trend, AnalyticsPoint{Date: date, Metrics: pointMetrics})
 	}
-	titles, contentMetrics, err := s.analyticsContentMetrics(user.ID, channel.ID, module)
+	titles, _, err := s.analyticsContentMetrics(user.ID, channel.ID, module)
 	if err != nil {
 		return AnalyticsResponse{}, err
 	}

@@ -127,6 +127,6 @@ func settingsResponse(settings model.StudioModuleSettings, module Module) Settin
 		ChannelID: settings.ChannelID, Module: module, DefaultCollectionID: settings.DefaultCollectionID,
 		DefaultVisibility:    studioVisibilityFromDB(settings.DefaultVisibility),
 		DefaultPublishStatus: settings.DefaultPublishStatus, AutoplayEnabled: autoplay,
-		EditorMode:           settings.EditorMode,
+		EditorMode: settings.EditorMode,
 	}
 }

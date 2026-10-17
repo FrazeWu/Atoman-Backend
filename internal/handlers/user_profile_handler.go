@@ -99,15 +99,6 @@ func isUserSettingsDuplicateError(err error) bool {
 		strings.Contains(message, "user_settings")
 }
 
-func isMissingTableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "no such table") ||
-		strings.Contains(message, "does not exist")
-}
-
 func loadOrCreateUserSettings(db *gorm.DB, userID uuid.UUID) (model.UserSettings, error) {
 	var settings model.UserSettings
 	if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {

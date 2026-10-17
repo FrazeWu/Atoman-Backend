@@ -670,13 +670,6 @@ func referenceTypeForDiscussionKind(kind string) (string, bool) {
 	}
 }
 
-func visibleOwned(query *gorm.DB, viewer Viewer, ownerColumn, visibilityColumn string) *gorm.DB {
-	if viewer.UserID == uuid.Nil {
-		return query.Where(visibilityColumn+" = ?", "public")
-	}
-	return query.Where("("+visibilityColumn+" = ? OR "+ownerColumn+" = ?)", "public", viewer.UserID)
-}
-
 func visiblePublicOwned(query *gorm.DB, viewer Viewer) *gorm.DB {
 	if viewer.UserID == uuid.Nil {
 		return query.Where("is_public = ?", true)

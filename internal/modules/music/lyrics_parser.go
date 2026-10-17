@@ -134,10 +134,6 @@ func isLRCJSONCreditMetadata(line string) bool {
 	return false
 }
 
-func plainLyricLines(content string) []string {
-	return musiclyrics.PlainLines(content)
-}
-
 func splitLyricLines(content string) []string {
 	return musiclyrics.SplitLines(content)
 }
