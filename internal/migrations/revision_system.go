@@ -80,8 +80,9 @@ func ensureRevisionMigrationSystemUser(tx *gorm.DB) (uuid.UUID, error) {
 	err := tx.Unscoped().Where("email = ?", systemEmail).First(&existing).Error
 	if err == nil {
 		if err := tx.Unscoped().Model(&existing).Updates(map[string]any{
-			"password": "migration-only", "role": "admin", "display_name": "System Migration",
-			"is_active": true, "deleted_at": nil,
+			// System attribution account: no password and inactive so it can never log in.
+			"password": "", "role": "admin", "display_name": "System Migration",
+			"is_active": false, "deleted_at": nil,
 		}).Error; err != nil {
 			return uuid.Nil, err
 		}
@@ -107,9 +108,10 @@ func ensureRevisionMigrationSystemUser(tx *gorm.DB) (uuid.UUID, error) {
 			}
 		}
 	}
+	// System attribution account: no password and inactive so it can never log in.
 	user := model.User{
-		Username: username, Email: systemEmail, Password: "migration-only",
-		Role: "admin", DisplayName: "System Migration", IsActive: true,
+		Username: username, Email: systemEmail, Password: "",
+		Role: "admin", DisplayName: "System Migration", IsActive: false,
 	}
 	if err := tx.Create(&user).Error; err != nil {
 		log.Printf("Failed to ensure revision migration system user: %v", err)
