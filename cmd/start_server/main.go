@@ -342,6 +342,9 @@ func main() {
 		log.Println("Running in development mode")
 	}
 
+	if err := validateRuntimeEnvironment(); err != nil {
+		fatalLogger.Fatal(err)
+	}
 	if err := validateAuthEnvironment(); err != nil {
 		fatalLogger.Fatal(err)
 	}

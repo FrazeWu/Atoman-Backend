@@ -125,8 +125,28 @@ func originAllowed(origin string, allowedOrigins []string) bool {
 	return false
 }
 
+// normalizeEnvironment returns the trimmed, lower-cased ENV value.
+func normalizeEnvironment() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("ENV")))
+}
+
+// validateRuntimeEnvironment rejects startup unless ENV is set to one of the
+// supported deployment environments. Requiring an explicit value keeps
+// production-only safeguards (such as AUTH_CODE_SECRET) from being skipped by
+// accident when the variable is missing.
+func validateRuntimeEnvironment() error {
+	switch normalizeEnvironment() {
+	case "development", "staging", "production":
+		return nil
+	case "":
+		return fmt.Errorf("ENV environment variable is required (development, staging, or production)")
+	default:
+		return fmt.Errorf("unknown ENV %q: expected development, staging, or production", os.Getenv("ENV"))
+	}
+}
+
 func validateAuthEnvironment() error {
-	if os.Getenv("ENV") == "production" && strings.TrimSpace(os.Getenv("AUTH_CODE_SECRET")) == "" {
+	if normalizeEnvironment() == "production" && strings.TrimSpace(os.Getenv("AUTH_CODE_SECRET")) == "" {
 		return fmt.Errorf("AUTH_CODE_SECRET environment variable is required")
 	}
 	return nil

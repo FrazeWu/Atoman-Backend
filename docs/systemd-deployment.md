@@ -18,6 +18,20 @@ This deployment path runs the Go backend directly on the host and keeps Nginx on
 - Nginx reads the deployed certificate from `/etc/nginx/ssl/api.atoman.org.pem`
 - Nginx reads the deployed private key from `/etc/nginx/ssl/api.atoman.org.key`
 
+## Required environment variables
+
+`start_server` refuses to boot unless `ENV` is explicitly set to `development`, `staging`, or `production`. A missing or unknown value aborts startup, because `ENV` selects production safeguards: when `ENV=production` the service also requires `AUTH_CODE_SECRET`, and `ENV` gates the migration-on-start behavior.
+
+- `AUTH_CODE_SECRET` must be present in the runtime environment of the backend service. Generate it with `openssl rand -hex 32` and keep it only in `/home/fa/Atoman-Backend/.env.prod`; never commit it.
+- `ENV` is supplied by the systemd unit through `Environment=ENV=production`. Settings from `EnvironmentFile=` override `Environment=`, so an `ENV` entry in `.env.prod` still wins over the unit value.
+
+Verify both before restarting the service:
+
+```bash
+grep -E '^AUTH_CODE_SECRET=' /home/fa/Atoman-Backend/.env.prod
+systemctl show atoman-backend -p Environment | tr ' ' '\n' | grep -E '^ENV='
+```
+
 ## Build
 
 ```bash

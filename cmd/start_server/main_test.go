@@ -150,9 +150,41 @@ func TestValidateAuthEnvironmentRequiresCodeSecretOnlyInProduction(t *testing.T)
 		t.Fatalf("expected production AUTH_CODE_SECRET error, got %v", err)
 	}
 
+	t.Setenv("ENV", "Production")
+	if err := validateAuthEnvironment(); err == nil || !strings.Contains(err.Error(), "AUTH_CODE_SECRET") {
+		t.Fatalf("expected ENV to match case-insensitively, got %v", err)
+	}
+
 	t.Setenv("AUTH_CODE_SECRET", "production-auth-code-secret")
 	if err := validateAuthEnvironment(); err != nil {
 		t.Fatalf("production auth environment should be valid: %v", err)
+	}
+}
+
+func TestValidateRuntimeEnvironmentRequiresExplicitKnownEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  string
+	}{
+		{"missing", ""},
+		{"whitespace only", "   "},
+		{"unknown", "prod"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ENV", tc.env)
+			if err := validateRuntimeEnvironment(); err == nil {
+				t.Fatalf("expected ENV=%q to be rejected", tc.env)
+			}
+		})
+	}
+
+	for _, env := range []string{"development", "staging", "production"} {
+		t.Run(env, func(t *testing.T) {
+			t.Setenv("ENV", env)
+			if err := validateRuntimeEnvironment(); err != nil {
+				t.Fatalf("expected ENV=%q to be accepted: %v", env, err)
+			}
+		})
 	}
 }
 
