@@ -106,7 +106,7 @@ type Album struct {
 	LifecycleStatus        string          `json:"lifecycle_status" gorm:"not null;default:'active';index;check:chk_albums_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
 	EditStatus             string          `json:"edit_status" gorm:"not null;default:'development';index;check:chk_albums_edit_status,edit_status IN ('development','locked','closed')"`
 	SourcesJSON            string          `json:"-" gorm:"type:jsonb;default:'[]'"`
-	ExternalMetadataJSON   json.RawMessage `json:"external_metadata,omitempty" gorm:"type:jsonb;default:'{}'"`
+	ExternalMetadataJSON   json.RawMessage `json:"external_metadata,omitempty" gorm:"type:jsonb;default:'{}'" swaggertype:"object"`
 	Sources                []MusicSource   `json:"sources,omitempty" gorm:"-"`
 	RedirectTo             *uuid.UUID      `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
 	RedirectSongID         *uuid.UUID      `json:"redirect_song_id,omitempty" gorm:"type:uuid;index"`

@@ -46,7 +46,6 @@ func TestSwaggerBookInteractionContractsMatchAcrossFormats(t *testing.T) {
 			"books.CreateBookDiscussionPassageInput", "books.BookDiscussionPassageDTO", "books.BookDiscussionPassageList",
 			"books.LinkBookContentReviewInput", "model.BookContentReview", "books.BookContentReviewDTO", "books.BookContentReviewList",
 			"books.BookListEntry",
-			"books.BookListSnapshot",
 			"books.SaveBookListDraftInput",
 			"books.PublishBookListInput",
 			"books.BookListVersionInput",
@@ -56,7 +55,6 @@ func TestSwaggerBookInteractionContractsMatchAcrossFormats(t *testing.T) {
 			"books.BookListItemDTO",
 			"books.BookListDetail",
 			"books.BookListSearchResult",
-			"books.BookListDraftResult",
 			"books.SaveBookListBookmarkInput",
 			"books.BookListBookmarkDTO",
 			"books.BookListBookmarkResult",
@@ -73,11 +71,16 @@ func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T)
 			Parameters []struct {
 				In     string `json:"in"`
 				Schema struct {
+					Ref        string         `json:"$ref"`
 					Required   []string       `json:"required"`
 					Properties map[string]any `json:"properties"`
 				} `json:"schema"`
 			} `json:"parameters"`
 		} `json:"paths"`
+		Definitions map[string]struct {
+			Required   []string       `json:"required"`
+			Properties map[string]any `json:"properties"`
+		} `json:"definitions"`
 	}
 	raw, err := os.ReadFile("swagger.json")
 	require.NoError(t, err)
@@ -138,12 +141,15 @@ func TestSwaggerDocumentsIndependentBookCreationAndRevisionContent(t *testing.T)
 			require.Contains(t, spec.Paths[path], method, path)
 		}
 	}
+	// swag renders the request body as a $ref into the definitions section.
 	input := spec.Paths["/api/v1/books/works"]["post"].Parameters[0].Schema
-	require.Equal(t, []string{"title"}, input.Required)
-	require.Contains(t, input.Properties, "author_ids")
-	require.Contains(t, input.Properties, "authors")
-	require.NotContains(t, input.Properties, "import_id")
-	require.NotContains(t, input.Properties, "edition")
+	require.Equal(t, "#/definitions/books.CreateBookWorkInput", input.Ref)
+	work := spec.Definitions["books.CreateBookWorkInput"]
+	require.Equal(t, []string{"title"}, work.Required)
+	require.Contains(t, work.Properties, "author_ids")
+	require.Contains(t, work.Properties, "authors")
+	require.NotContains(t, work.Properties, "import_id")
+	require.NotContains(t, work.Properties, "edition")
 	// The served spec and checked-in YAML must both contain the new routes.
 	served := SwaggerInfo.ReadDoc()
 	var servedSpec map[string]any

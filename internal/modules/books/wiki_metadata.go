@@ -17,13 +17,13 @@ import (
 type PatchBookMetadataInput struct {
 	BaseRevisionID uuid.UUID                  `json:"base_revision_id"`
 	Summary        string                     `json:"summary"`
-	Fields         map[string]json.RawMessage `json:"fields"`
+	Fields         map[string]json.RawMessage `json:"fields" swaggertype:"object"`
 }
 type BookWikiMetadata struct {
 	EntityType     string          `json:"entity_type"`
 	EntityID       uuid.UUID       `json:"entity_id"`
 	RevisionID     uuid.UUID       `json:"revision_id"`
-	Fields         json.RawMessage `json:"fields"`
+	Fields         json.RawMessage `json:"fields" swaggertype:"object"`
 	RedirectedFrom *uuid.UUID      `json:"redirected_from,omitempty"`
 }
 

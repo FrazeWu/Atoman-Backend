@@ -191,6 +191,7 @@ type recordSearchInteractionRequest struct {
 // @Param type query string false "song,album,artist,playlist"
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
+// @Param view query string false "summary 时歌曲仅返回轻量信息"
 // @Success 200 {object} musicSearchResponse
 // @Router /api/v1/music/search [get]
 func (h *Handler) search(c *gin.Context) {

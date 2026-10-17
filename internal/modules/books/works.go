@@ -18,7 +18,7 @@ import (
 
 // Creating metadata never depends on an upload or on file distribution rights.
 type CreateBookWorkInput struct {
-	Title         string      `json:"title"`
+	Title         string      `json:"title" validate:"required"`
 	Subtitle      string      `json:"subtitle"`
 	OriginalTitle string      `json:"original_title"`
 	Description   string      `json:"description"`
