@@ -39,6 +39,10 @@ func BuildBookPrivateObjectKey(userID, importID, format string) string {
 	return "books/private/users/" + strings.Trim(userID, "/") + "/imports/" + strings.Trim(importID, "/") + "/source" + normalizeExtension(format)
 }
 
+func BuildBookRevisionObjectKey(sessionID, format string) string {
+	return "books/revisions/" + strings.Trim(sessionID, "/") + "/source" + normalizeExtension(format)
+}
+
 func BuildBookPrivateDerivedObjectKey(userID, importID string) string {
 	return "books/private/users/" + strings.Trim(userID, "/") + "/imports/" + strings.Trim(importID, "/") + "/reader.epub"
 }

@@ -12,6 +12,7 @@ import (
 type Service struct {
 	db            *gorm.DB
 	bookUpload    bookUploadStore
+	bookResources bookUploadStore
 	virusScanner  bookVirusScanner
 	catalogCounts *cachex.Cache[int64]
 }
@@ -29,6 +30,12 @@ func (s *Service) WithBookUploadStore(store bookUploadStore) *Service {
 
 func (s *Service) WithS3(client *s3.S3) *Service {
 	s.bookUpload = newS3BookUploadStore(client)
+	s.bookResources = newPrivateBookResourceStore(client)
+	return s
+}
+
+func (s *Service) WithBookResourceStore(store bookUploadStore) *Service {
+	s.bookResources = store
 	return s
 }
 

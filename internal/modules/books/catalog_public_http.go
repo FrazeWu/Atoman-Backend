@@ -25,7 +25,6 @@ import (
 // @Success 201 {object} BookPublicWorkDTO
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works [post]
 func (h *Handler) createPublicWork(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -54,7 +53,6 @@ func (h *Handler) createPublicWork(c *gin.Context) {
 // @Param limit query int false "每页数量，最大 50"
 // @Param offset query int false "偏移量"
 // @Success 200 {object} map[string]interface{}
-// @Router /api/v1/books/catalog/search [get]
 func (h *Handler) searchPublicCatalog(c *gin.Context) {
 	limit, offset, ok := catalogPaginationParams(c)
 	if !ok {
@@ -76,7 +74,6 @@ func (h *Handler) searchPublicCatalog(c *gin.Context) {
 // @Success 200 {object} BookPublicWorkDTO
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId} [get]
 func (h *Handler) getPublicWork(c *gin.Context) {
 	workID, ok := parseCatalogID(c, "workId")
 	if !ok {
@@ -98,7 +95,6 @@ func (h *Handler) getPublicWork(c *gin.Context) {
 // @Success 200 {object} BookPublicEditionDetailDTO
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/editions/{editionId} [get]
 func (h *Handler) getPublicEdition(c *gin.Context) {
 	editionID, ok := parseCatalogID(c, "editionId")
 	if !ok {

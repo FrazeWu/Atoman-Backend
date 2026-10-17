@@ -26,7 +26,6 @@ type BookPostListResult struct {
 // @Param workId path string true "作品 UUID"
 // @Success 200 {object} BookPostListResult
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/posts [get]
 func (h *Handler) listRelatedBookPosts(c *gin.Context) {
 	workID, ok := parseBookPathID(c, "workId")
 	if !ok {
@@ -53,7 +52,6 @@ func (h *Handler) listRelatedBookPosts(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/posts/{postId} [put]
 func (h *Handler) linkBookPost(c *gin.Context) {
 	user, workID, postID, ok := bookPostRouteUser(c)
 	if !ok {
@@ -78,7 +76,6 @@ func (h *Handler) linkBookPost(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/posts/{postId} [delete]
 func (h *Handler) unlinkBookPost(c *gin.Context) {
 	user, workID, postID, ok := bookPostRouteUser(c)
 	if !ok {

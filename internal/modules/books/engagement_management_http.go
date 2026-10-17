@@ -23,7 +23,6 @@ type BookEditVoteInput struct {
 // @Success 200 {object} BookReviewDTO
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/review [get]
 func (h *Handler) getMyBookReview(c *gin.Context) {
 	user, workID, ok := bookWorkRouteUser(c)
 	if !ok {
@@ -46,7 +45,6 @@ func (h *Handler) getMyBookReview(c *gin.Context) {
 // @Success 200 {object} map[string]boolean
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/review [delete]
 func (h *Handler) deleteBookReview(c *gin.Context) {
 	user, workID, ok := bookWorkRouteUser(c)
 	if !ok {
@@ -73,7 +71,6 @@ func (h *Handler) deleteBookReview(c *gin.Context) {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/contributions/{editId}/vote [post]
 func (h *Handler) voteBookEdit(c *gin.Context) {
 	user, editID, ok := bookEditRouteUser(c)
 	if !ok {

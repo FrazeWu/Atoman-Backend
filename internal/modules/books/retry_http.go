@@ -20,7 +20,6 @@ import (
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 409 {object} handlers.ErrorResponse
-// @Router /api/v1/books/imports/{importId}/retry [post]
 func (h *Handler) retryBookImport(c *gin.Context) {
 	user, id, ok := bookImportRouteUser(c)
 	if !ok {

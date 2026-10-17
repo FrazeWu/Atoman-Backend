@@ -111,6 +111,16 @@ func newS3BookUploadStore(client *s3.S3) bookUploadStore {
 	return &s3BookUploadStore{client: client, bucket: bucket}
 }
 
+// New public ebooks use a private bucket, not the media CDN bucket. Do not
+// fall back to S3_BUCKET: R2 public domains bypass per-object ACLs.
+func newPrivateBookResourceStore(client *s3.S3) bookUploadStore {
+	bucket := strings.TrimSpace(os.Getenv("BOOK_PRIVATE_BUCKET"))
+	if client == nil || bucket == "" || bucket == strings.TrimSpace(os.Getenv("S3_BUCKET")) {
+		return nil
+	}
+	return &s3BookUploadStore{client: client, bucket: bucket}
+}
+
 func (s *s3BookUploadStore) CreateMultipartUpload(key, contentType string) (string, error) {
 	out, err := s.client.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
 		Bucket:      aws.String(s.bucket),

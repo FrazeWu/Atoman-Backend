@@ -48,6 +48,11 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 			if err := s.repo.lockUser(tx, user.ID); err != nil {
 				return ErrAuthenticationRequired
 			}
+			if resolved.Kind == TargetKindBookWork || resolved.Kind == TargetKindBookList {
+				if err := s.validateCreateTargetTx(tx, resolved); err != nil {
+					return err
+				}
+			}
 			target, err := s.repo.lockTarget(tx, resolved)
 			if err != nil {
 				return fmt.Errorf("lock discussion target: %w", err)
@@ -182,6 +187,16 @@ func (s *Service) replaceContentReferences(tx *gorm.DB, entry model.CommentEntry
 }
 
 func (s *Service) validateCreateTargetTx(tx *gorm.DB, resolved ResolvedTarget) error {
+	if resolved.Kind == TargetKindBookPassage || resolved.Kind == TargetKindBookList || resolved.Kind == TargetKindBookWork {
+		current, err := NewTargetRegistry(tx).Resolve(Viewer{}, TargetRef{Kind: resolved.Kind, ResourceID: resolved.ResourceID})
+		if err != nil {
+			return err
+		}
+		if current.ResourceID != resolved.ResourceID {
+			return ErrTargetNotFound
+		}
+		return nil
+	}
 	if resolved.Kind != TargetKindForumTopic {
 		return nil
 	}

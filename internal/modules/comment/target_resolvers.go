@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -41,6 +42,8 @@ func NewTargetRegistry(db *gorm.DB) *TargetRegistry {
 		TargetKindTimelineEvent:  targetResolverFunc(resolvers.resolveTimelineEvent),
 		TargetKindTimelinePerson: targetResolverFunc(resolvers.resolveTimelinePerson),
 		TargetKindBookWork:       targetResolverFunc(resolvers.resolveBookWork),
+		TargetKindBookPassage:    targetResolverFunc(resolvers.resolveBookPassage),
+		TargetKindBookList:       targetResolverFunc(resolvers.resolveBookList),
 	}}
 }
 
@@ -173,11 +176,31 @@ func (r *databaseTargetResolvers) resolveDebate(_ Viewer, resourceID uuid.UUID) 
 }
 
 func (r *databaseTargetResolvers) resolveBookWork(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
-	var work model.BookWork
-	if err := r.db.Where("id = ? AND lifecycle_status = ? AND edit_status <> ?", resourceID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&work).Error; err != nil {
-		return ResolvedTarget{}, targetLookupError(TargetKindBookWork, resourceID, err)
+	seen := map[uuid.UUID]bool{}
+	for !seen[resourceID] {
+		seen[resourceID] = true
+		var work model.BookWork
+		if err := r.db.Clauses(clause.Locking{Strength: "SHARE"}).First(&work, "id = ?", resourceID).Error; err != nil {
+			return ResolvedTarget{}, targetLookupError(TargetKindBookWork, resourceID, err)
+		}
+		if work.LifecycleStatus == model.BookLifecycleStatusMerged && work.RedirectTo != nil {
+			resourceID = *work.RedirectTo
+			continue
+		}
+		if work.LifecycleStatus != model.BookLifecycleStatusActive || work.EditStatus == model.BookEditStatusClosed {
+			return ResolvedTarget{}, ErrTargetNotFound
+		}
+		return communityTarget(TargetKindBookWork, work.ID, true), nil
 	}
-	return communityTarget(TargetKindBookWork, work.ID, true), nil
+	return ResolvedTarget{}, ErrTargetNotFound
+}
+
+func (r *databaseTargetResolvers) resolveBookList(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
+	var list model.BookList
+	if err := r.db.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ? AND visibility = 'public' AND published_at IS NOT NULL", resourceID).First(&list).Error; err != nil {
+		return ResolvedTarget{}, targetLookupError(TargetKindBookList, resourceID, err)
+	}
+	return ownedTarget(TargetKindBookList, list.ID, list.UserID, true, 0, markLabelPinned), nil
 }
 
 func (r *databaseTargetResolvers) resolveTimelineEvent(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {

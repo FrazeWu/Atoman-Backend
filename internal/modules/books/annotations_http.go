@@ -29,7 +29,6 @@ import (
 // @Success 200 {object} BookAnnotationListResult
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
-// @Router /api/v1/books/notes [get]
 func (h *Handler) listBookNotes(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -77,7 +76,6 @@ func (h *Handler) listBookNotes(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/assets/{assetId}/annotations [get]
 func (h *Handler) listAssetAnnotations(c *gin.Context) {
 	user, assetID, ok := bookAssetRouteUser(c)
 	if !ok {
@@ -105,7 +103,6 @@ func (h *Handler) listAssetAnnotations(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/assets/{assetId}/annotations [post]
 func (h *Handler) createBookAnnotation(c *gin.Context) {
 	user, assetID, ok := bookAssetRouteUser(c)
 	if !ok {
@@ -140,7 +137,6 @@ func (h *Handler) createBookAnnotation(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/annotations/{annotationId} [put]
 func (h *Handler) updateBookAnnotation(c *gin.Context) {
 	user, annotationID, ok := bookAnnotationRouteUser(c)
 	if !ok {
@@ -172,7 +168,6 @@ func (h *Handler) updateBookAnnotation(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/annotations/{annotationId} [delete]
 func (h *Handler) deleteBookAnnotation(c *gin.Context) {
 	user, annotationID, ok := bookAnnotationRouteUser(c)
 	if !ok {

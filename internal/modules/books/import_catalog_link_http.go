@@ -23,7 +23,6 @@ import (
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/imports/{importId}/catalog-link [put]
 func (h *Handler) linkBookImportToCatalog(c *gin.Context) {
 	user, importID, ok := bookImportRouteUser(c)
 	if !ok {

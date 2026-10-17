@@ -88,6 +88,14 @@ type BookPublicEditionDetailDTO struct {
 }
 
 func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, offset int) ([]BookPublicWorkDTO, int64, error) {
+	return s.searchBookCatalog(ctx, query, limit, offset, false)
+}
+
+func (s *Service) SearchBookWorks(ctx context.Context, query string, limit, offset int) ([]BookPublicWorkDTO, int64, error) {
+	return s.searchBookCatalog(ctx, query, limit, offset, true)
+}
+
+func (s *Service) searchBookCatalog(ctx context.Context, query string, limit, offset int, wikiOnly bool) ([]BookPublicWorkDTO, int64, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, errors.New("book catalog database is required")
 	}
@@ -98,6 +106,9 @@ func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, 
 	query = strings.TrimSpace(query)
 	base := s.db.WithContext(ctx).Model(&model.BookWork{}).
 		Where("lifecycle_status = ? AND edit_status <> ?", model.BookLifecycleStatusActive, model.BookEditStatusClosed)
+	if wikiOnly {
+		base = base.Where("EXISTS (SELECT 1 FROM revisions WHERE content_type = 'book_work' AND content_id = book_works.id AND is_current = true AND deleted_at IS NULL)")
+	}
 	if query != "" {
 		pattern := "%" + escapeBookCatalogQuery(query) + "%"
 		// 分别匹配书名和作者，让两个分支各自使用索引；UNION 保证同时命中不重复。
@@ -109,7 +120,11 @@ func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, 
 			WHERE bc.deleted_at IS NULL AND bp.deleted_at IS NULL AND bp.name ILIKE ? ESCAPE '\'
 		)`, pattern, pattern, pattern, pattern)
 	}
-	total, err := s.countPublicCatalog(base, query)
+	cacheKey := "catalog:" + query
+	if wikiOnly {
+		cacheKey = "books-v2:" + query
+	}
+	total, err := s.countPublicCatalog(base, cacheKey)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -362,12 +377,6 @@ func escapeBookCatalogQuery(query string) string {
 
 func buildBookPublicEditionDTO(edition model.BookEdition, publisher *model.BookPublisher, producer *model.BookProducer) BookPublicEditionDTO {
 	coverURL := strings.TrimSpace(edition.CoverURL)
-	if coverURL == "" {
-		coverURL = openLibraryISBNImageURL(edition.ISBN13)
-		if coverURL == "" {
-			coverURL = openLibraryISBNImageURL(edition.ISBN10)
-		}
-	}
 	dto := BookPublicEditionDTO{
 		ID: edition.ID.String(), WorkID: edition.WorkID.String(), Title: edition.Title,
 		PublisherID: uuidPointerString(edition.PublisherID), Publisher: edition.Publisher, ISBN10: edition.ISBN10, ISBN13: edition.ISBN13,

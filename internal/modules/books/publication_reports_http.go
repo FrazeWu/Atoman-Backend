@@ -29,7 +29,6 @@ type bookPublicationReportInput struct {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 409 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/assets/{assetId}/reports [post]
 func (h *Handler) reportPublishedBookAsset(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -61,7 +60,6 @@ func (h *Handler) reportPublishedBookAsset(c *gin.Context) {
 // @Success 200 {object} BookPublicationReportListResult
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/publication-reports [get]
 func (h *Handler) listPublicationReports(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -90,7 +88,6 @@ func (h *Handler) listPublicationReports(c *gin.Context) {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/publication-reports/{reportId}/decision [post]
 func (h *Handler) reviewPublicationReport(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {

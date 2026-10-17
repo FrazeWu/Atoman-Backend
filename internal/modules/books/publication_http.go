@@ -29,7 +29,6 @@ import (
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 422 {object} handlers.ErrorResponse
-// @Router /api/v1/books/assets/{assetId}/publication-requests [post]
 func (h *Handler) submitPublicationRequest(c *gin.Context) {
 	user, assetID, ok := bookAssetRouteUser(c)
 	if !ok {
@@ -64,7 +63,6 @@ func (h *Handler) submitPublicationRequest(c *gin.Context) {
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 503 {object} handlers.ErrorResponse
-// @Router /api/v1/books/publication-requests/{requestId}/evidence [post]
 func (h *Handler) uploadPublicationEvidence(c *gin.Context) {
 	user, requestID, ok := publicationRequestRouteUser(c)
 	if !ok {
@@ -113,8 +111,6 @@ func (h *Handler) uploadPublicationEvidence(c *gin.Context) {
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 503 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/publication-requests/{requestId}/evidence [get]
-// @Router /api/v1/books/publication-requests/{requestId}/evidence [get]
 func (h *Handler) getPublicationEvidence(c *gin.Context) {
 	user, requestID, ok := publicationRequestRouteUser(c)
 	if !ok {
@@ -138,7 +134,6 @@ func (h *Handler) getPublicationEvidence(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Success 200 {object} BookPublicationRequestListResult
-// @Router /api/v1/books/publication-requests [get]
 func (h *Handler) listMyPublicationRequests(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -162,7 +157,6 @@ func (h *Handler) listMyPublicationRequests(c *gin.Context) {
 // @Success 200 {object} BookPublicationRequestListResult
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/publication-requests [get]
 func (h *Handler) listPublicationReviewQueue(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -192,7 +186,6 @@ func (h *Handler) listPublicationReviewQueue(c *gin.Context) {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/publication-requests/{requestId}/decision [post]
 func (h *Handler) reviewPublicationRequest(c *gin.Context) {
 	user, requestID, ok := publicationRequestRouteUser(c)
 	if !ok {
@@ -218,7 +211,6 @@ func (h *Handler) reviewPublicationRequest(c *gin.Context) {
 // @Param workId path string true "作品 UUID"
 // @Success 200 {object} PublishedBookAssetListResult
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/assets [get]
 func (h *Handler) listPublishedBookAssets(c *gin.Context) {
 	workID, err := uuid.Parse(strings.TrimSpace(c.Param("workId")))
 	if err != nil || workID == uuid.Nil {
@@ -242,7 +234,6 @@ func (h *Handler) listPublishedBookAssets(c *gin.Context) {
 // @Param limit query int false "每页数量"
 // @Param offset query int false "偏移量"
 // @Success 200 {object} PublishedBookAssetListResult
-// @Router /api/v1/books/catalog/assets [get]
 func (h *Handler) listPublicBookAssets(c *gin.Context) {
 	limit, offset := bookPagination(c)
 	items, total, err := h.service.ListPublishedBookAssets(c.Request.Context(), uuid.Nil, uuid.Nil, limit, offset)
@@ -260,7 +251,6 @@ func (h *Handler) listPublicBookAssets(c *gin.Context) {
 // @Param assetId path string true "公共资源 UUID"
 // @Success 200 {object} BookPublishedAssetDTO
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/assets/{assetId} [get]
 func (h *Handler) getPublishedBookAsset(c *gin.Context) {
 	assetID, ok := parsePublicAssetID(c)
 	if !ok {
@@ -284,7 +274,6 @@ func (h *Handler) getPublishedBookAsset(c *gin.Context) {
 // @Success 200 {file} binary
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 503 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/assets/{assetId}/content [get]
 func (h *Handler) getPublishedBookAssetContent(c *gin.Context) {
 	assetID, ok := parsePublicAssetID(c)
 	if !ok {
@@ -316,7 +305,6 @@ func (h *Handler) getPublishedBookAssetContent(c *gin.Context) {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/published-assets/{assetId}/status [post]
 func (h *Handler) setPublishedAssetStatus(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {

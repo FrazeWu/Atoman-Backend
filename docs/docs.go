@@ -15,6 +15,3332 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/books/booklists": {"get":{"summary":"搜索已公开书单","description":"仅搜索已发布的公开标题和简介；按发布时间倒序、UUID 稳定分页。私人草稿和私人发布均不参与。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"q","in":"query","type":"string"},{"name":"limit","in":"query","type":"integer","default":20,"maximum":100},{"name":"offset","in":"query","type":"integer","default":0}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookListSearchResult"}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"}}}},
+        "/api/v1/books/booklists/{listId}": {"get":{"summary":"读取书单发布内容","description":"匿名及他人仅可读公开发布；私人发布仅本人可读。任何读者都不能通过此接口读取草稿。响应 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"listId","in":"path","required":true,"type":"string","format":"uuid"}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookListDetail"}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"}}}},
+        "/api/v1/books/me/booklists": {"get":{"summary":"列出本人的完整书单草稿","description":"包含私人编辑版本，只返回当前登录用户的数据。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"limit","in":"query","type":"integer","default":20,"maximum":100},{"name":"offset","in":"query","type":"integer","default":0}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookListDraftResult"}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}]}},
+        "/api/v1/books/me/booklists/{listId}/draft": {"get":{"summary":"获取本人的书单草稿","description":"发布后仍保留独立草稿。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"listId","in":"path","required":true,"type":"string","format":"uuid"}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookListDraftDTO"}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}]},"put":{"summary":"创建或更新私人书单草稿","description":"首次用客户端 UUID 和 base_version=0；完整替换标题、简介、有序作品和推荐语，不修改已发布内容。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"listId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"input","in":"body","required":true,"schema":{"$ref":"#/definitions/books.SaveBookListDraftInput"}}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookListDraftDTO"}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"},"409":{"description":"私人编辑版本已变化，请重新读取；未覆盖他人设备修改"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"consumes":["application/json"]}},
+        "/api/v1/books/me/booklists/{listId}/publish": {"post":{"summary":"明确发布书单快照，选择公开或私人","description":"至少包含一本可访问的新书目。只发布已确认版本的草稿，重复发布同一内容不制造新版本。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"listId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"input","in":"body","required":true,"schema":{"$ref":"#/definitions/books.PublishBookListInput"}}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookListDraftDTO"}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"},"409":{"description":"私人编辑版本已变化，请重新读取；未覆盖他人设备修改"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"consumes":["application/json"]}},
+        "/api/v1/books/me/booklists/{listId}/unpublish": {"post":{"summary":"撤下公开书单，转为仅本人可读","description":"保留本人草稿和上一份发布快照；第三方收藏也不能继续访问。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"listId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"input","in":"body","required":true,"schema":{"$ref":"#/definitions/books.BookListVersionInput"}}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"type":"object","properties":{"version":{"type":"integer","format":"int64","minimum":1},"deleted":{"type":"boolean"}}}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"},"409":{"description":"私人编辑版本已变化，请重新读取；未覆盖他人设备修改"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"consumes":["application/json"]}},
+        "/api/v1/books/me/booklists/{listId}": {"delete":{"summary":"删除本人书单","description":"软删除后不再出现在发现、收藏和本人列表，不允许旧请求隐式恢复。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"listId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"base_version","in":"query","type":"integer","required":true,"minimum":1}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"type":"object","properties":{"version":{"type":"integer","format":"int64","minimum":1},"deleted":{"type":"boolean"}}}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"},"409":{"description":"私人编辑版本已变化，请重新读取；未覆盖他人设备修改"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}]}},
+        "/api/v1/books/booklists/{listId}/bookmark": {"put":{"summary":"收藏书单并可确认已读发布版本","description":"收藏不能授予私人书单访问权；书单撤下后第三方访问和收藏列表立即隐藏。只推进明确提供的已读版本。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"listId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"input","in":"body","required":true,"schema":{"$ref":"#/definitions/books.SaveBookListBookmarkInput"}}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookListBookmarkDTO"}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"consumes":["application/json"]},"delete":{"summary":"移除本人书单收藏","description":"不删除书单；撤下或删除书单后仍可移除自己的收藏，重复移除为空操作。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"listId","in":"path","required":true,"type":"string","format":"uuid"}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"type":"object","properties":{"removed":{"type":"boolean"}}}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}]}},
+        "/api/v1/books/me/booklist-bookmarks": {"get":{"summary":"列出本人书单收藏、未读提示和最近发布摘要","description":"只返回本人当前仍有权限访问的发布快照，不返回私人草稿或他人的收藏状态。 Cache-Control: private, no-store。","tags":["books-lists"],"produces":["application/json"],"parameters":[{"name":"limit","in":"query","type":"integer","default":20,"maximum":100},{"name":"offset","in":"query","type":"integer","default":0}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookListBookmarkResult"}}}},"400":{"description":"参数、书目、选项或已读版本无效"},"401":{"description":"需要登录"},"404":{"description":"书单不存在、不是本人草稿，或无权访问当前发布内容"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}]}},
+        "/api/v1/books/asset-revisions/{revisionId}/passages": {"get":{"summary":"列出固定文件修订的段落讨论定位","description":"","tags":["books-discussions"],"produces":["application/json"],"parameters":[{"name":"revisionId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"limit","in":"query","type":"integer","default":20,"maximum":100},{"name":"offset","in":"query","type":"integer","default":0}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookDiscussionPassageList"}}}},"400":{"description":"参数或选区格式无效"},"404":{"description":"新版作品、可公开文件修订或本人统一博客内容不存在"}}},"post":{"summary":"创建固定文件修订的段落讨论定位","description":"相同修订和选区幂等返回同一段落 UUID，多个读者共享统一讨论；只保存选区，不读取或复制私人标注和笔记。后续发表评论使用返回的 comments_path。","tags":["books-discussions"],"produces":["application/json"],"parameters":[{"name":"revisionId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"input","in":"body","required":true,"schema":{"$ref":"#/definitions/books.CreateBookDiscussionPassageInput"}}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookDiscussionPassageDTO"}}}},"400":{"description":"参数或选区格式无效"},"401":{"description":"需要登录"},"403":{"description":"账号已停用"},"404":{"description":"新版作品、可公开文件修订或本人统一博客内容不存在"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"consumes":["application/json"]}},
+        "/api/v1/books/passages/{passageId}": {"get":{"summary":"获取可公开文件的段落讨论定位","description":"","tags":["books-discussions"],"produces":["application/json"],"parameters":[{"name":"passageId","in":"path","required":true,"type":"string","format":"uuid"}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookDiscussionPassageDTO"}}}},"400":{"description":"参数或选区格式无效"},"404":{"description":"新版作品、可公开文件修订或本人统一博客内容不存在"}}}},
+        "/api/v1/books/works/{workId}/reviews": {"get":{"summary":"列出已发布且公开的统一内容长评","description":"按发布时间倒序、内容 UUID 稳定分页。作品合并时聚合原始别名，撤销合并后恢复原作品列表。原博客变为草稿、私有、关注者可见或已删除时自动隐藏，不改变内容、评论和评分身份。","tags":["books-reviews"],"produces":["application/json"],"parameters":[{"name":"workId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"limit","in":"query","type":"integer","default":20,"maximum":100},{"name":"offset","in":"query","type":"integer","default":0}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookContentReviewList"}}}},"400":{"description":"参数或选区格式无效"},"404":{"description":"新版作品、可公开文件修订或本人统一博客内容不存在"}}}},
+        "/api/v1/books/works/{workId}/reviews/{contentId}": {"put":{"summary":"关联本人统一博客内容为图书长评","description":"重复关联不增加记录；正文通过现有博客接口创建或编辑。关联草稿和私人博客不会将其公开；只有已发布且公开的博客进入公共列表。Cache-Control: private, no-store。","tags":["books-reviews"],"produces":["application/json"],"parameters":[{"name":"workId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"contentId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"input","in":"body","required":true,"schema":{"$ref":"#/definitions/books.LinkBookContentReviewInput"}}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/model.BookContentReview"}}}},"400":{"description":"参数或选区格式无效"},"401":{"description":"需要登录"},"404":{"description":"新版作品、可公开文件修订或本人统一博客内容不存在"},"409":{"description":"该内容已关联到其他作品"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"consumes":["application/json"]},"delete":{"summary":"移除本人图书长评关联，不删除原内容和评论","description":"仅移除本人的关系；重复移除为幂等空操作。原博客删除后仍可清理关系。Cache-Control: private, no-store。","tags":["books-reviews"],"produces":["application/json"],"parameters":[{"name":"workId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"contentId","in":"path","required":true,"type":"string","format":"uuid"}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"type":"object","properties":{"unlinked":{"type":"boolean"}}}}}},"400":{"description":"参数或选区格式无效"},"401":{"description":"需要登录"},"404":{"description":"新版作品、可公开文件修订或本人统一博客内容不存在"}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}]}},
+        "/api/v1/books/works/{workId}/rating": {"get":{"summary":"获取作品有效评分与信誉加权评分","description":"合并别名解析到规范作品。至少六名有效评分者且总权重大于零才激活正式排名；不足六人的参考分仍返回。Cache-Control: private, no-store；viewer_rating 仅属于当前登录用户。","tags":["books-ratings"],"produces":["application/json"],"parameters":[{"name":"workId","in":"path","required":true,"type":"string","format":"uuid"}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookWorkRatingDTO"}}}},"400":{"description":"参数无效"},"404":{"description":"新版公开作品不存在"}}},"put":{"summary":"设置本人作品评分","description":"1–10 分，重复或并发提交不会增加票数；撤销后可重新评分。合并别名写入目标作品。Cache-Control: private, no-store。","tags":["books-ratings"],"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"consumes":["application/json"],"produces":["application/json"],"parameters":[{"name":"workId","in":"path","required":true,"type":"string","format":"uuid"},{"name":"input","in":"body","required":true,"schema":{"$ref":"#/definitions/books.bookRatingInput"}}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookWorkRatingDTO"}}}},"400":{"description":"参数无效"},"401":{"description":"需要登录"},"403":{"description":"账号已停用"},"404":{"description":"新版公开作品不存在"}}},"delete":{"summary":"撤销本人作品评分","description":"重复撤销不报错，只操作本人评分。Cache-Control: private, no-store。","tags":["books-ratings"],"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"produces":["application/json"],"parameters":[{"name":"workId","in":"path","required":true,"type":"string","format":"uuid"}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookWorkRatingDTO"}}}},"400":{"description":"参数无效"},"401":{"description":"需要登录"},"403":{"description":"账号已停用"},"404":{"description":"新版公开作品不存在"}}}},
+        "/api/v1/books/rankings/high-rated": {"get":{"summary":"获取正式图书高分榜","description":"仅收录新版公开作品，至少六名有效评分者且总权重大于零。按未四舍五入的信誉加权分降序、有效人数降序、作品 UUID 升序排序后分页。已合并、已关闭或已删除的作品不入榜；不返回任何人的 viewer_rating。","tags":["books-ratings"],"produces":["application/json"],"parameters":[{"name":"limit","in":"query","type":"integer","minimum":1,"maximum":100,"default":20},{"name":"offset","in":"query","type":"integer","minimum":0,"default":0}],"responses":{"200":{"description":"成功","schema":{"type":"object","properties":{"data":{"$ref":"#/definitions/books.BookRatingRankingResult"}}}},"400":{"description":"参数无效"},"404":{"description":"新版公开作品不存在"}}}},
+        "/api/v1/books/me/reading-sessions/{sessionId}/heartbeat": {
+            "post": {
+                "summary": "提交有效阅读心跳",
+                "description": "服务器逐用户串行计时，多个设备或标签页不重复累计同一段时间；后台设备不会中断前台会话；长断线不补算。重复和乱序序号不会改时钟。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "sessionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.BookReadingHeartbeatInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingHeartbeatResult"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "本人会话、笔记或公开作品不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/reading-statistics": {
+            "get": {
+                "summary": "查询本人有效阅读统计",
+                "description": "按 UTC 日期和作品汇总，含首尾，最多 366 天。文件更换和下架不会丢失私人统计。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "from",
+                        "in": "query",
+                        "type": "string",
+                        "format": "date",
+                        "description": "起始 UTC 日期 YYYY-MM-DD，默认截止前 29 天"
+                    },
+                    {
+                        "name": "to",
+                        "in": "query",
+                        "type": "string",
+                        "format": "date",
+                        "description": "截止 UTC 日期 YYYY-MM-DD，默认今天"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingStatistics"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "本人会话、笔记或公开作品不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/{noteId}/publish": {
+            "post": {
+                "summary": "确认后发布私人笔记的独立公开副本",
+                "description": "复用现有频道权限、频道可用性、合集、引用、媒体、版本和发布队列检查。请求 UUID 重试只返回原内容标识，不读取新的私人正文，也不重新发布已撤回的公开副本。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.PublishBookPrivateNoteInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookNotePublicationDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "403": {
+                        "description": "非本人频道或频道被禁用"
+                    },
+                    "404": {
+                        "description": "本人会话、笔记或公开作品不存在"
+                    },
+                    "409": {
+                        "description": "私人笔记版本已变化，或请求 UUID 被复用于其他发布"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/library": {
+            "get": {
+                "summary": "列出作品级私人书架",
+                "description": "",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "type": "string",
+                        "description": "书架状态",
+                        "required": false
+                    },
+                    {
+                        "name": "tag",
+                        "in": "query",
+                        "type": "string",
+                        "description": "私人标签",
+                        "required": false
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "每页数量，最多 100",
+                        "required": false
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "分页偏移",
+                        "required": false
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "items": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/books.BookLibraryEntryDTO"
+                                            }
+                                        },
+                                        "total": {
+                                            "type": "integer"
+                                        },
+                                        "limit": {
+                                            "type": "integer"
+                                        },
+                                        "offset": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/library/works/{workId}": {
+            "put": {
+                "summary": "创建或更新私人书架条目",
+                "description": "不会修改个人文件选择或阅读进度。条目 ID 可防止旧作品合并后的过期写入修改目标条目。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.SaveBookLibraryEntryInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookLibraryEntryDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/library/entries/{entryId}": {
+            "delete": {
+                "summary": "移出书架，保留阅读记录与笔记",
+                "description": "",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "entryId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "base_version",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "当前版本",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarkTombstone"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes": {
+            "get": {
+                "summary": "筛选本人跨修订笔记或 30 天回收站",
+                "description": "",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "work_id",
+                        "in": "query",
+                        "type": "string",
+                        "description": "作品 UUID，含合并别名",
+                        "required": false
+                    },
+                    {
+                        "name": "tag",
+                        "in": "query",
+                        "type": "string",
+                        "description": "私人标签",
+                        "required": false
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "type": "string",
+                        "description": "标题或正文原文搜索",
+                        "required": false
+                    },
+                    {
+                        "name": "trash",
+                        "in": "query",
+                        "type": "boolean",
+                        "description": "仅读取 30 天内回收站",
+                        "required": false
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "每页数量，最多 100",
+                        "required": false
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "分页偏移",
+                        "required": false
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "items": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/books.BookPrivateNoteDTO"
+                                            }
+                                        },
+                                        "total": {
+                                            "type": "integer"
+                                        },
+                                        "limit": {
+                                            "type": "integer"
+                                        },
+                                        "offset": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/{noteId}": {
+            "get": {
+                "summary": "读取本人笔记",
+                "description": "回收站过期返回 410。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookPrivateNoteDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    },
+                    "410": {
+                        "description": "30 天保留期已过，内容不可恢复"
+                    }
+                }
+            },
+            "put": {
+                "summary": "幂等保存私人笔记",
+                "description": "客户端生成 noteId。最近一次相同 PUT 重试不增加版本；旧版本或删除后的 PUT 返回 409，绝不隐式恢复。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.SaveBookPrivateNoteInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookPrivateNoteDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            },
+            "delete": {
+                "summary": "将笔记移入 30 天回收站",
+                "description": "保留删除 ID；重复删除不会重置保留期。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "base_version",
+                        "in": "query",
+                        "type": "integer",
+                        "description": "当前版本",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarkTombstone"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/{noteId}/restore": {
+            "post": {
+                "summary": "恢复 30 天内删除的私人笔记",
+                "description": "使用删除后的版本，过期返回 410。过期正文、标题、标签和文件来源将被清除，仅保留删除标识，不能被离线旧请求复活。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "noteId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "base_version"
+                            ],
+                            "properties": {
+                                "base_version": {
+                                    "type": "integer",
+                                    "format": "int64",
+                                    "minimum": 0
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookPrivateNoteDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    },
+                    "410": {
+                        "description": "30 天保留期已过，内容不可恢复"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/export": {
+            "get": {
+                "summary": "JSON 导出本人有效笔记",
+                "description": "",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookNoteExport"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/private-notes/import": {
+            "post": {
+                "summary": "幂等导入 JSON 笔记，不覆盖已有数据",
+                "description": "整个批次在一个事务内提交。内容冲突逐项报告并保留原笔记；无效条目导致整个批次回滚。导出结果 notes 和 schema_version 配合新的 request_id 可用于导入。",
+                "tags": [
+                    "books-library"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.ImportBookPrivateNotesInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功；Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookNoteImportResult"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数或导入数据无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或本人条目不存在"
+                    },
+                    "409": {
+                        "description": "并发版本或导入请求冲突，未覆盖已有内容"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/reading-marks/{revisionId}": {
+            "get": {
+                "summary": "获取本人修订级阅读标记及无损高亮分组",
+                "description": "按修订和当前用户严格隔离。已有私人记录在下架后仍可整理；无个人历史且文件不可读时返回 404。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功，Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarksResult"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "文件或本人标记不存在"
+                    },
+                    "409": {
+                        "description": "版本冲突，details 包含 current_version 和 deleted；不覆盖、不复活删除项"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/reading-marks/{revisionId}/{markId}": {
+            "put": {
+                "summary": "幂等保存书签、高亮和批注",
+                "description": "客户端生成固定 markId；创建 base_version=0，更新使用当前 version。完全相同的最近请求重试不增加版本。正文下架后不能创建新标记，但可编辑已有私人标记。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "markId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/books.SaveBookReadingMarkInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功，Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarkDTO"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "文件或本人标记不存在"
+                    },
+                    "409": {
+                        "description": "版本冲突，details 包含 current_version 和 deleted；不覆盖、不复活删除项"
+                    }
+                }
+            },
+            "delete": {
+                "summary": "带版本删除标记，防止离线旧请求复活",
+                "description": "删除记录保留版本，原请求可重试。过期版本不能删除新编辑；旧 PUT 不得重新创建已删除标记。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "markId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "base_version",
+                        "in": "query",
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 1,
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功，Cache-Control: private, no-store",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "$ref": "#/definitions/books.BookReadingMarkTombstone"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "文件或本人标记不存在"
+                    },
+                    "409": {
+                        "description": "版本冲突，details 包含 current_version 和 deleted；不覆盖、不复活删除项"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/selections/{workId}": {
+            "get": {
+                "summary": "读取个人固定修订",
+                "description": "无个人选择时 data 为 null。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "work_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "asset_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "revision_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "updated_at": {
+                                            "type": "string",
+                                            "format": "date-time"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或文件不存在"
+                    }
+                }
+            },
+            "put": {
+                "summary": "显式选择个人文件修订",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "asset_id",
+                                "revision_id"
+                            ],
+                            "properties": {
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "work_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "asset_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "revision_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "updated_at": {
+                                            "type": "string",
+                                            "format": "date-time"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或文件不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/reading-sessions": {
+            "post": {
+                "summary": "创建幂等设备阅读会话",
+                "description": "相同用户和 client_session_id 重试返回原会话；换设备或修订返回 409。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "client_session_id",
+                                "revision_id",
+                                "device_id"
+                            ],
+                            "properties": {
+                                "client_session_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "device_id": {
+                                    "type": "string",
+                                    "maxLength": 128
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "session": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string",
+                                                    "format": "uuid"
+                                                },
+                                                "client_session_id": {
+                                                    "type": "string",
+                                                    "format": "uuid"
+                                                },
+                                                "revision_id": {
+                                                    "type": "string",
+                                                    "format": "uuid"
+                                                },
+                                                "device_id": {
+                                                    "type": "string"
+                                                },
+                                                "last_sequence": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                },
+                                                "heartbeat_sequence": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                }
+                                            }
+                                        },
+                                        "state": {
+                                            "type": "object",
+                                            "properties": {
+                                                "revision_id": {
+                                                    "type": "string",
+                                                    "format": "uuid"
+                                                },
+                                                "epub_cfi": {
+                                                    "type": "string"
+                                                },
+                                                "pdf_page": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                },
+                                                "txt_offset": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                },
+                                                "current_percent": {
+                                                    "type": "number",
+                                                    "minimum": 0,
+                                                    "maximum": 1
+                                                },
+                                                "furthest_percent": {
+                                                    "type": "number",
+                                                    "minimum": 0,
+                                                    "maximum": 1
+                                                },
+                                                "version": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                },
+                                                "updated_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或文件不存在"
+                    },
+                    "409": {
+                        "description": "会话重复使用、请求 ID 复用或云端版本冲突"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/me/reading-states/{revisionId}": {
+            "get": {
+                "summary": "读取本人修订级云端进度",
+                "description": "文件下架后仍可读取本人已有历史，不能读取他人状态。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "revision_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "epub_cfi": {
+                                            "type": "string"
+                                        },
+                                        "pdf_page": {
+                                            "type": "integer",
+                                            "format": "int64",
+                                            "minimum": 0
+                                        },
+                                        "txt_offset": {
+                                            "type": "integer",
+                                            "format": "int64",
+                                            "minimum": 0
+                                        },
+                                        "current_percent": {
+                                            "type": "number",
+                                            "minimum": 0,
+                                            "maximum": 1
+                                        },
+                                        "furthest_percent": {
+                                            "type": "number",
+                                            "minimum": 0,
+                                            "maximum": 1
+                                        },
+                                        "version": {
+                                            "type": "integer",
+                                            "format": "int64",
+                                            "minimum": 0
+                                        },
+                                        "updated_at": {
+                                            "type": "string",
+                                            "format": "date-time"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或文件不存在"
+                    }
+                }
+            },
+            "put": {
+                "summary": "幂等同步云端阅读进度",
+                "description": "同请求重试返回原回执（可能不是最新版本）；乱序位置不覆盖，最远进度单调增长；跨设备版本冲突返回 409 和 details.state，客户端须由用户选择，不能静默覆盖。EPUB 使用 CFI，PDF/漫画使用从 1 开始的页码，TXT 使用非负偏移。",
+                "tags": [
+                    "books-reading"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "session_id",
+                                "request_id",
+                                "sequence",
+                                "base_version",
+                                "current_percent"
+                            ],
+                            "properties": {
+                                "session_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "request_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "sequence": {
+                                    "type": "integer",
+                                    "format": "int64",
+                                    "minimum": 1
+                                },
+                                "base_version": {
+                                    "type": "integer",
+                                    "format": "int64",
+                                    "minimum": 0
+                                },
+                                "epub_cfi": {
+                                    "type": "string"
+                                },
+                                "pdf_page": {
+                                    "type": "integer",
+                                    "format": "int64",
+                                    "minimum": 0
+                                },
+                                "txt_offset": {
+                                    "type": "integer",
+                                    "format": "int64",
+                                    "minimum": 0
+                                },
+                                "current_percent": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                },
+                                "furthest_percent": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "state": {
+                                            "type": "object",
+                                            "properties": {
+                                                "revision_id": {
+                                                    "type": "string",
+                                                    "format": "uuid"
+                                                },
+                                                "epub_cfi": {
+                                                    "type": "string"
+                                                },
+                                                "pdf_page": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                },
+                                                "txt_offset": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                },
+                                                "current_percent": {
+                                                    "type": "number",
+                                                    "minimum": 0,
+                                                    "maximum": 1
+                                                },
+                                                "furthest_percent": {
+                                                    "type": "number",
+                                                    "minimum": 0,
+                                                    "maximum": 1
+                                                },
+                                                "version": {
+                                                    "type": "integer",
+                                                    "format": "int64",
+                                                    "minimum": 0
+                                                },
+                                                "updated_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                }
+                                            }
+                                        },
+                                        "position_applied": {
+                                            "type": "boolean"
+                                        },
+                                        "duplicate": {
+                                            "type": "boolean"
+                                        },
+                                        "ignored_reason": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品或文件不存在"
+                    },
+                    "409": {
+                        "description": "会话重复使用、请求 ID 复用或云端版本冲突"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/{workId}/reading-recommendation": {
+            "get": {
+                "summary": "推荐适配的阅读文件",
+                "description": "个人固定修订优先，其次匹配语言及社区默认，最后按适配格式稳定选择。下架或不支持的个人文件不会自动替换。无文件返回 200 和 no_readable_asset。GET 不写入个人选择；响应 private, no-store。",
+                "tags": [
+                    "books-reading"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    {
+                        "name": "language",
+                        "in": "query",
+                        "type": "string",
+                        "description": "BCP47 语言"
+                    },
+                    {
+                        "name": "formats",
+                        "in": "query",
+                        "type": "string",
+                        "description": "逗号分隔客户端支持格式，默认 epub,pdf,txt"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "data": {
+                                    "type": "object",
+                                    "properties": {
+                                        "work_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "selection": {
+                                            "type": "object",
+                                            "properties": {
+                                                "work_id": {
+                                                    "type": "string",
+                                                    "format": "uuid"
+                                                },
+                                                "asset_id": {
+                                                    "type": "string",
+                                                    "format": "uuid"
+                                                },
+                                                "revision_id": {
+                                                    "type": "string",
+                                                    "format": "uuid"
+                                                },
+                                                "updated_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                }
+                                            }
+                                        },
+                                        "asset": {
+                                            "type": "object"
+                                        },
+                                        "revision_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        },
+                                        "available": {
+                                            "type": "boolean"
+                                        },
+                                        "source": {
+                                            "type": "string",
+                                            "enum": [
+                                                "none",
+                                                "personal",
+                                                "community_default",
+                                                "automatic"
+                                            ]
+                                        },
+                                        "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                                "no_readable_asset",
+                                                "selected_unavailable",
+                                                "selected_format_unsupported"
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效"
+                    },
+                    "404": {
+                        "description": "作品或文件不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/{workId}/assets": {
+            "get": {
+                "summary": "列出作品可读的独立电子书",
+                "tags": [
+                    "books-assets"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "可读电子书列表，不包含内部存储地址"
+                    },
+                    "404": {
+                        "description": "作品不存在"
+                    }
+                }
+            },
+            "post": {
+                "summary": "创建独立电子书，不要求出版版本",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "title": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string",
+                                    "enum": [
+                                        "epub",
+                                        "pdf",
+                                        "txt",
+                                        "cbz",
+                                        "cbr"
+                                    ]
+                                },
+                                "language": {
+                                    "type": "string",
+                                    "description": "BCP 47 语言代码，省略时为 und"
+                                }
+                            },
+                            "required": [
+                                "format"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "独立电子书元数据；上传后通过安全检查才可读"
+                    },
+                    "400": {
+                        "description": "无效格式或语言"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/assets/{assetId}/upload-sessions": {
+            "post": {
+                "summary": "为指定电子书追加文件修订，不覆盖旧修订",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "assetId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "public_distribution_confirmed": {
+                                    "type": "boolean",
+                                    "enum": [
+                                        true
+                                    ]
+                                }
+                            },
+                            "required": [
+                                "file_name",
+                                "content_type",
+                                "size",
+                                "public_distribution_confirmed"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "分片上传会话",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer"
+                                },
+                                "part_size": {
+                                    "type": "integer"
+                                },
+                                "completed_parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_number": {
+                                                "type": "integer"
+                                            },
+                                            "etag": {
+                                                "type": "string"
+                                            },
+                                            "size": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    }
+                                },
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "uploading",
+                                        "completing",
+                                        "uploaded",
+                                        "scanning",
+                                        "ready",
+                                        "failed",
+                                        "quarantined"
+                                    ]
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "error_message": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "未确认分享权限或文件格式不匹配"
+                    },
+                    "503": {
+                        "description": "私有存储不可用"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/upload-sessions/{uploadId}": {
+            "get": {
+                "summary": "获取本人上传与自动安全检查状态",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "本人会话",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer"
+                                },
+                                "part_size": {
+                                    "type": "integer"
+                                },
+                                "completed_parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_number": {
+                                                "type": "integer"
+                                            },
+                                            "etag": {
+                                                "type": "string"
+                                            },
+                                            "size": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    }
+                                },
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "uploading",
+                                        "completing",
+                                        "uploaded",
+                                        "scanning",
+                                        "ready",
+                                        "failed",
+                                        "quarantined"
+                                    ]
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "error_message": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "会话不存在或不属于当前用户"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/upload-sessions/{uploadId}/parts/{partNumber}": {
+            "post": {
+                "summary": "获取分片的短期上传地址",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true,
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "上传地址",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "part_number": {
+                                    "type": "integer"
+                                },
+                                "upload_url": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "上传已过期或状态不可用"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/upload-sessions/{uploadId}/parts/{partNumber}/complete": {
+            "post": {
+                "summary": "幂等登记一个已上传的分片",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true,
+                        "type": "integer"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "etag": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                }
+                            },
+                            "required": [
+                                "etag",
+                                "size"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "会话及已登记分片",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer"
+                                },
+                                "part_size": {
+                                    "type": "integer"
+                                },
+                                "completed_parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_number": {
+                                                "type": "integer"
+                                            },
+                                            "etag": {
+                                                "type": "string"
+                                            },
+                                            "size": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    }
+                                },
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "uploading",
+                                        "completing",
+                                        "uploaded",
+                                        "scanning",
+                                        "ready",
+                                        "failed",
+                                        "quarantined"
+                                    ]
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "error_message": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "分片号、大小或 ETag 无效"
+                    },
+                    "404": {
+                        "description": "会话不属于当前用户"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/upload-sessions/{uploadId}/complete": {
+            "post": {
+                "summary": "完成上传并排入自动安全检查，不经人工审核",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "轮询会话；ready 时包含 revision_id。扫描不可用则保持排队，不公开。",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "file_name": {
+                                    "type": "string"
+                                },
+                                "format": {
+                                    "type": "string"
+                                },
+                                "content_type": {
+                                    "type": "string"
+                                },
+                                "size": {
+                                    "type": "integer"
+                                },
+                                "part_size": {
+                                    "type": "integer"
+                                },
+                                "completed_parts": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "part_number": {
+                                                "type": "integer"
+                                            },
+                                            "etag": {
+                                                "type": "string"
+                                            },
+                                            "size": {
+                                                "type": "integer"
+                                            }
+                                        }
+                                    }
+                                },
+                                "expires_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "uploading",
+                                        "completing",
+                                        "uploaded",
+                                        "scanning",
+                                        "ready",
+                                        "failed",
+                                        "quarantined"
+                                    ]
+                                },
+                                "revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "error_message": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "分片未齐、状态不可用或已过期"
+                    },
+                    "503": {
+                        "description": "合并或校验上传失败，可重试完成"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/{workId}/default-assets/{language}": {
+            "put": {
+                "summary": "按语言设置社区默认文件，不修改读者个人选择",
+                "tags": [
+                    "books-assets"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "language",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "asset_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                }
+                            },
+                            "required": [
+                                "asset_id"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "社区默认文件"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "资源不可读，或不属于该作品/语言"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/wiki/merges/preview": {
+            "post": {
+                "summary": "预览作品合并：仅返回记录数量与预览令牌",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                }
+                            },
+                            "required": [
+                                "source_id",
+                                "target_id"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "重复交互保留目标记录，电子书全部保留",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "preview_token": {
+                                    "type": "string"
+                                },
+                                "conflict_policy": {
+                                    "type": "string",
+                                    "enum": [
+                                        "keep_target"
+                                    ]
+                                },
+                                "record_counts": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                        "type": "integer"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "作品不存在或不是新版活动作品"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/wiki/merges": {
+            "post": {
+                "summary": "执行可撤销的作品合并，无人工审核",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "preview_token": {
+                                    "type": "string"
+                                },
+                                "source_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                }
+                            },
+                            "required": [
+                                "source_id",
+                                "target_id",
+                                "preview_token",
+                                "source_revision_id",
+                                "target_revision_id"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "合并记录（不包含内部恢复快照或私人数据）",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "created_by": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "merged",
+                                        "reverted"
+                                    ]
+                                },
+                                "reverted_by": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "reverted_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "预览后关联数据或修订已改变，请重新预览"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/wiki/merges/{mergeId}/revert": {
+            "post": {
+                "summary": "撤销作品合并，后续关联数据有变化则拒绝覆盖",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "mergeId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "合并已撤销；文件修订级进度不受影响",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "source_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "target_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "created_by": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "merged",
+                                        "reverted"
+                                    ]
+                                },
+                                "reverted_by": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "reverted_at": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "合并不存在"
+                    },
+                    "409": {
+                        "description": "已撤销，或合并后发生新修改"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/wiki/{entityType}/{entityId}/revisions": {
+            "get": {
+                "summary": "获取书目修订、快照和真实字段差异",
+                "tags": [
+                    "books-wiki"
+                ],
+                "parameters": [
+                    {
+                        "name": "entityType",
+                        "in": "path",
+                        "type": "string",
+                        "enum": [
+                            "work",
+                            "edition",
+                            "person"
+                        ],
+                        "required": true
+                    },
+                    {
+                        "name": "entityId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer"
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "修订列表（含 changes 与 snapshot）"
+                    },
+                    "404": {
+                        "description": "条目不存在"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/wiki/revisions/{revisionId}/revert": {
+            "post": {
+                "summary": "回退作品元数据并创建新修订",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "base_revision_id"
+                            ],
+                            "properties": {
+                                "base_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "summary": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "回退后的作品及新 revision_id"
+                    },
+                    "409": {
+                        "description": "当前作品已被其他编辑修改"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/asset-revisions/{revisionId}/content": {
+            "get": {
+                "summary": "读取通过安全检查且未下架的文件修订",
+                "description": "正文从独立私有桶读取，不返回存储 URL；响应 Cache-Control: private, no-store。",
+                "tags": [
+                    "books-reading"
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "parameters": [
+                    {
+                        "name": "revisionId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "正文",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "404": {
+                        "description": "修订不可读或已下架"
+                    },
+                    "503": {
+                        "description": "私有存储不可用"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/assets/{assetId}/revisions": {
+            "get": {
+                "summary": "获取公共电子书的可读修订",
+                "tags": [
+                    "books-reading"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "assetId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "修订列表（不包含存储地址）",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "资源不存在或已下架"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works": {
+            "get": {
+                "summary": "搜索公开作品",
+                "tags": [
+                    "books-catalog"
+                ],
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "type": "string"
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer"
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "作品列表"
+                    }
+                }
+            },
+            "post": {
+                "summary": "使用书名和作者创建公开作品",
+                "description": "无需电子书、导入任务或出版版本。author_ids 与 authors 至少一项非空；authors 用于快速创建作者。",
+                "tags": [
+                    "books-catalog"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "title"
+                            ],
+                            "properties": {
+                                "title": {
+                                    "type": "string"
+                                },
+                                "subtitle": {
+                                    "type": "string"
+                                },
+                                "original_title": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "language": {
+                                    "type": "string"
+                                },
+                                "author_ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                    }
+                                },
+                                "authors": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "作品及 revision_id",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/books.BookPublicWorkDTO"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "revision_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "书名或作者无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/{workId}": {
+            "patch": {
+                "summary": "即时编辑作品并检查并发冲突",
+                "tags": [
+                    "books-wiki"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "base_revision_id"
+                            ],
+                            "properties": {
+                                "base_revision_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                },
+                                "summary": {
+                                    "type": "string"
+                                },
+                                "title": {
+                                    "type": "string"
+                                },
+                                "subtitle": {
+                                    "type": "string"
+                                },
+                                "original_title": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "language": {
+                                    "type": "string"
+                                },
+                                "author_ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "format": "uuid"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "编辑后的公开作品及新 revision_id"
+                    },
+                    "400": {
+                        "description": "基础修订或字段无效"
+                    },
+                    "409": {
+                        "description": "条目已经修改，details.current_revision_id 为最新修订"
+                    }
+                }
+            },
+            "get": {
+                "summary": "获取公开作品和当前修订标识",
+                "tags": [
+                    "books-catalog"
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "作品及 revision_id",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/books.BookPublicWorkDTO"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "revision_id": {
+                                            "type": "string",
+                                            "format": "uuid"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "作品不存在"
+                    },
+                    "308": {
+                        "description": "作品已合并，Location 指向规范作品地址"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/people": {
+            "get": {
+                "summary": "搜索公开作者",
+                "tags": [
+                    "books-catalog"
+                ],
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "type": "string"
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "type": "integer"
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "type": "integer"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "作者列表"
+                    }
+                }
+            },
+            "post": {
+                "summary": "快速创建公开作者",
+                "tags": [
+                    "books-catalog"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "required": [
+                                "name"
+                            ],
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "新建作者"
+                    },
+                    "400": {
+                        "description": "作者名无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/{workId}/editions": {
+            "post": {
+                "summary": "为作品独立添加出版版本",
+                "tags": [
+                    "books-catalog"
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "workId",
+                        "in": "path",
+                        "type": "string",
+                        "required": true
+                    },
+                    {
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "title": {
+                                    "type": "string"
+                                },
+                                "publisher": {
+                                    "type": "string"
+                                },
+                                "producer": {
+                                    "type": "string"
+                                },
+                                "isbn10": {
+                                    "type": "string"
+                                },
+                                "isbn13": {
+                                    "type": "string"
+                                },
+                                "language": {
+                                    "type": "string"
+                                },
+                                "published_date": {
+                                    "type": "string"
+                                },
+                                "binding": {
+                                    "type": "string"
+                                },
+                                "cover_url": {
+                                    "type": "string"
+                                },
+                                "page_count": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "出版版本",
+                        "schema": {
+                            "$ref": "#/definitions/books.BookPublicEditionDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "版本信息无效"
+                    },
+                    "401": {
+                        "description": "需要登录"
+                    },
+                    "404": {
+                        "description": "作品不存在"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/announcements": {
             "get": {
                 "security": [
@@ -5377,3096 +8703,6 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/assets/{assetId}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "只返回当前用户拥有的私有资源元数据，不返回对象存储 key。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-reading"
-                ],
-                "summary": "获取私有电子书资源状态",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "私有资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPrivateAssetDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/assets/{assetId}/content": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "只有资源所有者可以读取已完成处理的私有原始文件；响应不缓存且不生成公共 URL。",
-                "produces": [
-                    "application/epub+zip",
-                    "application/pdf",
-                    "text/plain"
-                ],
-                "tags": [
-                    "books-reading"
-                ],
-                "summary": "读取私有电子书正文",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "私有资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/assets/{assetId}/publication-requests": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "提交权利声明后等待审核。审核通过会创建独立公共资源，原私有资源仍由原用户控制。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-publication"
-                ],
-                "summary": "申请发布公共正文",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "私有资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "授权声明",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.SubmitPublicationInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationRequestDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/assets/{assetId}/reading-state": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-reading"
-                ],
-                "summary": "获取私有电子书阅读位置",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "私有资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookReadingStateDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "阅读位置、笔记和偏好均只属于当前用户。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-reading"
-                ],
-                "summary": "保存私有电子书阅读位置",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "私有资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "阅读状态",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.SaveBookReadingStateInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookReadingStateDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/assets/{assetId}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-reading"
-                ],
-                "summary": "获取公共正文元数据",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublishedAssetDTO"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/assets/{assetId}/content": {
-            "get": {
-                "produces": [
-                    "application/epub+zip",
-                    "application/pdf",
-                    "text/plain"
-                ],
-                "tags": [
-                    "books-reading"
-                ],
-                "summary": "读取公共正文",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/assets/{assetId}/reports": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-publication"
-                ],
-                "summary": "举报公共正文",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "举报理由",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.bookPublicationReportInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationReportDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/editions/{editionId}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-catalog"
-                ],
-                "summary": "获取公共版本",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共版本 UUID",
-                        "name": "editionId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicEditionDetailDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/search": {
-            "get": {
-                "description": "只搜索已公开的作品元数据，不包含私有导入和正文。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-catalog"
-                ],
-                "summary": "搜索公共书目",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "标题、作者或副标题",
-                        "name": "q",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量，最大 50",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "偏移量",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/works": {
-            "post": {
-                "security": [
-                    {"BearerAuth": []},
-                    {"CookieAuth": []}
-                ],
-                "description": "创建后立即进入公共目录；关联的电子书正文在安全处理完成后自动公开。",
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "tags": ["books-catalog"],
-                "summary": "创建公共图书及首个版本",
-                "parameters": [
-                    {
-                        "description": "图书元数据",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {"$ref": "#/definitions/books.CreatePublicBookInput"}
-                    }
-                ],
-                "responses": {
-                    "201": {"description": "Created", "schema": {"$ref": "#/definitions/books.BookPublicWorkDTO"}},
-                    "400": {"description": "Bad Request", "schema": {"$ref": "#/definitions/handlers.ErrorResponse"}},
-                    "401": {"description": "Unauthorized", "schema": {"$ref": "#/definitions/handlers.ErrorResponse"}}
-                }
-            }
-        },
-        "/api/v1/books/catalog/works/{workId}": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-catalog"
-                ],
-                "summary": "获取公共作品",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicWorkDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/works/{workId}/assets": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-reading"
-                ],
-                "summary": "列出公共正文资源",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.PublishedBookAssetListResult"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/works/{workId}/posts": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-catalog"
-                ],
-                "summary": "列出作品相关文章",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPostListResult"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/works/{workId}/posts/{postId}": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-contributions"
-                ],
-                "summary": "关联自己的公开 Blog 文章",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "文章 UUID",
-                        "name": "postId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-contributions"
-                ],
-                "summary": "取消 Blog 文章关联",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "文章 UUID",
-                        "name": "postId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/works/{workId}/rating": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-engagement"
-                ],
-                "summary": "获取当前用户的公共作品评分",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookRatingSummary"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-engagement"
-                ],
-                "summary": "为公共作品评分",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "1 至 10 分，每 1 分对应半星",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.bookRatingInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookRatingSummary"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-engagement"
-                ],
-                "summary": "清除当前用户的公共作品评分",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookRatingSummary"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/works/{workId}/review": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-engagement"
-                ],
-                "summary": "获取我的短书评",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookReviewDTO"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-engagement"
-                ],
-                "summary": "创建或更新公共作品短书评",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "短书评",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.SaveBookReviewInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookReviewDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-engagement"
-                ],
-                "summary": "删除自己的短书评",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/catalog/works/{workId}/reviews": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-engagement"
-                ],
-                "summary": "列出公共作品短书评",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量，最大 50",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "偏移量",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/contributions": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-contributions"
-                ],
-                "summary": "列出我的书目申请",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookEditListResult"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "提交作品、版本或人物资料修订。每次申请至少需要一条可核验来源。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-contributions"
-                ],
-                "summary": "提交书目修订",
-                "parameters": [
-                    {
-                        "description": "书目修订",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.SubmitBookEditInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookEditDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/contributions/{editId}/vote": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-contributions"
-                ],
-                "summary": "对书目申请投票",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "申请 UUID",
-                        "name": "editId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "支持或反对",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.BookEditVoteInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookEditDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/contributions/{editId}/withdraw": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-contributions"
-                ],
-                "summary": "撤回书目申请",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "申请 UUID",
-                        "name": "editId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/imports": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "列出我的私有电子书导入",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/books.BookImportSessionDTO"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "创建用户隔离的 EPUB 或 PDF 分片上传会话。正文不会进入公共书目。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "创建私有电子书导入",
-                "parameters": [
-                    {
-                        "description": "电子书文件信息",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.CreateBookImportInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookImportSessionDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/imports/{importId}": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "获取私有电子书导入状态",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "导入会话 UUID",
-                        "name": "importId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookImportSessionDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "立即撤销读取状态，并删除或终止对应的私有对象存储上传。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "删除私有电子书导入",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "导入会话 UUID",
-                        "name": "importId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/imports/{importId}/catalog-link": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "只保存当前用户导入与已公开作品或版本的关联，不会改变私有正文的可见性。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "关联私有导入与公共书目",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "导入会话 UUID",
-                        "name": "importId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "公共书目关联",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.LinkBookImportInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookImportSessionDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/imports/{importId}/complete": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "完成对象存储分片合并并校验文件魔数。文件进入扫描状态后才会继续解析。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "完成私有电子书上传",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "导入会话 UUID",
-                        "name": "importId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookImportSessionDTO"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/imports/{importId}/parts/{partNumber}": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "获取私有电子书分片上传地址",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "导入会话 UUID",
-                        "name": "importId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "分片序号",
-                        "name": "partNumber",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookUploadPartURL"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/imports/{importId}/parts/{partNumber}/complete": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "记录私有电子书分片上传结果",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "导入会话 UUID",
-                        "name": "importId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "分片序号",
-                        "name": "partNumber",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "分片 ETag 与大小",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.BookUploadPart"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookImportSessionDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/imports/{importId}/retry": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "仅普通处理失败可以重试；病毒隔离资源必须删除后重新提交。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-imports"
-                ],
-                "summary": "重试失败的私有电子书处理",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "导入会话 UUID",
-                        "name": "importId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookImportSessionDTO"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/library": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "书架记录和书架备注只对当前用户可见。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-library"
-                ],
-                "summary": "列出我的书架",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "want_to_read、reading、read、on_hold 或 dropped",
-                        "name": "status",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "偏移量",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookShelfListResult"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/library/continue": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "只返回当前用户拥有且尚未读完的私有资源，不返回其他用户或公共资源信息。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-library"
-                ],
-                "summary": "列出继续阅读项目",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "数量",
-                        "name": "limit",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/books.BookContinueReadingDTO"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/library/works/{workId}": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "仅已公开的作品可以加入当前用户的私有书架。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-library"
-                ],
-                "summary": "保存书架状态",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "书架状态",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.SaveBookShelfInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookShelfItemDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-library"
-                ],
-                "summary": "移出书架",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "作品 UUID",
-                        "name": "workId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/publication-requests": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-publication"
-                ],
-                "summary": "列出我的公共正文申请",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationRequestListResult"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/publication-requests/{requestId}/appeals": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-publication"
-                ],
-                "summary": "列出我的公共正文申诉",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共正文申请 UUID",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationAppealListResult"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "只有原公共正文申请人可以提交申诉；每个被下架资源同时只能有一个待处理申诉。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-publication"
-                ],
-                "summary": "申诉被下架的公共正文",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共正文申请 UUID",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "申诉理由",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.submitPublicationAppealInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationAppealDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/publication-requests/{requestId}/evidence": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "仅申请人和审核人员可读取私有授权证据。",
-                "produces": [
-                    "application/octet-stream"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "获取公共正文授权证据",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "申请 UUID",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "证据文件仅保存到私有 R2 对象存储，不会出现在公共书目接口中。",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-publication"
-                ],
-                "summary": "上传公共正文授权证据",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "申请 UUID",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "file",
-                        "description": "授权证据文件",
-                        "name": "evidence",
-                        "in": "formData",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationRequestDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/contributions": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "列出待审核书目申请",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookEditListResult"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/contributions/{editId}/decision": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "审核者不能批准或驳回自己提交的申请。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "审核书目申请",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "申请 UUID",
-                        "name": "editId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "审核决定",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.reviewBookEditInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookEditDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/publication-appeals": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "列出公共正文申诉审核队列",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationAppealListResult"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/publication-appeals/{appealId}/decision": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "通过申诉会恢复对应公共正文；驳回申诉会保持下架状态。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "审核公共正文申诉",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "申诉 UUID",
-                        "name": "appealId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "审核决定",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.reviewPublicationAppealInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationAppealDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/publication-reports": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "列出公共正文举报",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationReportListResult"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/publication-reports/{reportId}/decision": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "处理公共正文举报",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "举报 UUID",
-                        "name": "reportId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "举报处理决定",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.reviewPublicationInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationReportDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/publication-requests": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "列出公共正文审核申请",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationRequestListResult"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/publication-requests/{requestId}/decision": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "审核通过会复制到独立公共对象存储键，不会把私有对象直接改为公共对象。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "审核公共正文申请",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "申请 UUID",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "审核决定",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.reviewPublicationInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationRequestDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/publication-requests/{requestId}/evidence": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "仅申请人和审核人员可读取私有授权证据。",
-                "produces": [
-                    "application/octet-stream"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "获取公共正文授权证据",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "申请 UUID",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/publication-requests/{requestId}/retention-hold": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "法律保全期间不会删除授权证据或申诉材料；设置和解除操作都会写入不可删除的审核日志。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "设置或解除公共正文保全",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共正文申请 UUID",
-                        "name": "requestId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "保全状态和理由",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.publicationRetentionHoldInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/books.BookPublicationRetentionHoldDTO"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/books/review/published-assets/{assetId}/status": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "books-review"
-                ],
-                "summary": "下架或恢复公共正文",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "公共资源 UUID",
-                        "name": "assetId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "资源状态",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/books.reviewPublicationInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -28520,9 +28756,718 @@ const docTemplate = `{
                     }
                 }
             }
-        }
+        },
+        "/api/v1/books/assets/{assetId}/status": {"patch":{"consumes":["application/json"],"parameters":[{"description":"电子书 UUID","in":"path","name":"assetId","required":true,"type":"string"},{"description":"状态及原因，需版主权限","in":"body","name":"input","required":true,"schema":{"$ref":"#/definitions/books.SetBookResourceStatusInput"}}],"produces":["application/json"],"responses":{"200":{"description":"OK","schema":{"properties":{"data":{"$ref":"#/definitions/model.BookAsset"}},"type":"object"}},"403":{"description":"Forbidden","schema":{"$ref":"#/definitions/handlers.ErrorResponse"}}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"summary":"管理员下架或恢复电子书，保留不可变文件及私人阅读数据","tags":["books-assets"]}},
+        "/api/v1/books/me/reading-marks": {"get":{"parameters":[{"description":"原文、批注或书名搜索","in":"query","name":"q","type":"string"},{"description":"高亮颜色","in":"query","name":"color","type":"string"},{"description":"分页大小","in":"query","name":"limit","type":"integer"},{"description":"分页偏移","in":"query","name":"offset","type":"integer"}],"produces":["application/json"],"responses":{"200":{"description":"成功","schema":{"properties":{"data":{"$ref":"#/definitions/books.BookPrivateHighlightsPage"}},"type":"object"}}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"summary":"跨作品查询本人划线与批注，文件下架不删除私人数据","tags":["books-notes"]}},
+        "/api/v1/books/wiki/{entityType}/{entityId}": {"get":{"parameters":[{"description":"person 或 edition","in":"path","name":"entityType","required":true,"type":"string"},{"description":"实体 UUID","in":"path","name":"entityId","required":true,"type":"string"}],"produces":["application/json"],"responses":{"200":{"description":"OK","schema":{"properties":{"data":{"$ref":"#/definitions/books.BookWikiMetadata"}},"type":"object"}}},"summary":"获取作者或出版版本及其当前修订，解析永久重定向","tags":["books-wiki"]},"patch":{"consumes":["application/json"],"parameters":[{"description":"person 或 edition","in":"path","name":"entityType","required":true,"type":"string"},{"description":"实体 UUID","in":"path","name":"entityId","required":true,"type":"string"},{"description":"基础修订和可编辑字段","in":"body","name":"input","required":true,"schema":{"$ref":"#/definitions/books.PatchBookMetadataInput"}}],"produces":["application/json"],"responses":{"200":{"description":"OK","schema":{"properties":{"data":{"$ref":"#/definitions/books.BookWikiMetadata"}},"type":"object"}},"409":{"description":"Conflict","schema":{"$ref":"#/definitions/handlers.ErrorResponse"}}},"security":[{"BearerAuth":[]},{"CookieAuth":[]}],"summary":"即时编辑作者或出版版本，基础修订过期返回 409","tags":["books-wiki"]}},
+        "/api/v1/books/wiki/{entityType}/{entityId}/merges": {"get":{"parameters":[{"description":"work、person 或 edition","in":"path","name":"entityType","required":true,"type":"string"},{"description":"实体 UUID","in":"path","name":"entityId","required":true,"type":"string"}],"produces":["application/json"],"responses":{"200":{"description":"成功","schema":{"properties":{"data":{"$ref":"#/definitions/books.BookWikiMergePage"}},"type":"object"}}},"summary":"获取实体合并日志，不返回关系快照或私人数据","tags":["books-wiki"]}}
     },
     "definitions": {
+        "books.BookListEntry": {"type":"object","required":["work_id"],"properties":{"work_id":{"type":"string","format":"uuid"},"recommendation":{"type":"string","maxLength":2000}},"description":"顺序即书单排序；保留原始作品 UUID，不关联文件、阅读进度或私人笔记。"},
+        "books.BookListSnapshot": {"type":"object","properties":{"title":{"type":"string","maxLength":120},"description":{"type":"string","maxLength":10000},"items":{"type":"array","maxItems":200,"items":{"$ref":"#/definitions/books.BookListEntry"}}}},
+        "books.SaveBookListDraftInput": {"type":"object","required":["base_version","title"],"properties":{"base_version":{"type":"integer","format":"int64","minimum":0},"title":{"type":"string","maxLength":120},"description":{"type":"string","maxLength":10000},"items":{"type":"array","maxItems":200,"items":{"$ref":"#/definitions/books.BookListEntry"}}},"description":"最多 2 MiB。首次创建用客户端 UUID 和 base_version=0；更新使用当前私人编辑版本。作品必须为可访问的新版书目；同一作品及合并别名不得重复。空书单可保存为草稿，但不能发布。相同内容重试不增加版本，旧版本不同内容返回 409。"},
+        "books.PublishBookListInput": {"type":"object","required":["base_version","visibility"],"properties":{"base_version":{"type":"integer","format":"int64","minimum":1},"visibility":{"type":"string","enum":["public","private"]}},"description":"明确发布已经查看的草稿版本；快照与草稿独立。发布操作也会推进私人编辑版本。原草稿的并发修改会导致 409，相同发布重试不增加发布版本。"},
+        "books.BookListVersionInput": {"type":"object","required":["base_version"],"properties":{"base_version":{"type":"integer","format":"int64","minimum":1}}},
+        "books.BookListDraftDTO": {"type":"object","properties":{"id":{"type":"string","format":"uuid"},"version":{"type":"integer","format":"int64","minimum":1},"published_version":{"type":"integer","format":"int64","minimum":0},"visibility":{"type":"string","enum":["public","private"]},"published_at":{"type":"string","format":"date-time"},"updated_at":{"type":"string","format":"date-time"},"title":{"type":"string","maxLength":120},"description":{"type":"string","maxLength":10000},"items":{"type":"array","maxItems":200,"items":{"$ref":"#/definitions/books.BookListEntry"}}},"description":"仅本人可读的完整草稿。version 用于所有草稿、发布、撤下和删除操作的并发控制；published_version 仅随实际发布推进。删除后原 UUID 不可用于重建或隐式恢复。"},
+        "books.BookListChanges": {"type":"object","properties":{"items_added":{"type":"integer","minimum":0},"items_removed":{"type":"integer","minimum":0},"recommendations_changed":{"type":"integer","minimum":0},"order_changed":{"type":"boolean"},"metadata_changed":{"type":"boolean"}},"description":"最近一次发布的变更计数，不是累计未读差异；从私人状态公开时按首次公开计算，不透露私人发布内容的差异。"},
+        "books.BookListCard": {"type":"object","properties":{"id":{"type":"string","format":"uuid"},"owner_id":{"type":"string","format":"uuid"},"visibility":{"type":"string","enum":["public","private"]},"published_version":{"type":"integer","format":"int64","minimum":1},"title":{"type":"string","maxLength":120},"description":{"type":"string","maxLength":10000},"item_count":{"type":"integer","minimum":1,"maximum":200},"published_at":{"type":"string","format":"date-time"},"changes":{"$ref":"#/definitions/books.BookListChanges"}},"description":"只投影已发布内容，不包含私人编辑版本、草稿及草稿更新时间。发现排序使用 published_at，不使用私人编辑时间。"},
+        "books.BookListItemDTO": {"allOf":[{"$ref":"#/definitions/books.BookListEntry"},{"type":"object","properties":{"canonical_work_id":{"type":"string","format":"uuid","x-nullable":true},"title":{"type":"string"},"available":{"type":"boolean"}}}],"description":"作品合并后保留每条原始推荐语和顺序，canonical_work_id 指向当前可读作品。不可用条目保留 work_id、推荐语，available=false、canonical_work_id=null，不返回已隐藏作品的标题。"},
+        "books.BookListDetail": {"allOf":[{"$ref":"#/definitions/books.BookListCard"},{"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/definitions/books.BookListItemDTO"}}}}]},
+        "books.BookListSearchResult": {"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/definitions/books.BookListCard"}},"total":{"type":"integer","format":"int64","minimum":0},"limit":{"type":"integer"},"offset":{"type":"integer"}}},
+        "books.BookListDraftResult": {"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/definitions/books.BookListDraftDTO"}},"total":{"type":"integer","format":"int64","minimum":0},"limit":{"type":"integer"},"offset":{"type":"integer"}}},
+        "books.SaveBookListBookmarkInput": {"type":"object","properties":{"seen_version":{"type":"integer","format":"int64","minimum":0}},"description":"可省略 seen_version；省略时不确认已读，新收藏从 0 开始，因此可能提示未读。明确提供已查看的 published_version 才推进已读位置；未来版本无效，旧请求不倒退已读版本。"},
+        "books.BookListBookmarkDTO": {"type":"object","properties":{"list":{"$ref":"#/definitions/books.BookListCard"},"seen_version":{"type":"integer","format":"int64","minimum":0},"has_updates":{"type":"boolean"}},"description":"只属于当前读者，不公开收藏关系和阅读状态。has_updates 比较 published_version 和 seen_version，草稿编辑不触发更新。"},
+        "books.BookListBookmarkResult": {"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/definitions/books.BookListBookmarkDTO"}},"total":{"type":"integer","format":"int64","minimum":0},"limit":{"type":"integer"},"offset":{"type":"integer"}}},
+        "books.CreateBookDiscussionPassageInput": {"type":"object","required":["anchor"],"properties":{"anchor":{"$ref":"#/definitions/books.BookReadingMarkAnchor"}},"description":"必须提供所选格式的有效选区：EPUB 起止 CFI、PDF 页码和矩形、TXT UTF-16 起止偏移。只保存定位，不接受私人标注 ID，不复制摘录和笔记。"},
+        "books.BookDiscussionPassageDTO": {"type":"object","properties":{"id":{"type":"string","format":"uuid"},"revision_id":{"type":"string","format":"uuid"},"anchor":{"$ref":"#/definitions/books.BookReadingMarkAnchor"},"target_kind":{"type":"string","enum":["book_passage"]},"comments_path":{"type":"string"}},"description":"同一文件修订和同一规范化选区共享一个讨论 UUID。文件更新不迁移旧选区。通过 comments_path 使用统一评论的回复、点赞、举报与删除能力；任一公开生命周期层下架后拒绝访问。"},
+        "books.BookDiscussionPassageList": {"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/definitions/books.BookDiscussionPassageDTO"}},"total":{"type":"integer","format":"int64"},"limit":{"type":"integer"},"offset":{"type":"integer"}}},
+        "books.LinkBookContentReviewInput": {"type":"object","properties":{"spoiler":{"type":"boolean","default":false}},"description":"长评先经现有博客接口创建和编辑，此接口仅关联本人内容及剧透标记。关联草稿或私有内容不会将其发布。每篇长评仅关联一个原始作品；合并别名共享查询，不重写原始归属。"},
+        "model.BookContentReview": {"type":"object","properties":{"content_id":{"type":"string","format":"uuid"},"work_id":{"type":"string","format":"uuid"},"spoiler":{"type":"boolean"},"created_at":{"type":"string","format":"date-time"},"updated_at":{"type":"string","format":"date-time"}},"description":"只保存统一博客内容 UUID、原始作品归属及剧透标记，不保存正文。合并撤销不会回滚内容或此关系的独立编辑。"},
+        "books.BookContentReviewDTO": {"type":"object","properties":{"content_id":{"type":"string","format":"uuid"},"work_id":{"type":"string","format":"uuid"},"author_id":{"type":"string","format":"uuid"},"title":{"type":"string"},"summary":{"type":"string"},"spoiler":{"type":"boolean"},"published_at":{"type":"string","format":"date-time"},"target_path":{"type":"string"},"target_kind":{"type":"string","enum":["blog_post"]},"comments_path":{"type":"string"}},"description":"ContentEntry 与博客扩展是唯一正文及发布状态权威；此处仅返回公开列表投影。详情与评论使用原博客 UUID，不另建图书长评正文或评论副本。"},
+        "books.BookContentReviewList": {"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/definitions/books.BookContentReviewDTO"}},"total":{"type":"integer","format":"int64"},"limit":{"type":"integer"},"offset":{"type":"integer"}}},
+        "books.BookWorkRatingDTO": {"type":"object","description":"仅统计活跃未删除账号的有效评分；每账号每作品一票。使用最新已发布信誉批次的 evaluation_weight，无快照时为 0.2。weighted_rating_score 无正权重时为 null；不足六人仍可显示参考分，但 rating_active=false，不进入正式高分榜。作品创建者是元数据编辑者，不等同于图书作者，因此不排除其评分。","properties":{"work_id":{"type":"string","format":"uuid"},"rating_score":{"type":"number","description":"有效评分的算术平均，保留一位小数"},"rating_count":{"type":"integer","format":"int64","minimum":0},"weighted_rating_score":{"type":"number","x-nullable":true,"description":"信誉加权平均，保留一位小数，无正权重时为 null"},"rating_active":{"type":"boolean"},"minimum_rating_count":{"type":"integer","enum":[6]},"viewer_rating":{"type":"integer","minimum":1,"maximum":10,"description":"仅返回当前登录用户自己的评分，匿名时省略"}}},
+        "books.BookRatingRankingItem": {"allOf":[{"$ref":"#/definitions/books.BookWorkRatingDTO"},{"type":"object","properties":{"title":{"type":"string"}}}]},
+        "books.BookRatingRankingResult": {"type":"object","properties":{"items":{"type":"array","items":{"$ref":"#/definitions/books.BookRatingRankingItem"}},"total":{"type":"integer","format":"int64"},"limit":{"type":"integer"},"offset":{"type":"integer"}}},
+        "books.BookReadingHeartbeatInput": {
+            "type": "object",
+            "required": [
+                "sequence",
+                "visible",
+                "active"
+            ],
+            "properties": {
+                "sequence": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                },
+                "visible": {
+                    "type": "boolean",
+                    "description": "客户端报告阅读器处于前台"
+                },
+                "active": {
+                    "type": "boolean",
+                    "description": "客户端报告近期有人机交互，不是防作弊证明"
+                }
+            },
+            "description": "建议每 15 秒发送。服务端不接受客户端时长和时间戳，只累计同会话前后均活跃、间隔不超过 30 秒的整秒时长。"
+        },
+        "books.BookReadingHeartbeatResult": {
+            "type": "object",
+            "properties": {
+                "last_sequence": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "credited_seconds": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "ignored": {
+                    "type": "boolean"
+                }
+            },
+            "description": "credited_seconds 仅为此次新增加的秒数，重复或乱序请求为 0；总量应从统计接口获取。"
+        },
+        "books.BookReadingStatistics": {
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "enum": [
+                        "UTC"
+                    ]
+                },
+                "from": {
+                    "type": "string",
+                    "format": "date"
+                },
+                "to": {
+                    "type": "string",
+                    "format": "date"
+                },
+                "total_seconds": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "days": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "day": {
+                                "type": "string",
+                                "format": "date"
+                            },
+                            "seconds": {
+                                "type": "integer",
+                                "format": "int64",
+                                "minimum": 0
+                            }
+                        }
+                    }
+                },
+                "works": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "work_id": {
+                                "type": "string",
+                                "format": "uuid"
+                            },
+                            "title": {
+                                "type": "string"
+                            },
+                            "seconds": {
+                                "type": "integer",
+                                "format": "int64",
+                                "minimum": 0
+                            }
+                        }
+                    }
+                }
+            },
+            "description": "仅当前用户的数据；按 UTC 自然日和当前作品归属汇总，含首尾最多 366 天。作品合并撤销不回滚修订级计时。"
+        },
+        "books.PublishBookPrivateNoteInput": {
+            "type": "object",
+            "required": [
+                "request_id",
+                "base_version",
+                "channel_id",
+                "confirm_public"
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "base_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                },
+                "channel_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "collection_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "confirm_public": {
+                    "type": "boolean",
+                    "enum": [
+                        true
+                    ]
+                }
+            },
+            "description": "必须明确确认公开，并提供已查看的私人笔记版本和本人频道。可指定该频道的合集，缺省使用系统默认合集。"
+        },
+        "books.BookNotePublicationDTO": {
+            "type": "object",
+            "properties": {
+                "content_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "target_path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "duplicate": {
+                    "type": "boolean"
+                }
+            },
+            "description": "内容以 ContentEntry 和博客正文扩展为唯一权威。只复制标题和正文，不复制私人标签、笔记 ID、文件来源或阅读状态。私人笔记后续编辑、删除和过期清理不修改公开副本。"
+        },
+        "books.SaveBookLibraryEntryInput": {
+            "type": "object",
+            "required": [
+                "status",
+                "base_version"
+            ],
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "base_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "want_to_read",
+                        "reading",
+                        "read",
+                        "on_hold",
+                        "dropped"
+                    ]
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                }
+            },
+            "description": "首次创建 base_version=0，entry_id 不填；更新需原条目 ID 和当前版本。已删除条目用其 ID 和删除后的版本显式重新加入。"
+        },
+        "books.BookLibraryEntryDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "work_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "work_title": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "books.SaveBookPrivateNoteInput": {
+            "type": "object",
+            "required": [
+                "work_id",
+                "base_version"
+            ],
+            "properties": {
+                "base_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "work_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "source_revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "body": {
+                    "type": "string",
+                    "maxLength": 200000
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                }
+            },
+            "description": "标题和正文至少一个非空。笔记与作品关联，source_revision_id 仅为可选来源。创建 base_version=0，编辑使用当前版本；不得跨作品迁移或隐式发布。"
+        },
+        "books.BookPrivateNoteDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "work_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "source_revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "body": {
+                    "type": "string",
+                    "maxLength": 200000
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "trashed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            },
+            "description": "work_id 是原始作品 ID，合并时不改写，作品筛选会解析合并别名。私人标签和正文只返回给本人。"
+        },
+        "books.BookNoteTransferItem": {
+            "type": "object",
+            "required": [
+                "id",
+                "work_id"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "work_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "source_revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "body": {
+                    "type": "string",
+                    "maxLength": 200000
+                },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 48
+                    }
+                }
+            }
+        },
+        "books.BookNoteExport": {
+            "type": "object",
+            "properties": {
+                "schema_version": {
+                    "type": "integer",
+                    "enum": [
+                        1
+                    ]
+                },
+                "exported_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "notes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookNoteTransferItem"
+                    }
+                }
+            },
+            "description": "仅导出当前用户的有效私人笔记，不含回收站、用户身份和私人阅读进度。"
+        },
+        "books.ImportBookPrivateNotesInput": {
+            "type": "object",
+            "required": [
+                "request_id",
+                "schema_version",
+                "notes"
+            ],
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "schema_version": {
+                    "type": "integer",
+                    "enum": [
+                        1
+                    ]
+                },
+                "notes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "items": {
+                        "$ref": "#/definitions/books.BookNoteTransferItem"
+                    }
+                }
+            },
+            "description": "每批最多 500 条和 8 MiB；来源作品和可选文件修订必须存在且可访问，不创建外部书目。"
+        },
+        "books.BookNoteImportResult": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "description": "新建的本人笔记 UUID"
+                },
+                "skipped": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "description": "内容相同的来源 UUID"
+                },
+                "conflicts": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "description": "已有不同内容或已删除的来源 UUID，不覆盖"
+                },
+                "duplicate": {
+                    "type": "boolean"
+                }
+            },
+            "description": "不同用户的导入笔记使用独立 ID。相同请求 UUID 重试返回原结果，复用请求 UUID 修改内容返回 409。"
+        },
+        "books.BookReadingMarkAnchor": {
+            "type": "object",
+            "description": "只填写对应格式字段。EPUB 为两个文档/文本点 CFI（不接受逗号范围或音视频空间 CFI）；PDF/漫画页码从 1 开始，矩形按未旋转页面坐标归一化到 0..1；TXT 为 UTF-16 半开区间。书签只填起点或页码。",
+            "properties": {
+                "epub_start_cfi": {
+                    "type": "string"
+                },
+                "epub_end_cfi": {
+                    "type": "string"
+                },
+                "pdf_page": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "pdf_rects": {
+                    "type": "array",
+                    "maxItems": 1000,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "x",
+                            "y",
+                            "width",
+                            "height"
+                        ],
+                        "properties": {
+                            "x": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            },
+                            "y": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            },
+                            "width": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            },
+                            "height": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            }
+                        }
+                    }
+                },
+                "txt_offset_start": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "txt_offset_end": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                }
+            }
+        },
+        "books.SaveBookReadingMarkInput": {
+            "type": "object",
+            "required": [
+                "base_version",
+                "kind",
+                "anchor"
+            ],
+            "properties": {
+                "base_version": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "bookmark",
+                        "highlight"
+                    ]
+                },
+                "anchor": {
+                    "$ref": "#/definitions/books.BookReadingMarkAnchor"
+                },
+                "label": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "quote": {
+                    "type": "string",
+                    "maxLength": 50000,
+                    "description": "高亮必填原文；书签不填"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "color": {
+                    "type": "string",
+                    "enum": [
+                        "yellow",
+                        "green",
+                        "blue",
+                        "pink"
+                    ],
+                    "description": "仅高亮，默认 yellow"
+                },
+                "style": {
+                    "type": "string",
+                    "enum": [
+                        "highlight",
+                        "underline"
+                    ],
+                    "description": "仅高亮，默认 highlight"
+                }
+            }
+        },
+        "books.BookReadingMarkDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "bookmark",
+                        "highlight"
+                    ]
+                },
+                "anchor": {
+                    "$ref": "#/definitions/books.BookReadingMarkAnchor"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "quote": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "style": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "books.BookReadingMarkTombstone": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "format": "int64"
+                },
+                "deleted_at": {
+                    "type": "string",
+                    "format": "date-time"
+                }
+            }
+        },
+        "books.BookHighlightGroup": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "member_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "anchor": {
+                    "$ref": "#/definitions/books.BookReadingMarkAnchor"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "style": {
+                    "type": "string"
+                }
+            }
+        },
+        "books.BookReadingMarksResult": {
+            "type": "object",
+            "description": "items 保留每条原始划线、书签和批注；highlight_groups 仅用于同色同样式重叠高亮的合并显示，不丢失原始记录；deleted 供客户端移除缓存。",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookReadingMarkDTO"
+                    }
+                },
+                "highlight_groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookHighlightGroup"
+                    }
+                },
+                "deleted": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookReadingMarkTombstone"
+                    }
+                }
+            }
+        },
         "blog.BlogBookmarkDTO": {
             "type": "object",
             "properties": {
@@ -42397,7 +43342,48 @@ const docTemplate = `{
                     }
                 }
             }
-        }
+        },
+        "books.BookAnnotationDTO": {"properties":{"asset_id":{"type":"string"},"book_author":{"type":"string"},"book_title":{"type":"string"},"chapter_title":{"type":"string"},"color":{"type":"string"},"created_at":{"type":"string"},"epub_cfi":{"type":"string"},"format":{"type":"string"},"id":{"type":"string"},"note":{"type":"string"},"pdf_page":{"type":"integer"},"pdf_rects":{"type":"string"},"style":{"type":"string"},"text":{"type":"string"},"txt_offset_end":{"type":"integer"},"txt_offset_start":{"type":"integer"},"updated_at":{"type":"string"},"work_id":{"type":"string"}},"type":"object"},
+        "books.BookAnnotationListResult": {"properties":{"items":{"items":{"$ref":"#/definitions/books.BookAnnotationDTO"},"type":"array"},"total":{"type":"integer"}},"type":"object"},
+        "books.BookPDFRect": {"properties":{"height":{"type":"number"},"width":{"type":"number"},"x":{"type":"number"},"y":{"type":"number"}},"type":"object"},
+        "books.BookPrivateHighlightsPage": {"properties":{"items":{"items":{"$ref":"#/definitions/books.BookPrivateMarkItem"},"type":"array"},"total":{"format":"int64","type":"integer"}},"type":"object"},
+        "books.BookPrivateMarkItem": {"allOf":[{"$ref":"#/definitions/books.BookReadingMarkDTO"},{"properties":{"asset_id":{"format":"uuid","type":"string"},"work_id":{"format":"uuid","type":"string"},"work_title":{"type":"string"}},"type":"object"}]},
+        "books.BookPublicPublisherDTO": {"properties":{"id":{"type":"string"},"name":{"type":"string"}},"type":"object"},
+        "books.BookReadingDayDTO": {"properties":{"day":{"type":"string"},"seconds":{"type":"integer"}},"type":"object"},
+        "books.BookReadingRecommendation": {"properties":{"asset":{"$ref":"#/definitions/model.BookAsset"},"available":{"type":"boolean"},"reason":{"type":"string"},"revision_id":{"type":"string"},"selection":{"$ref":"#/definitions/model.BookReadingSelection"},"source":{"type":"string"},"work_id":{"type":"string"}},"type":"object"},
+        "books.BookReadingSessionDTO": {"properties":{"session":{"$ref":"#/definitions/model.BookReadingSession"},"state":{"$ref":"#/definitions/model.BookReadingState"}},"type":"object"},
+        "books.BookReadingWorkDTO": {"properties":{"seconds":{"type":"integer"},"title":{"type":"string"},"work_id":{"type":"string"}},"type":"object"},
+        "books.BookReadingWriteResult": {"properties":{"duplicate":{"type":"boolean"},"ignored_reason":{"type":"string"},"position_applied":{"type":"boolean"},"state":{"$ref":"#/definitions/model.BookReadingState"}},"type":"object"},
+        "books.BookResourceUploadDTO": {"properties":{"asset_id":{"type":"string"},"completed_parts":{"items":{"$ref":"#/definitions/books.BookUploadPart"},"type":"array"},"content_type":{"type":"string"},"created_at":{"type":"string"},"error_message":{"type":"string"},"expires_at":{"type":"string"},"file_name":{"type":"string"},"format":{"type":"string"},"id":{"type":"string"},"part_size":{"type":"integer"},"revision_id":{"type":"string"},"size":{"type":"integer"},"status":{"type":"string"},"updated_at":{"type":"string"}},"type":"object"},
+        "books.BookWikiMergePage": {"properties":{"items":{"items":{"$ref":"#/definitions/model.BookWikiMerge"},"type":"array"}},"type":"object"},
+        "books.BookWikiMetadata": {"properties":{"entity_id":{"type":"string"},"entity_type":{"type":"string"},"fields":{"type":"object"},"redirected_from":{"type":"string"},"revision_id":{"type":"string"}},"type":"object"},
+        "books.BookWorkDetail": {"properties":{"authors":{"items":{"$ref":"#/definitions/books.BookPublicPersonDTO"},"type":"array"},"description":{"type":"string"},"editions":{"items":{"$ref":"#/definitions/books.BookPublicEditionDTO"},"type":"array"},"id":{"type":"string"},"language":{"type":"string"},"lifecycle_status":{"type":"string"},"original_title":{"type":"string"},"rating_count":{"type":"integer"},"rating_score":{"type":"number"},"redirected_from":{"type":"string"},"related_posts":{"items":{"$ref":"#/definitions/books.BookPublicPostDTO"},"type":"array"},"revision_id":{"type":"string"},"sources":{"items":{"$ref":"#/definitions/books.BookPublicSourceDTO"},"type":"array"},"subtitle":{"type":"string"},"title":{"type":"string"}},"type":"object"},
+        "books.BookWorkMergePreview": {"properties":{"conflict_policy":{"type":"string"},"preview_token":{"type":"string"},"record_counts":{"additionalProperties":{"type":"integer"},"type":"object"},"source_id":{"type":"string"},"source_revision_id":{"type":"string"},"target_id":{"type":"string"},"target_revision_id":{"type":"string"}},"type":"object"},
+        "books.CreateBookAnnotationInput": {"properties":{"chapter_title":{"type":"string"},"color":{"type":"string"},"epub_cfi":{"type":"string"},"format":{"type":"string"},"note":{"type":"string"},"pdf_page":{"type":"integer"},"pdf_rects":{"type":"string"},"style":{"type":"string"},"text":{"type":"string"},"txt_offset_end":{"type":"integer"},"txt_offset_start":{"type":"integer"}},"type":"object"},
+        "books.CreateBookEditionInput": {"properties":{"binding":{"type":"string"},"cover_url":{"type":"string"},"isbn10":{"type":"string"},"isbn13":{"type":"string"},"language":{"type":"string"},"page_count":{"type":"integer"},"producer":{"type":"string"},"published_date":{"type":"string"},"publisher":{"type":"string"},"title":{"type":"string"}},"type":"object"},
+        "books.CreateBookPersonInput": {"properties":{"description":{"type":"string"},"name":{"type":"string"}},"type":"object"},
+        "books.CreateBookReadingSessionInput": {"properties":{"client_session_id":{"type":"string"},"device_id":{"type":"string"},"revision_id":{"type":"string"}},"type":"object"},
+        "books.CreateBookResourceInput": {"properties":{"format":{"type":"string"},"language":{"type":"string"},"title":{"type":"string"}},"type":"object"},
+        "books.CreateBookResourceUploadInput": {"properties":{"content_type":{"type":"string"},"file_name":{"type":"string"},"public_distribution_confirmed":{"type":"boolean"},"size":{"type":"integer"}},"type":"object"},
+        "books.CreateBookWorkInput": {"properties":{"author_ids":{"items":{"type":"string"},"type":"array"},"authors":{"items":{"type":"string"},"type":"array"},"description":{"type":"string"},"language":{"type":"string"},"original_title":{"type":"string"},"subtitle":{"type":"string"},"title":{"type":"string"}},"type":"object"},
+        "books.MergeBookWorksInput": {"properties":{"entity_type":{"default":"work","enum":["work","person","edition"],"type":"string"},"preview_token":{"type":"string"},"source_id":{"type":"string"},"source_revision_id":{"type":"string"},"target_id":{"type":"string"},"target_revision_id":{"type":"string"}},"type":"object"},
+        "books.PatchBookMetadataInput": {"properties":{"base_revision_id":{"type":"string"},"fields":{"additionalProperties":{"type":"object"},"type":"object"},"summary":{"type":"string"}},"type":"object"},
+        "books.PatchBookWorkInput": {"properties":{"author_ids":{"items":{"type":"string"},"type":"array"},"base_revision_id":{"type":"string"},"description":{"type":"string"},"language":{"type":"string"},"original_title":{"type":"string"},"subtitle":{"type":"string"},"summary":{"type":"string"},"title":{"type":"string"}},"type":"object"},
+        "books.PreviewBookWorkMergeInput": {"properties":{"entity_type":{"default":"work","enum":["work","person","edition"],"type":"string"},"source_id":{"type":"string"},"target_id":{"type":"string"}},"type":"object"},
+        "books.RestoreBookPrivateNoteInput": {"properties":{"base_version":{"type":"integer"}},"type":"object"},
+        "books.RevertBookWikiInput": {"properties":{"base_revision_id":{"type":"string"},"summary":{"type":"string"}},"type":"object"},
+        "books.SaveBookCloudReadingStateInput": {"properties":{"base_version":{"type":"integer"},"current_percent":{"type":"number"},"epub_cfi":{"type":"string"},"furthest_percent":{"type":"number"},"pdf_page":{"type":"integer"},"request_id":{"type":"string"},"sequence":{"type":"integer"},"session_id":{"type":"string"},"txt_offset":{"type":"integer"}},"type":"object"},
+        "books.SetBookDefaultAssetInput": {"properties":{"asset_id":{"type":"string"}},"type":"object"},
+        "books.SetBookReadingSelectionInput": {"properties":{"asset_id":{"type":"string"},"revision_id":{"type":"string"}},"type":"object"},
+        "books.SetBookResourceStatusInput": {"properties":{"reason":{"type":"string"},"status":{"type":"string"}},"type":"object"},
+        "books.UpdateBookAnnotationInput": {"properties":{"color":{"type":"string"},"note":{"type":"string"},"style":{"type":"string"}},"type":"object"},
+        "model.BookAsset": {"properties":{"created_at":{"type":"string"},"created_by":{"type":"string"},"current_revision_id":{"type":"string"},"format":{"type":"string"},"id":{"type":"string"},"language":{"type":"string"},"status":{"type":"string"},"title":{"type":"string"},"updated_at":{"type":"string"},"work_id":{"type":"string"}},"type":"object"},
+        "model.BookDefaultAsset": {"properties":{"asset_id":{"type":"string"},"language":{"type":"string"},"updated_at":{"type":"string"},"updated_by":{"type":"string"},"work_id":{"type":"string"}},"type":"object"},
+        "model.BookPerson": {"properties":{"created_at":{"type":"string"},"created_by":{"type":"string"},"description":{"type":"string"},"id":{"type":"string"},"lifecycle_status":{"type":"string"},"name":{"type":"string"},"redirect_to":{"type":"string"},"sort_name":{"type":"string"},"updated_at":{"type":"string"}},"type":"object"},
+        "model.BookReadingSelection": {"properties":{"asset_id":{"type":"string"},"revision_id":{"type":"string"},"updated_at":{"type":"string"},"work_id":{"type":"string"}},"type":"object"},
+        "model.BookReadingSession": {"properties":{"client_session_id":{"type":"string"},"created_at":{"type":"string"},"device_id":{"type":"string"},"heartbeat_sequence":{"type":"integer"},"id":{"type":"string"},"last_sequence":{"type":"integer"},"revision_id":{"type":"string"},"updated_at":{"type":"string"}},"type":"object"},
+        "model.BookReadingState": {"properties":{"current_percent":{"type":"number"},"epub_cfi":{"type":"string"},"furthest_percent":{"type":"number"},"pdf_page":{"type":"integer"},"revision_id":{"type":"string"},"txt_offset":{"type":"integer"},"updated_at":{"type":"string"},"version":{"type":"integer"}},"type":"object"},
+        "model.BookWikiMerge": {"properties":{"created_at":{"type":"string"},"created_by":{"type":"string"},"id":{"type":"string"},"reverted_at":{"type":"string"},"reverted_by":{"type":"string"},"source_id":{"type":"string"},"source_revision_id":{"type":"string"},"status":{"type":"string"},"target_id":{"type":"string"},"target_revision_id":{"type":"string"},"updated_at":{"type":"string"}},"type":"object"}
     },
     "securityDefinitions": {
         "BearerAuth": {

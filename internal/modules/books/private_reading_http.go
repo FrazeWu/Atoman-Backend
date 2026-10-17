@@ -24,7 +24,6 @@ import (
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/assets/{assetId} [get]
 func (h *Handler) getBookAsset(c *gin.Context) {
 	user, assetID, ok := bookAssetRouteUser(c)
 	if !ok {
@@ -54,7 +53,6 @@ func (h *Handler) getBookAsset(c *gin.Context) {
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 422 {object} handlers.ErrorResponse
 // @Failure 503 {object} handlers.ErrorResponse
-// @Router /api/v1/books/assets/{assetId}/content [get]
 func (h *Handler) getBookAssetContent(c *gin.Context) {
 	user, assetID, ok := bookAssetRouteUser(c)
 	if !ok {
@@ -84,7 +82,6 @@ func (h *Handler) getBookAssetContent(c *gin.Context) {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 422 {object} handlers.ErrorResponse
-// @Router /api/v1/books/assets/{assetId}/reading-state [get]
 func (h *Handler) getBookReadingState(c *gin.Context) {
 	user, assetID, ok := bookAssetRouteUser(c)
 	if !ok {
@@ -113,7 +110,6 @@ func (h *Handler) getBookReadingState(c *gin.Context) {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 422 {object} handlers.ErrorResponse
-// @Router /api/v1/books/assets/{assetId}/reading-state [put]
 func (h *Handler) saveBookReadingState(c *gin.Context) {
 	user, assetID, ok := bookAssetRouteUser(c)
 	if !ok {
