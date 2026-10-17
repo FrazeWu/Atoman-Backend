@@ -83,5 +83,3 @@ GEOIP_DB_PATH=/var/lib/atoman/geoip/GeoLite2-City.mmdb
 go build -o start_server ./cmd/start_server
 ./start_server --mode prod
 ```
-
-开发计划见 [ROADMAP.md](./ROADMAP.md)。
