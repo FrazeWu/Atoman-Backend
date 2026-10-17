@@ -273,6 +273,11 @@ func (r *Registry) searchUserTargets(query string, limit int) ([]Target, error) 
 
 func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search string, limit int) ([]Target, error) {
 	like := searchContainsPattern(search)
+	fullUUID, prefixUUID := inspectUUIDQuery(search)
+	var exactUUID uuid.UUID
+	if fullUUID {
+		exactUUID, _ = uuid.Parse(strings.TrimSpace(search))
+	}
 	var query *gorm.DB
 	switch targetType {
 	case "post":
@@ -323,13 +328,25 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 			Where("redirect_to IS NULL AND LOWER(name) LIKE ? ESCAPE '\\'", like).
 			Select("id, name AS label")
 	case "album":
-		query = visibleMusicWikiEntries(r.db.Model(&model.Album{}), viewer, "uploaded_by").
-			Where("LOWER(title) LIKE ? ESCAPE '\\'", like).
-			Select("id, title AS label")
+		query = visibleMusicWikiEntries(r.db.Model(&model.Album{}), viewer, "uploaded_by")
+		if fullUUID {
+			query = query.Where("(LOWER(title) LIKE ? ESCAPE '\\' OR id = ?)", like, exactUUID)
+		} else if prefixUUID {
+			query = query.Where("(LOWER(title) LIKE ? ESCAPE '\\' OR CAST(id AS text) LIKE ? ESCAPE '\\')", like, searchPrefixPattern(search))
+		} else {
+			query = query.Where("LOWER(title) LIKE ? ESCAPE '\\'", like)
+		}
+		query = query.Select("id, title AS label")
 	case "song":
-		query = visibleMusicWikiEntries(r.db.Model(&model.Song{}), viewer, "uploaded_by").
-			Where("LOWER(title) LIKE ? ESCAPE '\\'", like).
-			Select("id, title AS label, album_id")
+		query = visibleMusicWikiEntries(r.db.Model(&model.Song{}), viewer, "uploaded_by")
+		if fullUUID {
+			query = query.Where("(LOWER(title) LIKE ? ESCAPE '\\' OR id = ?)", like, exactUUID)
+		} else if prefixUUID {
+			query = query.Where("(LOWER(title) LIKE ? ESCAPE '\\' OR CAST(id AS text) LIKE ? ESCAPE '\\')", like, searchPrefixPattern(search))
+		} else {
+			query = query.Where("LOWER(title) LIKE ? ESCAPE '\\'", like)
+		}
+		query = query.Select("id, title AS label, album_id")
 	case "playlist":
 		query = r.db.Model(&model.Playlist{}).
 			Where("LOWER(music_playlists.name) LIKE ? ESCAPE '\\'", like)
@@ -352,9 +369,15 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 			query = query.Where("posts.visibility IN ? OR "+contentmodule.PodcastAuthorColumn(r.db)+" = ?", []string{"", "public"}, viewer.UserID)
 		}
 	case "video":
-		query = contentmodule.VideoQuery(r.db).
-			Where("posts.status = ? AND LOWER(posts.title) LIKE ? ESCAPE '\\'", "published", like).
-			Select("videos.video_id AS id, posts.title AS label")
+		query = contentmodule.VideoQuery(r.db)
+		if fullUUID {
+			query = query.Where("posts.status = ? AND (LOWER(posts.title) LIKE ? ESCAPE '\\' OR videos.video_id = ? OR posts.id = ?)", "published", like, exactUUID, exactUUID)
+		} else if prefixUUID {
+			query = query.Where("posts.status = ? AND (LOWER(posts.title) LIKE ? ESCAPE '\\' OR CAST(videos.video_id AS text) LIKE ? ESCAPE '\\' OR CAST(posts.id AS text) LIKE ? ESCAPE '\\')", "published", like, searchPrefixPattern(search), searchPrefixPattern(search))
+		} else {
+			query = query.Where("posts.status = ? AND LOWER(posts.title) LIKE ? ESCAPE '\\'", "published", like)
+		}
+		query = query.Select("videos.video_id AS id, posts.title AS label")
 		if viewer.UserID == uuid.Nil {
 			query = query.Where("posts.visibility IN ?", []string{"", "public"})
 		} else {
@@ -385,9 +408,13 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 	}
 
 	var rankingColumns []string
+	var idColumns []string
 	switch targetType {
-	case "post", "episode", "video":
+	case "post", "episode":
 		rankingColumns = []string{"posts.title"}
+	case "video":
+		rankingColumns = []string{"posts.title"}
+		idColumns = []string{"videos.video_id", "posts.id"}
 	case "short_note":
 		rankingColumns = []string{"short_notes.content"}
 	case "thread":
@@ -402,8 +429,10 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 		rankingColumns = []string{"artists.name"}
 	case "album":
 		rankingColumns = []string{"albums.title"}
+		idColumns = []string{"id"}
 	case "song":
 		rankingColumns = []string{"songs.title"}
+		idColumns = []string{"id"}
 	case "playlist":
 		rankingColumns = []string{"music_playlists.name"}
 	case "podcast":
@@ -430,7 +459,7 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 	default:
 		orderColumn = "created_at"
 	}
-	query = applySearchRanking(query, rankingColumns, search)
+	query = applySearchRankingWithIDs(query, idColumns, rankingColumns, search)
 	var rows []searchTargetRow
 	if err := query.Order(orderColumn + " DESC").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, err
@@ -818,6 +847,29 @@ func searchPrefixPattern(value string) string {
 	return escapedSearchTerm(value) + "%"
 }
 
+func inspectUUIDQuery(value string) (isFullUUID bool, isPrefix bool) {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if len(trimmed) == 0 {
+		return false, false
+	}
+	if _, err := uuid.Parse(trimmed); err == nil {
+		return true, false
+	}
+	if len(trimmed) >= 4 {
+		validHex := true
+		for _, r := range trimmed {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || r == '-') {
+				validHex = false
+				break
+			}
+		}
+		if validHex {
+			return false, true
+		}
+	}
+	return false, false
+}
+
 func withContentEntryOwner(query *gorm.DB, db *gorm.DB, alias string) (*gorm.DB, string) {
 	if contentmodule.CurrentMediaSchema(db).ContentEntryAuthor {
 		return query, alias + ".author_id"
@@ -828,20 +880,46 @@ func withContentEntryOwner(query *gorm.DB, db *gorm.DB, alias string) (*gorm.DB,
 }
 
 func applySearchRanking(query *gorm.DB, columns []string, value string) *gorm.DB {
+	return applySearchRankingWithIDs(query, nil, columns, value)
+}
+
+func applySearchRankingWithIDs(query *gorm.DB, idColumns []string, columns []string, value string) *gorm.DB {
 	exact := strings.ToLower(strings.TrimSpace(value))
-	if exact == "" || len(columns) == 0 {
+	if exact == "" || (len(columns) == 0 && len(idColumns) == 0) {
 		return query
 	}
 	prefix := searchPrefixPattern(value)
-	parts := make([]string, 0, len(columns)*2+1)
-	args := make([]interface{}, 0, len(columns)*2)
+	fullUUID, prefixUUID := inspectUUIDQuery(value)
+	var exactUUID uuid.UUID
+	if fullUUID {
+		exactUUID, _ = uuid.Parse(exact)
+	}
+
+	parts := make([]string, 0, len(idColumns)+len(columns)*2+1)
+	args := make([]interface{}, 0, len(idColumns)+len(columns)*2)
+
+	if fullUUID && len(idColumns) > 0 {
+		for _, col := range idColumns {
+			parts = append(parts, "WHEN "+col+" = ? THEN 0")
+			args = append(args, exactUUID)
+		}
+	}
+
 	for _, column := range columns {
-		parts = append(parts, "WHEN LOWER(COALESCE("+column+", '')) = ? THEN 0")
+		parts = append(parts, "WHEN LOWER(COALESCE("+column+", '')) = ? THEN 1")
 		args = append(args, exact)
-		parts = append(parts, "WHEN LOWER(COALESCE("+column+", '')) LIKE ? ESCAPE '\\' THEN 1")
+		parts = append(parts, "WHEN LOWER(COALESCE("+column+", '')) LIKE ? ESCAPE '\\' THEN 2")
 		args = append(args, prefix)
 	}
-	parts = append(parts, "ELSE 2 END ASC")
+
+	if prefixUUID && len(idColumns) > 0 {
+		for _, col := range idColumns {
+			parts = append(parts, "WHEN CAST("+col+" AS text) LIKE ? ESCAPE '\\' THEN 3")
+			args = append(args, prefix)
+		}
+	}
+
+	parts = append(parts, "ELSE 4 END ASC")
 	return query.Order(gorm.Expr("CASE "+strings.Join(parts, " "), args...))
 }
 
