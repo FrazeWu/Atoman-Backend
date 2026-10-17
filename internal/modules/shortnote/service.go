@@ -35,11 +35,16 @@ func (s *Service) Create(user authctx.CurrentUser, input noteInput) (NoteDTO, er
 	if user.ID == uuid.Nil {
 		return NoteDTO{}, apperr.Unauthorized("Login required")
 	}
-	content, mediaURLs, err := validateInput(input)
+	content, mediaURLs, attachType, attachID, err := validateInput(input)
 	if err != nil {
 		return NoteDTO{}, err
 	}
-	note := model.ShortNote{UserID: user.ID, Content: content}
+	note := model.ShortNote{
+		UserID:              user.ID,
+		Content:             content,
+		MediaAttachmentType: attachType,
+		MediaAttachmentID:   attachID,
+	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&note).Error; err != nil {
 			return err
@@ -92,7 +97,7 @@ func (s *Service) Get(id, viewerID uuid.UUID) (NoteDTO, error) {
 }
 
 func (s *Service) Update(user authctx.CurrentUser, id uuid.UUID, input noteInput) (NoteDTO, error) {
-	content, mediaURLs, err := validateInput(input)
+	content, mediaURLs, attachType, attachID, err := validateInput(input)
 	if err != nil {
 		return NoteDTO{}, err
 	}
@@ -101,10 +106,17 @@ func (s *Service) Update(user authctx.CurrentUser, id uuid.UUID, input noteInput
 		return NoteDTO{}, err
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&note).Update("content", content).Error; err != nil {
+		updates := map[string]any{
+			"content":               content,
+			"media_attachment_type": attachType,
+			"media_attachment_id":   attachID,
+		}
+		if err := tx.Model(&note).Updates(updates).Error; err != nil {
 			return err
 		}
 		note.Content = content
+		note.MediaAttachmentType = attachType
+		note.MediaAttachmentID = attachID
 		if err := tx.Where("short_note_id = ?", note.ID).Delete(&model.ShortNoteMedia{}).Error; err != nil {
 			return err
 		}
@@ -237,7 +249,27 @@ func (s *Service) dto(note model.ShortNote, viewerID uuid.UUID) (NoteDTO, error)
 	for _, item := range note.Media {
 		media = append(media, MediaDTO{ID: item.ID, URL: item.URL, Position: item.Position})
 	}
-	return NoteDTO{ID: note.ID, UserID: note.UserID, User: note.User, Content: note.Content, Media: media, LikesCount: likesCount, DislikesCount: dislikesCount, VoteScore: likesCount - dislikesCount, ViewerVote: viewerVote, CommentsCount: commentsCount, Liked: liked, Edited: note.UpdatedAt.After(note.CreatedAt), CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt}, nil
+	mediaAttachment, err := s.resolveMediaAttachment(note)
+	if err != nil {
+		return NoteDTO{}, err
+	}
+	return NoteDTO{
+		ID:              note.ID,
+		UserID:          note.UserID,
+		User:            note.User,
+		Content:         note.Content,
+		Media:           media,
+		MediaAttachment: mediaAttachment,
+		LikesCount:      likesCount,
+		DislikesCount:   dislikesCount,
+		VoteScore:       likesCount - dislikesCount,
+		ViewerVote:      viewerVote,
+		CommentsCount:   commentsCount,
+		Liked:           liked,
+		Edited:          note.UpdatedAt.After(note.CreatedAt),
+		CreatedAt:       note.CreatedAt,
+		UpdatedAt:       note.UpdatedAt,
+	}, nil
 }
 
 func (s *Service) voteSummary(noteID, viewerID uuid.UUID) (int64, int64, string, error) {
@@ -280,15 +312,30 @@ func (s *Service) voteSummary(noteID, viewerID uuid.UUID) (int64, int64, string,
 	return likesCount, dislikesCount, viewerVote, nil
 }
 
-func validateInput(input noteInput) (string, []string, error) {
+func validateInput(input noteInput) (string, []string, *string, *uuid.UUID, error) {
 	content := strings.TrimSpace(input.Content)
 	if content == "" || len([]rune(content)) > maxContentRunes {
-		return "", nil, apperr.BadRequest("validation.invalid_request", "content must be between 1 and 500 characters")
+		return "", nil, nil, nil, apperr.BadRequest("validation.invalid_request", "content must be between 1 and 500 characters")
 	}
 	if len(input.MediaURLs) > maxMediaURLs {
-		return "", nil, apperr.BadRequest("validation.invalid_request", "media_urls must contain at most 9 items")
+		return "", nil, nil, nil, apperr.BadRequest("validation.invalid_request", "media_urls must contain at most 9 items")
 	}
-	return content, input.MediaURLs, nil
+	var attachType *string
+	var attachID *uuid.UUID
+	if input.MediaAttachmentType != nil && strings.TrimSpace(*input.MediaAttachmentType) != "" {
+		t := strings.TrimSpace(*input.MediaAttachmentType)
+		if t != "song" && t != "album" && t != "video" {
+			return "", nil, nil, nil, apperr.BadRequest("validation.invalid_request", "media_attachment_type must be song, album, or video")
+		}
+		if input.MediaAttachmentID == nil || *input.MediaAttachmentID == uuid.Nil {
+			return "", nil, nil, nil, apperr.BadRequest("validation.invalid_request", "media_attachment_id is required when media_attachment_type is set")
+		}
+		attachType = &t
+		attachID = input.MediaAttachmentID
+	} else if input.MediaAttachmentID != nil && *input.MediaAttachmentID != uuid.Nil {
+		return "", nil, nil, nil, apperr.BadRequest("validation.invalid_request", "media_attachment_type is required when media_attachment_id is set")
+	}
+	return content, input.MediaURLs, attachType, attachID, nil
 }
 
 func createMedia(tx *gorm.DB, noteID uuid.UUID, urls []string) error {
@@ -300,10 +347,111 @@ func createMedia(tx *gorm.DB, noteID uuid.UUID, urls []string) error {
 	return nil
 }
 
+func (s *Service) resolveMediaAttachment(note model.ShortNote) (*MediaAttachmentDTO, error) {
+	if note.MediaAttachmentType == nil || note.MediaAttachmentID == nil || *note.MediaAttachmentType == "" || *note.MediaAttachmentID == uuid.Nil {
+		return nil, nil
+	}
+	switch *note.MediaAttachmentType {
+	case "song":
+		var row struct {
+			ID          uuid.UUID `gorm:"column:id"`
+			Title       string    `gorm:"column:title"`
+			DurationSec int       `gorm:"column:duration_sec"`
+			AudioURL    string    `gorm:"column:audio_url"`
+			CoverURL    string    `gorm:"column:cover_url"`
+		}
+		err := s.db.Table("songs").Select("id, title, duration_sec, audio_url, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
+		if err != nil {
+			if err2 := s.db.Table("\"Songs\"").Select("id, title, duration_sec, audio_url, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error; err2 == nil {
+				err = nil
+			}
+		}
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return &MediaAttachmentDTO{Type: "song", ID: *note.MediaAttachmentID}, nil
+			}
+			return nil, err
+		}
+		return &MediaAttachmentDTO{
+			Type:     "song",
+			ID:       row.ID,
+			Title:    row.Title,
+			CoverURL: row.CoverURL,
+			AudioURL: row.AudioURL,
+			Duration: row.DurationSec,
+		}, nil
+	case "album":
+		var row struct {
+			ID       uuid.UUID `gorm:"column:id"`
+			Title    string    `gorm:"column:title"`
+			CoverURL string    `gorm:"column:cover_url"`
+		}
+		err := s.db.Table("albums").Select("id, title, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
+		if err != nil {
+			if err2 := s.db.Table("\"Albums\"").Select("id, title, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error; err2 == nil {
+				err = nil
+			}
+		}
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return &MediaAttachmentDTO{Type: "album", ID: *note.MediaAttachmentID}, nil
+			}
+			return nil, err
+		}
+		return &MediaAttachmentDTO{
+			Type:     "album",
+			ID:       row.ID,
+			Title:    row.Title,
+			CoverURL: row.CoverURL,
+		}, nil
+	case "video":
+		var row struct {
+			ID           uuid.UUID `gorm:"column:id"`
+			Title        string    `gorm:"column:title"`
+			ThumbnailURL string    `gorm:"column:thumbnail_url"`
+			DurationSec  int       `gorm:"column:duration_sec"`
+		}
+		err := s.db.Table("videos").Select("id, title, thumbnail_url, duration_sec").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return &MediaAttachmentDTO{Type: "video", ID: *note.MediaAttachmentID}, nil
+			}
+			return nil, err
+		}
+		return &MediaAttachmentDTO{
+			Type:     "video",
+			ID:       row.ID,
+			Title:    row.Title,
+			CoverURL: row.ThumbnailURL,
+			Duration: row.DurationSec,
+		}, nil
+	default:
+		return nil, nil
+	}
+}
+
 func (s *Service) syncShortNoteReferences(tx *gorm.DB, note model.ShortNote) ([]reference.ResolvedReference, error) {
-	return s.references.ReplacePublished(tx, reference.Source{
+	refs, err := s.references.ReplacePublished(tx, reference.Source{
 		Type: "short_note", ID: note.ID, ActorID: note.UserID, Audience: reference.AudiencePublic,
 		MentionNotificationType: "content_mention", NotificationSourceType: "content_reference_short_note",
 		Meta: map[string]interface{}{"module": "blog", "path": "/posts/notes/" + note.ID.String()},
 	}, []reference.Field{{Name: "content", Content: note.Content}})
+	if err != nil {
+		return nil, err
+	}
+	if note.MediaAttachmentType != nil && note.MediaAttachmentID != nil && *note.MediaAttachmentType != "" && *note.MediaAttachmentID != uuid.Nil {
+		ref := model.ContentReference{
+			SourceType:  "short_note",
+			SourceID:    note.ID,
+			SourceField: "media_attachment",
+			TargetType:  *note.MediaAttachmentType,
+			TargetID:    *note.MediaAttachmentID,
+			StartOffset: 0,
+			EndOffset:   0,
+		}
+		if err := tx.Create(&ref).Error; err != nil {
+			return nil, err
+		}
+	}
+	return refs, nil
 }

@@ -8,9 +8,21 @@ import (
 	"github.com/google/uuid"
 )
 
+type MediaAttachmentDTO struct {
+	Type     string    `json:"type"`
+	ID       uuid.UUID `json:"id"`
+	Title    string    `json:"title"`
+	Subtitle string    `json:"subtitle,omitempty"`
+	CoverURL string    `json:"cover_url,omitempty"`
+	AudioURL string    `json:"audio_url,omitempty"`
+	Duration int       `json:"duration,omitempty"`
+}
+
 type noteInput struct {
-	Content   string   `json:"content"`
-	MediaURLs []string `json:"media_urls"`
+	Content             string     `json:"content"`
+	MediaURLs           []string   `json:"media_urls"`
+	MediaAttachmentType *string    `json:"media_attachment_type"`
+	MediaAttachmentID   *uuid.UUID `json:"media_attachment_id"`
 }
 
 type voteInput struct {
@@ -18,20 +30,21 @@ type voteInput struct {
 }
 
 type NoteDTO struct {
-	ID            uuid.UUID   `json:"id"`
-	UserID        uuid.UUID   `json:"user_id"`
-	User          *model.User `json:"user,omitempty"`
-	Content       string      `json:"content"`
-	Media         []MediaDTO  `json:"media"`
-	LikesCount    int64       `json:"likes_count"`
-	DislikesCount int64       `json:"dislikes_count"`
-	VoteScore     int64       `json:"vote_score"`
-	ViewerVote    string      `json:"viewer_vote"`
-	CommentsCount int         `json:"comments_count"`
-	Liked         bool        `json:"liked"`
-	Edited        bool        `json:"edited"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	ID              uuid.UUID           `json:"id"`
+	UserID          uuid.UUID           `json:"user_id"`
+	User            *model.User         `json:"user,omitempty"`
+	Content         string              `json:"content"`
+	Media           []MediaDTO          `json:"media"`
+	MediaAttachment *MediaAttachmentDTO `json:"media_attachment,omitempty"`
+	LikesCount      int64               `json:"likes_count"`
+	DislikesCount   int64               `json:"dislikes_count"`
+	VoteScore       int64               `json:"vote_score"`
+	ViewerVote      string              `json:"viewer_vote"`
+	CommentsCount   int                 `json:"comments_count"`
+	Liked           bool                `json:"liked"`
+	Edited          bool                `json:"edited"`
+	CreatedAt       time.Time           `json:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at"`
 }
 
 type MediaDTO struct {

@@ -39687,6 +39687,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/model.ShortNoteMedia"
                     }
                 },
+                "media_attachment_id": {
+                    "type": "string"
+                },
+                "media_attachment_type": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -43948,6 +43954,32 @@ const docTemplate = `{
                 }
             }
         },
+        "shortnote.MediaAttachmentDTO": {
+            "type": "object",
+            "properties": {
+                "audio_url": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "duration": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "subtitle": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "shortnote.MediaDTO": {
             "type": "object",
             "properties": {
@@ -43994,6 +44026,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/shortnote.MediaDTO"
                     }
+                },
+                "media_attachment": {
+                    "$ref": "#/definitions/shortnote.MediaAttachmentDTO"
                 },
                 "updated_at": {
                     "type": "string"

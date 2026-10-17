@@ -7115,6 +7115,10 @@ definitions:
         items:
           $ref: '#/definitions/model.ShortNoteMedia'
         type: array
+      media_attachment_id:
+        type: string
+      media_attachment_type:
+        type: string
       updated_at:
         type: string
       user:
@@ -9919,6 +9923,23 @@ definitions:
       total:
         type: integer
     type: object
+  shortnote.MediaAttachmentDTO:
+    properties:
+      audio_url:
+        type: string
+      cover_url:
+        type: string
+      duration:
+        type: integer
+      id:
+        type: string
+      subtitle:
+        type: string
+      title:
+        type: string
+      type:
+        type: string
+    type: object
   shortnote.MediaDTO:
     properties:
       id:
@@ -9950,6 +9971,8 @@ definitions:
         items:
           $ref: '#/definitions/shortnote.MediaDTO'
         type: array
+      media_attachment:
+        $ref: '#/definitions/shortnote.MediaAttachmentDTO'
       updated_at:
         type: string
       user:

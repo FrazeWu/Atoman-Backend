@@ -300,3 +300,198 @@ func TestShortNoteUpdateRefreshesMentionsAndNotifiesNewTarget(t *testing.T) {
 		t.Fatalf("expected 1 mention notification for bob after update, got %d", bobCount)
 	}
 }
+
+func TestCreateAndGetShortNoteWithMediaAttachment(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	router := newShortNoteHTTPRouter(service, &user)
+
+	// 创建测试歌曲
+	songID := uuid.New()
+	db.Exec("CREATE TABLE IF NOT EXISTS songs (id uuid PRIMARY KEY, title text, duration_sec integer, audio_url text, cover_url text, lifecycle_status text)")
+	db.Exec("INSERT INTO songs (id, title, duration_sec, audio_url, cover_url, lifecycle_status) VALUES (?, ?, ?, ?, ?, ?)",
+		songID, "测试歌曲", 180, "https://example.com/audio.mp3", "https://example.com/cover.jpg", "active")
+
+	body := map[string]any{
+		"content":               "分享一首好歌",
+		"media_urls":            []string{},
+		"media_attachment_type": "song",
+		"media_attachment_id":   songID.String(),
+	}
+	payload, _ := json.Marshal(body)
+	res := shortNoteRequest(t, router, "POST", "/api/v1/short-notes", string(payload))
+	if res.Code != http.StatusCreated && res.Code != http.StatusOK {
+		t.Fatalf("expected 200/201, got %d: %s", res.Code, res.Body.String())
+	}
+
+	var resData struct {
+		Data NoteDTO `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &resData); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resData.Data.MediaAttachment == nil {
+		t.Fatalf("expected media_attachment to be non-nil")
+	}
+	if resData.Data.MediaAttachment.Type != "song" || resData.Data.MediaAttachment.ID != songID {
+		t.Errorf("unexpected media attachment: %+v", resData.Data.MediaAttachment)
+	}
+	if resData.Data.MediaAttachment.Title != "测试歌曲" {
+		t.Errorf("expected title '测试歌曲', got %q", resData.Data.MediaAttachment.Title)
+	}
+	if resData.Data.MediaAttachment.Duration != 180 {
+		t.Errorf("expected duration 180, got %d", resData.Data.MediaAttachment.Duration)
+	}
+
+	// GET 验证
+	noteID := resData.Data.ID
+	getRes := shortNoteRequest(t, router, "GET", "/api/v1/short-notes/"+noteID.String(), "")
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", getRes.Code, getRes.Body.String())
+	}
+	var getData struct {
+		Data NoteDTO `json:"data"`
+	}
+	if err := json.Unmarshal(getRes.Body.Bytes(), &getData); err != nil {
+		t.Fatalf("unmarshal get response: %v", err)
+	}
+	if getData.Data.MediaAttachment == nil || getData.Data.MediaAttachment.ID != songID {
+		t.Fatalf("expected GET media attachment with songID, got %+v", getData.Data.MediaAttachment)
+	}
+
+	// content_references 验证
+	var refs []model.ContentReference
+	if err := db.Where("source_type = ? AND source_id = ? AND source_field = ?", "short_note", noteID, "media_attachment").Find(&refs).Error; err != nil {
+		t.Fatalf("query content_references: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 media attachment reference, got %d", len(refs))
+	}
+	if refs[0].TargetType != "song" || refs[0].TargetID != songID {
+		t.Errorf("unexpected reference target: %+v", refs[0])
+	}
+}
+
+func TestShortNoteMediaAttachmentValidation(t *testing.T) {
+	service, _, user := newShortNoteHTTPTestService(t)
+	router := newShortNoteHTTPRouter(service, &user)
+
+	// 无效类型
+	w := shortNoteRequest(t, router, http.MethodPost, "/api/v1/short-notes", `{"content":"test","media_attachment_type":"invalid","media_attachment_id":"`+uuid.New().String()+`"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid type, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 提供了类型但缺少 ID
+	w = shortNoteRequest(t, router, http.MethodPost, "/api/v1/short-notes", `{"content":"test","media_attachment_type":"song"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing ID, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 提供了 ID 但缺少类型
+	w = shortNoteRequest(t, router, http.MethodPost, "/api/v1/short-notes", `{"content":"test","media_attachment_id":"`+uuid.New().String()+`"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing type, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestShortNoteMediaAttachmentAlbumAndVideo(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	router := newShortNoteHTTPRouter(service, &user)
+
+	// 测试专辑附件
+	albumID := uuid.New()
+	db.Exec("CREATE TABLE IF NOT EXISTS albums (id uuid PRIMARY KEY, title text, cover_url text)")
+	db.Exec("INSERT INTO albums (id, title, cover_url) VALUES (?, ?, ?)", albumID, "测试专辑", "https://example.com/album.jpg")
+
+	albumBody := map[string]any{
+		"content":               "分享一张好专辑",
+		"media_attachment_type": "album",
+		"media_attachment_id":   albumID.String(),
+	}
+	payload, _ := json.Marshal(albumBody)
+	res := shortNoteRequest(t, router, "POST", "/api/v1/short-notes", string(payload))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", res.Code, res.Body.String())
+	}
+	var albumRes struct {
+		Data NoteDTO `json:"data"`
+	}
+	_ = json.Unmarshal(res.Body.Bytes(), &albumRes)
+	if albumRes.Data.MediaAttachment == nil || albumRes.Data.MediaAttachment.Type != "album" || albumRes.Data.MediaAttachment.ID != albumID || albumRes.Data.MediaAttachment.Title != "测试专辑" {
+		t.Fatalf("unexpected album media attachment: %+v", albumRes.Data.MediaAttachment)
+	}
+
+	// 测试视频附件
+	videoID := uuid.New()
+	db.Exec("CREATE TABLE IF NOT EXISTS videos (id uuid PRIMARY KEY, title text, thumbnail_url text, duration_sec integer)")
+	db.Exec("INSERT INTO videos (id, title, thumbnail_url, duration_sec) VALUES (?, ?, ?, ?)", videoID, "测试视频", "https://example.com/video.jpg", 120)
+
+	videoBody := map[string]any{
+		"content":               "分享一段视频",
+		"media_attachment_type": "video",
+		"media_attachment_id":   videoID.String(),
+	}
+	payload, _ = json.Marshal(videoBody)
+	res = shortNoteRequest(t, router, "POST", "/api/v1/short-notes", string(payload))
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", res.Code, res.Body.String())
+	}
+	var videoRes struct {
+		Data NoteDTO `json:"data"`
+	}
+	_ = json.Unmarshal(res.Body.Bytes(), &videoRes)
+	if videoRes.Data.MediaAttachment == nil || videoRes.Data.MediaAttachment.Type != "video" || videoRes.Data.MediaAttachment.ID != videoID || videoRes.Data.MediaAttachment.CoverURL != "https://example.com/video.jpg" || videoRes.Data.MediaAttachment.Duration != 120 {
+		t.Fatalf("unexpected video media attachment: %+v", videoRes.Data.MediaAttachment)
+	}
+}
+
+func TestShortNoteUpdateMediaAttachment(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	router := newShortNoteHTTPRouter(service, &user)
+
+	songID1 := uuid.New()
+	songID2 := uuid.New()
+	db.Exec("CREATE TABLE IF NOT EXISTS songs (id uuid PRIMARY KEY, title text, duration_sec integer, audio_url text, cover_url text, lifecycle_status text)")
+	db.Exec("INSERT INTO songs (id, title, duration_sec, audio_url, cover_url, lifecycle_status) VALUES (?, ?, ?, ?, ?, ?)",
+		songID1, "歌曲1", 100, "https://example.com/1.mp3", "https://example.com/c1.jpg", "active")
+	db.Exec("INSERT INTO songs (id, title, duration_sec, audio_url, cover_url, lifecycle_status) VALUES (?, ?, ?, ?, ?, ?)",
+		songID2, "歌曲2", 200, "https://example.com/2.mp3", "https://example.com/c2.jpg", "active")
+
+	body := map[string]any{
+		"content":               "初始短笺",
+		"media_attachment_type": "song",
+		"media_attachment_id":   songID1.String(),
+	}
+	payload, _ := json.Marshal(body)
+	createRes := shortNoteRequest(t, router, "POST", "/api/v1/short-notes", string(payload))
+	noteID := responseID(t, createRes)
+
+	// 更新为歌曲2
+	updateBody := map[string]any{
+		"content":               "更新后的短笺",
+		"media_attachment_type": "song",
+		"media_attachment_id":   songID2.String(),
+	}
+	payload, _ = json.Marshal(updateBody)
+	updateRes := shortNoteRequest(t, router, "PUT", "/api/v1/short-notes/"+noteID, string(payload))
+	if updateRes.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", updateRes.Code, updateRes.Body.String())
+	}
+	var updateData struct {
+		Data NoteDTO `json:"data"`
+	}
+	_ = json.Unmarshal(updateRes.Body.Bytes(), &updateData)
+	if updateData.Data.MediaAttachment == nil || updateData.Data.MediaAttachment.ID != songID2 || updateData.Data.MediaAttachment.Title != "歌曲2" {
+		t.Fatalf("expected media attachment updated to song 2, got %+v", updateData.Data.MediaAttachment)
+	}
+
+	// 验证 content_references 只有歌曲2
+	var refs []model.ContentReference
+	if err := db.Where("source_type = ? AND source_id = ? AND source_field = ?", "short_note", noteID, "media_attachment").Find(&refs).Error; err != nil {
+		t.Fatalf("load refs: %v", err)
+	}
+	if len(refs) != 1 || refs[0].TargetID != songID2 {
+		t.Fatalf("expected 1 reference pointing to songID2, got %+v", refs)
+	}
+}
+
