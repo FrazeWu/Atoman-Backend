@@ -19,7 +19,6 @@ import (
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/reviews [get]
 func (h *Handler) listPublicBookReviews(c *gin.Context) {
 	workID, ok := parseCatalogID(c, "workId")
 	if !ok {
@@ -50,7 +49,6 @@ func (h *Handler) listPublicBookReviews(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/rating [put]
 func (h *Handler) setBookRating(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -83,7 +81,6 @@ func (h *Handler) setBookRating(c *gin.Context) {
 // @Success 200 {object} BookRatingSummary
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/rating [get]
 func (h *Handler) getBookRating(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -111,7 +108,6 @@ func (h *Handler) getBookRating(c *gin.Context) {
 // @Success 200 {object} BookRatingSummary
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/rating [delete]
 func (h *Handler) deleteBookRating(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -146,7 +142,6 @@ func (h *Handler) deleteBookRating(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/catalog/works/{workId}/review [put]
 func (h *Handler) saveBookReview(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {

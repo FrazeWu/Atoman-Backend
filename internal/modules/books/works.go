@@ -94,6 +94,21 @@ func resolveBookAuthors(tx *gorm.DB, userID uuid.UUID, ids []uuid.UUID, names []
 	result := make([]uuid.UUID, 0, len(ids)+len(names))
 	seen := map[uuid.UUID]bool{}
 	for _, id := range ids {
+		visited := map[uuid.UUID]bool{}
+		for {
+			if visited[id] {
+				return nil, apperr.Conflict("books.redirect_cycle", "Invalid author redirect")
+			}
+			visited[id] = true
+			var person model.BookPerson
+			if err := tx.Where("id = ?", id).First(&person).Error; err != nil {
+				return nil, publicBookNotFound(err)
+			}
+			if person.LifecycleStatus != model.BookLifecycleStatusMerged || person.RedirectTo == nil {
+				break
+			}
+			id = *person.RedirectTo
+		}
 		if seen[id] {
 			continue
 		}

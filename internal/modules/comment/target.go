@@ -25,6 +25,7 @@ const (
 	TargetKindTimelinePerson = "timeline_person"
 	TargetKindBookWork       = "book_work"
 	TargetKindBookPassage    = "book_passage"
+	TargetKindBookList       = "book_list"
 )
 
 var (

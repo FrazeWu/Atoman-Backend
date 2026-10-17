@@ -30,7 +30,6 @@ type reviewBookEditInput struct {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
-// @Router /api/v1/books/contributions [post]
 func (h *Handler) submitBookEdit(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -56,7 +55,6 @@ func (h *Handler) submitBookEdit(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Success 200 {object} BookEditListResult
-// @Router /api/v1/books/contributions [get]
 func (h *Handler) listMyBookEdits(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -82,7 +80,6 @@ func (h *Handler) listMyBookEdits(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/contributions/{editId}/withdraw [post]
 func (h *Handler) withdrawBookEdit(c *gin.Context) {
 	user, editID, ok := bookEditRouteUser(c)
 	if !ok {
@@ -104,7 +101,6 @@ func (h *Handler) withdrawBookEdit(c *gin.Context) {
 // @Success 200 {object} BookEditListResult
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/contributions [get]
 func (h *Handler) listBookEditReviewQueue(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -134,7 +130,6 @@ func (h *Handler) listBookEditReviewQueue(c *gin.Context) {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/contributions/{editId}/decision [post]
 func (h *Handler) reviewBookEdit(c *gin.Context) {
 	user, editID, ok := bookEditRouteUser(c)
 	if !ok {

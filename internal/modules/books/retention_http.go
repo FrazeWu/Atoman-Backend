@@ -29,7 +29,6 @@ type publicationRetentionHoldInput struct {
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/publication-requests/{requestId}/retention-hold [post]
 func (h *Handler) setPublicationRetentionHold(c *gin.Context) {
 	user, requestID, ok := publicationRequestRouteUser(c)
 	if !ok {

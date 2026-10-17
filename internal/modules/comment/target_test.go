@@ -170,6 +170,7 @@ func TestTargetRegistryRegistersExactlySupportedKinds(t *testing.T) {
 		TargetKindTimelinePerson,
 		TargetKindBookWork,
 		TargetKindBookPassage,
+		TargetKindBookList,
 	}
 	require.Len(t, registry.resolvers, len(want))
 	for _, kind := range want {

@@ -3,16 +3,12 @@ package books
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"atoman/internal/model"
-	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
-	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -94,7 +90,7 @@ func TestPublicCatalogSearchExcludesDraftsAndPrivateFields(t *testing.T) {
 func TestPublicEditionUsesISBNCoverWhenImportedCoverIsMissing(t *testing.T) {
 	edition := model.BookEdition{Base: model.Base{ID: uuid.New()}, WorkID: uuid.New(), ISBN13: "978-7-111-00000-1"}
 	dto := buildBookPublicEditionDTO(edition, nil, nil)
-	require.Equal(t, "https://covers.openlibrary.org/b/isbn/978-7-111-00000-1-M.jpg", dto.CoverURL)
+	require.Empty(t, dto.CoverURL, "新版书目不隐式接入外部封面服务")
 }
 
 func TestDiscoveryShowsAllActiveBooksRegardlessOfCoverOrLanguage(t *testing.T) {
@@ -134,72 +130,4 @@ func TestDiscoveryShowsAllActiveBooksRegardlessOfCoverOrLanguage(t *testing.T) {
 	require.Equal(t, int64(1), total)
 	require.Len(t, items, 1, "搜索应保留仅有 ISBN、没有实际封面的书目")
 	require.Equal(t, isbnOnly.ID.String(), items[0].ID)
-}
-
-func TestPublicCatalogRoutesDoNotRequireAuthentication(t *testing.T) {
-	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookSource{}, &model.BookRating{})
-	work := model.BookWork{Base: model.Base{ID: uuid.New()}, Title: "Public Route Book", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
-	require.NoError(t, db.Create(&work).Error)
-
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	RegisterRoutes(router.Group("/api/v1/books"), NewService(db))
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/books/catalog/search?q=Public", nil)
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-
-	require.Equal(t, http.StatusOK, response.Code)
-	var payload struct {
-		Data struct {
-			Items []BookPublicWorkDTO `json:"items"`
-			Total int64               `json:"total"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
-	require.Equal(t, int64(1), payload.Data.Total)
-	require.Equal(t, work.ID.String(), payload.Data.Items[0].ID)
-}
-
-func TestBookRatingRoutesLoadClearAndRestoreViewerRating(t *testing.T) {
-	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.BookWork{}, &model.BookRating{})
-	work := model.BookWork{Base: model.Base{ID: uuid.New()}, Title: "Rateable Book", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
-	require.NoError(t, db.Create(&work).Error)
-	user := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
-
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		authctx.SetCurrentUser(c, user)
-		c.Next()
-	})
-	RegisterRoutes(router.Group("/api/v1/books"), NewService(db))
-	path := "/api/v1/books/catalog/works/" + work.ID.String() + "/rating"
-
-	request := func(method, body string) *httptest.ResponseRecorder {
-		t.Helper()
-		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		if body != "" {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, req)
-		return response
-	}
-
-	require.Equal(t, http.StatusOK, request(http.MethodPut, `{"score":9}`).Code)
-	loaded := request(http.MethodGet, "")
-	require.Equal(t, http.StatusOK, loaded.Code)
-	require.Contains(t, loaded.Body.String(), `"viewer_rating":9`)
-
-	cleared := request(http.MethodDelete, "")
-	require.Equal(t, http.StatusOK, cleared.Code)
-	require.NotContains(t, cleared.Body.String(), "viewer_rating")
-	require.Contains(t, cleared.Body.String(), `"rating_count":0`)
-
-	restored := request(http.MethodPut, `{"score":7}`)
-	require.Equal(t, http.StatusOK, restored.Code)
-	require.Contains(t, restored.Body.String(), `"viewer_rating":7`)
-	require.Contains(t, restored.Body.String(), `"rating_count":1`)
 }

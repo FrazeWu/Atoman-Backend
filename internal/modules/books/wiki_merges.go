@@ -20,8 +20,9 @@ import (
 )
 
 type PreviewBookWorkMergeInput struct {
-	SourceID uuid.UUID `json:"source_id"`
-	TargetID uuid.UUID `json:"target_id"`
+	EntityType string    `json:"entity_type,omitempty"`
+	SourceID   uuid.UUID `json:"source_id"`
+	TargetID   uuid.UUID `json:"target_id"`
 }
 
 type MergeBookWorksInput struct {
@@ -58,6 +59,9 @@ var bookWorkMergeTables = []bookMergeTable{
 	{"user_book_shelves", "work_id IN ?"},
 	{"book_library_entries", "work_id IN ?"},
 	{"book_post_links", "work_id IN ?"},
+	{"discussion_targets", "kind = 'book_work' AND resource_id IN ?"},
+	{"comment_entries", "target_id IN (SELECT id FROM discussion_targets WHERE kind = 'book_work' AND resource_id IN ?)"},
+	{"comment_publish_records", "target_id IN (SELECT id FROM discussion_targets WHERE kind = 'book_work' AND resource_id IN ?)"},
 }
 
 type bookMergeSnapshot map[string]json.RawMessage
@@ -117,6 +121,9 @@ func bookMergePreviewToken(snapshot bookMergeSnapshot, source, target model.Revi
 }
 
 func (s *Service) PreviewBookWorkMerge(ctx context.Context, user authctx.CurrentUser, input PreviewBookWorkMergeInput) (BookWorkMergePreview, error) {
+	if input.EntityType != "" && input.EntityType != "work" {
+		return s.previewBookMetadataMerge(ctx, user, input)
+	}
 	if user.ID == uuid.Nil {
 		return BookWorkMergePreview{}, apperr.Unauthorized("Login required")
 	}
@@ -174,6 +181,9 @@ func lockBookMergeGraph(tx *gorm.DB) error {
 }
 
 func (s *Service) MergeBookWorks(ctx context.Context, user authctx.CurrentUser, input MergeBookWorksInput) (model.BookWikiMerge, error) {
+	if input.EntityType != "" && input.EntityType != "work" {
+		return s.mergeBookMetadata(ctx, user, input)
+	}
 	if user.ID == uuid.Nil {
 		return model.BookWikiMerge{}, apperr.Unauthorized("Login required")
 	}
@@ -235,6 +245,9 @@ func (s *Service) MergeBookWorks(ctx context.Context, user authctx.CurrentUser, 
 }
 
 func moveBookWorkRelations(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
+	if err := mergeBookWorkComments(tx, sourceID, targetID); err != nil {
+		return err
+	}
 	for _, unique := range []struct{ table, key string }{
 		{"book_ratings", "user_id"}, {"book_reviews", "user_id"}, {"user_book_shelves", "user_id"}, {"book_post_links", "post_id"},
 		{"book_default_assets", "language"}, {"book_reading_selections", "user_id"},
@@ -253,7 +266,7 @@ AND s.edition_id IS NOT DISTINCT FROM t.edition_id`, sourceID, targetID).Error; 
 		return err
 	}
 	for _, table := range bookWorkMergeTables {
-		if table.name == "book_works" || table.name == "book_sources" || !tx.Migrator().HasTable(table.name) {
+		if table.name == "book_works" || table.name == "book_sources" || table.name == "discussion_targets" || table.name == "comment_entries" || table.name == "comment_publish_records" || !tx.Migrator().HasTable(table.name) {
 			continue
 		}
 		if err := tx.Exec("UPDATE "+table.name+" SET work_id = ? WHERE work_id = ?", targetID, sourceID).Error; err != nil {
@@ -286,6 +299,13 @@ func appendBookMergeRevisions(tx *gorm.DB, userID, sourceID, targetID uuid.UUID,
 func (s *Service) RevertBookWorkMerge(ctx context.Context, user authctx.CurrentUser, id uuid.UUID) (model.BookWikiMerge, error) {
 	if user.ID == uuid.Nil {
 		return model.BookWikiMerge{}, apperr.Unauthorized("Login required")
+	}
+	var journal model.BookWikiMerge
+	if err := s.db.WithContext(ctx).First(&journal, "id = ?", id).Error; err == nil {
+		var head model.Revision
+		if err := s.db.First(&head, "id = ?", journal.SourceRevisionID).Error; err == nil && head.ContentType != "book_work" {
+			return s.revertBookMetadataMerge(ctx, user, journal, head.ContentType)
+		}
 	}
 	var merge model.BookWikiMerge
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

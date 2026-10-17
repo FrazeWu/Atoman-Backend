@@ -1,6 +1,7 @@
 package books
 
 import (
+	"atoman/internal/model"
 	"net/http"
 
 	"atoman/internal/platform/apperr"
@@ -91,6 +92,16 @@ func (h *Handler) revertBookWikiRevision(c *gin.Context) {
 	var input RevertBookWikiInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid revert request"))
+		return
+	}
+	var target model.Revision
+	if err := h.service.db.Where("id = ? AND content_type IN ? AND status = 'approved'", id, []string{"book_person", "book_edition"}).First(&target).Error; err == nil {
+		result, err := h.service.RevertBookMetadata(c.Request.Context(), user, target, input)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		httpx.OK(c, http.StatusOK, result)
 		return
 	}
 	work, err := h.service.RevertBookWikiRevision(c.Request.Context(), user, id, input)

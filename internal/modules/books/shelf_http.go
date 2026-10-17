@@ -25,7 +25,6 @@ import (
 // @Param offset query int false "偏移量"
 // @Success 200 {object} BookShelfListResult
 // @Failure 401 {object} handlers.ErrorResponse
-// @Router /api/v1/books/library [get]
 func (h *Handler) listBookShelf(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -50,7 +49,6 @@ func (h *Handler) listBookShelf(c *gin.Context) {
 // @Param limit query int false "数量"
 // @Success 200 {array} BookContinueReadingDTO
 // @Failure 401 {object} handlers.ErrorResponse
-// @Router /api/v1/books/library/continue [get]
 func (h *Handler) listContinueReading(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -79,7 +77,6 @@ func (h *Handler) listContinueReading(c *gin.Context) {
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/books/library/works/{workId} [put]
 func (h *Handler) saveBookShelf(c *gin.Context) {
 	user, workID, ok := bookWorkRouteUser(c)
 	if !ok {
@@ -108,7 +105,6 @@ func (h *Handler) saveBookShelf(c *gin.Context) {
 // @Success 200 {object} map[string]boolean
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
-// @Router /api/v1/books/library/works/{workId} [delete]
 func (h *Handler) deleteBookShelf(c *gin.Context) {
 	user, workID, ok := bookWorkRouteUser(c)
 	if !ok {

@@ -377,12 +377,6 @@ func escapeBookCatalogQuery(query string) string {
 
 func buildBookPublicEditionDTO(edition model.BookEdition, publisher *model.BookPublisher, producer *model.BookProducer) BookPublicEditionDTO {
 	coverURL := strings.TrimSpace(edition.CoverURL)
-	if coverURL == "" {
-		coverURL = openLibraryISBNImageURL(edition.ISBN13)
-		if coverURL == "" {
-			coverURL = openLibraryISBNImageURL(edition.ISBN10)
-		}
-	}
 	dto := BookPublicEditionDTO{
 		ID: edition.ID.String(), WorkID: edition.WorkID.String(), Title: edition.Title,
 		PublisherID: uuidPointerString(edition.PublisherID), Publisher: edition.Publisher, ISBN10: edition.ISBN10, ISBN13: edition.ISBN13,

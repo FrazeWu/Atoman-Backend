@@ -36,7 +36,6 @@ type reviewPublicationAppealInput struct {
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 409 {object} handlers.ErrorResponse
-// @Router /api/v1/books/publication-requests/{requestId}/appeals [post]
 func (h *Handler) submitPublicationAppeal(c *gin.Context) {
 	user, requestID, ok := publicationRequestRouteUser(c)
 	if !ok {
@@ -63,7 +62,6 @@ func (h *Handler) submitPublicationAppeal(c *gin.Context) {
 // @Security CookieAuth
 // @Param requestId path string true "公共正文申请 UUID"
 // @Success 200 {object} BookPublicationAppealListResult
-// @Router /api/v1/books/publication-requests/{requestId}/appeals [get]
 func (h *Handler) listMyPublicationAppeals(c *gin.Context) {
 	user, requestID, ok := publicationRequestRouteUser(c)
 	if !ok {
@@ -87,7 +85,6 @@ func (h *Handler) listMyPublicationAppeals(c *gin.Context) {
 // @Success 200 {object} BookPublicationAppealListResult
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/publication-appeals [get]
 func (h *Handler) listPublicationAppealReviewQueue(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
@@ -118,7 +115,6 @@ func (h *Handler) listPublicationAppealReviewQueue(c *gin.Context) {
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 409 {object} handlers.ErrorResponse
-// @Router /api/v1/books/review/publication-appeals/{appealId}/decision [post]
 func (h *Handler) reviewPublicationAppeal(c *gin.Context) {
 	user, ok := currentBookUser(c)
 	if !ok {
