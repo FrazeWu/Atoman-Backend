@@ -21487,7 +21487,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.podcastRatingSummary"
+                            "$ref": "#/definitions/handlers.contentRatingSummary"
                         }
                     },
                     "404": {
@@ -21540,7 +21540,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.podcastRatingSummary"
+                            "$ref": "#/definitions/handlers.contentRatingSummary"
                         }
                     },
                     "400": {
@@ -21592,7 +21592,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.podcastRatingSummary"
+                            "$ref": "#/definitions/handlers.contentRatingSummary"
                         }
                     },
                     "401": {
@@ -28846,7 +28846,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.videoRatingSummary"
+                            "$ref": "#/definitions/handlers.contentRatingSummary"
                         }
                     },
                     "400": {
@@ -28891,7 +28891,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.videoRatingSummary"
+                            "$ref": "#/definitions/handlers.contentRatingSummary"
                         }
                     },
                     "401": {
@@ -29919,79 +29919,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.BookAnnotationDTO": {
-            "type": "object",
-            "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
-                "book_author": {
-                    "type": "string"
-                },
-                "book_title": {
-                    "type": "string"
-                },
-                "chapter_title": {
-                    "type": "string"
-                },
-                "color": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "epub_cfi": {
-                    "type": "string"
-                },
-                "format": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "note": {
-                    "type": "string"
-                },
-                "pdf_page": {
-                    "type": "integer"
-                },
-                "pdf_rects": {
-                    "type": "string"
-                },
-                "style": {
-                    "type": "string"
-                },
-                "text": {
-                    "type": "string"
-                },
-                "txt_offset_end": {
-                    "type": "integer"
-                },
-                "txt_offset_start": {
-                    "type": "integer"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "work_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookAnnotationListResult": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookAnnotationDTO"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
         "books.BookContentReviewDTO": {
             "type": "object",
             "properties": {
@@ -30047,35 +29974,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.BookContinueReadingDTO": {
-            "type": "object",
-            "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
-                "author": {
-                    "type": "string"
-                },
-                "file_name": {
-                    "type": "string"
-                },
-                "format": {
-                    "type": "string"
-                },
-                "last_read_at": {
-                    "type": "string"
-                },
-                "processing_status": {
-                    "type": "string"
-                },
-                "reading_percent": {
-                    "type": "number"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
         "books.BookDiscussionPassageDTO": {
             "type": "object",
             "properties": {
@@ -30116,99 +30014,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.BookEditDTO": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "decision_note": {
-                    "type": "string"
-                },
-                "downvote_count": {
-                    "type": "integer"
-                },
-                "entity_id": {
-                    "type": "string"
-                },
-                "entity_type": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "payload": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "reviewed_at": {
-                    "type": "string"
-                },
-                "sources": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicSourceDTO"
-                    }
-                },
-                "status": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                },
-                "upvote_count": {
-                    "type": "integer"
-                }
-            }
-        },
-        "books.BookEditListResult": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookEditDTO"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "books.BookEditSourceInput": {
-            "type": "object",
-            "properties": {
-                "kind": {
-                    "type": "string"
-                },
-                "note": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "url": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookEditVoteInput": {
-            "type": "object",
-            "properties": {
-                "value": {
-                    "type": "integer"
-                }
-            }
-        },
         "books.BookHighlightGroup": {
             "type": "object",
             "properties": {
@@ -30228,68 +30033,6 @@ const docTemplate = `{
                     }
                 },
                 "style": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookImportSessionDTO": {
-            "type": "object",
-            "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
-                "author": {
-                    "type": "string"
-                },
-                "completed_parts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookUploadPart"
-                    }
-                },
-                "content_type": {
-                    "type": "string"
-                },
-                "edition_id": {
-                    "type": "string"
-                },
-                "error_code": {
-                    "type": "string"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "type": "string"
-                },
-                "file_name": {
-                    "type": "string"
-                },
-                "format": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "part_size": {
-                    "type": "integer"
-                },
-                "processing_status": {
-                    "type": "string"
-                },
-                "published_asset_id": {
-                    "type": "string"
-                },
-                "size": {
-                    "type": "integer"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "work_id": {
                     "type": "string"
                 }
             }
@@ -30647,67 +30390,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.BookPostListResult": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicPostDTO"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "books.BookPrivateAssetDTO": {
-            "type": "object",
-            "properties": {
-                "author": {
-                    "type": "string"
-                },
-                "content_type": {
-                    "type": "string"
-                },
-                "error_message": {
-                    "type": "string"
-                },
-                "file_name": {
-                    "type": "string"
-                },
-                "format": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "import_id": {
-                    "type": "string"
-                },
-                "processing_status": {
-                    "type": "string"
-                },
-                "scan_status": {
-                    "type": "string"
-                },
-                "size": {
-                    "type": "integer"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
         "books.BookPrivateNoteDTO": {
             "type": "object",
             "properties": {
@@ -30799,23 +30481,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.BookPublicEditionDetailDTO": {
-            "type": "object",
-            "properties": {
-                "edition": {
-                    "$ref": "#/definitions/books.BookPublicEditionDTO"
-                },
-                "sources": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicSourceDTO"
-                    }
-                },
-                "work": {
-                    "$ref": "#/definitions/books.BookPublicWorkDTO"
-                }
-            }
-        },
         "books.BookPublicPersonDTO": {
             "type": "object",
             "properties": {
@@ -30886,285 +30551,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.BookPublicWorkDTO": {
-            "type": "object",
-            "properties": {
-                "authors": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicPersonDTO"
-                    }
-                },
-                "description": {
-                    "type": "string"
-                },
-                "editions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicEditionDTO"
-                    }
-                },
-                "id": {
-                    "type": "string"
-                },
-                "language": {
-                    "type": "string"
-                },
-                "lifecycle_status": {
-                    "type": "string"
-                },
-                "original_title": {
-                    "type": "string"
-                },
-                "rating_count": {
-                    "type": "integer"
-                },
-                "rating_score": {
-                    "type": "number"
-                },
-                "redirected_from": {
-                    "type": "string"
-                },
-                "related_posts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicPostDTO"
-                    }
-                },
-                "sources": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicSourceDTO"
-                    }
-                },
-                "subtitle": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookPublicationAppealDTO": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "decision_note": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "publication_request_id": {
-                    "type": "string"
-                },
-                "published_asset_id": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "reviewed_at": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookPublicationAppealListResult": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicationAppealDTO"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "books.BookPublicationReportDTO": {
-            "type": "object",
-            "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "decision_note": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "reviewed_at": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookPublicationReportListResult": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicationReportDTO"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "books.BookPublicationRequestDTO": {
-            "type": "object",
-            "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "decision_note": {
-                    "type": "string"
-                },
-                "declaration": {
-                    "type": "string"
-                },
-                "edition_id": {
-                    "type": "string"
-                },
-                "evidence_uploaded": {
-                    "type": "boolean"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "license_type": {
-                    "type": "string"
-                },
-                "published_asset_status": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "reviewed_at": {
-                    "type": "string"
-                },
-                "rights_holder": {
-                    "type": "string"
-                },
-                "source_url": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "work_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookPublicationRequestListResult": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublicationRequestDTO"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "books.BookPublicationRetentionHoldDTO": {
-            "type": "object",
-            "properties": {
-                "held": {
-                    "type": "boolean"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "request_id": {
-                    "type": "string"
-                },
-                "set_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookPublishedAssetDTO": {
-            "type": "object",
-            "properties": {
-                "author": {
-                    "type": "string"
-                },
-                "content_type": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "edition_id": {
-                    "type": "string"
-                },
-                "file_name": {
-                    "type": "string"
-                },
-                "format": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "size": {
-                    "type": "integer"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "work_id": {
-                    "type": "string"
-                }
-            }
-        },
         "books.BookRatingRankingItem": {
             "type": "object",
             "properties": {
@@ -31210,20 +30596,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "books.BookRatingSummary": {
-            "type": "object",
-            "properties": {
-                "rating_count": {
-                    "type": "integer"
-                },
-                "rating_score": {
-                    "type": "number"
-                },
-                "viewer_rating": {
                     "type": "integer"
                 }
             }
@@ -31408,36 +30780,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.BookReadingStateDTO": {
-            "type": "object",
-            "properties": {
-                "asset_id": {
-                    "type": "string"
-                },
-                "epub_cfi": {
-                    "type": "string"
-                },
-                "last_read_at": {
-                    "type": "string"
-                },
-                "pdf_page": {
-                    "type": "integer"
-                },
-                "preferences": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "private_notes": {
-                    "type": "string"
-                },
-                "reading_percent": {
-                    "type": "number"
-                },
-                "txt_offset": {
-                    "type": "integer"
-                }
-            }
-        },
         "books.BookReadingStatistics": {
             "type": "object",
             "properties": {
@@ -31545,75 +30887,6 @@ const docTemplate = `{
                 },
                 "updated_at": {
                     "type": "string"
-                }
-            }
-        },
-        "books.BookReviewDTO": {
-            "type": "object",
-            "properties": {
-                "author_id": {
-                    "type": "string"
-                },
-                "content": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "spoiler": {
-                    "type": "boolean"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "work_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookShelfItemDTO": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "note": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "work": {
-                    "$ref": "#/definitions/books.BookPublicWorkDTO"
-                },
-                "work_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.BookShelfListResult": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookShelfItemDTO"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
                 }
             }
         },
@@ -31779,44 +31052,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.CreateBookAnnotationInput": {
-            "type": "object",
-            "properties": {
-                "chapter_title": {
-                    "type": "string"
-                },
-                "color": {
-                    "type": "string"
-                },
-                "epub_cfi": {
-                    "type": "string"
-                },
-                "format": {
-                    "type": "string"
-                },
-                "note": {
-                    "type": "string"
-                },
-                "pdf_page": {
-                    "type": "integer"
-                },
-                "pdf_rects": {
-                    "type": "string"
-                },
-                "style": {
-                    "type": "string"
-                },
-                "text": {
-                    "type": "string"
-                },
-                "txt_offset_end": {
-                    "type": "integer"
-                },
-                "txt_offset_start": {
-                    "type": "integer"
-                }
-            }
-        },
         "books.CreateBookDiscussionPassageInput": {
             "type": "object",
             "properties": {
@@ -31854,26 +31089,6 @@ const docTemplate = `{
                 },
                 "publisher": {
                     "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.CreateBookImportInput": {
-            "type": "object",
-            "properties": {
-                "author": {
-                    "type": "string"
-                },
-                "content_type": {
-                    "type": "string"
-                },
-                "file_name": {
-                    "type": "string"
-                },
-                "size": {
-                    "type": "integer"
                 },
                 "title": {
                     "type": "string"
@@ -31971,76 +31186,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.CreatePublicBookInput": {
-            "type": "object",
-            "properties": {
-                "authors": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "description": {
-                    "type": "string"
-                },
-                "edition": {
-                    "type": "object",
-                    "properties": {
-                        "binding": {
-                            "type": "string"
-                        },
-                        "cover_url": {
-                            "type": "string"
-                        },
-                        "isbn10": {
-                            "type": "string"
-                        },
-                        "isbn13": {
-                            "type": "string"
-                        },
-                        "language": {
-                            "type": "string"
-                        },
-                        "page_count": {
-                            "type": "integer"
-                        },
-                        "producer": {
-                            "type": "string"
-                        },
-                        "published_date": {
-                            "type": "string"
-                        },
-                        "publisher": {
-                            "type": "string"
-                        },
-                        "title": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "import_id": {
-                    "type": "string"
-                },
-                "language": {
-                    "type": "string"
-                },
-                "original_title": {
-                    "type": "string"
-                },
-                "public_distribution_confirmed": {
-                    "type": "boolean"
-                },
-                "source_url": {
-                    "type": "string"
-                },
-                "subtitle": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
         "books.ImportBookPrivateNotesInput": {
             "type": "object",
             "properties": {
@@ -32063,17 +31208,6 @@ const docTemplate = `{
             "properties": {
                 "spoiler": {
                     "type": "boolean"
-                }
-            }
-        },
-        "books.LinkBookImportInput": {
-            "type": "object",
-            "properties": {
-                "edition_id": {
-                    "type": "string"
-                },
-                "work_id": {
-                    "type": "string"
                 }
             }
         },
@@ -32188,26 +31322,6 @@ const docTemplate = `{
                 },
                 "request_id": {
                     "type": "string"
-                }
-            }
-        },
-        "books.PublishedBookAssetListResult": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookPublishedAssetDTO"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
                 }
             }
         },
@@ -32365,55 +31479,6 @@ const docTemplate = `{
                 }
             }
         },
-        "books.SaveBookReadingStateInput": {
-            "type": "object",
-            "properties": {
-                "epub_cfi": {
-                    "type": "string"
-                },
-                "pdf_page": {
-                    "type": "integer"
-                },
-                "preferences": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "private_notes": {
-                    "type": "string"
-                },
-                "reading_percent": {
-                    "type": "number"
-                },
-                "txt_offset": {
-                    "type": "integer"
-                }
-            }
-        },
-        "books.SaveBookReviewInput": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "spoiler": {
-                    "type": "boolean"
-                },
-                "visibility": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.SaveBookShelfInput": {
-            "type": "object",
-            "properties": {
-                "note": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
         "books.SetBookDefaultAssetInput": {
             "type": "object",
             "properties": {
@@ -32444,138 +31509,11 @@ const docTemplate = `{
                 }
             }
         },
-        "books.SubmitBookEditInput": {
-            "type": "object",
-            "properties": {
-                "entity_id": {
-                    "type": "string"
-                },
-                "entity_type": {
-                    "type": "string"
-                },
-                "payload": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "sources": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/books.BookEditSourceInput"
-                    }
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.SubmitPublicationInput": {
-            "type": "object",
-            "properties": {
-                "declaration": {
-                    "type": "string"
-                },
-                "edition_id": {
-                    "type": "string"
-                },
-                "license_type": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "rights_holder": {
-                    "type": "string"
-                },
-                "source_url": {
-                    "type": "string"
-                },
-                "work_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.UpdateBookAnnotationInput": {
-            "type": "object",
-            "properties": {
-                "color": {
-                    "type": "string"
-                },
-                "note": {
-                    "type": "string"
-                },
-                "style": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.bookPublicationReportInput": {
-            "type": "object",
-            "properties": {
-                "reason": {
-                    "type": "string"
-                }
-            }
-        },
         "books.bookRatingInput": {
             "type": "object",
             "properties": {
                 "score": {
                     "type": "integer"
-                }
-            }
-        },
-        "books.publicationRetentionHoldInput": {
-            "type": "object",
-            "properties": {
-                "held": {
-                    "type": "boolean"
-                },
-                "reason": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.reviewBookEditInput": {
-            "type": "object",
-            "properties": {
-                "decision": {
-                    "type": "string"
-                },
-                "note": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.reviewPublicationAppealInput": {
-            "type": "object",
-            "properties": {
-                "decision": {
-                    "type": "string"
-                },
-                "note": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.reviewPublicationInput": {
-            "type": "object",
-            "properties": {
-                "decision": {
-                    "type": "string"
-                },
-                "note": {
-                    "type": "string"
-                }
-            }
-        },
-        "books.submitPublicationAppealInput": {
-            "type": "object",
-            "properties": {
-                "reason": {
-                    "type": "string"
                 }
             }
         },
@@ -37447,6 +36385,20 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.contentRatingSummary": {
+            "type": "object",
+            "properties": {
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "viewer_rating": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.oauthVerifyEmailRequest": {
             "type": "object",
             "required": [
@@ -37479,20 +36431,6 @@ const docTemplate = `{
                     "type": "integer",
                     "maximum": 10,
                     "minimum": 1
-                }
-            }
-        },
-        "handlers.podcastRatingSummary": {
-            "type": "object",
-            "properties": {
-                "rating_count": {
-                    "type": "integer"
-                },
-                "rating_score": {
-                    "type": "number"
-                },
-                "viewer_rating": {
-                    "type": "integer"
                 }
             }
         },
@@ -37564,20 +36502,6 @@ const docTemplate = `{
                     "type": "integer",
                     "maximum": 10,
                     "minimum": 1
-                }
-            }
-        },
-        "handlers.videoRatingSummary": {
-            "type": "object",
-            "properties": {
-                "rating_count": {
-                    "type": "integer"
-                },
-                "rating_score": {
-                    "type": "number"
-                },
-                "viewer_rating": {
-                    "type": "integer"
                 }
             }
         },

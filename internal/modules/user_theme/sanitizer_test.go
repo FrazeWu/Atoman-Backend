@@ -253,4 +253,3 @@ func TestSanitizeAndScopeCSS_EdgeCases(t *testing.T) {
 		assert.Contains(t, out, "color: red;")
 	})
 }
-

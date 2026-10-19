@@ -541,54 +541,6 @@ definitions:
     required:
     - name
     type: object
-  books.BookAnnotationDTO:
-    properties:
-      asset_id:
-        type: string
-      book_author:
-        type: string
-      book_title:
-        type: string
-      chapter_title:
-        type: string
-      color:
-        type: string
-      created_at:
-        type: string
-      epub_cfi:
-        type: string
-      format:
-        type: string
-      id:
-        type: string
-      note:
-        type: string
-      pdf_page:
-        type: integer
-      pdf_rects:
-        type: string
-      style:
-        type: string
-      text:
-        type: string
-      txt_offset_end:
-        type: integer
-      txt_offset_start:
-        type: integer
-      updated_at:
-        type: string
-      work_id:
-        type: string
-    type: object
-  books.BookAnnotationListResult:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/books.BookAnnotationDTO'
-        type: array
-      total:
-        type: integer
-    type: object
   books.BookContentReviewDTO:
     properties:
       author_id:
@@ -625,25 +577,6 @@ definitions:
       total:
         type: integer
     type: object
-  books.BookContinueReadingDTO:
-    properties:
-      asset_id:
-        type: string
-      author:
-        type: string
-      file_name:
-        type: string
-      format:
-        type: string
-      last_read_at:
-        type: string
-      processing_status:
-        type: string
-      reading_percent:
-        type: number
-      title:
-        type: string
-    type: object
   books.BookDiscussionPassageDTO:
     properties:
       anchor:
@@ -670,67 +603,6 @@ definitions:
       total:
         type: integer
     type: object
-  books.BookEditDTO:
-    properties:
-      created_at:
-        type: string
-      decision_note:
-        type: string
-      downvote_count:
-        type: integer
-      entity_id:
-        type: string
-      entity_type:
-        type: string
-      id:
-        type: string
-      payload:
-        additionalProperties: {}
-        type: object
-      reason:
-        type: string
-      reviewed_at:
-        type: string
-      sources:
-        items:
-          $ref: '#/definitions/books.BookPublicSourceDTO'
-        type: array
-      status:
-        type: string
-      type:
-        type: string
-      upvote_count:
-        type: integer
-    type: object
-  books.BookEditListResult:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/books.BookEditDTO'
-        type: array
-      limit:
-        type: integer
-      offset:
-        type: integer
-      total:
-        type: integer
-    type: object
-  books.BookEditSourceInput:
-    properties:
-      kind:
-        type: string
-      note:
-        type: string
-      title:
-        type: string
-      url:
-        type: string
-    type: object
-  books.BookEditVoteInput:
-    properties:
-      value:
-        type: integer
-    type: object
   books.BookHighlightGroup:
     properties:
       anchor:
@@ -744,47 +616,6 @@ definitions:
           type: string
         type: array
       style:
-        type: string
-    type: object
-  books.BookImportSessionDTO:
-    properties:
-      asset_id:
-        type: string
-      author:
-        type: string
-      completed_parts:
-        items:
-          $ref: '#/definitions/books.BookUploadPart'
-        type: array
-      content_type:
-        type: string
-      edition_id:
-        type: string
-      error_code:
-        type: string
-      error_message:
-        type: string
-      expires_at:
-        type: string
-      file_name:
-        type: string
-      format:
-        type: string
-      id:
-        type: string
-      part_size:
-        type: integer
-      processing_status:
-        type: string
-      published_asset_id:
-        type: string
-      size:
-        type: integer
-      status:
-        type: string
-      title:
-        type: string
-      work_id:
         type: string
     type: object
   books.BookLibraryEntryDTO:
@@ -1017,46 +848,6 @@ definitions:
       "y":
         type: number
     type: object
-  books.BookPostListResult:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/books.BookPublicPostDTO'
-        type: array
-      limit:
-        type: integer
-      offset:
-        type: integer
-      total:
-        type: integer
-    type: object
-  books.BookPrivateAssetDTO:
-    properties:
-      author:
-        type: string
-      content_type:
-        type: string
-      error_message:
-        type: string
-      file_name:
-        type: string
-      format:
-        type: string
-      id:
-        type: string
-      import_id:
-        type: string
-      processing_status:
-        type: string
-      scan_status:
-        type: string
-      size:
-        type: integer
-      status:
-        type: string
-      title:
-        type: string
-    type: object
   books.BookPrivateNoteDTO:
     properties:
       body:
@@ -1117,17 +908,6 @@ definitions:
       work_id:
         type: string
     type: object
-  books.BookPublicEditionDetailDTO:
-    properties:
-      edition:
-        $ref: '#/definitions/books.BookPublicEditionDTO'
-      sources:
-        items:
-          $ref: '#/definitions/books.BookPublicSourceDTO'
-        type: array
-      work:
-        $ref: '#/definitions/books.BookPublicWorkDTO'
-    type: object
   books.BookPublicPersonDTO:
     properties:
       id:
@@ -1173,189 +953,6 @@ definitions:
       url:
         type: string
     type: object
-  books.BookPublicWorkDTO:
-    properties:
-      authors:
-        items:
-          $ref: '#/definitions/books.BookPublicPersonDTO'
-        type: array
-      description:
-        type: string
-      editions:
-        items:
-          $ref: '#/definitions/books.BookPublicEditionDTO'
-        type: array
-      id:
-        type: string
-      language:
-        type: string
-      lifecycle_status:
-        type: string
-      original_title:
-        type: string
-      rating_count:
-        type: integer
-      rating_score:
-        type: number
-      redirected_from:
-        type: string
-      related_posts:
-        items:
-          $ref: '#/definitions/books.BookPublicPostDTO'
-        type: array
-      sources:
-        items:
-          $ref: '#/definitions/books.BookPublicSourceDTO'
-        type: array
-      subtitle:
-        type: string
-      title:
-        type: string
-    type: object
-  books.BookPublicationAppealDTO:
-    properties:
-      created_at:
-        type: string
-      decision_note:
-        type: string
-      id:
-        type: string
-      publication_request_id:
-        type: string
-      published_asset_id:
-        type: string
-      reason:
-        type: string
-      reviewed_at:
-        type: string
-      status:
-        type: string
-    type: object
-  books.BookPublicationAppealListResult:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/books.BookPublicationAppealDTO'
-        type: array
-      limit:
-        type: integer
-      offset:
-        type: integer
-      total:
-        type: integer
-    type: object
-  books.BookPublicationReportDTO:
-    properties:
-      asset_id:
-        type: string
-      created_at:
-        type: string
-      decision_note:
-        type: string
-      id:
-        type: string
-      reason:
-        type: string
-      reviewed_at:
-        type: string
-      status:
-        type: string
-    type: object
-  books.BookPublicationReportListResult:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/books.BookPublicationReportDTO'
-        type: array
-      limit:
-        type: integer
-      offset:
-        type: integer
-      total:
-        type: integer
-    type: object
-  books.BookPublicationRequestDTO:
-    properties:
-      asset_id:
-        type: string
-      created_at:
-        type: string
-      decision_note:
-        type: string
-      declaration:
-        type: string
-      edition_id:
-        type: string
-      evidence_uploaded:
-        type: boolean
-      id:
-        type: string
-      license_type:
-        type: string
-      published_asset_status:
-        type: string
-      reason:
-        type: string
-      reviewed_at:
-        type: string
-      rights_holder:
-        type: string
-      source_url:
-        type: string
-      status:
-        type: string
-      work_id:
-        type: string
-    type: object
-  books.BookPublicationRequestListResult:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/books.BookPublicationRequestDTO'
-        type: array
-      limit:
-        type: integer
-      offset:
-        type: integer
-      total:
-        type: integer
-    type: object
-  books.BookPublicationRetentionHoldDTO:
-    properties:
-      held:
-        type: boolean
-      reason:
-        type: string
-      request_id:
-        type: string
-      set_at:
-        type: string
-    type: object
-  books.BookPublishedAssetDTO:
-    properties:
-      author:
-        type: string
-      content_type:
-        type: string
-      created_at:
-        type: string
-      edition_id:
-        type: string
-      file_name:
-        type: string
-      format:
-        type: string
-      id:
-        type: string
-      size:
-        type: integer
-      status:
-        type: string
-      title:
-        type: string
-      work_id:
-        type: string
-    type: object
   books.BookRatingRankingItem:
     properties:
       minimum_rating_count:
@@ -1386,15 +983,6 @@ definitions:
       offset:
         type: integer
       total:
-        type: integer
-    type: object
-  books.BookRatingSummary:
-    properties:
-      rating_count:
-        type: integer
-      rating_score:
-        type: number
-      viewer_rating:
         type: integer
     type: object
   books.BookReadingDayDTO:
@@ -1514,26 +1102,6 @@ definitions:
       state:
         $ref: '#/definitions/model.BookReadingState'
     type: object
-  books.BookReadingStateDTO:
-    properties:
-      asset_id:
-        type: string
-      epub_cfi:
-        type: string
-      last_read_at:
-        type: string
-      pdf_page:
-        type: integer
-      preferences:
-        additionalProperties: {}
-        type: object
-      private_notes:
-        type: string
-      reading_percent:
-        type: number
-      txt_offset:
-        type: integer
-    type: object
   books.BookReadingStatistics:
     properties:
       days:
@@ -1605,51 +1173,6 @@ definitions:
         type: string
       updated_at:
         type: string
-    type: object
-  books.BookReviewDTO:
-    properties:
-      author_id:
-        type: string
-      content:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      spoiler:
-        type: boolean
-      updated_at:
-        type: string
-      work_id:
-        type: string
-    type: object
-  books.BookShelfItemDTO:
-    properties:
-      id:
-        type: string
-      note:
-        type: string
-      status:
-        type: string
-      updated_at:
-        type: string
-      work:
-        $ref: '#/definitions/books.BookPublicWorkDTO'
-      work_id:
-        type: string
-    type: object
-  books.BookShelfListResult:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/books.BookShelfItemDTO'
-        type: array
-      limit:
-        type: integer
-      offset:
-        type: integer
-      total:
-        type: integer
     type: object
   books.BookUploadPart:
     properties:
@@ -1757,31 +1280,6 @@ definitions:
       work_id:
         type: string
     type: object
-  books.CreateBookAnnotationInput:
-    properties:
-      chapter_title:
-        type: string
-      color:
-        type: string
-      epub_cfi:
-        type: string
-      format:
-        type: string
-      note:
-        type: string
-      pdf_page:
-        type: integer
-      pdf_rects:
-        type: string
-      style:
-        type: string
-      text:
-        type: string
-      txt_offset_end:
-        type: integer
-      txt_offset_start:
-        type: integer
-    type: object
   books.CreateBookDiscussionPassageInput:
     properties:
       anchor:
@@ -1807,19 +1305,6 @@ definitions:
         type: string
       publisher:
         type: string
-      title:
-        type: string
-    type: object
-  books.CreateBookImportInput:
-    properties:
-      author:
-        type: string
-      content_type:
-        type: string
-      file_name:
-        type: string
-      size:
-        type: integer
       title:
         type: string
     type: object
@@ -1882,52 +1367,6 @@ definitions:
     required:
     - title
     type: object
-  books.CreatePublicBookInput:
-    properties:
-      authors:
-        items:
-          type: string
-        type: array
-      description:
-        type: string
-      edition:
-        properties:
-          binding:
-            type: string
-          cover_url:
-            type: string
-          isbn10:
-            type: string
-          isbn13:
-            type: string
-          language:
-            type: string
-          page_count:
-            type: integer
-          producer:
-            type: string
-          published_date:
-            type: string
-          publisher:
-            type: string
-          title:
-            type: string
-        type: object
-      import_id:
-        type: string
-      language:
-        type: string
-      original_title:
-        type: string
-      public_distribution_confirmed:
-        type: boolean
-      source_url:
-        type: string
-      subtitle:
-        type: string
-      title:
-        type: string
-    type: object
   books.ImportBookPrivateNotesInput:
     properties:
       notes:
@@ -1943,13 +1382,6 @@ definitions:
     properties:
       spoiler:
         type: boolean
-    type: object
-  books.LinkBookImportInput:
-    properties:
-      edition_id:
-        type: string
-      work_id:
-        type: string
     type: object
   books.MergeBookWorksInput:
     properties:
@@ -2024,19 +1456,6 @@ definitions:
         type: boolean
       request_id:
         type: string
-    type: object
-  books.PublishedBookAssetListResult:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/books.BookPublishedAssetDTO'
-        type: array
-      limit:
-        type: integer
-      offset:
-        type: integer
-      total:
-        type: integer
     type: object
   books.RestoreBookPrivateNoteInput:
     properties:
@@ -2138,38 +1557,6 @@ definitions:
       style:
         type: string
     type: object
-  books.SaveBookReadingStateInput:
-    properties:
-      epub_cfi:
-        type: string
-      pdf_page:
-        type: integer
-      preferences:
-        additionalProperties: {}
-        type: object
-      private_notes:
-        type: string
-      reading_percent:
-        type: number
-      txt_offset:
-        type: integer
-    type: object
-  books.SaveBookReviewInput:
-    properties:
-      content:
-        type: string
-      spoiler:
-        type: boolean
-      visibility:
-        type: string
-    type: object
-  books.SaveBookShelfInput:
-    properties:
-      note:
-        type: string
-      status:
-        type: string
-    type: object
   books.SetBookDefaultAssetInput:
     properties:
       asset_id:
@@ -2189,92 +1576,10 @@ definitions:
       status:
         type: string
     type: object
-  books.SubmitBookEditInput:
-    properties:
-      entity_id:
-        type: string
-      entity_type:
-        type: string
-      payload:
-        additionalProperties: {}
-        type: object
-      reason:
-        type: string
-      sources:
-        items:
-          $ref: '#/definitions/books.BookEditSourceInput'
-        type: array
-      type:
-        type: string
-    type: object
-  books.SubmitPublicationInput:
-    properties:
-      declaration:
-        type: string
-      edition_id:
-        type: string
-      license_type:
-        type: string
-      reason:
-        type: string
-      rights_holder:
-        type: string
-      source_url:
-        type: string
-      work_id:
-        type: string
-    type: object
-  books.UpdateBookAnnotationInput:
-    properties:
-      color:
-        type: string
-      note:
-        type: string
-      style:
-        type: string
-    type: object
-  books.bookPublicationReportInput:
-    properties:
-      reason:
-        type: string
-    type: object
   books.bookRatingInput:
     properties:
       score:
         type: integer
-    type: object
-  books.publicationRetentionHoldInput:
-    properties:
-      held:
-        type: boolean
-      reason:
-        type: string
-    type: object
-  books.reviewBookEditInput:
-    properties:
-      decision:
-        type: string
-      note:
-        type: string
-    type: object
-  books.reviewPublicationAppealInput:
-    properties:
-      decision:
-        type: string
-      note:
-        type: string
-    type: object
-  books.reviewPublicationInput:
-    properties:
-      decision:
-        type: string
-      note:
-        type: string
-    type: object
-  books.submitPublicationAppealInput:
-    properties:
-      reason:
-        type: string
     type: object
   comment.ActionResponse:
     properties:
@@ -5535,6 +4840,15 @@ definitions:
       url:
         type: string
     type: object
+  handlers.contentRatingSummary:
+    properties:
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      viewer_rating:
+        type: integer
+    type: object
   handlers.oauthVerifyEmailRequest:
     properties:
       code:
@@ -5557,15 +4871,6 @@ definitions:
         type: integer
     required:
     - score
-    type: object
-  handlers.podcastRatingSummary:
-    properties:
-      rating_count:
-        type: integer
-      rating_score:
-        type: number
-      viewer_rating:
-        type: integer
     type: object
   handlers.timelineProposalRequest:
     properties:
@@ -5613,15 +4918,6 @@ definitions:
         type: integer
     required:
     - score
-    type: object
-  handlers.videoRatingSummary:
-    properties:
-      rating_count:
-        type: integer
-      rating_score:
-        type: number
-      viewer_rating:
-        type: integer
     type: object
   handlers.videoSubscriptionListResponse:
     properties:
@@ -24152,7 +23448,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.podcastRatingSummary'
+            $ref: '#/definitions/handlers.contentRatingSummary'
         "401":
           description: Unauthorized
           schema:
@@ -24181,7 +23477,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.podcastRatingSummary'
+            $ref: '#/definitions/handlers.contentRatingSummary'
         "404":
           description: Not Found
           schema:
@@ -24211,7 +23507,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.podcastRatingSummary'
+            $ref: '#/definitions/handlers.contentRatingSummary'
         "400":
           description: Bad Request
           schema:
@@ -28385,7 +27681,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.videoRatingSummary'
+            $ref: '#/definitions/handlers.contentRatingSummary'
         "401":
           description: Unauthorized
           schema:
@@ -28419,7 +27715,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.videoRatingSummary'
+            $ref: '#/definitions/handlers.contentRatingSummary'
         "400":
           description: Bad Request
           schema:

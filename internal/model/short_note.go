@@ -8,8 +8,8 @@ import (
 
 type ShortNote struct {
 	Base
-	UserID  uuid.UUID        `json:"user_id" gorm:"type:uuid;not null;index"`
-	User    *User            `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	UserID              uuid.UUID        `json:"user_id" gorm:"type:uuid;not null;index"`
+	User                *User            `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
 	Content             string           `json:"content" gorm:"type:text;not null"`
 	MediaAttachmentType *string          `json:"media_attachment_type,omitempty" gorm:"type:varchar(32)"`
 	MediaAttachmentID   *uuid.UUID       `json:"media_attachment_id,omitempty" gorm:"type:uuid;index"`

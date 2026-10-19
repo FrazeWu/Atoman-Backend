@@ -17,15 +17,13 @@ type podcastRatingInput struct {
 	Score int `json:"score" binding:"required,min=1,max=10"`
 }
 
-type podcastRatingSummary = contentRatingSummary
-
 // GetPodcastRating godoc
 // @Summary 获取播客单集评分
 // @Description 返回已发布且当前用户可访问的单集评分；匿名读取不包含个人评分。
 // @Tags podcast
 // @Produce json
 // @Param id path string true "单集 UUID"
-// @Success 200 {object} podcastRatingSummary
+// @Success 200 {object} contentRatingSummary
 // @Failure 404 {object} ErrorResponse
 // @Router /api/v1/podcast/episodes/{id}/rating [get]
 func GetPodcastRating(db *gorm.DB) gin.HandlerFunc {
@@ -46,7 +44,7 @@ func GetPodcastRating(db *gorm.DB) gin.HandlerFunc {
 // @Produce json
 // @Param id path string true "单集 UUID"
 // @Param input body podcastRatingInput true "评分"
-// @Success 200 {object} podcastRatingSummary
+// @Success 200 {object} contentRatingSummary
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -79,7 +77,7 @@ func SetPodcastRating(db *gorm.DB) gin.HandlerFunc {
 // @Tags podcast
 // @Produce json
 // @Param id path string true "单集 UUID"
-// @Success 200 {object} podcastRatingSummary
+// @Success 200 {object} contentRatingSummary
 // @Failure 401 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth

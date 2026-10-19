@@ -16,8 +16,6 @@ type videoRatingInput struct {
 	Score int `json:"score" binding:"required,min=1,max=10"`
 }
 
-type videoRatingSummary = contentRatingSummary
-
 // SetVideoRating godoc
 // @Summary 设置视频评分
 // @Description 为可观看视频提交或更新 0.5 至 5 星评分，分值使用 1 至 10 的半星单位。
@@ -26,7 +24,7 @@ type videoRatingSummary = contentRatingSummary
 // @Produce json
 // @Param id path string true "视频 UUID"
 // @Param input body videoRatingInput true "视频评分"
-// @Success 200 {object} videoRatingSummary
+// @Success 200 {object} contentRatingSummary
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
@@ -72,7 +70,7 @@ func SetVideoRating(db *gorm.DB) gin.HandlerFunc {
 // @Tags videos
 // @Produce json
 // @Param id path string true "视频 UUID"
-// @Success 200 {object} videoRatingSummary
+// @Success 200 {object} contentRatingSummary
 // @Failure 401 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Router /api/v1/videos/{id}/rating [delete]

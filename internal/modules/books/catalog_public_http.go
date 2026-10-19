@@ -1,112 +1,15 @@
 package books
 
 import (
-	"net/http"
 	"strconv"
 	"strings"
 
 	"atoman/internal/platform/apperr"
-	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
-
-// createPublicWork godoc
-// @Summary 创建公共图书及首个版本
-// @Description 创建后立即进入公共目录；关联的电子书正文在安全处理完成后自动公开。
-// @Tags books-catalog
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Security CookieAuth
-// @Param input body CreatePublicBookInput true "图书元数据"
-// @Success 201 {object} BookPublicWorkDTO
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-func (h *Handler) createPublicWork(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	var input CreatePublicBookInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	work, err := h.service.CreatePublicBook(c.Request.Context(), user, input)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusCreated, work)
-}
-
-// searchPublicCatalog godoc
-// @Summary 搜索公共书目
-// @Description 只搜索已公开的作品元数据，不包含私有导入和正文。
-// @Tags books-catalog
-// @Produce json
-// @Param q query string false "标题、作者或副标题"
-// @Param limit query int false "每页数量，最大 50"
-// @Param offset query int false "偏移量"
-// @Success 200 {object} map[string]interface{}
-func (h *Handler) searchPublicCatalog(c *gin.Context) {
-	limit, offset, ok := catalogPaginationParams(c)
-	if !ok {
-		return
-	}
-	items, total, err := h.service.SearchPublicCatalog(c.Request.Context(), c.Query("q"), limit, offset)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"items": items, "total": total, "limit": limit, "offset": offset})
-}
-
-// getPublicWork godoc
-// @Summary 获取公共作品
-// @Tags books-catalog
-// @Produce json
-// @Param workId path string true "公共作品 UUID"
-// @Success 200 {object} BookPublicWorkDTO
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-func (h *Handler) getPublicWork(c *gin.Context) {
-	workID, ok := parseCatalogID(c, "workId")
-	if !ok {
-		return
-	}
-	work, err := h.service.GetPublicWork(c.Request.Context(), workID)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, work)
-}
-
-// getPublicEdition godoc
-// @Summary 获取公共版本
-// @Tags books-catalog
-// @Produce json
-// @Param editionId path string true "公共版本 UUID"
-// @Success 200 {object} BookPublicEditionDetailDTO
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-func (h *Handler) getPublicEdition(c *gin.Context) {
-	editionID, ok := parseCatalogID(c, "editionId")
-	if !ok {
-		return
-	}
-	edition, err := h.service.GetPublicEdition(c.Request.Context(), editionID)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, edition)
-}
 
 func catalogPaginationParams(c *gin.Context) (int, int, bool) {
 	limit, offset := 20, 0

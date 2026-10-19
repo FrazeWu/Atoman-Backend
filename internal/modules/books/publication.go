@@ -70,11 +70,6 @@ type BookPublishedAssetDTO struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-type reviewPublicationInput struct {
-	Decision string `json:"decision"`
-	Note     string `json:"note"`
-}
-
 func (s *Service) SubmitPublicationRequest(user authctx.CurrentUser, assetID uuid.UUID, input SubmitPublicationInput) (BookPublicationRequestDTO, error) {
 	if user.ID == uuid.Nil {
 		return BookPublicationRequestDTO{}, apperr.Unauthorized("Login required")

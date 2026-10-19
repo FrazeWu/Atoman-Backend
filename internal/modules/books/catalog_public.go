@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"net/url"
 	"strings"
 	"time"
 
@@ -422,14 +421,6 @@ func uuidPointerString(value *uuid.UUID) string {
 		return ""
 	}
 	return value.String()
-}
-
-func openLibraryISBNImageURL(isbn string) string {
-	isbn = strings.TrimSpace(isbn)
-	if isbn == "" {
-		return ""
-	}
-	return "https://covers.openlibrary.org/b/isbn/" + url.PathEscape(isbn) + "-M.jpg"
 }
 
 func buildBookPublicSources(sources []model.BookSource) []BookPublicSourceDTO {

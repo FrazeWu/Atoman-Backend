@@ -307,10 +307,10 @@ func TestCreateAndGetShortNoteWithMediaAttachment(t *testing.T) {
 
 	// 创建测试歌曲
 	song := model.Song{
-		Title:          "测试歌曲",
-		DurationSec:    180,
-		AudioURL:       "https://example.com/audio.mp3",
-		CoverURL:       "https://example.com/cover.jpg",
+		Title:           "测试歌曲",
+		DurationSec:     180,
+		AudioURL:        "https://example.com/audio.mp3",
+		CoverURL:        "https://example.com/cover.jpg",
 		LifecycleStatus: "active",
 	}
 	if err := db.Create(&song).Error; err != nil {
@@ -470,10 +470,10 @@ func TestShortNoteUpdateMediaAttachment(t *testing.T) {
 	router := newShortNoteHTTPRouter(service, &user)
 
 	song1 := model.Song{
-		Title:          "歌曲1",
-		DurationSec:    100,
-		AudioURL:       "https://example.com/1.mp3",
-		CoverURL:       "https://example.com/c1.jpg",
+		Title:           "歌曲1",
+		DurationSec:     100,
+		AudioURL:        "https://example.com/1.mp3",
+		CoverURL:        "https://example.com/c1.jpg",
 		LifecycleStatus: "active",
 	}
 	if err := db.Create(&song1).Error; err != nil {
@@ -482,10 +482,10 @@ func TestShortNoteUpdateMediaAttachment(t *testing.T) {
 	songID1 := song1.ID
 
 	song2 := model.Song{
-		Title:          "歌曲2",
-		DurationSec:    200,
-		AudioURL:       "https://example.com/2.mp3",
-		CoverURL:       "https://example.com/c2.jpg",
+		Title:           "歌曲2",
+		DurationSec:     200,
+		AudioURL:        "https://example.com/2.mp3",
+		CoverURL:        "https://example.com/c2.jpg",
 		LifecycleStatus: "active",
 	}
 	if err := db.Create(&song2).Error; err != nil {
@@ -701,10 +701,10 @@ func TestShortNoteMediaAttachmentEnrichedMetadata(t *testing.T) {
 	}
 
 	album := model.Album{
-		Title:       "十一月的萧邦",
-		Year:        2005,
-		CoverURL:    "https://example.com/album.jpg",
-		Artists:     []model.Artist{artist},
+		Title:           "十一月的萧邦",
+		Year:            2005,
+		CoverURL:        "https://example.com/album.jpg",
+		Artists:         []model.Artist{artist},
 		LifecycleStatus: "active",
 	}
 	if err := db.Create(&album).Error; err != nil {
@@ -794,4 +794,3 @@ func TestShortNoteMediaAttachmentEnrichedMetadata(t *testing.T) {
 		t.Errorf("expected subtitle '周杰伦 · 2005 · 1 首曲目', got %q", attAlbum.Subtitle)
 	}
 }
-

@@ -17,7 +17,7 @@ func TestSwaggerPodcastRatingContract(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(SwaggerInfo.ReadDoc()), &embeddedSpec))
 	path := "/api/v1/podcast/episodes/{id}/rating"
 	require.Equal(t, jsonSpec["paths"].(map[string]any)[path], embeddedSpec["paths"].(map[string]any)[path])
-	for _, name := range []string{"handlers.podcastRatingInput", "handlers.podcastRatingSummary", "model.PodcastEpisode"} {
+	for _, name := range []string{"handlers.podcastRatingInput", "handlers.contentRatingSummary", "model.PodcastEpisode"} {
 		require.Equal(t, jsonSpec["definitions"].(map[string]any)[name], embeddedSpec["definitions"].(map[string]any)[name])
 	}
 	data, err = os.ReadFile("swagger.yaml")
@@ -35,7 +35,7 @@ func TestSwaggerPodcastRatingContract(t *testing.T) {
 			}
 		}
 		defs := spec["definitions"].(map[string]any)
-		for _, name := range []string{"handlers.podcastRatingSummary", "model.PodcastEpisode"} {
+		for _, name := range []string{"handlers.contentRatingSummary", "model.PodcastEpisode"} {
 			props := defs[name].(map[string]any)["properties"].(map[string]any)
 			for _, field := range []string{"rating_score", "rating_count", "viewer_rating"} {
 				require.Contains(t, props, field)

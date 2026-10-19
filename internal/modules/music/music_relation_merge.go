@@ -628,22 +628,3 @@ func moveMusicEntityCorrections(tx *gorm.DB, entityType string, sourceID, target
 	column := entityType + "_id"
 	return tx.Model(table).Where(column+" = ?", sourceID).Update(column, targetID).Error
 }
-
-func removeMusicEntityRelations(tx *gorm.DB, entityType string, entityID uuid.UUID) error {
-	if tx.Migrator().HasTable(&model.MusicTagAssignment{}) {
-		if err := tx.Where("entity_type = ? AND entity_id = ?", entityType, entityID).Delete(&model.MusicTagAssignment{}).Error; err != nil {
-			return err
-		}
-	}
-	if tx.Migrator().HasTable(&model.MusicMatchRecord{}) {
-		if err := tx.Where("entity_type = ? AND entity_id = ?", entityType, entityID).Delete(&model.MusicMatchRecord{}).Error; err != nil {
-			return err
-		}
-	}
-	if tx.Migrator().HasTable(&model.MusicCatalogLink{}) {
-		if err := tx.Where("entity_type = ? AND entity_id = ?", entityType, entityID).Delete(&model.MusicCatalogLink{}).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
