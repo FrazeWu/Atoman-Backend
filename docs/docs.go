@@ -43542,6 +43542,9 @@ const docTemplate = `{
                 "available": {
                     "type": "boolean"
                 },
+                "cover_url": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -43957,6 +43960,15 @@ const docTemplate = `{
         "shortnote.MediaAttachmentDTO": {
             "type": "object",
             "properties": {
+                "album_id": {
+                    "type": "string"
+                },
+                "album_title": {
+                    "type": "string"
+                },
+                "artist": {
+                    "type": "string"
+                },
                 "audio_url": {
                     "type": "string"
                 },
@@ -43969,6 +43981,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "song_count": {
+                    "type": "integer"
+                },
                 "subtitle": {
                     "type": "string"
                 },
@@ -43977,6 +43992,9 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                },
+                "year": {
+                    "type": "integer"
                 }
             }
         },

@@ -691,3 +691,107 @@ func TestShortNoteMediaAttachmentMissingOrDeletedRecord(t *testing.T) {
 	}
 }
 
+func TestShortNoteMediaAttachmentEnrichedMetadata(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	router := newShortNoteHTTPRouter(service, &user)
+
+	artist := model.Artist{Name: "周杰伦"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	album := model.Album{
+		Title:       "十一月的萧邦",
+		Year:        2005,
+		CoverURL:    "https://example.com/album.jpg",
+		Artists:     []model.Artist{artist},
+		LifecycleStatus: "active",
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+
+	song := model.Song{
+		Title:           "夜曲",
+		DurationSec:     226,
+		AudioURL:        "https://example.com/nocturne.mp3",
+		CoverURL:        "", // 继承专辑封面
+		AlbumID:         &album.ID,
+		Artists:         []model.Artist{artist},
+		LifecycleStatus: "active",
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	// 1. 验证单曲的丰富元数据
+	songNoteBody := map[string]any{
+		"content":               "为你弹奏肖邦的夜曲",
+		"media_attachment_type": "song",
+		"media_attachment_id":   song.ID.String(),
+	}
+	payloadSong, _ := json.Marshal(songNoteBody)
+	songRes := shortNoteRequest(t, router, "POST", "/api/v1/short-notes", string(payloadSong))
+	if songRes.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on create song note, got %d: %s", songRes.Code, songRes.Body.String())
+	}
+	var songNoteData struct {
+		Data NoteDTO `json:"data"`
+	}
+	_ = json.Unmarshal(songRes.Body.Bytes(), &songNoteData)
+	attSong := songNoteData.Data.MediaAttachment
+	if attSong == nil {
+		t.Fatalf("expected media attachment, got nil")
+	}
+	if attSong.Artist != "周杰伦" {
+		t.Errorf("expected artist '周杰伦', got %q", attSong.Artist)
+	}
+	if attSong.AlbumTitle != "十一月的萧邦" {
+		t.Errorf("expected album_title '十一月的萧邦', got %q", attSong.AlbumTitle)
+	}
+	if attSong.AlbumID == nil || *attSong.AlbumID != album.ID {
+		t.Errorf("expected album_id %v, got %v", album.ID, attSong.AlbumID)
+	}
+	if attSong.Year != 2005 {
+		t.Errorf("expected year 2005, got %d", attSong.Year)
+	}
+	if attSong.CoverURL != "https://example.com/album.jpg" {
+		t.Errorf("expected inherited cover_url, got %q", attSong.CoverURL)
+	}
+	if attSong.Subtitle != "周杰伦 · 十一月的萧邦" {
+		t.Errorf("expected subtitle '周杰伦 · 十一月的萧邦', got %q", attSong.Subtitle)
+	}
+
+	// 2. 验证专辑的丰富元数据
+	albumNoteBody := map[string]any{
+		"content":               "一张经典的专辑",
+		"media_attachment_type": "album",
+		"media_attachment_id":   album.ID.String(),
+	}
+	payloadAlbum, _ := json.Marshal(albumNoteBody)
+	albumRes := shortNoteRequest(t, router, "POST", "/api/v1/short-notes", string(payloadAlbum))
+	if albumRes.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on create album note, got %d: %s", albumRes.Code, albumRes.Body.String())
+	}
+	var albumNoteData struct {
+		Data NoteDTO `json:"data"`
+	}
+	_ = json.Unmarshal(albumRes.Body.Bytes(), &albumNoteData)
+	attAlbum := albumNoteData.Data.MediaAttachment
+	if attAlbum == nil {
+		t.Fatalf("expected media attachment, got nil")
+	}
+	if attAlbum.Artist != "周杰伦" {
+		t.Errorf("expected artist '周杰伦', got %q", attAlbum.Artist)
+	}
+	if attAlbum.Year != 2005 {
+		t.Errorf("expected year 2005, got %d", attAlbum.Year)
+	}
+	if attAlbum.SongCount != 1 {
+		t.Errorf("expected song_count 1, got %d", attAlbum.SongCount)
+	}
+	if attAlbum.Subtitle != "周杰伦 · 2005 · 1 首曲目" {
+		t.Errorf("expected subtitle '周杰伦 · 2005 · 1 首曲目', got %q", attAlbum.Subtitle)
+	}
+}
+

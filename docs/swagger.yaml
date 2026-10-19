@@ -9655,6 +9655,8 @@ definitions:
     properties:
       available:
         type: boolean
+      cover_url:
+        type: string
       id:
         type: string
       label:
@@ -9925,6 +9927,12 @@ definitions:
     type: object
   shortnote.MediaAttachmentDTO:
     properties:
+      album_id:
+        type: string
+      album_title:
+        type: string
+      artist:
+        type: string
       audio_url:
         type: string
       cover_url:
@@ -9933,12 +9941,16 @@ definitions:
         type: integer
       id:
         type: string
+      song_count:
+        type: integer
       subtitle:
         type: string
       title:
         type: string
       type:
         type: string
+      year:
+        type: integer
     type: object
   shortnote.MediaDTO:
     properties:

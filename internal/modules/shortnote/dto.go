@@ -9,13 +9,18 @@ import (
 )
 
 type MediaAttachmentDTO struct {
-	Type     string    `json:"type"`
-	ID       uuid.UUID `json:"id"`
-	Title    string    `json:"title"`
-	Subtitle string    `json:"subtitle,omitempty"`
-	CoverURL string    `json:"cover_url,omitempty"`
-	AudioURL string    `json:"audio_url,omitempty"`
-	Duration int       `json:"duration,omitempty"`
+	Type       string     `json:"type"`
+	ID         uuid.UUID  `json:"id"`
+	Title      string     `json:"title"`
+	Subtitle   string     `json:"subtitle,omitempty"`
+	CoverURL   string     `json:"cover_url,omitempty"`
+	AudioURL   string     `json:"audio_url,omitempty"`
+	Duration   int        `json:"duration,omitempty"`
+	Artist     string     `json:"artist,omitempty"`
+	AlbumID    *uuid.UUID `json:"album_id,omitempty"`
+	AlbumTitle string     `json:"album_title,omitempty"`
+	Year       int        `json:"year,omitempty"`
+	SongCount  int        `json:"song_count,omitempty"`
 }
 
 type noteInput struct {

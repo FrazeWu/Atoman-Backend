@@ -2,6 +2,7 @@ package shortnote
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"atoman/internal/model"
@@ -353,46 +354,117 @@ func (s *Service) resolveMediaAttachment(note model.ShortNote) (*MediaAttachment
 	}
 	switch *note.MediaAttachmentType {
 	case "song":
-		var row struct {
-			ID          uuid.UUID `gorm:"column:id"`
-			Title       string    `gorm:"column:title"`
-			DurationSec int       `gorm:"column:duration_sec"`
-			AudioURL    string    `gorm:"column:audio_url"`
-			CoverURL    string    `gorm:"column:cover_url"`
-		}
-		err := s.db.Model(&model.Song{}).Select("id, title, duration_sec, audio_url, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
+		var song model.Song
+		err := s.db.Model(&model.Song{}).
+			Preload("Album").
+			Preload("Album.Artists").
+			Preload("Artists").
+			Where("id = ?", *note.MediaAttachmentID).
+			First(&song).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return &MediaAttachmentDTO{Type: "song", ID: *note.MediaAttachmentID}, nil
 			}
 			return nil, err
 		}
+
+		artistName := ""
+		if len(song.Artists) > 0 && strings.TrimSpace(song.Artists[0].Name) != "" {
+			artistName = strings.TrimSpace(song.Artists[0].Name)
+		} else if song.Album != nil && len(song.Album.Artists) > 0 && strings.TrimSpace(song.Album.Artists[0].Name) != "" {
+			artistName = strings.TrimSpace(song.Album.Artists[0].Name)
+		}
+
+		var albumTitle string
+		var albumID *uuid.UUID
+		year := 0
+		if song.Album != nil {
+			albumTitle = strings.TrimSpace(song.Album.Title)
+			albumID = song.AlbumID
+			year = song.Album.Year
+			if year == 0 && song.Album.ReleaseYear != 0 {
+				year = song.Album.ReleaseYear
+			}
+		}
+		if year == 0 && !song.ReleaseDate.IsZero() {
+			year = song.ReleaseDate.Year()
+		}
+
+		coverURL := song.CoverURL
+		if coverURL == "" && song.Album != nil {
+			coverURL = song.Album.CoverURL
+		}
+
+		var subParts []string
+		if artistName != "" {
+			subParts = append(subParts, artistName)
+		}
+		if albumTitle != "" {
+			subParts = append(subParts, albumTitle)
+		}
+		subtitle := strings.Join(subParts, " · ")
+
 		return &MediaAttachmentDTO{
-			Type:     "song",
-			ID:       row.ID,
-			Title:    row.Title,
-			CoverURL: row.CoverURL,
-			AudioURL: row.AudioURL,
-			Duration: row.DurationSec,
+			Type:       "song",
+			ID:         song.ID,
+			Title:      song.Title,
+			Subtitle:   subtitle,
+			CoverURL:   coverURL,
+			AudioURL:   song.AudioURL,
+			Duration:   song.DurationSec,
+			Artist:     artistName,
+			AlbumID:    albumID,
+			AlbumTitle: albumTitle,
+			Year:       year,
 		}, nil
 	case "album":
-		var row struct {
-			ID       uuid.UUID `gorm:"column:id"`
-			Title    string    `gorm:"column:title"`
-			CoverURL string    `gorm:"column:cover_url"`
-		}
-		err := s.db.Model(&model.Album{}).Select("id, title, cover_url").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
+		var album model.Album
+		err := s.db.Model(&model.Album{}).
+			Preload("Artists").
+			Preload("Songs").
+			Where("id = ?", *note.MediaAttachmentID).
+			First(&album).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return &MediaAttachmentDTO{Type: "album", ID: *note.MediaAttachmentID}, nil
 			}
 			return nil, err
 		}
+
+		artistName := ""
+		if len(album.Artists) > 0 && strings.TrimSpace(album.Artists[0].Name) != "" {
+			artistName = strings.TrimSpace(album.Artists[0].Name)
+		}
+
+		year := album.Year
+		if year == 0 && album.ReleaseYear != 0 {
+			year = album.ReleaseYear
+		}
+		if year == 0 && !album.ReleaseDate.IsZero() {
+			year = album.ReleaseDate.Year()
+		}
+
+		var subParts []string
+		if artistName != "" {
+			subParts = append(subParts, artistName)
+		}
+		if year > 0 {
+			subParts = append(subParts, fmt.Sprintf("%d", year))
+		}
+		if len(album.Songs) > 0 {
+			subParts = append(subParts, fmt.Sprintf("%d 首曲目", len(album.Songs)))
+		}
+		subtitle := strings.Join(subParts, " · ")
+
 		return &MediaAttachmentDTO{
-			Type:     "album",
-			ID:       row.ID,
-			Title:    row.Title,
-			CoverURL: row.CoverURL,
+			Type:      "album",
+			ID:        album.ID,
+			Title:     album.Title,
+			Subtitle:  subtitle,
+			CoverURL:  album.CoverURL,
+			Artist:    artistName,
+			Year:      year,
+			SongCount: len(album.Songs),
 		}, nil
 	case "video":
 		var row struct {

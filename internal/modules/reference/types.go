@@ -71,6 +71,7 @@ type Target struct {
 	ID        uuid.UUID `json:"id"`
 	Label     string    `json:"label"`
 	Subtitle  string    `json:"subtitle,omitempty"`
+	CoverURL  string    `json:"cover_url,omitempty"`
 	Module    string    `json:"module"`
 	Path      string    `json:"path"`
 	Available bool      `json:"available"`

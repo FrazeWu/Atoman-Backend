@@ -133,10 +133,7 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		if err := visibleMusicWikiEntries(r.db.Model(&model.Song{}), viewer, "uploaded_by").First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
-		path := "/?song_id=" + row.ID.String()
-		if row.AlbumID != nil {
-			path = "/album/" + row.AlbumID.String() + "?song_id=" + row.ID.String()
-		}
+		path := "/song/" + row.ID.String()
 		return target(targetType, row.ID, row.Title, "music", path), nil
 	case "playlist":
 		var row model.Playlist
@@ -243,6 +240,8 @@ func (r *Registry) Search(viewer Viewer, targetType, query string, limit int) ([
 type searchTargetRow struct {
 	ID          uuid.UUID  `gorm:"column:id"`
 	Label       string     `gorm:"column:label"`
+	Subtitle    string     `gorm:"column:subtitle"`
+	CoverURL    string     `gorm:"column:cover_url"`
 	Username    string     `gorm:"column:username"`
 	Slug        string     `gorm:"column:slug"`
 	ContentType string     `gorm:"column:content_type"`
@@ -336,7 +335,7 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 		} else {
 			query = query.Where("LOWER(title) LIKE ? ESCAPE '\\'", like)
 		}
-		query = query.Select("id, title AS label")
+		query = query.Select("id, title AS label, cover_url")
 	case "song":
 		query = visibleMusicWikiEntries(r.db.Model(&model.Song{}), viewer, "uploaded_by")
 		if fullUUID {
@@ -346,7 +345,7 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 		} else {
 			query = query.Where("LOWER(title) LIKE ? ESCAPE '\\'", like)
 		}
-		query = query.Select("id, title AS label, album_id")
+		query = query.Select("id, title AS label, cover_url, album_id")
 	case "playlist":
 		query = r.db.Model(&model.Playlist{}).
 			Where("LOWER(music_playlists.name) LIKE ? ESCAPE '\\'", like)
@@ -377,7 +376,7 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 		} else {
 			query = query.Where("posts.status = ? AND LOWER(posts.title) LIKE ? ESCAPE '\\'", "published", like)
 		}
-		query = query.Select("videos.video_id AS id, posts.title AS label")
+		query = query.Select("videos.video_id AS id, posts.title AS label, videos.thumbnail_url AS cover_url")
 		if viewer.UserID == uuid.Nil {
 			query = query.Where("posts.visibility IN ?", []string{"", "public"})
 		} else {
@@ -467,7 +466,14 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 	items := make([]Target, 0, len(rows))
 	for _, row := range rows {
 		module, path := searchTargetLocation(targetType, row)
-		items = append(items, target(targetType, row.ID, row.Label, module, path))
+		t := target(targetType, row.ID, row.Label, module, path)
+		if row.Subtitle != "" {
+			t.Subtitle = row.Subtitle
+		}
+		if row.CoverURL != "" {
+			t.CoverURL = row.CoverURL
+		}
+		items = append(items, t)
 	}
 	return items, nil
 }
@@ -489,12 +495,6 @@ func searchTargetLocation(targetType string, row searchTargetRow) (string, strin
 	case "artist", "album", "song", "playlist":
 		module := "music"
 		path := "/" + targetType + "/" + row.ID.String()
-		if targetType == "song" {
-			path = "/?song_id=" + row.ID.String()
-			if row.AlbumID != nil {
-				path = "/album/" + row.AlbumID.String() + "?song_id=" + row.ID.String()
-			}
-		}
 		return module, path
 	case "podcast":
 		return "podcast", "/show/" + row.Slug
