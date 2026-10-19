@@ -10637,6 +10637,30 @@ definitions:
           $ref: '#/definitions/studio.collectionConflictResolution'
         type: array
     type: object
+  user_theme.UpdateThemeInput:
+    properties:
+      custom_css:
+        type: string
+      is_enabled:
+        type: boolean
+      mode:
+        type: string
+      preset_config:
+        type: object
+    type: object
+  user_theme.UserThemeDTO:
+    properties:
+      custom_css:
+        type: string
+      is_enabled:
+        type: boolean
+      mode:
+        type: string
+      preset_config:
+        type: object
+      sanitized_css:
+        type: string
+    type: object
 info:
   contact: {}
   description: 'Atoman 后端 API 文档。公开及 API Token 接口支持任意 HTTP/HTTPS 网站；第三方使用 Authorization:
@@ -27641,6 +27665,33 @@ paths:
       summary: 检查上一张头像
       tags:
       - uploads
+  /api/v1/users/{handle}/theme:
+    get:
+      description: 获取指定用户的个性化主题配置。如果用户存在但未定制主题，返回默认主题配置。
+      parameters:
+      - description: 用户 Handle（用户名或 UUID）
+        in: path
+        name: handle
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/user_theme.UserThemeDTO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取用户个性化主题
+      tags:
+      - user_theme
   /api/v1/users/{id}/follow:
     delete:
       description: 当前用户取消关注指定 UUID 用户。
@@ -27995,6 +28046,65 @@ paths:
       summary: 更新当前用户设置
       tags:
       - users
+  /api/v1/users/me/theme:
+    delete:
+      description: 重置并清除当前创作者的主题配置，恢复为系统默认样式。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 重置当前用户的主题设置
+      tags:
+      - user_theme
+    put:
+      consumes:
+      - application/json
+      description: 更新当前创作者的主题设置，支持预设模式与自定义 CSS。自定义 CSS 会自动进行安全过滤与作用域隔离。
+      parameters:
+      - description: 主题配置
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/user_theme.UpdateThemeInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/user_theme.UserThemeDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新当前用户的主题设置
+      tags:
+      - user_theme
   /api/v1/users/roles:
     get:
       description: 仅站长可用，按用户名、邮箱、显示名搜索用户并返回当前角色。

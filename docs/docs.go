@@ -27258,6 +27258,99 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/users/me/theme": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "更新当前创作者的主题设置，支持预设模式与自定义 CSS。自定义 CSS 会自动进行安全过滤与作用域隔离。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user_theme"
+                ],
+                "summary": "更新当前用户的主题设置",
+                "parameters": [
+                    {
+                        "description": "主题配置",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/user_theme.UpdateThemeInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/user_theme.UserThemeDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "重置并清除当前创作者的主题配置，恢复为系统默认样式。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user_theme"
+                ],
+                "summary": "重置当前用户的主题设置",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users/roles": {
             "get": {
                 "security": [
@@ -27359,6 +27452,47 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/{handle}/theme": {
+            "get": {
+                "description": "获取指定用户的个性化主题配置。如果用户存在但未定制主题，返回默认主题配置。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user_theme"
+                ],
+                "summary": "获取用户个性化主题",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 Handle（用户名或 UUID）",
+                        "name": "handle",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/user_theme.UserThemeDTO"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -45041,6 +45175,43 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/studio.collectionConflictResolution"
                     }
+                }
+            }
+        },
+        "user_theme.UpdateThemeInput": {
+            "type": "object",
+            "properties": {
+                "custom_css": {
+                    "type": "string"
+                },
+                "is_enabled": {
+                    "type": "boolean"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "preset_config": {
+                    "type": "object"
+                }
+            }
+        },
+        "user_theme.UserThemeDTO": {
+            "type": "object",
+            "properties": {
+                "custom_css": {
+                    "type": "string"
+                },
+                "is_enabled": {
+                    "type": "boolean"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "preset_config": {
+                    "type": "object"
+                },
+                "sanitized_css": {
+                    "type": "string"
                 }
             }
         }

@@ -33,6 +33,7 @@ import (
 	"atoman/internal/modules/books"
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/reputation"
+	"atoman/internal/modules/user_theme"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/platform/indexnow"
@@ -428,6 +429,10 @@ func main() {
 	userHub := collab.NewUserHub()
 	collabHub := collab.NewHub()
 	app.RegisterV1Routes(r, db, emailService, s3Client, userHub, collabHub)
+
+	themeSvc := user_theme.NewService(db)
+	themeHandler := user_theme.NewHandler(themeSvc)
+	user_theme.RegisterRoutes(r.Group("/api/v1"), themeHandler)
 
 	// 404 handler - must be last
 	r.NoRoute(func(c *gin.Context) {
