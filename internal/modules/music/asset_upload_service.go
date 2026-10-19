@@ -361,7 +361,7 @@ func (s *Service) CompleteMusicAssetUpload(user authctx.CurrentUser, id uuid.UUI
 
 	storageParts := make([]AlbumImportMultipartPartDTO, 0, len(parts))
 	for _, part := range parts {
-		storageParts = append(storageParts, AlbumImportMultipartPartDTO{PartNumber: part.PartNumber, ETag: part.ETag, Size: part.Size})
+		storageParts = append(storageParts, AlbumImportMultipartPartDTO(part))
 	}
 	size, err := s.assetUploadMultipart.ObjectSize(session.ObjectKey)
 	if err != nil {

@@ -593,10 +593,7 @@ func openLibraryEditionCompleteness(edition openLibraryDumpEdition) int {
 func normalizeOpenLibraryKey(raw, collection, suffix string) string {
 	value := strings.TrimSpace(raw)
 	value = strings.TrimPrefix(value, "/")
-	prefix := collection + "/"
-	if strings.HasPrefix(value, prefix) {
-		value = strings.TrimPrefix(value, prefix)
-	}
+	value = strings.TrimPrefix(value, collection+"/")
 	if len(value) < 4 || !strings.HasPrefix(value, "OL") || !strings.HasSuffix(value, suffix) {
 		return ""
 	}

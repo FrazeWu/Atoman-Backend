@@ -194,9 +194,7 @@ func ValidateMultiLineAnnotationAnchor(lines []string, startOffset, endOffset in
 
 	parts := make([]string, 0, len(lines))
 	parts = append(parts, string(utf16.Decode(firstUnits[startOffset:])))
-	for _, line := range lines[1 : len(lines)-1] {
-		parts = append(parts, line)
-	}
+	parts = append(parts, lines[1:len(lines)-1]...)
 	parts = append(parts, string(utf16.Decode(lastUnits[:endOffset])))
 	anchorText := strings.Join(parts, "\n")
 	if anchorText == "" {

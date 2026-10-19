@@ -359,7 +359,7 @@ func (importer *AppleCatalogImporter) searchArtist(ctx context.Context, storefro
 			}, nil
 		}
 	}
-	return appleArtistCandidate{}, fmt.Errorf("Apple artist search did not return an exact match for %s", seed.Name)
+	return appleArtistCandidate{}, fmt.Errorf("apple artist search did not return an exact match for %s", seed.Name)
 }
 
 func normalizeAppleArtistName(value string) string {
@@ -435,7 +435,7 @@ func (importer *AppleCatalogImporter) fetchJSONOnce(ctx context.Context, endpoin
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("Apple API returned %s", response.Status)
+		return fmt.Errorf("apple API returned %s", response.Status)
 	}
 	return json.NewDecoder(response.Body).Decode(target)
 }

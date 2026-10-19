@@ -149,7 +149,7 @@ func newBlogContentDTOFromCanonical(content BlogContent) BlogContentDTO {
 	}
 	collections := make([]BlogCollectionDTO, 0, len(content.Collections))
 	for _, item := range content.Collections {
-		collections = append(collections, BlogCollectionDTO{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, ChannelID: item.ChannelID, Channel: item.Channel, CreatedBy: item.CreatedBy, Name: item.Name, Description: item.Description, CoverURL: item.CoverURL, IsDefault: item.IsDefault})
+		collections = append(collections, BlogCollectionDTO(item))
 	}
 	return BlogContentDTO{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt, UserID: content.UserID, User: content.User, ChannelID: content.ChannelID, Channel: content.Channel, CollectionID: content.CollectionID, Collection: collection, Collections: collections, CollectionPosition: content.CollectionPosition, CollectionConflict: content.CollectionConflict, Title: content.Title, Content: content.Content, Summary: content.Summary, LanguageCode: content.LanguageCode, CoverURL: content.CoverURL, Status: content.Status, Visibility: content.Visibility, Pinned: content.Pinned, ScheduledAt: content.ScheduledAt, PublishedAt: content.PublishedAt, ViewCount: content.ViewCount, BookmarksCount: content.BookmarksCount, RatingScore: content.RatingScore, RatingCount: content.RatingCount, ViewerRating: content.ViewerRating, WeightedRatingScore: content.WeightedRatingScore, WeightedRatingCount: content.WeightedRatingCount, WeightedRatingActive: content.WeightedRatingActive, Tags: content.Tags, References: []reference.ResolvedReference{}}
 }

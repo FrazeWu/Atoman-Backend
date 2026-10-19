@@ -407,7 +407,7 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	if !releaseMatched {
 		switch {
 		case musicBrainzMatch.err != nil && discogsMatch.err != nil && e.preferDiscogs:
-			result.MetadataError = fmt.Errorf("Discogs: %v; MusicBrainz: %w", discogsMatch.err, musicBrainzMatch.err).Error()
+			result.MetadataError = fmt.Errorf("discogs: %v; MusicBrainz: %w", discogsMatch.err, musicBrainzMatch.err).Error()
 		case musicBrainzMatch.err != nil && discogsMatch.err != nil:
 			result.MetadataError = fmt.Errorf("MusicBrainz: %v; Discogs: %w", musicBrainzMatch.err, discogsMatch.err).Error()
 		case musicBrainzMatch.err != nil:
@@ -579,7 +579,7 @@ func (e *ExternalAlbumMetadataEnricher) findRelease(ctx context.Context, input A
 
 func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, input AlbumImportMetadataInput) (discogsRelease, []int, int, bool, error) {
 	if e.discogsBase == "" || e.discogsKey == "" || e.discogsSecret == "" {
-		return discogsRelease{}, nil, 0, false, errors.New("Discogs is not configured")
+		return discogsRelease{}, nil, 0, false, errors.New("discogs is not configured")
 	}
 	if strings.TrimSpace(input.AlbumTitle) == "" || len(input.Tracks) == 0 {
 		return discogsRelease{}, nil, 0, false, errors.New("not enough metadata for Discogs lookup")
@@ -666,7 +666,7 @@ func (e *ExternalAlbumMetadataEnricher) findDiscogsRelease(ctx context.Context, 
 	if lastErr != nil {
 		return discogsRelease{}, nil, candidateCount, false, lastErr
 	}
-	return discogsRelease{}, nil, candidateCount, false, errors.New("Discogs candidates did not safely match uploaded tracks")
+	return discogsRelease{}, nil, candidateCount, false, errors.New("discogs candidates did not safely match uploaded tracks")
 }
 
 func discogsReleaseMatchIsComplete(release discogsRelease, uploaded []AlbumImportMetadataTrack, mapping []int) bool {

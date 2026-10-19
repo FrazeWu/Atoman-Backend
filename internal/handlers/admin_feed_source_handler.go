@@ -160,7 +160,7 @@ func normalizeExternalRSSURL(db *gorm.DB, rawURL string) (string, error) {
 		return "", errors.New("rss_url is required")
 	}
 	if _, err := feedmodule.ResolveInternalRSSURL(db, trimmed); err == nil {
-		return "", errors.New("Internal RSS sources are managed separately")
+		return "", errors.New("internal RSS sources are managed separately")
 	}
 
 	u, err := url.ParseRequestURI(trimmed)

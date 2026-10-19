@@ -26,13 +26,13 @@ func verifyTurnstileToken(token string, remoteIP string) error {
 	secret := os.Getenv("TURNSTILE_SECRET_KEY")
 	if secret == "" {
 		if isProductionEnv() {
-			return fmt.Errorf("Turnstile is not configured")
+			return fmt.Errorf("turnstile is not configured")
 		}
 		return nil
 	}
 
 	if token == "" {
-		return fmt.Errorf("Turnstile verification is required")
+		return fmt.Errorf("turnstile verification is required")
 	}
 
 	form := url.Values{}
@@ -45,22 +45,22 @@ func verifyTurnstileToken(token string, remoteIP string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Post(turnstileSiteverifyURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
 	if err != nil {
-		return fmt.Errorf("Failed to verify Turnstile token")
+		return fmt.Errorf("failed to verify Turnstile token")
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("Failed to read Turnstile verification response")
+		return fmt.Errorf("failed to read Turnstile verification response")
 	}
 
 	var result turnstileVerifyResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Errorf("Invalid Turnstile verification response")
+		return fmt.Errorf("invalid Turnstile verification response")
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices || !result.Success {
-		return fmt.Errorf("Turnstile verification failed")
+		return fmt.Errorf("turnstile verification failed")
 	}
 
 	return nil

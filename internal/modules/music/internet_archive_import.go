@@ -252,7 +252,7 @@ func (importer *InternetArchiveImporter) buildPlan(ctx context.Context, candidat
 	identifier := strings.TrimSpace(candidate.Identifier)
 	plan := InternetArchiveImportPlan{Identifier: identifier, Downloads: int64(candidate.Downloads)}
 	if identifier == "" {
-		return plan, fmt.Errorf("Internet Archive result has no identifier")
+		return plan, fmt.Errorf("internet archive result has no identifier")
 	}
 	var response internetArchiveMetadataResponse
 	if err := importer.getJSON(ctx, "https://archive.org/metadata/"+url.PathEscape(identifier), &response); err != nil {

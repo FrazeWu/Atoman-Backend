@@ -137,7 +137,7 @@ func (p *OpenLibraryProvider) Search(ctx context.Context, query string, limit in
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
-		return nil, fmt.Errorf("Open Library returned %s: %s", response.Status, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("openlibrary returned %s: %s", response.Status, strings.TrimSpace(string(body)))
 	}
 
 	var payload openLibrarySearchResponse
