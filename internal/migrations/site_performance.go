@@ -14,14 +14,10 @@ func RunSitePerformanceIndexes(db *gorm.DB) error {
 	if db.Dialector.Name() != "postgres" {
 		return nil
 	}
-	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS pg_trgm").Error; err != nil {
+	op, err := pgTrgmOperatorClass(db)
+	if err != nil {
 		return err
 	}
-	var schema string
-	if err := db.Raw(`SELECT n.nspname FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'pg_trgm'`).Scan(&schema).Error; err != nil {
-		return err
-	}
-	op := quotePostgresIdentifier(schema) + ".gin_trgm_ops"
 	statements := []string{
 		fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_book_works_title_trgm ON book_works USING GIN (title %s) WHERE deleted_at IS NULL`, op),
 		fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_book_works_original_title_trgm ON book_works USING GIN (original_title %s) WHERE deleted_at IS NULL`, op),

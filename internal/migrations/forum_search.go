@@ -11,10 +11,11 @@ func RunForumSearchIndexes(db *gorm.DB) error {
 		return nil
 	}
 
-	statements := forumSearchIndexStatements()
-	if err := db.Exec(statements[0]).Error; err != nil {
-		return fmt.Errorf("enable pg_trgm extension: %w", err)
+	operatorClass, err := pgTrgmOperatorClass(db)
+	if err != nil {
+		return fmt.Errorf("forum search indexes: %w", err)
 	}
+	statements := forumSearchIndexStatements(operatorClass)
 	if db.Migrator().HasTable("forum_topics") {
 		for _, statement := range []string{statements[1], statements[3], statements[4]} {
 			if err := db.Exec(statement).Error; err != nil {
@@ -32,9 +33,13 @@ func RunForumSearchIndexes(db *gorm.DB) error {
 	return nil
 }
 
-func forumSearchIndexStatements() []string {
+func forumSearchIndexStatements(operatorClass ...string) []string {
+	trigramOperatorClass := "gin_trgm_ops"
+	if len(operatorClass) > 0 {
+		trigramOperatorClass = operatorClass[0]
+	}
 	return []string{
-		`CREATE EXTENSION IF NOT EXISTS pg_trgm`,
+		`CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public`,
 		`CREATE INDEX IF NOT EXISTS idx_forum_topics_search
 			ON forum_topics USING GIN (
 				to_tsvector('simple', COALESCE(title, '') || ' ' || COALESCE(content, ''))
@@ -45,14 +50,14 @@ func forumSearchIndexStatements() []string {
 				to_tsvector('simple', COALESCE(content, ''))
 			)
 			WHERE deleted_at IS NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_forum_topics_title_trgm
-			ON forum_topics USING GIN (title gin_trgm_ops)
-			WHERE deleted_at IS NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_forum_topics_content_trgm
-			ON forum_topics USING GIN (content gin_trgm_ops)
-			WHERE deleted_at IS NULL`,
-		`CREATE INDEX IF NOT EXISTS idx_forum_comments_content_trgm
-			ON comment_entries USING GIN (content gin_trgm_ops)
-			WHERE deleted_at IS NULL`,
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_forum_topics_title_trgm
+			ON forum_topics USING GIN (title %s)
+			WHERE deleted_at IS NULL`, trigramOperatorClass),
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_forum_topics_content_trgm
+			ON forum_topics USING GIN (content %s)
+			WHERE deleted_at IS NULL`, trigramOperatorClass),
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_forum_comments_content_trgm
+			ON comment_entries USING GIN (content %s)
+			WHERE deleted_at IS NULL`, trigramOperatorClass),
 	}
 }

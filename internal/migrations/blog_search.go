@@ -17,21 +17,10 @@ func RunBlogSearchIndexes(db *gorm.DB) error {
 		return nil
 	}
 
-	statements := blogSearchIndexStatements()
-	if err := db.Exec(statements[0]).Error; err != nil {
-		return fmt.Errorf("enable pg_trgm extension: %w", err)
+	operatorClass, err := pgTrgmOperatorClass(db)
+	if err != nil {
+		return err
 	}
-	var extensionSchema string
-	if err := db.Raw(`SELECT n.nspname
-		FROM pg_extension e
-		JOIN pg_namespace n ON n.oid = e.extnamespace
-		WHERE e.extname = 'pg_trgm'`).Scan(&extensionSchema).Error; err != nil {
-		return fmt.Errorf("resolve pg_trgm schema: %w", err)
-	}
-	if extensionSchema == "" {
-		return fmt.Errorf("resolve pg_trgm schema: extension is not installed")
-	}
-	operatorClass := quotePostgresIdentifier(extensionSchema) + ".gin_trgm_ops"
 	for _, statement := range blogSearchIndexStatements(operatorClass)[1:] {
 		if err := db.Exec(statement).Error; err != nil {
 			return fmt.Errorf("create canonical blog search index: %w", err)
@@ -46,7 +35,7 @@ func blogSearchIndexStatements(operatorClass ...string) []string {
 		trigramOperatorClass = operatorClass[0]
 	}
 	return []string{
-		`CREATE EXTENSION IF NOT EXISTS pg_trgm`,
+		`CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public`,
 		fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_content_entries_blog_title_trgm
 			ON content_entries USING GIN (LOWER(title) %s)
 			WHERE deleted_at IS NULL AND kind = 'blog' AND status = 'published' AND COALESCE(visibility, '') IN ('', 'public')`, trigramOperatorClass),

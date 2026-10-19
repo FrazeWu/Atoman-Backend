@@ -1,6 +1,10 @@
 package migrations
 
-import "gorm.io/gorm"
+import (
+	"fmt"
+
+	"gorm.io/gorm"
+)
 
 // RunMusicCatalogIndexesMigration creates the indexes used by catalog pages,
 // import history, and ordered track loading. Every statement is idempotent.
@@ -45,17 +49,18 @@ func RunMusicCatalogIndexesMigration(db *gorm.DB) error {
 		}
 	}
 	if db.Dialector.Name() == "postgres" || db.Dialector.Name() == "pgx" {
-		if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS pg_trgm`).Error; err != nil {
+		operatorClass, err := pgTrgmOperatorClass(db)
+		if err != nil {
 			return err
 		}
 		searchIndexes := []struct {
 			table string
 			sql   string
 		}{
-			{"Songs", `CREATE INDEX IF NOT EXISTS idx_music_songs_title_trgm ON "Songs" USING GIN (LOWER(title) gin_trgm_ops) WHERE deleted_at IS NULL`},
-			{"Albums", `CREATE INDEX IF NOT EXISTS idx_music_albums_title_trgm ON "Albums" USING GIN (LOWER(title) gin_trgm_ops) WHERE deleted_at IS NULL`},
-			{"Artists", `CREATE INDEX IF NOT EXISTS idx_music_artists_name_trgm ON "Artists" USING GIN (LOWER(name) gin_trgm_ops) WHERE deleted_at IS NULL`},
-			{"music_playlists", `CREATE INDEX IF NOT EXISTS idx_music_playlists_name_trgm ON music_playlists USING GIN (LOWER(name) gin_trgm_ops) WHERE deleted_at IS NULL`},
+			{"Songs", fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_music_songs_title_trgm ON "Songs" USING GIN (LOWER(title) %s) WHERE deleted_at IS NULL`, operatorClass)},
+			{"Albums", fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_music_albums_title_trgm ON "Albums" USING GIN (LOWER(title) %s) WHERE deleted_at IS NULL`, operatorClass)},
+			{"Artists", fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_music_artists_name_trgm ON "Artists" USING GIN (LOWER(name) %s) WHERE deleted_at IS NULL`, operatorClass)},
+			{"music_playlists", fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_music_playlists_name_trgm ON music_playlists USING GIN (LOWER(name) %s) WHERE deleted_at IS NULL`, operatorClass)},
 		}
 		for _, statement := range searchIndexes {
 			if db.Migrator().HasTable(statement.table) {
