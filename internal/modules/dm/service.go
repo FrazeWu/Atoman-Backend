@@ -215,7 +215,7 @@ func (s *Service) MarkRead(ctx context.Context, actor authctx.CurrentUser, conve
 		if err != nil {
 			return ReadResultDTO{}, err
 		}
-		s.publish.Push(actor.ID, "dm.message.read", MessageReadEventDTO{ConversationID: conversationID.String(), ReadAt: readAtStr, Mailbox: MailboxDTO{Party: partyForRef(parties, mailbox), Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread})
+		s.publish.Push(actor.ID, "dm.message.read", MessageReadEventDTO{ConversationID: conversationID.String(), ReaderID: mailbox.ID.String(), ReadAt: readAtStr, Mailbox: MailboxDTO{Party: partyForRef(parties, mailbox), Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread})
 
 		otherUserID, err := repo.OtherUserForConversation(access, actor.ID)
 		if err == nil && otherUserID != uuid.Nil && otherUserID != actor.ID {
@@ -234,6 +234,7 @@ func (s *Service) MarkRead(ctx context.Context, actor authctx.CurrentUser, conve
 			}
 			s.publish.Push(otherUserID, "dm.message.read", MessageReadEventDTO{
 				ConversationID: conversationID.String(),
+				ReaderID:       mailbox.ID.String(),
 				ReadAt:         readAtStr,
 				Mailbox:        MailboxDTO{Party: partyForRef(otherParties, otherMailbox), Unread: otherMailboxUnread},
 				DMUnread:       otherDMUnread,

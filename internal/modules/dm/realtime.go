@@ -25,6 +25,7 @@ type MessageCreatedEventDTO struct {
 
 type MessageReadEventDTO struct {
 	ConversationID string     `json:"conversation_id"`
+	ReaderID       string     `json:"reader_id,omitempty"`
 	ReadAt         string     `json:"read_at"`
 	Mailbox        MailboxDTO `json:"mailbox"`
 	DMUnread       int64      `json:"dm_unread"`

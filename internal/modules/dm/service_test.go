@@ -147,6 +147,13 @@ func TestMarkReadUpdatesReadAtAndNotifiesSender(t *testing.T) {
 	foundRecipientEvent := false
 	for _, ev := range publisher.events {
 		if ev.event == "dm.message.read" {
+			readEv, ok := ev.payload.(MessageReadEventDTO)
+			if !ok {
+				t.Fatalf("expected MessageReadEventDTO payload, got %T", ev.payload)
+			}
+			if readEv.ReaderID != recipient.String() {
+				t.Fatalf("expected ReaderID to be %s, got %s", recipient.String(), readEv.ReaderID)
+			}
 			if ev.userID == sender {
 				foundSenderEvent = true
 			}
