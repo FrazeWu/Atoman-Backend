@@ -241,16 +241,20 @@ func parseCSSRules(input string) []cssRule {
 				continue
 			}
 			if c == '}' {
-				braceDepth--
-				if braceDepth == 0 {
-					body := strings.TrimSpace(input[start:i])
-					if header != "" || body != "" {
-						rules = append(rules, cssRule{
-							header: header,
-							body:   body,
-						})
+				if braceDepth > 0 {
+					braceDepth--
+					if braceDepth == 0 {
+						body := strings.TrimSpace(input[start:i])
+						if header != "" || body != "" {
+							rules = append(rules, cssRule{
+								header: header,
+								body:   body,
+							})
+						}
+						header = ""
+						start = i + 1
 					}
-					header = ""
+				} else {
 					start = i + 1
 				}
 				i++

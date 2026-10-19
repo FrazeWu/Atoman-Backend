@@ -244,5 +244,13 @@ func TestSanitizeAndScopeCSS_EdgeCases(t *testing.T) {
 		assert.Contains(t, out, "color: red;")
 		assert.Contains(t, out, "background: yellow;")
 	})
+
+	t.Run("malformed css with stray closing braces", func(t *testing.T) {
+		raw := `} } .btn { color: red; } }`
+		out, err := user_theme.SanitizeAndScopeCSS(raw, creatorID)
+		require.NoError(t, err)
+		assert.Contains(t, out, scopePrefix+` .btn`)
+		assert.Contains(t, out, "color: red;")
+	})
 }
 
