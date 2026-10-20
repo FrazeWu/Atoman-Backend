@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"atoman/internal/handlers"
 	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
@@ -50,9 +51,33 @@ func newTestRouter(handler *Handler, currentUser *authctx.CurrentUser) *gin.Engi
 		}
 		c.Next()
 	})
+	handlers.SetupUserRoutes(r, handler.service.db)
 	v1 := r.Group("/api/v1")
 	RegisterRoutes(v1, handler)
 	return r
+}
+
+func TestRegisterRoutesWithExistingUserRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, themeFirst := range []bool{false, true} {
+		t.Run(map[bool]string{false: "users-first", true: "theme-first"}[themeFirst], func(t *testing.T) {
+			r := gin.New()
+			handler := NewHandler(nil)
+			if themeFirst {
+				RegisterRoutes(r.Group("/api/v1"), handler)
+			}
+			handlers.SetupUserRoutes(r, nil)
+			if !themeFirst {
+				RegisterRoutes(r.Group("/api/v1"), handler)
+			}
+			for _, route := range r.Routes() {
+				if route.Method == http.MethodGet && route.Path == "/api/v1/users/:id/theme" {
+					return
+				}
+			}
+			t.Fatal("public theme route is not registered")
+		})
+	}
 }
 
 func themeRequest(t *testing.T, r *gin.Engine, method, path, body string) *httptest.ResponseRecorder {

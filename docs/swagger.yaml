@@ -26961,33 +26961,6 @@ paths:
       summary: 检查上一张头像
       tags:
       - uploads
-  /api/v1/users/{handle}/theme:
-    get:
-      description: 获取指定用户的个性化主题配置。如果用户存在但未定制主题，返回默认主题配置。
-      parameters:
-      - description: 用户 Handle（用户名或 UUID）
-        in: path
-        name: handle
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/user_theme.UserThemeDTO'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取用户个性化主题
-      tags:
-      - user_theme
   /api/v1/users/{id}/follow:
     delete:
       description: 当前用户取消关注指定 UUID 用户。
@@ -27166,6 +27139,33 @@ paths:
       summary: 更新用户角色
       tags:
       - users
+  /api/v1/users/{id}/theme:
+    get:
+      description: 获取指定用户的个性化主题配置。如果用户存在但未定制主题，返回默认主题配置。
+      parameters:
+      - description: 用户 Handle（用户名或 UUID）
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/user_theme.UserThemeDTO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取用户个性化主题
+      tags:
+      - user_theme
   /api/v1/users/by-username/{username}:
     get:
       description: 返回公开的用户摘要信息和关注统计。

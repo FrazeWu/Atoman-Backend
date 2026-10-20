@@ -27465,47 +27465,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/users/{handle}/theme": {
-            "get": {
-                "description": "获取指定用户的个性化主题配置。如果用户存在但未定制主题，返回默认主题配置。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "user_theme"
-                ],
-                "summary": "获取用户个性化主题",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "用户 Handle（用户名或 UUID）",
-                        "name": "handle",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/user_theme.UserThemeDTO"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/users/{id}/follow": {
             "post": {
                 "security": [
@@ -27769,6 +27728,47 @@ const docTemplate = `{
                         "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/{id}/theme": {
+            "get": {
+                "description": "获取指定用户的个性化主题配置。如果用户存在但未定制主题，返回默认主题配置。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "user_theme"
+                ],
+                "summary": "获取用户个性化主题",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 Handle（用户名或 UUID）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/user_theme.UserThemeDTO"
                         }
                     },
                     "404": {

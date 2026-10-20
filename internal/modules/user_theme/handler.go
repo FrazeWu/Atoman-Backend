@@ -35,7 +35,8 @@ func requireCurrentUser() gin.HandlerFunc {
 
 // RegisterRoutes mounts user theme endpoints on the provided router group.
 func RegisterRoutes(v1 *gin.RouterGroup, handler *Handler) {
-	v1.GET("/users/:handle/theme", handler.GetByHandle)
+	// Gin requires the same wildcard name as the existing /users/:id routes.
+	v1.GET("/users/:id/theme", handler.GetByHandle)
 	v1.PUT("/users/me/theme", requireCurrentUser(), handler.UpdateTheme)
 	v1.DELETE("/users/me/theme", requireCurrentUser(), handler.ResetTheme)
 }
@@ -45,13 +46,13 @@ func RegisterRoutes(v1 *gin.RouterGroup, handler *Handler) {
 // @Description 获取指定用户的个性化主题配置。如果用户存在但未定制主题，返回默认主题配置。
 // @Tags user_theme
 // @Produce json
-// @Param handle path string true "用户 Handle（用户名或 UUID）"
+// @Param id path string true "用户 Handle（用户名或 UUID）"
 // @Success 200 {object} UserThemeDTO
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 500 {object} handlers.ErrorResponse
-// @Router /api/v1/users/{handle}/theme [get]
+// @Router /api/v1/users/{id}/theme [get]
 func (h *Handler) GetByHandle(c *gin.Context) {
-	handle := c.Param("handle")
+	handle := c.Param("id")
 	if handle == "me" {
 		if cur, ok := authctx.Current(c); ok && cur.ID != uuid.Nil {
 			handle = cur.ID.String()
