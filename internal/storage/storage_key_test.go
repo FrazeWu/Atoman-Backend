@@ -15,6 +15,12 @@ func TestBuildUserMediaKey(t *testing.T) {
 	}
 }
 
+func TestBuildBookRevisionObjectKey(t *testing.T) {
+	if got := BuildBookRevisionObjectKey("/session-123/", "txt"); got != "book/revisions/session-123/source.txt" {
+		t.Fatalf("unexpected book revision key: %s", got)
+	}
+}
+
 func TestBuildUserAvatarSlotKey(t *testing.T) {
 	tests := []struct {
 		slot string

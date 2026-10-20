@@ -76,7 +76,8 @@ func TestBookRevisionContentChecksAllLifecycleLayers(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestBookResourceStoreRequiresSeparatePrivateBucket(t *testing.T) {
+func TestBookResourceStoreRejectsUnprotectedSharedBucket(t *testing.T) {
+	t.Setenv("BOOK_SHARED_BUCKET_PREFIX_PROTECTED", "false")
 	t.Setenv("S3_BUCKET", "public-media")
 	t.Setenv("BOOK_PRIVATE_BUCKET", "")
 	require.Nil(t, newPrivateBookResourceStore(&s3.S3{}))
@@ -84,4 +85,19 @@ func TestBookResourceStoreRequiresSeparatePrivateBucket(t *testing.T) {
 	require.Nil(t, newPrivateBookResourceStore(&s3.S3{}))
 	t.Setenv("BOOK_PRIVATE_BUCKET", "private-books")
 	require.NotNil(t, newPrivateBookResourceStore(&s3.S3{}))
+}
+
+func TestBookResourceStoreReusesProtectedSharedBucket(t *testing.T) {
+	t.Setenv("S3_BUCKET", "atoman")
+	t.Setenv("BOOK_PRIVATE_BUCKET", "")
+	t.Setenv("BOOK_SHARED_BUCKET_PREFIX_PROTECTED", "true")
+	store, ok := newPrivateBookResourceStore(&s3.S3{}).(*s3BookUploadStore)
+	require.True(t, ok)
+	require.Equal(t, "atoman", store.bucket)
+	require.Nil(t, newPrivateBookResourceStore(nil))
+	t.Setenv("BOOK_PRIVATE_BUCKET", "atoman")
+	require.NotNil(t, newPrivateBookResourceStore(&s3.S3{}))
+	t.Setenv("S3_BUCKET", "")
+	t.Setenv("BOOK_PRIVATE_BUCKET", "")
+	require.Nil(t, newPrivateBookResourceStore(&s3.S3{}))
 }
