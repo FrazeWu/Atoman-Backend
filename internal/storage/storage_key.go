@@ -40,7 +40,7 @@ func BuildBookPrivateObjectKey(userID, importID, format string) string {
 }
 
 func BuildBookRevisionObjectKey(sessionID, format string) string {
-	return "books/revisions/" + strings.Trim(sessionID, "/") + "/source" + normalizeExtension(format)
+	return "book/revisions/" + strings.Trim(sessionID, "/") + "/source" + normalizeExtension(format)
 }
 
 func BuildBookPrivateDerivedObjectKey(userID, importID string) string {

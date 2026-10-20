@@ -111,11 +111,18 @@ func newS3BookUploadStore(client *s3.S3) bookUploadStore {
 	return &s3BookUploadStore{client: client, bucket: bucket}
 }
 
-// New public ebooks use a private bucket, not the media CDN bucket. Do not
-// fall back to S3_BUCKET: R2 public domains bypass per-object ACLs.
+// 共享桶的 book/ 前缀必须先在所有公开入口禁用直链；正文只经修订 API 读取。
+// 未显式确认入口已受保护时，仍要求使用独立私有桶。
 func newPrivateBookResourceStore(client *s3.S3) bookUploadStore {
+	if client == nil {
+		return nil
+	}
 	bucket := strings.TrimSpace(os.Getenv("BOOK_PRIVATE_BUCKET"))
-	if client == nil || bucket == "" || bucket == strings.TrimSpace(os.Getenv("S3_BUCKET")) {
+	shared := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	if bucket == "" {
+		bucket = shared
+	}
+	if bucket == "" || (bucket == shared && !strings.EqualFold(strings.TrimSpace(os.Getenv("BOOK_SHARED_BUCKET_PREFIX_PROTECTED")), "true")) {
 		return nil
 	}
 	return &s3BookUploadStore{client: client, bucket: bucket}

@@ -39,6 +39,7 @@ func queueBookTestFile(t *testing.T, service *Service, user authctx.CurrentUser,
 	ctx := context.Background()
 	session, err := service.CreateBookResourceUpload(ctx, user, asset.ID, CreateBookResourceUploadInput{FileName: filename, ContentType: contentType, Size: int64(len(body)), PublicDistributionConfirmed: true})
 	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(store.lastKey, "book/revisions/"))
 	store.objects[store.lastKey] = body
 	_, err = service.CompleteBookResourceUploadPart(ctx, user, session.ID, 1, BookUploadPart{ETag: "etag", Size: int64(len(body))})
 	require.NoError(t, err)
@@ -72,7 +73,7 @@ func TestBookResourceUploadsAppendRevisionsWithoutChangingPrivateState(t *testin
 	oldRevisionID := *ready.RevisionID
 	encoded, err := json.Marshal(ready)
 	require.NoError(t, err)
-	for _, secret := range []string{"object_key", "upload_id", "user_id", "books/revisions/"} {
+	for _, secret := range []string{"object_key", "upload_id", "user_id", "book/revisions/"} {
 		require.NotContains(t, string(encoded), secret)
 	}
 	require.NoError(t, service.db.Create(&model.BookReadingSelection{UserID: user.ID, WorkID: workID, AssetID: asset.ID, RevisionID: oldRevisionID}).Error)
