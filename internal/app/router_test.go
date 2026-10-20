@@ -13,6 +13,7 @@ import (
 	"atoman/internal/collab"
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/modules/user_theme"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/authsession"
 	"atoman/internal/testdb"
@@ -21,6 +22,20 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+func TestRegisterProductionRoutesWithUserTheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	r := gin.New()
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+	user_theme.RegisterRoutes(r.Group("/api/v1"), user_theme.NewHandler(user_theme.NewService(db)))
+	for _, route := range r.Routes() {
+		if route.Method == http.MethodGet && route.Path == "/api/v1/users/:id/theme" {
+			return
+		}
+	}
+	t.Fatal("production router is missing the public theme route")
+}
 
 func signedRouterTokenForTest(t *testing.T, db *gorm.DB, user model.User) string {
 	t.Helper()
