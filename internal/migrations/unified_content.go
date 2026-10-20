@@ -306,16 +306,18 @@ func backfillContentCollectionMemberships(tx *gorm.DB) error {
 			return err
 		}
 	}
-	var videos []model.Video
-	if err := tx.Where("collection_id IS NOT NULL").Find(&videos).Error; err != nil {
-		return err
-	}
-	for _, video := range videos {
-		if video.CollectionID == nil {
-			continue
-		}
-		if err := createContentCollectionMembership(tx, contentByVideoID[video.ID], collectionByLegacyID[*video.CollectionID], video.CollectionPosition); err != nil {
+	if tx.Migrator().HasColumn(&model.Video{}, "collection_id") {
+		var videos []model.Video
+		if err := tx.Where("collection_id IS NOT NULL").Find(&videos).Error; err != nil {
 			return err
+		}
+		for _, video := range videos {
+			if video.CollectionID == nil {
+				continue
+			}
+			if err := createContentCollectionMembership(tx, contentByVideoID[video.ID], collectionByLegacyID[*video.CollectionID], video.CollectionPosition); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
