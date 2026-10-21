@@ -104,6 +104,7 @@ type FilterDefinition struct {
 	Label    string         `json:"label"`
 	Kind     string         `json:"kind"` // text / enum / entity(UUID) / date / number / boolean
 	Multiple bool           `json:"multiple"`
+	Integer  bool           `json:"integer,omitempty"` // number 筛选的整数约束，例如出版年份。
 	Options  []FilterOption `json:"options,omitempty"`
 	Min      *float64       `json:"min,omitempty"`
 	Max      *float64       `json:"max,omitempty"`

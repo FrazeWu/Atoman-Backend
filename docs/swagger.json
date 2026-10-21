@@ -22138,7 +22138,7 @@
         },
         "/api/v1/search": {
             "get": {
-                "description": "preview 每组 2 条，grouped 每组 6 条；list 必须选择单个 module/type。filter[key] 仅接受 capabilities 声明的字段，重复值为 OR、不同字段为 AND。未完成 Provider 接入时非空查询返回 503，现有搜索入口不受影响。",
+                "description": "preview 每组 2 条，grouped 每组 6 条；list 必须选择单个 module/type。filter[key] 仅接受 capabilities 声明的字段，重复值为 OR、不同字段为 AND。已接入 books 的 work、author、book_list（仅 public）；作品支持 language、author_id、year_from、year_to，年份为 1–9999 的整数，匹配任一有效公开版本。rating_desc 复用信誉加权评分和 6 人门槛。现有搜索入口不受影响。",
                 "produces": [
                     "application/json"
                 ],
@@ -42912,6 +42912,10 @@
         "search.FilterDefinition": {
             "type": "object",
             "properties": {
+                "integer": {
+                    "description": "number 筛选的整数约束，例如出版年份。",
+                    "type": "boolean"
+                },
                 "key": {
                     "type": "string"
                 },

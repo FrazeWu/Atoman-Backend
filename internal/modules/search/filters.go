@@ -229,6 +229,7 @@ func validateFilter(filter FilterDefinition, values []string) error {
 		case "number":
 			n, err := strconv.ParseFloat(value, 64)
 			valid = err == nil && !math.IsNaN(n) && !math.IsInf(n, 0) && (filter.Min == nil || n >= *filter.Min) && (filter.Max == nil || n <= *filter.Max)
+			valid = valid && (!filter.Integer || n == math.Trunc(n))
 		case "boolean":
 			valid = value == "true" || value == "false"
 		case "enum":

@@ -61,7 +61,7 @@ func TestValidateSearchRequest(t *testing.T) {
 	filters := []FilterDefinition{
 		{Key: "language", Label: "语言", Kind: "enum", Multiple: true, Options: []FilterOption{{Value: "zh"}, {Value: "en"}}},
 		{Key: "author_id", Kind: "entity"}, {Key: "published_at", Kind: "date"},
-		{Key: "year", Kind: "number", Min: &minimum, Max: &maximum}, {Key: "active", Kind: "boolean"},
+		{Key: "year", Kind: "number", Integer: true, Min: &minimum, Max: &maximum}, {Key: "active", Kind: "boolean"},
 	}
 	kind := testType("work")
 	kind.Filters = filters
@@ -72,7 +72,7 @@ func TestValidateSearchRequest(t *testing.T) {
 	for key, value := range map[string]string{"unknown": "x", "language": "xx", "author_id": "bad", "published_at": "2026-02-30", "year": "NaN", "active": "1"} {
 		require.Error(t, ValidateSearchRequest(SearchRequest{Query: "x", Filters: map[string][]string{key: {value}}}, caps), key)
 	}
-	for _, year := range []string{"1899", "2101", "Inf"} {
+	for _, year := range []string{"1899", "2101", "Inf", "2000.5"} {
 		require.Error(t, ValidateSearchRequest(SearchRequest{Query: "x", Filters: map[string][]string{"year": {year}}}, caps))
 	}
 	require.Error(t, ValidateSearchRequest(SearchRequest{Query: "x", Sort: "unknown"}, caps))

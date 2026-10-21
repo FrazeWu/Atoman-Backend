@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 
+	"atoman/internal/modules/books"
 	"atoman/internal/modules/search"
+	"atoman/internal/modules/search/adapters"
 	"atoman/internal/service"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -21,6 +23,8 @@ func registerSearchRoutes(group *gin.RouterGroup, db *gorm.DB) {
 		}
 		return modules, nil
 	})
-	// P1 仅装配核心。P2 起在此注册真实领域 Provider，不使用占位结果开放能力。
+	if err := registry.Register(adapters.NewBooksProvider(books.NewService(db))); err != nil {
+		panic(err) // 固定的启动装配错误，不能静默遗漏已实现的 Provider。
+	}
 	search.RegisterRoutes(group, search.NewService(registry))
 }
