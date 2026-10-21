@@ -45,22 +45,25 @@ type BookPublicPostDTO struct {
 }
 
 type BookPublicEditionDTO struct {
-	ID            string                  `json:"id"`
-	WorkID        string                  `json:"work_id"`
-	Title         string                  `json:"title,omitempty"`
-	PublisherID   string                  `json:"publisher_id,omitempty"`
-	Publisher     string                  `json:"publisher,omitempty"`
-	PublisherInfo *BookPublicPublisherDTO `json:"publisher_info,omitempty"`
-	ProducerID    string                  `json:"producer_id,omitempty"`
-	Producer      string                  `json:"producer,omitempty"`
-	ProducerInfo  *BookPublicProducerDTO  `json:"producer_info,omitempty"`
-	ISBN10        string                  `json:"isbn10,omitempty"`
-	ISBN13        string                  `json:"isbn13,omitempty"`
-	Language      string                  `json:"language,omitempty"`
-	PublishedDate *time.Time              `json:"published_date,omitempty"`
-	PageCount     int                     `json:"page_count,omitempty"`
-	Binding       string                  `json:"binding,omitempty"`
-	CoverURL      string                  `json:"cover_url,omitempty"`
+	ID               string                  `json:"id"`
+	WorkID           string                  `json:"work_id"`
+	Title            string                  `json:"title,omitempty"`
+	Subtitle         string                  `json:"subtitle,omitempty"`
+	EditionStatement string                  `json:"edition_statement,omitempty"`
+	Translators      []BookPublicPersonDTO   `json:"translators"`
+	PublisherID      string                  `json:"publisher_id,omitempty"`
+	Publisher        string                  `json:"publisher,omitempty"`
+	PublisherInfo    *BookPublicPublisherDTO `json:"publisher_info,omitempty"`
+	ProducerID       string                  `json:"producer_id,omitempty"`
+	Producer         string                  `json:"producer,omitempty"`
+	ProducerInfo     *BookPublicProducerDTO  `json:"producer_info,omitempty"`
+	ISBN10           string                  `json:"isbn10,omitempty"`
+	ISBN13           string                  `json:"isbn13,omitempty"`
+	Language         string                  `json:"language,omitempty"`
+	PublishedDate    *time.Time              `json:"published_date,omitempty"`
+	PageCount        int                     `json:"page_count,omitempty"`
+	Binding          string                  `json:"binding,omitempty"`
+	CoverURL         string                  `json:"cover_url,omitempty"`
 }
 
 type BookPublicWorkDTO struct {
@@ -184,8 +187,15 @@ func (s *Service) GetPublicEdition(ctx context.Context, editionID uuid.UUID) (Bo
 	if err := s.db.WithContext(ctx).Where("target_type IN ? AND target_id = ?", []string{"edition", "book_edition"}, edition.ID).Order("created_at ASC").Find(&sources).Error; err != nil {
 		return BookPublicEditionDetailDTO{}, err
 	}
+	publicEdition := buildBookPublicEditionDTO(edition, s.findBookPublisher(ctx, edition.PublisherID), s.findBookProducer(ctx, edition.ProducerID))
+	for _, candidate := range work.Editions {
+		if candidate.ID == edition.ID.String() {
+			publicEdition = candidate
+			break
+		}
+	}
 	return BookPublicEditionDetailDTO{
-		Edition: buildBookPublicEditionDTO(edition, s.findBookPublisher(ctx, edition.PublisherID), s.findBookProducer(ctx, edition.ProducerID)),
+		Edition: publicEdition,
 		Work:    work,
 		Sources: buildBookPublicSources(sources),
 	}, nil
@@ -204,7 +214,11 @@ func (s *Service) buildPublicWorkDTOs(ctx context.Context, works []model.BookWor
 		return nil, err
 	}
 	var contributions []model.BookContribution
-	if err := s.db.WithContext(ctx).Where("work_id IN ? AND edition_id IS NULL AND role IN ?", workIDs, []string{"author", "translator", "editor"}).Order("position ASC").Find(&contributions).Error; err != nil {
+	editionIDs := make([]uuid.UUID, 0, len(editions))
+	for _, edition := range editions {
+		editionIDs = append(editionIDs, edition.ID)
+	}
+	if err := s.db.WithContext(ctx).Where("(work_id IN ? AND edition_id IS NULL AND role IN ?) OR (edition_id IN ? AND role = 'translator')", workIDs, []string{"author", "translator", "editor"}, editionIDs).Order("position ASC").Find(&contributions).Error; err != nil {
 		return nil, err
 	}
 	type ratingAggregate struct {
@@ -317,7 +331,7 @@ func (s *Service) buildPublicWorkDTOs(ctx context.Context, works []model.BookWor
 			dto.RatingCount = rating.RatingCount
 		}
 		for _, contribution := range contributions {
-			if contribution.WorkID == nil || *contribution.WorkID != work.ID {
+			if contribution.EditionID != nil || contribution.WorkID == nil || *contribution.WorkID != work.ID {
 				continue
 			}
 			person, ok := people[contribution.PersonID]
@@ -335,7 +349,15 @@ func (s *Service) buildPublicWorkDTOs(ctx context.Context, works []model.BookWor
 				if edition.ProducerID != nil {
 					producer = producers[*edition.ProducerID]
 				}
-				dto.Editions = append(dto.Editions, buildBookPublicEditionDTO(edition, &publisher, &producer))
+				publicEdition := buildBookPublicEditionDTO(edition, &publisher, &producer)
+				for _, contribution := range contributions {
+					if contribution.EditionID != nil && *contribution.EditionID == edition.ID && contribution.Role == "translator" {
+						if person, ok := people[contribution.PersonID]; ok {
+							publicEdition.Translators = append(publicEdition.Translators, BookPublicPersonDTO{ID: person.ID.String(), Name: person.Name, Role: "translator"})
+						}
+					}
+				}
+				dto.Editions = append(dto.Editions, publicEdition)
 			}
 		}
 		if includeSources {
@@ -377,6 +399,7 @@ func escapeBookCatalogQuery(query string) string {
 func buildBookPublicEditionDTO(edition model.BookEdition, publisher *model.BookPublisher, producer *model.BookProducer) BookPublicEditionDTO {
 	coverURL := strings.TrimSpace(edition.CoverURL)
 	dto := BookPublicEditionDTO{
+		Subtitle: edition.Subtitle, EditionStatement: edition.EditionStatement, Translators: []BookPublicPersonDTO{},
 		ID: edition.ID.String(), WorkID: edition.WorkID.String(), Title: edition.Title,
 		PublisherID: uuidPointerString(edition.PublisherID), Publisher: edition.Publisher, ISBN10: edition.ISBN10, ISBN13: edition.ISBN13,
 		ProducerID: uuidPointerString(edition.ProducerID), Producer: edition.Producer,

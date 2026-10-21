@@ -21,9 +21,10 @@ import (
 )
 
 type CreateBookResourceInput struct {
-	Title    string `json:"title"`
-	Language string `json:"language"`
-	Format   string `json:"format"`
+	EditionID *uuid.UUID `json:"edition_id,omitempty"`
+	Title     string     `json:"title"`
+	Language  string     `json:"language"`
+	Format    string     `json:"format"`
 }
 
 type CreateBookResourceUploadInput struct {
@@ -66,7 +67,7 @@ func (s *Service) CreateBookResource(ctx context.Context, user authctx.CurrentUs
 	if err != nil {
 		return model.BookAsset{}, err
 	}
-	asset := model.BookAsset{WorkID: workID, Title: strings.TrimSpace(input.Title), Language: lang, Format: format, CreatedBy: user.ID}
+	asset := model.BookAsset{WorkID: workID, EditionID: input.EditionID, Title: strings.TrimSpace(input.Title), Language: lang, Format: format, CreatedBy: user.ID}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var work model.BookWork
 		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ? AND lifecycle_status = ? AND edit_status <> ?", workID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&work).Error; err != nil {
@@ -74,6 +75,15 @@ func (s *Service) CreateBookResource(ctx context.Context, user authctx.CurrentUs
 		}
 		if _, err := currentBookWikiRevision(tx, "work", workID); err != nil {
 			return publicBookNotFound(err)
+		}
+		if input.EditionID != nil {
+			var edition model.BookEdition
+			if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ? AND work_id = ? AND lifecycle_status = ? AND edit_status <> ?", *input.EditionID, workID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&edition).Error; err != nil {
+				return publicBookNotFound(err)
+			}
+			if _, err := currentBookWikiRevision(tx, "edition", edition.ID); err != nil {
+				return publicBookNotFound(err)
+			}
 		}
 		return tx.Create(&asset).Error
 	})

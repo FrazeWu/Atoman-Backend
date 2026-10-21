@@ -22,7 +22,11 @@ func metadataMergeTables(kind string) ([]bookMergeTable, error) {
 	if kind == "edition" {
 		column = "edition_id"
 	}
-	return []bookMergeTable{{table, "id IN ?"}, {"book_contributions", column + " IN ?"}, {"book_sources", "target_type IN ('" + kind + "','book_" + kind + "') AND target_id IN ?"}}, nil
+	tables := []bookMergeTable{{table, "id IN ?"}, {"book_contributions", column + " IN ?"}, {"book_sources", "target_type IN ('" + kind + "','book_" + kind + "') AND target_id IN ?"}}
+	if kind == "edition" {
+		tables = append(tables, bookMergeTable{"book_assets", "edition_id IN ?"})
+	}
+	return tables, nil
 }
 func captureMetadataMerge(tx *gorm.DB, kind string, source, target uuid.UUID) (bookMergeSnapshot, error) {
 	tables, err := metadataMergeTables(kind)
@@ -31,6 +35,9 @@ func captureMetadataMerge(tx *gorm.DB, kind string, source, target uuid.UUID) (b
 	}
 	snapshot := bookMergeSnapshot{}
 	for _, table := range tables {
+		if !tx.Migrator().HasTable(table.name) {
+			continue
+		}
 		var raw string
 		if err := tx.Raw("SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb)::text FROM "+table.name+" t WHERE "+table.predicate, []uuid.UUID{source, target}).Scan(&raw).Error; err != nil {
 			return nil, err
@@ -41,7 +48,10 @@ func captureMetadataMerge(tx *gorm.DB, kind string, source, target uuid.UUID) (b
 }
 func lockMetadataMerge(tx *gorm.DB) error {
 	// Fixed order shared with work merges; metadata edits hold row locks on these tables.
-	for _, table := range []string{"book_works", "book_editions", "book_people", "book_contributions", "book_sources"} {
+	for _, table := range []string{"book_works", "book_editions", "book_people", "book_contributions", "book_sources", "book_assets"} {
+		if !tx.Migrator().HasTable(table) {
+			continue
+		}
 		if err := tx.Exec("LOCK TABLE " + table + " IN EXCLUSIVE MODE").Error; err != nil {
 			return err
 		}
@@ -124,7 +134,11 @@ func appendMetadataMergeRevision(tx *gorm.DB, kind string, id, editor uuid.UUID,
 	if err := tx.First(&row, "id = ?", id).Error; err != nil {
 		return model.Revision{}, err
 	}
-	return appendBookWikiRevision(tx, kind, id, editor, "出版版本合并/撤销", editType, row)
+	snapshot, err := loadBookEditionSnapshot(tx, row)
+	if err != nil {
+		return model.Revision{}, err
+	}
+	return appendBookWikiRevision(tx, kind, id, editor, "出版版本合并/撤销", editType, snapshot)
 }
 func (s *Service) mergeBookMetadata(ctx context.Context, user authctx.CurrentUser, input MergeBookWorksInput) (model.BookWikiMerge, error) {
 	if user.ID == uuid.Nil {
@@ -154,7 +168,7 @@ func (s *Service) mergeBookMetadata(ctx context.Context, user authctx.CurrentUse
 			return apperr.Conflict("books.merge_preview_stale", "Preview again before merging")
 		}
 		column, other := "person_id", "s.edition_id IS NOT DISTINCT FROM t.edition_id AND s.work_id IS NOT DISTINCT FROM t.work_id"
-		if input.EntityType == "edition" {
+		if input.EntityType == "edition" && tx.Migrator().HasTable(&model.BookAsset{}) {
 			column = "edition_id"
 			other = "s.person_id = t.person_id AND s.work_id IS NOT DISTINCT FROM t.work_id"
 		}
@@ -163,6 +177,11 @@ func (s *Service) mergeBookMetadata(ctx context.Context, user authctx.CurrentUse
 		}
 		if err := tx.Exec("UPDATE book_contributions SET "+column+" = ? WHERE "+column+" = ?", input.TargetID, input.SourceID).Error; err != nil {
 			return err
+		}
+		if input.EntityType == "edition" {
+			if err := tx.Model(&model.BookAsset{}).Where("edition_id = ?", input.SourceID).Update("edition_id", input.TargetID).Error; err != nil {
+				return err
+			}
 		}
 		if err := tx.Exec("UPDATE book_sources SET target_id = ? WHERE target_id = ? AND target_type IN (?,?)", input.TargetID, input.SourceID, input.EntityType, "book_"+input.EntityType).Error; err != nil {
 			return err
@@ -245,6 +264,16 @@ func (s *Service) revertBookMetadataMerge(ctx context.Context, user authctx.Curr
 			}
 		}
 		for _, table := range tables[1:] {
+			if !tx.Migrator().HasTable(table.name) || len(before[table.name]) == 0 {
+				continue
+			}
+			if table.name == "book_assets" {
+				// Restore only edition ownership; never delete files with pinned revisions.
+				if err := tx.Exec("UPDATE book_assets a SET edition_id = original.edition_id FROM jsonb_populate_recordset(NULL::book_assets, ?::jsonb) original WHERE a.id = original.id", string(before[table.name])).Error; err != nil {
+					return err
+				}
+				continue
+			}
 			if err := tx.Exec("DELETE FROM "+table.name+" WHERE "+table.predicate, []uuid.UUID{journal.SourceID, journal.TargetID}).Error; err != nil {
 				return err
 			}
