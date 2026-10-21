@@ -79,6 +79,27 @@ func TestErrorWritesErrorEnvelope(t *testing.T) {
 	}
 }
 
+func TestErrorWithoutRequestWritesErrorEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 without a request, got %d", w.Code)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error.Code != "blog.post_not_found" {
+		t.Fatalf("unexpected error code: %q", body.Error.Code)
+	}
+}
+
 func TestErrorWithAbandonedClientRecords499NotServerError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
