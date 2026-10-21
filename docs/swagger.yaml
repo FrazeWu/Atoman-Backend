@@ -9009,6 +9009,233 @@ definitions:
       run_id:
         type: string
     type: object
+  search.CapabilitiesEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/search.CapabilitiesResponse'
+    type: object
+  search.CapabilitiesResponse:
+    properties:
+      modules:
+        items:
+          $ref: '#/definitions/search.ModuleCapabilities'
+        type: array
+      scope:
+        $ref: '#/definitions/search.Scope'
+    type: object
+  search.ErrorEnvelope:
+    properties:
+      error:
+        properties:
+          code:
+            type: string
+          details:
+            additionalProperties: {}
+            type: object
+          message:
+            type: string
+        type: object
+    type: object
+  search.FilterDefinition:
+    properties:
+      key:
+        type: string
+      kind:
+        description: text / enum / entity(UUID) / date / number / boolean
+        type: string
+      label:
+        type: string
+      max:
+        type: number
+      min:
+        type: number
+      multiple:
+        type: boolean
+      options:
+        items:
+          $ref: '#/definitions/search.FilterOption'
+        type: array
+    type: object
+  search.FilterOption:
+    properties:
+      label:
+        type: string
+      value:
+        type: string
+    type: object
+  search.GroupError:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  search.ModuleCapabilities:
+    properties:
+      allow_empty_query:
+        type: boolean
+      default_sort:
+        type: string
+      filters:
+        items:
+          $ref: '#/definitions/search.FilterDefinition'
+        type: array
+      label:
+        type: string
+      module:
+        type: string
+      scope:
+        $ref: '#/definitions/search.Scope'
+      sorts:
+        items:
+          $ref: '#/definitions/search.SortDefinition'
+        type: array
+      types:
+        items:
+          $ref: '#/definitions/search.TypeCapability'
+        type: array
+    type: object
+  search.Pagination:
+    properties:
+      has_more:
+        type: boolean
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
+    type: object
+  search.Scope:
+    enum:
+    - public
+    - mine
+    type: string
+    x-enum-varnames:
+    - ScopePublic
+    - ScopeMine
+  search.SearchEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/search.SearchResponse'
+    type: object
+  search.SearchGroup:
+    properties:
+      error:
+        allOf:
+        - $ref: '#/definitions/search.GroupError'
+        x-nullable: true
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/search.SearchHit'
+        type: array
+      label:
+        type: string
+      module:
+        type: string
+      total:
+        type: integer
+        x-nullable: true
+      type:
+        type: string
+    type: object
+  search.SearchHit:
+    properties:
+      cover_url:
+        type: string
+      href:
+        type: string
+      id:
+        type: string
+      key:
+        type: string
+      matched_fields:
+        items:
+          type: string
+        type: array
+      metadata:
+        additionalProperties: {}
+        type: object
+      module:
+        type: string
+      snippet:
+        type: string
+      subtitle:
+        type: string
+      title:
+        type: string
+      type:
+        type: string
+    type: object
+  search.SearchResponse:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/search.SearchGroup'
+        type: array
+      items:
+        items:
+          $ref: '#/definitions/search.SearchHit'
+        type: array
+      module:
+        type: string
+      pagination:
+        $ref: '#/definitions/search.Pagination'
+      partial:
+        type: boolean
+      query:
+        type: string
+      scope:
+        $ref: '#/definitions/search.Scope'
+      type:
+        type: string
+      view:
+        $ref: '#/definitions/search.View'
+    type: object
+  search.SortDefinition:
+    properties:
+      key:
+        type: string
+      label:
+        type: string
+    type: object
+  search.TypeCapability:
+    properties:
+      allow_empty_query:
+        type: boolean
+      default_sort:
+        type: string
+      discovery_sort:
+        type: string
+      filters:
+        items:
+          $ref: '#/definitions/search.FilterDefinition'
+        type: array
+      key:
+        type: string
+      label:
+        type: string
+      search_fields:
+        items:
+          type: string
+        type: array
+      sorts:
+        items:
+          $ref: '#/definitions/search.SortDefinition'
+        type: array
+    type: object
+  search.View:
+    enum:
+    - preview
+    - grouped
+    - list
+    type: string
+    x-enum-varnames:
+    - ViewPreview
+    - ViewGrouped
+    - ViewList
   service.RevisionContributorDTO:
     properties:
       avatar_url:
@@ -23868,6 +24095,132 @@ paths:
       summary: 获取用户公开内容 RSS
       tags:
       - feed
+  /api/v1/search:
+    get:
+      description: preview 每组 2 条，grouped 每组 6 条；list 必须选择单个 module/type。filter[key]
+        仅接受 capabilities 声明的字段，重复值为 OR、不同字段为 AND。未完成 Provider 接入时非空查询返回 503，现有搜索入口不受影响。
+      parameters:
+      - description: 关键词，最多 256 个 Unicode 字符
+        in: query
+        name: q
+        type: string
+      - default: public
+        description: 范围；mine 需 Cookie 或 API Token 登录
+        enum:
+        - public
+        - mine
+        in: query
+        name: scope
+        type: string
+      - description: 已注册模块
+        in: query
+        name: module
+        type: string
+      - collectionFormat: multi
+        description: 内容类型，可重复
+        in: query
+        items:
+          type: string
+        name: type
+        type: array
+      - default: grouped
+        description: 结果模式
+        enum:
+        - preview
+        - grouped
+        - list
+        in: query
+        name: view
+        type: string
+      - description: 已注册排序
+        in: query
+        name: sort
+        type: string
+      - default: 1
+        description: list 页码，offset 不超过 10000
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 24
+        description: list 页大小
+        in: query
+        maximum: 50
+        minimum: 1
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/search.SearchEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/search.ErrorEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/search.ErrorEnvelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/search.ErrorEnvelope'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/search.ErrorEnvelope'
+      summary: 统一内容搜索
+      tags:
+      - search
+  /api/v1/search/capabilities:
+    get:
+      description: 始终返回 scope 和 modules 数组；指定 module/type 时收窄结果，模块级 sorts/filters
+        是选中类型的交集。未注册能力和已停用模块不会出现在结果中。
+      parameters:
+      - default: public
+        description: 范围；mine 需登录
+        enum:
+        - public
+        - mine
+        in: query
+        name: scope
+        type: string
+      - description: 已注册模块
+        in: query
+        name: module
+        type: string
+      - collectionFormat: multi
+        description: 内容类型，可重复
+        in: query
+        items:
+          type: string
+        name: type
+        type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/search.CapabilitiesEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/search.ErrorEnvelope'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/search.ErrorEnvelope'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/search.ErrorEnvelope'
+      summary: 查询已实现的统一搜索能力
+      tags:
+      - search
   /api/v1/settings/site-access:
     get:
       description: 返回后台模块开关与结构化模块设置，包括 feed/blog/forum 的设置矩阵。
