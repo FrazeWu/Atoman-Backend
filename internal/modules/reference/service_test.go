@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/searchlimit"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -37,7 +38,7 @@ func TestReferenceSearchWorkerLimit(t *testing.T) {
 			require.Equal(t, test.want, referenceSearchWorkerLimit(test.typeCount))
 		})
 	}
-	require.Equal(t, referenceSearchGlobalWorkerCount, cap(referenceSearchSlots))
+	require.Equal(t, 8, searchlimit.Capacity)
 }
 
 func TestReplacePublishedPersistsOccurrencesAndNotifiesMentionedUserOnce(t *testing.T) {

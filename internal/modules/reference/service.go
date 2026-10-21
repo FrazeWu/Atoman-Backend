@@ -11,6 +11,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/searchlimit"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -24,11 +25,6 @@ type Service struct {
 
 // Keep per-request search fan-out bounded; concurrent HTTP requests multiply this number against the DB pool.
 const referenceSearchWorkerCount = 2
-
-// Cap process-wide search query concurrency so bursts do not exhaust the DB pool.
-const referenceSearchGlobalWorkerCount = 8
-
-var referenceSearchSlots = make(chan struct{}, referenceSearchGlobalWorkerCount)
 
 func referenceSearchWorkerLimit(typeCount int) int {
 	if typeCount < referenceSearchWorkerCount {
@@ -89,14 +85,12 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 					errMu.Unlock()
 					continue
 				}
-				select {
-				case referenceSearchSlots <- struct{}{}:
-				case <-ctx.Done():
+				if err := searchlimit.Acquire(ctx); err != nil {
 					continue
 				}
 				typeStartedAt := time.Now()
 				matches, err := registry.Search(viewer, uniqueTypes[index], query, limit)
-				<-referenceSearchSlots
+				searchlimit.Release()
 				typeDuration := time.Since(typeStartedAt)
 				if err != nil {
 					errMu.Lock()

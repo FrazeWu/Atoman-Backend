@@ -22139,6 +22139,187 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/search": {
+            "get": {
+                "description": "preview 每组 2 条，grouped 每组 6 条；list 必须选择单个 module/type。filter[key] 仅接受 capabilities 声明的字段，重复值为 OR、不同字段为 AND。未完成 Provider 接入时非空查询返回 503，现有搜索入口不受影响。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "统一内容搜索",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "关键词，最多 256 个 Unicode 字符",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "public",
+                            "mine"
+                        ],
+                        "type": "string",
+                        "default": "public",
+                        "description": "范围；mine 需 Cookie 或 API Token 登录",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "已注册模块",
+                        "name": "module",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "内容类型，可重复",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "preview",
+                            "grouped",
+                            "list"
+                        ],
+                        "type": "string",
+                        "default": "grouped",
+                        "description": "结果模式",
+                        "name": "view",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "已注册排序",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 1,
+                        "description": "list 页码，offset 不超过 10000",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 50,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 24,
+                        "description": "list 页大小",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/search.SearchEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/search.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/search.ErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/search.ErrorEnvelope"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/search.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/search/capabilities": {
+            "get": {
+                "description": "始终返回 scope 和 modules 数组；指定 module/type 时收窄结果，模块级 sorts/filters 是选中类型的交集。未注册能力和已停用模块不会出现在结果中。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "search"
+                ],
+                "summary": "查询已实现的统一搜索能力",
+                "parameters": [
+                    {
+                        "enum": [
+                            "public",
+                            "mine"
+                        ],
+                        "type": "string",
+                        "default": "public",
+                        "description": "范围；mine 需登录",
+                        "name": "scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "已注册模块",
+                        "name": "module",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "内容类型，可重复",
+                        "name": "type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/search.CapabilitiesEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/search.ErrorEnvelope"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/search.ErrorEnvelope"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/search.ErrorEnvelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/settings/site-access": {
             "get": {
                 "security": [
@@ -42688,6 +42869,351 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "search.CapabilitiesEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/search.CapabilitiesResponse"
+                }
+            }
+        },
+        "search.CapabilitiesResponse": {
+            "type": "object",
+            "properties": {
+                "modules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.ModuleCapabilities"
+                    }
+                },
+                "scope": {
+                    "$ref": "#/definitions/search.Scope"
+                }
+            }
+        },
+        "search.ErrorEnvelope": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string"
+                        },
+                        "details": {
+                            "type": "object",
+                            "additionalProperties": {}
+                        },
+                        "message": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "search.FilterDefinition": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "kind": {
+                    "description": "text / enum / entity(UUID) / date / number / boolean",
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "max": {
+                    "type": "number"
+                },
+                "min": {
+                    "type": "number"
+                },
+                "multiple": {
+                    "type": "boolean"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.FilterOption"
+                    }
+                }
+            }
+        },
+        "search.FilterOption": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "search.GroupError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "search.ModuleCapabilities": {
+            "type": "object",
+            "properties": {
+                "allow_empty_query": {
+                    "type": "boolean"
+                },
+                "default_sort": {
+                    "type": "string"
+                },
+                "filters": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.FilterDefinition"
+                    }
+                },
+                "label": {
+                    "type": "string"
+                },
+                "module": {
+                    "type": "string"
+                },
+                "scope": {
+                    "$ref": "#/definitions/search.Scope"
+                },
+                "sorts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.SortDefinition"
+                    }
+                },
+                "types": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.TypeCapability"
+                    }
+                }
+            }
+        },
+        "search.Pagination": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "search.Scope": {
+            "type": "string",
+            "enum": [
+                "public",
+                "mine"
+            ],
+            "x-enum-varnames": [
+                "ScopePublic",
+                "ScopeMine"
+            ]
+        },
+        "search.SearchEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/search.SearchResponse"
+                }
+            }
+        },
+        "search.SearchGroup": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/search.GroupError"
+                        }
+                    ],
+                    "x-nullable": true
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.SearchHit"
+                    }
+                },
+                "label": {
+                    "type": "string"
+                },
+                "module": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer",
+                    "x-nullable": true
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "search.SearchHit": {
+            "type": "object",
+            "properties": {
+                "cover_url": {
+                    "type": "string"
+                },
+                "href": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "matched_fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "module": {
+                    "type": "string"
+                },
+                "snippet": {
+                    "type": "string"
+                },
+                "subtitle": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "search.SearchResponse": {
+            "type": "object",
+            "properties": {
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.SearchGroup"
+                    }
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.SearchHit"
+                    }
+                },
+                "module": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "$ref": "#/definitions/search.Pagination"
+                },
+                "partial": {
+                    "type": "boolean"
+                },
+                "query": {
+                    "type": "string"
+                },
+                "scope": {
+                    "$ref": "#/definitions/search.Scope"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "view": {
+                    "$ref": "#/definitions/search.View"
+                }
+            }
+        },
+        "search.SortDefinition": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "search.TypeCapability": {
+            "type": "object",
+            "properties": {
+                "allow_empty_query": {
+                    "type": "boolean"
+                },
+                "default_sort": {
+                    "type": "string"
+                },
+                "discovery_sort": {
+                    "type": "string"
+                },
+                "filters": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.FilterDefinition"
+                    }
+                },
+                "key": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "search_fields": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "sorts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/search.SortDefinition"
+                    }
+                }
+            }
+        },
+        "search.View": {
+            "type": "string",
+            "enum": [
+                "preview",
+                "grouped",
+                "list"
+            ],
+            "x-enum-varnames": [
+                "ViewPreview",
+                "ViewGrouped",
+                "ViewList"
+            ]
         },
         "service.RevisionContributorDTO": {
             "type": "object",

@@ -68,6 +68,7 @@ func RegisterV1Routes(
 		}
 	})
 	group := r.Group("/api/v1")
+	registerSearchRoutes(group, db)
 	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
 	commentService.SetNotificationPublisher(handlers.WsPushNotif(userHub))
 	forumService := forum.NewServiceWithComments(db, commentService)
