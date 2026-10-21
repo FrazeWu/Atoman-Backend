@@ -31,7 +31,19 @@ func List(c *gin.Context, data any, page int, pageSize int, total int64) {
 	OKMeta(c, http.StatusOK, data, meta)
 }
 
+// clientClosedRequest is nginx's convention for a client that hung up before
+// the response was written.
+const clientClosedRequest = 499
+
 func Error(c *gin.Context, err error) {
+	// The client is already gone: it navigated away, canceled the request, or
+	// stopped waiting mid-flight, and the aborted query came back with
+	// "context canceled". Nobody can read the response and this must not be
+	// reported as a server error, so record 499 and stop.
+	if c.Request.Context().Err() != nil {
+		c.AbortWithStatus(clientClosedRequest)
+		return
+	}
 	app := apperr.FromError(err)
 	if app == nil {
 		app = apperr.Internal(nil)

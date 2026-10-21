@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -75,6 +76,42 @@ func TestErrorWritesErrorEnvelope(t *testing.T) {
 	}
 	if body.Error.Code != "blog.post_not_found" {
 		t.Fatalf("expected blog.post_not_found, got %q", body.Error.Code)
+	}
+}
+
+func TestErrorWithAbandonedClientRecords499NotServerError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", func(c *gin.Context) {
+		Error(c, context.Canceled)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != 499 {
+		t.Fatalf("expected 499 for an abandoned client, got %d", w.Code)
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected an empty body for an abandoned client, got %q", w.Body.String())
+	}
+}
+
+func TestErrorWithLiveClientStillMapsCanceledContextToServerError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", func(c *gin.Context) {
+		// A cancellation that did not come from the request context (for
+		// example a canceled background job surfacing in a handler) is still
+		// a server error for a client that is waiting for an answer.
+		Error(c, context.Canceled)
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for a canceled error with a live client, got %d", w.Code)
 	}
 }
 
