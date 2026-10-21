@@ -12,7 +12,7 @@ import (
 // Composite foreign keys enforce ownership even when writes bypass the service.
 func RunBooksV2Migration(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.AutoMigrate(&model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
+		if err := tx.AutoMigrate(&model.BookEdition{}, &model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
 			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{},
 			&model.BookReadingSession{}, &model.BookReadingWrite{}, &model.BookReadingMark{},
 			&model.BookLibraryEntry{}, &model.BookPrivateNote{}, &model.BookNoteImportReceipt{},
@@ -23,6 +23,7 @@ func RunBooksV2Migration(db *gorm.DB) error {
 		if err := tx.Exec(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_work_language ON book_assets (id, work_id, language);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_work ON book_assets (id, work_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_book_editions_work ON book_editions (id, work_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_revisions_asset ON book_asset_revisions (id, asset_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_reading_session_identity ON book_reading_sessions (id, user_id, revision_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private_notes (id, user_id, work_id);
@@ -38,6 +39,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private
 			{"book_content_reviews", "fk_book_content_review_work", "FOREIGN KEY (work_id) REFERENCES book_works(id) DEFERRABLE INITIALLY DEFERRED"},
 			{"book_content_reviews", "fk_book_content_review_creator", "FOREIGN KEY (created_by) REFERENCES \"Users\"(uuid)"},
 			{"book_assets", "fk_book_assets_work", "FOREIGN KEY (work_id) REFERENCES book_works(id)"},
+			{"book_assets", "fk_book_assets_edition_work", "FOREIGN KEY (edition_id, work_id) REFERENCES book_editions(id, work_id) DEFERRABLE INITIALLY DEFERRED"},
 			{"book_assets", "fk_book_assets_current_revision", "FOREIGN KEY (current_revision_id, id) REFERENCES book_asset_revisions(id, asset_id) DEFERRABLE INITIALLY DEFERRED"},
 			{"book_asset_revisions", "fk_book_revisions_asset", "FOREIGN KEY (asset_id) REFERENCES book_assets(id)"},
 			{"book_asset_revisions", "fk_book_revisions_media", "FOREIGN KEY (media_asset_id) REFERENCES media_assets(id)"},

@@ -30434,6 +30434,9 @@
                 "cover_url": {
                     "type": "string"
                 },
+                "edition_statement": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -30470,8 +30473,17 @@
                 "publisher_info": {
                     "$ref": "#/definitions/books.BookPublicPublisherDTO"
                 },
+                "subtitle": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
+                },
+                "translators": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookPublicPersonDTO"
+                    }
                 },
                 "work_id": {
                     "type": "string"
@@ -31066,6 +31078,9 @@
                 "cover_url": {
                     "type": "string"
                 },
+                "edition_statement": {
+                    "type": "string"
+                },
                 "isbn10": {
                     "type": "string"
                 },
@@ -31087,8 +31102,23 @@
                 "publisher": {
                     "type": "string"
                 },
+                "subtitle": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
+                },
+                "translator_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "translators": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -31120,6 +31150,9 @@
         "books.CreateBookResourceInput": {
             "type": "object",
             "properties": {
+                "edition_id": {
+                    "type": "string"
+                },
                 "format": {
                     "type": "string"
                 },
@@ -37005,6 +37038,10 @@
                     "type": "string"
                 },
                 "current_revision_id": {
+                    "type": "string"
+                },
+                "edition_id": {
+                    "description": "Nil is reserved for legacy files; existing records are not guessed or backfilled.",
                     "type": "string"
                 },
                 "format": {

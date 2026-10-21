@@ -16,10 +16,12 @@ const (
 	BookRevisionStatusRemoved     = "removed"
 )
 
-// BookAsset is a logical public ebook, independent of publication editions.
+// BookAsset is a logical public ebook belonging to a publication edition.
 // Replacing a file appends a revision; uploading another ebook creates another asset.
 type BookAsset struct {
 	Base
+	// Nil is reserved for legacy files; existing records are not guessed or backfilled.
+	EditionID         *uuid.UUID `json:"edition_id,omitempty" gorm:"type:uuid;index"`
 	WorkID            uuid.UUID  `json:"work_id" gorm:"type:uuid;not null;index"`
 	Language          string     `json:"language" gorm:"not null"`
 	Format            string     `json:"format" gorm:"not null;check:chk_book_assets_format,format IN ('epub','pdf','txt','cbz','cbr')"`

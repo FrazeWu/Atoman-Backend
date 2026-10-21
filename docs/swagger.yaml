@@ -879,6 +879,8 @@ definitions:
         type: string
       cover_url:
         type: string
+      edition_statement:
+        type: string
       id:
         type: string
       isbn10:
@@ -903,8 +905,14 @@ definitions:
         type: string
       publisher_info:
         $ref: '#/definitions/books.BookPublicPublisherDTO'
+      subtitle:
+        type: string
       title:
         type: string
+      translators:
+        items:
+          $ref: '#/definitions/books.BookPublicPersonDTO'
+        type: array
       work_id:
         type: string
     type: object
@@ -1291,6 +1299,8 @@ definitions:
         type: string
       cover_url:
         type: string
+      edition_statement:
+        type: string
       isbn10:
         type: string
       isbn13:
@@ -1305,8 +1315,18 @@ definitions:
         type: string
       publisher:
         type: string
+      subtitle:
+        type: string
       title:
         type: string
+      translator_ids:
+        items:
+          type: string
+        type: array
+      translators:
+        items:
+          type: string
+        type: array
     type: object
   books.CreateBookPersonInput:
     properties:
@@ -1326,6 +1346,8 @@ definitions:
     type: object
   books.CreateBookResourceInput:
     properties:
+      edition_id:
+        type: string
       format:
         type: string
       language:
@@ -5251,6 +5273,10 @@ definitions:
       created_by:
         type: string
       current_revision_id:
+        type: string
+      edition_id:
+        description: Nil is reserved for legacy files; existing records are not guessed
+          or backfilled.
         type: string
       format:
         type: string

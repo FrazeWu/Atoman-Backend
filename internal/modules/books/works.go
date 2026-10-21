@@ -38,16 +38,20 @@ type CreateBookPersonInput struct {
 }
 
 type CreateBookEditionInput struct {
-	Title         string `json:"title"`
-	Publisher     string `json:"publisher"`
-	Producer      string `json:"producer"`
-	ISBN10        string `json:"isbn10"`
-	ISBN13        string `json:"isbn13"`
-	Language      string `json:"language"`
-	PublishedDate string `json:"published_date"`
-	PageCount     int    `json:"page_count"`
-	Binding       string `json:"binding"`
-	CoverURL      string `json:"cover_url"`
+	Title            string      `json:"title"`
+	Subtitle         string      `json:"subtitle"`
+	EditionStatement string      `json:"edition_statement"`
+	Translators      []string    `json:"translators"`
+	TranslatorIDs    []uuid.UUID `json:"translator_ids"`
+	Publisher        string      `json:"publisher"`
+	Producer         string      `json:"producer"`
+	ISBN10           string      `json:"isbn10"`
+	ISBN13           string      `json:"isbn13"`
+	Language         string      `json:"language"`
+	PublishedDate    string      `json:"published_date"`
+	PageCount        int         `json:"page_count"`
+	Binding          string      `json:"binding"`
+	CoverURL         string      `json:"cover_url"`
 }
 
 type bookWorkSnapshot struct {
@@ -257,6 +261,8 @@ func (s *Service) CreateBookEdition(ctx context.Context, user authctx.CurrentUse
 		publishedDate = &parsed
 	}
 	edition := model.BookEdition{WorkID: workID, Title: strings.TrimSpace(input.Title), Publisher: strings.TrimSpace(input.Publisher), Producer: strings.TrimSpace(input.Producer), ISBN10: strings.TrimSpace(input.ISBN10), ISBN13: strings.TrimSpace(input.ISBN13), Language: strings.TrimSpace(input.Language), PublishedDate: publishedDate, PageCount: input.PageCount, Binding: strings.TrimSpace(input.Binding), CoverURL: strings.TrimSpace(input.CoverURL), LifecycleStatus: model.BookLifecycleStatusActive, CreatedBy: &user.ID}
+	edition.Subtitle = strings.TrimSpace(input.Subtitle)
+	edition.EditionStatement = strings.TrimSpace(input.EditionStatement)
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var work model.BookWork
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND lifecycle_status = ? AND edit_status <> ?", workID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&work).Error; err != nil {
@@ -277,12 +283,58 @@ func (s *Service) CreateBookEdition(ctx context.Context, user authctx.CurrentUse
 		if err := tx.Create(&edition).Error; err != nil {
 			return err
 		}
-		_, err = appendBookWikiRevision(tx, "edition", edition.ID, user.ID, "添加出版版本", "creation", edition)
+		if len(input.Translators) > 0 || len(input.TranslatorIDs) > 0 {
+			ids, err := resolveBookAuthors(tx, user.ID, input.TranslatorIDs, input.Translators)
+			if err != nil {
+				return err
+			}
+			if err := replaceBookTranslators(tx, edition.ID, ids); err != nil {
+				return err
+			}
+		}
+		snapshot, err := loadBookEditionSnapshot(tx, edition)
+		if err != nil {
+			return err
+		}
+		_, err = appendBookWikiRevision(tx, "edition", edition.ID, user.ID, "添加出版版本", "creation", snapshot)
 		return err
 	})
 	if err != nil {
 		return BookPublicEditionDTO{}, err
 	}
 	s.InvalidateCatalog()
-	return buildBookPublicEditionDTO(edition, nil, nil), nil
+	work, err := s.GetBookWork(ctx, workID)
+	if err != nil {
+		return BookPublicEditionDTO{}, err
+	}
+	for _, result := range work.Editions {
+		if result.ID == edition.ID.String() {
+			return result, nil
+		}
+	}
+	return BookPublicEditionDTO{}, gorm.ErrRecordNotFound
+}
+
+// Translators use the existing people/contributions graph, never work authors.
+type bookEditionSnapshot struct {
+	model.BookEdition
+	TranslatorIDs []uuid.UUID `json:"translator_ids"`
+}
+
+func loadBookEditionSnapshot(tx *gorm.DB, edition model.BookEdition) (bookEditionSnapshot, error) {
+	snapshot := bookEditionSnapshot{BookEdition: edition, TranslatorIDs: []uuid.UUID{}}
+	err := tx.Model(&model.BookContribution{}).Where("edition_id = ? AND role = 'translator'", edition.ID).Order("position ASC, id ASC").Pluck("person_id", &snapshot.TranslatorIDs).Error
+	return snapshot, err
+}
+
+func replaceBookTranslators(tx *gorm.DB, editionID uuid.UUID, ids []uuid.UUID) error {
+	if err := tx.Where("edition_id = ? AND role = 'translator'", editionID).Delete(&model.BookContribution{}).Error; err != nil {
+		return err
+	}
+	for index, id := range ids {
+		if err := tx.Create(&model.BookContribution{EditionID: &editionID, PersonID: id, Role: "translator", Position: index + 1}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

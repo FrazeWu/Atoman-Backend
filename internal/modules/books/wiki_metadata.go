@@ -41,7 +41,7 @@ func metadataFields(kind string) []string {
 	if kind == "person" {
 		return []string{"name", "description"}
 	}
-	return []string{"title", "publisher", "producer", "isbn10", "isbn13", "language", "published_date", "page_count", "binding", "cover_url"}
+	return []string{"title", "subtitle", "edition_statement", "translator_ids", "publisher", "producer", "isbn10", "isbn13", "language", "published_date", "page_count", "binding", "cover_url"}
 }
 
 func (s *Service) GetBookWikiMetadata(ctx context.Context, kind string, id uuid.UUID) (BookWikiMetadata, error) {
@@ -162,10 +162,11 @@ func (s *Service) PatchBookMetadata(ctx context.Context, user authctx.CurrentUse
 			}
 			snapshot = person
 		} else {
-			var edition model.BookEdition
-			if err := json.Unmarshal(encoded, &edition); err != nil {
+			var editionSnapshot bookEditionSnapshot
+			if err := json.Unmarshal(encoded, &editionSnapshot); err != nil {
 				return apperr.BadRequest("books.invalid_metadata", "Invalid edition fields; date must be an ISO timestamp or null")
 			}
+			edition := editionSnapshot.BookEdition
 			if edition.PageCount < 0 {
 				return apperr.BadRequest("books.invalid_metadata", "page_count cannot be negative")
 			}
@@ -180,11 +181,28 @@ func (s *Service) PatchBookMetadata(ctx context.Context, user authctx.CurrentUse
 				return err
 			}
 			updates := map[string]any{"title": strings.TrimSpace(edition.Title), "publisher": edition.Publisher, "publisher_id": edition.PublisherID, "producer": edition.Producer, "producer_id": edition.ProducerID, "isbn10": edition.ISBN10, "isbn13": edition.ISBN13, "language": edition.Language, "published_date": edition.PublishedDate, "page_count": edition.PageCount, "binding": edition.Binding, "cover_url": edition.CoverURL}
+			updates["subtitle"] = strings.TrimSpace(edition.Subtitle)
+			updates["edition_statement"] = strings.TrimSpace(edition.EditionStatement)
 			if err := tx.Model(&edition).Updates(updates).Error; err != nil {
 				return err
 			}
 			edition.Title = strings.TrimSpace(edition.Title)
-			snapshot = edition
+			if _, changed := input.Fields["translator_ids"]; changed {
+				ids := editionSnapshot.TranslatorIDs
+				if len(ids) > 0 {
+					ids, err = resolveBookAuthors(tx, user.ID, ids, nil)
+					if err != nil {
+						return err
+					}
+				}
+				if err := replaceBookTranslators(tx, edition.ID, ids); err != nil {
+					return err
+				}
+			}
+			snapshot, err = loadBookEditionSnapshot(tx, edition)
+			if err != nil {
+				return err
+			}
 		}
 		_, err = appendBookWikiRevision(tx, kind, id, user.ID, strings.TrimSpace(input.Summary), editType, snapshot)
 		return err

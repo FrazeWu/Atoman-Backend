@@ -107,24 +107,26 @@ func (BookWork) TableName() string { return "book_works" }
 // BookEdition is a public edition record. Public metadata is independent from private assets.
 type BookEdition struct {
 	Base
-	WorkID          uuid.UUID  `json:"work_id" gorm:"type:uuid;not null;index"`
-	Title           string     `json:"title,omitempty"`
-	PublisherID     *uuid.UUID `json:"publisher_id,omitempty" gorm:"type:uuid;index"`
-	Publisher       string     `json:"publisher,omitempty"`
-	ProducerID      *uuid.UUID `json:"producer_id,omitempty" gorm:"type:uuid;index"`
-	Producer        string     `json:"producer,omitempty"`
-	ISBN10          string     `json:"isbn10,omitempty" gorm:"index"`
-	ISBN13          string     `json:"isbn13,omitempty" gorm:"index"`
-	Language        string     `json:"language,omitempty"`
-	PublishedDate   *time.Time `json:"published_date,omitempty" gorm:"type:date"`
-	PageCount       int        `json:"page_count,omitempty"`
-	Binding         string     `json:"binding,omitempty"`
-	CoverURL        string     `json:"cover_url,omitempty" gorm:"type:text"`
-	CoverSource     string     `json:"cover_source,omitempty"`
-	LifecycleStatus string     `json:"lifecycle_status" gorm:"not null;default:'draft';index;check:chk_book_editions_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
-	EditStatus      string     `json:"edit_status" gorm:"not null;default:'development';index;check:chk_book_editions_edit_status,edit_status IN ('development','locked','closed')"`
-	CreatedBy       *uuid.UUID `json:"created_by,omitempty" gorm:"type:uuid;index"`
-	RedirectTo      *uuid.UUID `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
+	WorkID           uuid.UUID  `json:"work_id" gorm:"type:uuid;not null;index"`
+	Title            string     `json:"title,omitempty"`
+	Subtitle         string     `json:"subtitle,omitempty"`
+	EditionStatement string     `json:"edition_statement,omitempty"`
+	PublisherID      *uuid.UUID `json:"publisher_id,omitempty" gorm:"type:uuid;index"`
+	Publisher        string     `json:"publisher,omitempty"`
+	ProducerID       *uuid.UUID `json:"producer_id,omitempty" gorm:"type:uuid;index"`
+	Producer         string     `json:"producer,omitempty"`
+	ISBN10           string     `json:"isbn10,omitempty" gorm:"index"`
+	ISBN13           string     `json:"isbn13,omitempty" gorm:"index"`
+	Language         string     `json:"language,omitempty"`
+	PublishedDate    *time.Time `json:"published_date,omitempty" gorm:"type:date"`
+	PageCount        int        `json:"page_count,omitempty"`
+	Binding          string     `json:"binding,omitempty"`
+	CoverURL         string     `json:"cover_url,omitempty" gorm:"type:text"`
+	CoverSource      string     `json:"cover_source,omitempty"`
+	LifecycleStatus  string     `json:"lifecycle_status" gorm:"not null;default:'draft';index;check:chk_book_editions_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
+	EditStatus       string     `json:"edit_status" gorm:"not null;default:'development';index;check:chk_book_editions_edit_status,edit_status IN ('development','locked','closed')"`
+	CreatedBy        *uuid.UUID `json:"created_by,omitempty" gorm:"type:uuid;index"`
+	RedirectTo       *uuid.UUID `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
 }
 
 func (BookEdition) TableName() string { return "book_editions" }

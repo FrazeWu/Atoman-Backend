@@ -30437,6 +30437,9 @@ const docTemplate = `{
                 "cover_url": {
                     "type": "string"
                 },
+                "edition_statement": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -30473,8 +30476,17 @@ const docTemplate = `{
                 "publisher_info": {
                     "$ref": "#/definitions/books.BookPublicPublisherDTO"
                 },
+                "subtitle": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
+                },
+                "translators": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.BookPublicPersonDTO"
+                    }
                 },
                 "work_id": {
                     "type": "string"
@@ -31069,6 +31081,9 @@ const docTemplate = `{
                 "cover_url": {
                     "type": "string"
                 },
+                "edition_statement": {
+                    "type": "string"
+                },
                 "isbn10": {
                     "type": "string"
                 },
@@ -31090,8 +31105,23 @@ const docTemplate = `{
                 "publisher": {
                     "type": "string"
                 },
+                "subtitle": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
+                },
+                "translator_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "translators": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -31123,6 +31153,9 @@ const docTemplate = `{
         "books.CreateBookResourceInput": {
             "type": "object",
             "properties": {
+                "edition_id": {
+                    "type": "string"
+                },
                 "format": {
                     "type": "string"
                 },
@@ -37008,6 +37041,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "current_revision_id": {
+                    "type": "string"
+                },
+                "edition_id": {
+                    "description": "Nil is reserved for legacy files; existing records are not guessed or backfilled.",
                     "type": "string"
                 },
                 "format": {
