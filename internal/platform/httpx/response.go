@@ -40,6 +40,7 @@ func Error(c *gin.Context, err error) {
 	// stopped waiting mid-flight, and the aborted query came back with
 	// "context canceled". Nobody can read the response and this must not be
 	// reported as a server error, so record 499 and stop.
+	// c.Request is nil in bare gin.CreateTestContext test contexts.
 	if c.Request != nil && c.Request.Context().Err() != nil {
 		c.AbortWithStatus(clientClosedRequest)
 		return

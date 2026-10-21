@@ -120,6 +120,17 @@ func TestErrorWithAbandonedClientRecords499NotServerError(t *testing.T) {
 	}
 }
 
+func TestErrorWithBareTestContextStillMapsErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	// gin.CreateTestContext leaves Request nil; Error must not dereference it.
+	Error(c, apperr.NotFound("dm.target_not_found", "target not found"))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 with a nil request context, got %d", recorder.Code)
+	}
+}
+
 func TestErrorWithLiveClientStillMapsCanceledContextToServerError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
