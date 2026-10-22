@@ -1,0 +1,19 @@
+name: atoman-test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: atoman_test
+      POSTGRES_PASSWORD: atoman_test
+      POSTGRES_DB: atoman_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    # Test data is disposable; no shared development volume is mounted.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atoman_test -d atoman_test"]
+      interval: 1s
+      timeout: 5s
+      retries: 30

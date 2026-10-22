@@ -33,7 +33,7 @@ func OpenWithConfig(t *testing.T, config *gorm.Config) *gorm.DB {
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
 	if err := sqlDB.Ping(); err != nil {
-		t.Fatalf("ping PostgreSQL: %v", err)
+		t.Fatalf("ping test PostgreSQL: %v; run `make test-postgres-up` or configure TEST_POSTGRES_DSN for a reachable test database", err)
 	}
 	schema := "test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := admin.Exec("CREATE SCHEMA " + schema).Error; err != nil {
