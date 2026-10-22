@@ -18,9 +18,22 @@ type BooksProvider struct{ service *books.Service }
 func NewBooksProvider(service *books.Service) *BooksProvider { return &BooksProvider{service: service} }
 func (p *BooksProvider) Module() string                      { return "books" }
 
-func (p *BooksProvider) Capabilities(_ context.Context, _ search.Viewer, scope search.Scope) search.ModuleCapabilities {
+func (p *BooksProvider) Capabilities(_ context.Context, viewer search.Viewer, scope search.Scope) search.ModuleCapabilities {
 	caps := search.ModuleCapabilities{Module: p.Module(), Label: "图书", Scope: scope}
-	// 私人笔记、藏书和书单留到 P6，不能提前宣传未实现的能力。
+	if scope == search.ScopeMine && viewer.ID != uuid.Nil {
+		for _, kind := range []struct {
+			key, label string
+			fields     []string
+		}{
+			{"note", "私人笔记", []string{"title", "body"}},
+			{"book_list", "我创建的书单", []string{"title", "description"}},
+			{"library", "我的书架", []string{"title", "description"}},
+			{"bookmark", "收藏书单", []string{"title", "description"}},
+		} {
+			caps.Types = append(caps.Types, privateTypeCapability(kind.key, kind.label, kind.fields))
+		}
+		return caps
+	}
 	if scope != search.ScopePublic {
 		return caps
 	}
@@ -44,9 +57,26 @@ func (p *BooksProvider) Capabilities(_ context.Context, _ search.Viewer, scope s
 	return caps
 }
 
-func (p *BooksProvider) Search(ctx context.Context, _ search.Viewer, req search.ProviderSearchRequest) (search.ProviderSearchResult, error) {
+func (p *BooksProvider) Search(ctx context.Context, viewer search.Viewer, req search.ProviderSearchRequest) (search.ProviderSearchResult, error) {
+	if req.Scope == search.ScopeMine {
+		data, err := p.service.SearchPrivateBooks(ctx, viewer, req.Type, books.BookSearchOptions{Query: req.Query, Sort: req.Sort, Limit: req.Limit, Offset: req.Offset, ExactTotal: req.ExactTotal})
+		out := search.ProviderSearchResult{Items: []search.SearchHit{}, Total: data.Total}
+		for _, item := range data.Items {
+			href := "/books/lists/" + item.ID.String()
+			switch req.Type {
+			case "note":
+				href = "/books/notes?work=" + item.WorkID.String()
+			case "library":
+				href = "/books/work/" + item.WorkID.String()
+			case "book_list":
+				href += "/edit"
+			}
+			out.Items = append(out.Items, search.SearchHit{Module: p.Module(), Type: req.Type, ID: item.ID.String(), Title: item.Title, Snippet: searchSnippet(item.Snippet), Href: href})
+		}
+		return out, err
+	}
 	if req.Scope != search.ScopePublic {
-		return search.ProviderSearchResult{}, apperr.BadRequest("search.invalid_scope", "Books private search is not available yet")
+		return search.ProviderSearchResult{}, apperr.BadRequest("search.invalid_scope", "Unsupported books search scope")
 	}
 	opts := books.BookSearchOptions{Query: req.Query, Sort: req.Sort, Limit: req.Limit, Offset: req.Offset, ExactTotal: req.ExactTotal}
 	switch req.Type {

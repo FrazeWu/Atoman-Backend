@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	"atoman/internal/collab"
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/modules/search"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/testdb"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -41,6 +43,41 @@ func TestRegisterV1RoutesMountsUnifiedSearchWithoutSwitchingLegacySearch(t *test
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
 			require.False(t, envelope.Data.Partial, response.Body.String())
 			require.Len(t, envelope.Data.Groups, 20)
+		}
+	}
+}
+
+func TestRegisteredPrivateSearchUsesOnlyBooksAndMusic(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.SiteSetting{}, &model.User{}, &model.AuthSession{}, &model.Revision{}, &model.BookWork{},
+		&model.BookList{}, &model.BookListBookmark{}, &model.BookPrivateNote{}, &model.BookLibraryEntry{}, &model.Playlist{}, &model.PlaylistBookmark{})
+	user := model.User{Username: "private-search", Email: "private-search@example.test", Password: "hash", IsActive: true, Role: "user"}
+	require.NoError(t, db.Create(&user).Error)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+	require.NoError(t, err)
+	router := gin.New()
+	registerSearchRoutes(router.Group("/api/v1"), db)
+	for _, path := range []string{"/api/v1/search?scope=mine&q=私人", "/api/v1/search/capabilities?scope=mine"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer "+credentials.Token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		if path == "/api/v1/search/capabilities?scope=mine" {
+			var envelope search.CapabilitiesEnvelope
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
+			require.Len(t, envelope.Data.Modules, 2)
+			require.Equal(t, "books", envelope.Data.Modules[0].Module)
+			require.Len(t, envelope.Data.Modules[0].Types, 4)
+			require.Equal(t, "music", envelope.Data.Modules[1].Module)
+			require.Len(t, envelope.Data.Modules[1].Types, 2)
+		} else {
+			var envelope search.SearchEnvelope
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
+			require.False(t, envelope.Data.Partial, response.Body.String())
+			require.Len(t, envelope.Data.Groups, 6)
 		}
 	}
 }

@@ -113,14 +113,14 @@ func TestBooksProviderUnifiedAPIContract(t *testing.T) {
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &caps))
 	require.Len(t, caps.Data.Modules[0].Types, 3)
 	require.Empty(t, caps.Data.Modules[0].Filters, "模块级筛选必须是三种类型的交集")
-	// public 不因登录身份而增加私人结果；mine 在 P6 前没有图书能力。
+	// public 不因登录身份而增加私人结果。
 	for _, viewer := range []search.Viewer{{}, {ID: user.UUID}, {ID: uuid.New(), Role: authctx.RoleAdmin}} {
 		result, err := service.Search(context.Background(), viewer, search.SearchRequest{Query: "私人秘密", Module: "books", Types: []string{"book_list"}, View: search.ViewList})
 		require.NoError(t, err)
 		require.Zero(t, result.Pagination.Total)
 	}
-	require.Empty(t, provider.Capabilities(context.Background(), search.Viewer{ID: user.UUID}, search.ScopeMine).Types)
-	_, err := provider.Search(context.Background(), search.Viewer{ID: user.UUID}, search.ProviderSearchRequest{Scope: search.ScopeMine, Type: "book_list"})
+	require.Len(t, provider.Capabilities(context.Background(), search.Viewer{ID: user.UUID}, search.ScopeMine).Types, 4)
+	_, err := provider.Search(context.Background(), search.Viewer{}, search.ProviderSearchRequest{Scope: search.ScopeMine, Type: "book_list"})
 	require.Error(t, err)
 }
 
