@@ -47,10 +47,10 @@ func (h *Handler) searchBlogPosts(c *gin.Context) {
 		return
 	}
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.SearchPublishedBlogContents(BlogSearchQuery{
+	items, total, err := h.service.SearchPublishedBlogContentsPage(c.Request.Context(), BlogSearchQuery{
 		Text: c.Query("q"), Tag: c.Query("tag"), AuthorID: authorID, ChannelID: channelID, CollectionID: collectionID,
 		Sort: c.DefaultQuery("sort", blogSearchSortRelevance), Page: page, PageSize: pageSize,
-	})
+	}, pageSize, (page-1)*pageSize, true)
 	if err != nil {
 		httpx.Error(c, err)
 		return

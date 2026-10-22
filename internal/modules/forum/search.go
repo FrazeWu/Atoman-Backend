@@ -1,21 +1,59 @@
 package forum
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"github.com/google/uuid"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (r *Repo) SearchTopics(user authctx.CurrentUser, query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
-	search := strings.TrimSpace(query.Search)
+	return r.searchTopicsPage(r.db.Statement.Context, user, TopicSearchOptions{Query: query.Search,
+		Limit: normalizedPageSize(query.PageSize), Offset: offset(query.Page, query.PageSize), ExactTotal: true}, false)
+}
+
+type TopicSearchOptions struct {
+	Query, Sort   string
+	CategoryIDs   []uuid.UUID
+	Tags          []string
+	Limit, Offset int
+	ExactTotal    bool
+}
+
+func (r *Repo) SearchPublicTopics(ctx context.Context, opts TopicSearchOptions) ([]model.ForumTopic, int64, error) {
+	return r.searchTopicsPage(ctx, authctx.CurrentUser{}, opts, true)
+}
+
+func (r *Repo) searchTopicsPage(ctx context.Context, user authctx.CurrentUser, opts TopicSearchOptions, publicOnly bool) ([]model.ForumTopic, int64, error) {
+	search := strings.TrimSpace(opts.Query)
 	if search == "" {
 		return []model.ForumTopic{}, 0, nil
 	}
 
-	db := r.visibleCategories(r.db.Model(&model.ForumTopic{}), user, "forum_topics.category_id")
+	db := r.visibleCategories(r.db.WithContext(ctx).Model(&model.ForumTopic{}), user, "forum_topics.category_id")
+	if publicOnly {
+		db = db.Where("EXISTS (SELECT 1 FROM forum_categories fc WHERE fc.id = forum_topics.category_id AND fc.deleted_at IS NULL)")
+	}
+	if len(opts.CategoryIDs) > 0 {
+		db = db.Where("forum_topics.category_id IN ?", opts.CategoryIDs)
+	}
+	if len(opts.Tags) > 0 {
+		// tags 是 JSON 文本数组，按完整标签匹配；同字段的多个值为 OR。
+		conditions := make([]string, 0, len(opts.Tags))
+		args := make([]any, 0, len(opts.Tags))
+		for _, tag := range opts.Tags {
+			encoded, _ := json.Marshal(tag)
+			conditions = append(conditions, "forum_topics.tags LIKE ? ESCAPE '\\'")
+			args = append(args, "%"+escapeLike(string(encoded))+"%")
+		}
+		db = db.Where("("+strings.Join(conditions, " OR ")+")", args...)
+	}
 	switch r.db.Dialector.Name() {
 	case "postgres", "pgx":
 		db = applyPostgresTopicSearch(db, search)
@@ -24,14 +62,19 @@ func (r *Repo) SearchTopics(user authctx.CurrentUser, query ListTopicsQuery) ([]
 	}
 
 	var total int64
-	if err := db.Count(&total).Error; err != nil {
-		return nil, 0, err
+	if opts.ExactTotal {
+		if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+	}
+	if opts.Sort == "recent" {
+		db = db.Order(clause.OrderByColumn{Column: clause.Column{Name: "forum_topics.created_at"}, Desc: true, Reorder: true}).Order("forum_topics.id DESC")
 	}
 
 	var topics []model.ForumTopic
 	err := db.Preload("User.ForumTrust").Preload("Category").
-		Offset(offset(query.Page, query.PageSize)).
-		Limit(normalizedPageSize(query.PageSize)).
+		Offset(opts.Offset).
+		Limit(opts.Limit).
 		Find(&topics).Error
 	attachTopicTrustLevels(topics)
 	return topics, total, err

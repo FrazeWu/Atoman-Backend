@@ -24128,6 +24128,7 @@ paths:
   /api/v1/search:
     get:
       description: |-
+        blog 已接入 post（标题/摘要/正文全文）、short_note、channel、collection；频道和合集必须包含公开已发布博客文章。forum 已接入 topic，回复及回复作者命中返回所属主题，仅检索匿名可见板块，登录身份不扩大范围。两域均要求关键词，支持 relevance、recent；文章可按 author_id/channel_id/collection_id/tag、短笺按 author_id、主题按 category_id/tag 筛选。
         music 已接入 song、album、artist、playlist（仅 public），支持歌曲/专辑/艺术家及别名关联、歌词原文与翻译、歌单名称。音乐必须提供关键词，仅声明 relevance 排序；即使管理员登录也不会返回草稿或私人歌单。
         preview 每组 2 条，grouped 每组 6 条；list 必须选择单个 module/type。filter[key] 仅接受 capabilities 声明的字段，重复值为 OR、不同字段为 AND。已接入 books 的 work、author、book_list（仅 public）；作品支持 language、author_id、year_from、year_to，年份为 1–9999 的整数，匹配任一有效公开版本。rating_desc 复用信誉加权评分和 6 人门槛。现有搜索入口不受影响。
       parameters:

@@ -1,6 +1,7 @@
 package blog
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -22,14 +23,18 @@ const (
 )
 
 type BlogSearchQuery struct {
-	Text         string
-	Tag          string
-	AuthorID     *uuid.UUID
-	ChannelID    *uuid.UUID
-	CollectionID *uuid.UUID
-	Sort         string
-	Page         int
-	PageSize     int
+	Text          string
+	Tag           string
+	AuthorID      *uuid.UUID
+	ChannelID     *uuid.UUID
+	CollectionID  *uuid.UUID
+	AuthorIDs     []uuid.UUID
+	ChannelIDs    []uuid.UUID
+	CollectionIDs []uuid.UUID
+	Tags          []string
+	Sort          string
+	Page          int
+	PageSize      int
 }
 
 type BlogSearchResultDTO struct {
@@ -89,18 +94,24 @@ func normalizeBlogDigestPeriod(raw string) (string, time.Duration, error) {
 }
 
 func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSearchResultDTO, int64, error) {
+	page, size := normalizeBlogSearchPage(input.Page, input.PageSize)
+	return s.SearchPublishedBlogContentsPage(s.db.Statement.Context, input, size, (page-1)*size, true)
+}
+
+// SearchPublishedBlogContentsPage 与旧搜索共用全文条件；预览只读取 limit 条，不计算总数。
+func (s *Service) SearchPublishedBlogContentsPage(ctx context.Context, input BlogSearchQuery, limit, offset int, exactTotal bool) ([]BlogSearchResultDTO, int64, error) {
+	db := s.db.WithContext(ctx)
 	text := strings.TrimSpace(input.Text)
 	tag := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(input.Tag)), " "))
 	if text == "" && tag == "" {
 		return []BlogSearchResultDTO{}, 0, nil
 	}
-	page, pageSize := normalizeBlogSearchPage(input.Page, input.PageSize)
 	sortMode, err := normalizeBlogSearchSort(input.Sort)
 	if err != nil {
 		return nil, 0, err
 	}
 	newQuery := func() *gorm.DB {
-		query := canonicalBlogPostsQuery(s.db).
+		query := canonicalBlogPostsQuery(db).
 			Where("posts.status = ? AND (posts.visibility = ? OR posts.visibility = ?)", "published", "", "public")
 		if input.AuthorID != nil {
 			query = query.Where("posts.author_id = ?", *input.AuthorID)
@@ -110,6 +121,18 @@ func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSear
 		}
 		if input.CollectionID != nil {
 			query = query.Where("memberships.collection_id = ?", *input.CollectionID)
+		}
+		if len(input.AuthorIDs) > 0 {
+			query = query.Where("posts.author_id IN ?", input.AuthorIDs)
+		}
+		if len(input.ChannelIDs) > 0 {
+			query = query.Where("posts.channel_id IN ?", input.ChannelIDs)
+		}
+		if len(input.CollectionIDs) > 0 {
+			query = query.Where("EXISTS (SELECT 1 FROM content_collection_memberships cm WHERE cm.content_id = posts.id AND cm.collection_id IN ?)", input.CollectionIDs)
+		}
+		if len(input.Tags) > 0 {
+			query = query.Where("EXISTS (SELECT 1 FROM content_blog_tags bt WHERE bt.content_id = posts.id AND bt.name IN ?)", input.Tags)
 		}
 		if tag != "" {
 			query = query.Where("EXISTS (SELECT 1 FROM content_blog_tags WHERE content_blog_tags.content_id = posts.id AND content_blog_tags.name = ?)", tag)
@@ -121,21 +144,41 @@ func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSear
 	}
 
 	var total int64
-	if err := newQuery().Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	if total == 0 {
-		return []BlogSearchResultDTO{}, 0, nil
+	if exactTotal {
+		if err := newQuery().Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		if total == 0 {
+			return []BlogSearchResultDTO{}, 0, nil
+		}
 	}
 
 	var rows []canonicalBlogPostRow
 	query := blogSearchOrder(newQuery(), text, sortMode)
-	if err := query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
+	if err := query.Offset(offset).Limit(limit).Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
-	contents, err := hydrateCanonicalBlogContents(s.db, rows)
+	contents, err := hydrateCanonicalBlogContents(db, rows)
 	if err != nil {
 		return nil, 0, err
+	}
+	// 公共标签数按本页批量聚合，避免每条结果各查一次。
+	ids := make([]uuid.UUID, 0, len(contents))
+	for _, content := range contents {
+		ids = append(ids, content.ID)
+	}
+	var counts []struct {
+		ContentID uuid.UUID
+		Count     int64
+	}
+	if len(ids) > 0 {
+		if err := db.Model(&model.ContentBlogUserTag{}).Select("content_id, COUNT(*) AS count").Where("content_id IN ?", ids).Group("content_id").Scan(&counts).Error; err != nil {
+			return nil, 0, err
+		}
+	}
+	tagCounts := make(map[uuid.UUID]int64, len(counts))
+	for _, count := range counts {
+		tagCounts[count.ContentID] = count.Count
 	}
 	items := make([]BlogSearchResultDTO, 0, len(contents))
 	for _, content := range contents {
@@ -143,15 +186,11 @@ func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSear
 		if text == "" {
 			snippet, matchField = content.Summary, "tag"
 		}
-		var publicTagCount int64
-		if err := s.db.Model(&model.ContentBlogUserTag{}).Where("content_id = ?", content.ID).Count(&publicTagCount).Error; err != nil {
-			return nil, 0, err
-		}
 		items = append(items, BlogSearchResultDTO{
 			ID: content.ID, Title: content.Title, Summary: content.Summary, Snippet: snippet, MatchField: matchField,
 			CoverURL: content.CoverURL, PublishedAt: content.PublishedAt, CreatedAt: content.CreatedAt,
 			Channel: recommendationChannel(content.Channel), User: recommendationAuthor(content.User),
-			CollectionID: content.CollectionID, TargetPath: "/posts/post/" + content.ID.String(), PublicTagCount: publicTagCount,
+			CollectionID: content.CollectionID, TargetPath: "/posts/post/" + content.ID.String(), PublicTagCount: tagCounts[content.ID],
 		})
 	}
 	return items, total, nil

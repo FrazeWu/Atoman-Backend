@@ -227,7 +227,7 @@ func (h *Handler) searchTopics(c *gin.Context) {
 		Page:     page(c),
 		PageSize: pageSize(c),
 	}
-	topics, total, err := h.service.SearchTopics(currentForumUser(c), query)
+	topics, total, err := h.service.SearchTopicsContext(c.Request.Context(), currentForumUser(c), query)
 	if err != nil {
 		httpx.Error(c, err)
 		return
