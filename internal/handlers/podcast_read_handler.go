@@ -65,6 +65,15 @@ func RecordPodcastPlayback(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// GetRecommendedPodcastEpisodes godoc
+// @Summary 获取推荐播客单集
+// @Tags podcast
+// @Produce json
+// @Param mode query string false "推荐模式"
+// @Param page query int false "页码"
+// @Param page_size query int false "每页条数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/podcast/recommend/episodes [get]
 func GetRecommendedPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		mode, err := parseRecommendationMode(c.DefaultQuery("mode", "hot"))

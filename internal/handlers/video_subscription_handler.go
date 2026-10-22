@@ -69,6 +69,12 @@ type videoCollectionBookmarkResponse struct {
 }
 
 // GetVideoCollectionBookmarks returns the user's subscribed video collections.
+// GetVideoCollectionBookmarks godoc
+// @Summary 列出视频合集收藏
+// @Tags videos
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/videos/collection-bookmarks [get]
 func GetVideoCollectionBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)

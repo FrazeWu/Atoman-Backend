@@ -53,7 +53,7 @@ func (p *PublicProvider) Search(ctx context.Context, _ search.Viewer, req search
 	}
 	query := strings.TrimSpace(req.Query)
 	var rows []publicRow
-	base := p.db.WithContext(ctx).Table(" ")
+	var base *gorm.DB
 	switch p.module + ":" + req.Type {
 	case "feed:source":
 		base = p.db.WithContext(ctx).Table("feed_sources AS f").Select(`f.id::text AS id, COALESCE(NULLIF(f.title,''), f.site_url) AS title, '' AS subtitle, '' AS snippet, COALESCE(f.cover_url,'') AS cover_url, '/feed?source_id=' || f.id::text AS href, f.updated_at AS created_at, 'title' AS match_field`).

@@ -130,6 +130,12 @@ func adminFeedFullTextHealthStatus(enabled bool, pendingCount, retryCount, faile
 	}
 }
 
+// GetAdminFeedFullTextHealth godoc
+// @Summary 获取全文抓取健康状态
+// @Tags admin
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/health [get]
 func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var enabledSources int64
@@ -277,6 +283,12 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// GetAdminFeedFullTextSources godoc
+// @Summary 列出全文抓取来源
+// @Tags admin
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/sources [get]
 func GetAdminFeedFullTextSources(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		page, limit := parseAdminListParams(c)
@@ -432,6 +444,12 @@ func GetAdminFeedFullTextSources(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// GetAdminFeedFullTextItems godoc
+// @Summary 列出全文抓取条目
+// @Tags admin
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/items [get]
 func GetAdminFeedFullTextItems(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		page, limit := parseAdminListParams(c)
@@ -514,6 +532,13 @@ func GetAdminFeedFullTextItems(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// RetryAdminFeedFullTextItem godoc
+// @Summary 重试条目全文抓取
+// @Tags admin
+// @Produce json
+// @Param item_id path string true "item_id"
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/items/{item_id}/retry [post]
 func RetryAdminFeedFullTextItem(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		itemID := c.Param("item_id")

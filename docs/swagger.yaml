@@ -3109,6 +3109,8 @@ definitions:
       has_updates:
         type: boolean
     type: object
+  feed.subscriptionRuleInput:
+    type: object
   forum_moderation.ModeratorAssignmentInput:
     properties:
       can_lock_topic:
@@ -3428,6 +3430,19 @@ definitions:
         example: true
         type: boolean
     type: object
+  handlers.ChangeEmailInput:
+    properties:
+      code:
+        type: string
+      current_password:
+        type: string
+      email:
+        type: string
+    required:
+    - code
+    - current_password
+    - email
+    type: object
   handlers.ChangePasswordInput:
     properties:
       current_password:
@@ -3440,6 +3455,20 @@ definitions:
     - current_password
     - new_password
     - password_confirm
+    type: object
+  handlers.CheckEmailInput:
+    properties:
+      email:
+        type: string
+    required:
+    - email
+    type: object
+  handlers.CheckUsernameInput:
+    properties:
+      username:
+        type: string
+    required:
+    - username
     type: object
   handlers.CompleteVideoImportPartInput:
     properties:
@@ -4251,6 +4280,13 @@ definitions:
           $ref: '#/definitions/handlers.SearchUserSummary'
         type: array
     type: object
+  handlers.SendEmailChangeCodeInput:
+    properties:
+      email:
+        type: string
+    required:
+    - email
+    type: object
   handlers.SendVerificationInput:
     properties:
       email:
@@ -4259,6 +4295,16 @@ definitions:
         type: string
     required:
     - email
+    type: object
+  handlers.SetPasswordInput:
+    properties:
+      password:
+        type: string
+      password_confirm:
+        type: string
+    required:
+    - password
+    - password_confirm
     type: object
   handlers.SetProtectionInput:
     properties:
@@ -4833,6 +4879,31 @@ definitions:
       view_count:
         type: integer
     type: object
+  handlers.adminFeedFullTextSettingsInput:
+    properties:
+      auto_sync_enabled:
+        type: boolean
+      auto_sync_interval_minutes:
+        type: integer
+      reader_crawl_batch_size:
+        type: integer
+      reader_crawl_days:
+        type: integer
+      reader_crawl_enabled:
+        type: boolean
+    type: object
+  handlers.adminFeedFullTextSourceSettingsInput:
+    properties:
+      full_text_enabled:
+        type: boolean
+    type: object
+  handlers.adminFeedSourceDeleteInput:
+    properties:
+      confirm_title:
+        type: string
+    required:
+    - confirm_title
+    type: object
   handlers.adminFeedSourceImpact:
     properties:
       items:
@@ -4845,6 +4916,20 @@ definitions:
         type: integer
       subscriptions:
         type: integer
+    type: object
+  handlers.adminFeedSourceInput:
+    properties:
+      rss_url:
+        type: string
+      title:
+        type: string
+    type: object
+  handlers.adminFeedSourceUpdateInput:
+    properties:
+      hidden:
+        type: boolean
+      title:
+        type: string
     type: object
   handlers.avatarRestoreAvailabilityResponse:
     properties:
@@ -4862,6 +4947,13 @@ definitions:
       url:
         type: string
     type: object
+  handlers.channelBookmarkInput:
+    properties:
+      channel_id:
+        type: string
+    required:
+    - channel_id
+    type: object
   handlers.contentRatingSummary:
     properties:
       rating_count:
@@ -4878,6 +4970,26 @@ definitions:
     required:
     - code
     type: object
+  handlers.onboardingFeedRecommendationInput:
+    properties:
+      enabled:
+        type: boolean
+      feed_source_id:
+        type: string
+      sort_order:
+        type: integer
+    required:
+    - feed_source_id
+    type: object
+  handlers.podcastEpisodeBookmarkInput:
+    properties:
+      episode_id:
+        type: string
+      kind:
+        type: string
+    required:
+    - episode_id
+    type: object
   handlers.podcastPlaybackInput:
     properties:
       event:
@@ -4893,6 +5005,13 @@ definitions:
         type: integer
     required:
     - score
+    type: object
+  handlers.podcastShowBookmarkInput:
+    properties:
+      channel_id:
+        type: string
+    required:
+    - channel_id
     type: object
   handlers.timelineProposalRequest:
     properties:
@@ -4932,6 +5051,13 @@ definitions:
       url:
         type: string
     type: object
+  handlers.videoBookmarkInput:
+    properties:
+      video_id:
+        type: string
+    required:
+    - video_id
+    type: object
   handlers.videoRatingInput:
     properties:
       score:
@@ -4940,6 +5066,16 @@ definitions:
         type: integer
     required:
     - score
+    type: object
+  handlers.videoRecommendationFeedbackInput:
+    properties:
+      scope:
+        type: string
+      target_id:
+        type: string
+    required:
+    - scope
+    - target_id
     type: object
   handlers.videoSubscriptionListResponse:
     properties:
@@ -10592,6 +10728,278 @@ paths:
       summary: Start a managed feed article crawl
       tags:
       - admin-feed-fulltext
+  /api/v1/admin/feed/fulltext/health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 获取全文抓取健康状态
+      tags:
+      - admin
+  /api/v1/admin/feed/fulltext/items:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出全文抓取条目
+      tags:
+      - admin
+  /api/v1/admin/feed/fulltext/items/{item_id}/retry:
+    post:
+      parameters:
+      - description: item_id
+        in: path
+        name: item_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 重试条目全文抓取
+      tags:
+      - admin
+  /api/v1/admin/feed/fulltext/settings:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 获取全文抓取设置
+      tags:
+      - admin
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.adminFeedFullTextSettingsInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 更新全文抓取设置
+      tags:
+      - admin
+  /api/v1/admin/feed/fulltext/sources:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出全文抓取来源
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.adminFeedSourceInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功
+      summary: 创建管理员订阅来源
+      tags:
+      - admin
+  /api/v1/admin/feed/fulltext/sources/{source_id}:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: source_id
+        in: path
+        name: source_id
+        required: true
+        type: string
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.adminFeedSourceInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 更新全文抓取来源
+      tags:
+      - admin
+  /api/v1/admin/feed/fulltext/sources/{source_id}/settings:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: source_id
+        in: path
+        name: source_id
+        required: true
+        type: string
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.adminFeedFullTextSourceSettingsInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 更新来源全文抓取设置
+      tags:
+      - admin
+  /api/v1/admin/feed/fulltext/sources/{source_id}/sync:
+    post:
+      parameters:
+      - description: source_id
+        in: path
+        name: source_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 同步订阅来源
+      tags:
+      - admin
+  /api/v1/admin/feed/onboarding/recommendations:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出管理员入门推荐
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.onboardingFeedRecommendationInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功
+      summary: 创建入门订阅推荐
+      tags:
+      - admin
+  /api/v1/admin/feed/onboarding/recommendations/{id}:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 成功
+      summary: 删除入门订阅推荐
+      tags:
+      - admin
+    patch:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 更新入门订阅推荐
+      tags:
+      - admin
+  /api/v1/admin/feed/sources:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出管理员订阅来源
+      tags:
+      - admin
+  /api/v1/admin/feed/sources/{id}:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.adminFeedSourceDeleteInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 删除管理员订阅来源
+      tags:
+      - admin
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.adminFeedSourceUpdateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 更新管理员订阅来源
+      tags:
+      - admin
   /api/v1/admin/feed/sources/{id}/diagnostics:
     get:
       description: 返回最近 90 天的全文抓取失败和恢复记录。
@@ -10722,6 +11130,16 @@ paths:
       summary: 获取音乐资料问题
       tags:
       - music-entry-status
+  /api/v1/admin/site-access:
+    put:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 更新兼容站点访问设置
+      tags:
+      - admin
   /api/v1/admin/user-audit-logs:
     get:
       parameters:
@@ -12268,6 +12686,44 @@ paths:
       summary: 获取单个艺人修订版本
       tags:
       - music-artists
+  /api/v1/auth/check-email:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CheckEmailInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 检查邮箱可用性
+      tags:
+      - auth
+  /api/v1/auth/check-username:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CheckUsernameInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 检查用户名可用性
+      tags:
+      - auth
   /api/v1/auth/login:
     post:
       consumes:
@@ -17634,6 +18090,16 @@ paths:
       summary: 获取统一收藏时间线
       tags:
       - feed
+  /api/v1/feed/discover:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 发现订阅候选来源
+      tags:
+      - feed
   /api/v1/feed/explore:
     get:
       description: 分页返回公开文章与 RSS 条目，支持搜索、来源类型、语言和排序筛选。
@@ -18123,6 +18589,16 @@ paths:
       summary: 加载订阅正文图片
       tags:
       - feed
+  /api/v1/feed/onboarding/recommendations:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 获取入门订阅推荐
+      tags:
+      - feed
   /api/v1/feed/opml/export:
     get:
       description: 导出当前用户的订阅为 OPML 文件。
@@ -18173,6 +18649,37 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 导入 OPML
+      tags:
+      - feed
+  /api/v1/feed/preferences:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 获取订阅阅读偏好
+      tags:
+      - feed
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: hidden_keywords 隐藏关键词列表
+        in: body
+        name: input
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 更新订阅阅读偏好
       tags:
       - feed
   /api/v1/feed/reading-list:
@@ -18268,6 +18775,53 @@ paths:
       summary: 从待读列表移除条目
       tags:
       - feed
+  /api/v1/feed/sources/batch-subscribe:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 批量订阅参数
+        in: body
+        name: input
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 批量订阅来源
+      tags:
+      - feed
+  /api/v1/feed/sources/create-from-provider:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 服务商订阅参数
+        in: body
+        name: input
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.SubscriptionResponse'
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/feed.SubscriptionResponse'
+      summary: 从服务商创建订阅
+      tags:
+      - feed
   /api/v1/feed/sources/opml/export:
     get:
       description: 管理员导出全站 external_rss 订阅源为 OPML 文件，不包含用户订阅关系。
@@ -18336,6 +18890,66 @@ paths:
       summary: 导入全局 OPML 订阅源
       tags:
       - feed
+  /api/v1/feed/sources/retry-import:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 重试订阅来源导入
+      tags:
+      - feed
+  /api/v1/feed/star-groups:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 获取文章收藏分组
+      tags:
+      - feed
+    post:
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功
+      summary: 创建文章收藏分组
+      tags:
+      - feed
+  /api/v1/feed/star-groups/{id}:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 删除文章收藏分组
+      tags:
+      - feed
+    put:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 更新文章收藏分组
+      tags:
+      - feed
   /api/v1/feed/stars:
     get:
       description: 分页返回当前用户已星标的 feed item。
@@ -18363,6 +18977,22 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 获取星标条目
+      tags:
+      - feed
+  /api/v1/feed/stars/{feedItemId}/group:
+    put:
+      parameters:
+      - description: feedItemId
+        in: path
+        name: feedItemId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 设置文章收藏分组
       tags:
       - feed
   /api/v1/feed/stats:
@@ -18719,6 +19349,129 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 获取订阅中心更新流
+      tags:
+      - feed
+  /api/v1/feed/subscription-rules:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 列出订阅规则
+      tags:
+      - feed
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 订阅规则
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.subscriptionRuleInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 创建订阅规则
+      tags:
+      - feed
+  /api/v1/feed/subscription-rules/{id}:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 删除订阅规则
+      tags:
+      - feed
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 订阅规则
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.subscriptionRuleInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 更新订阅规则
+      tags:
+      - feed
+  /api/v1/feed/subscription-rules/apply:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: rule_id 或 all=true
+        in: body
+        name: input
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 应用订阅规则
+      tags:
+      - feed
+  /api/v1/feed/subscription-rules/reorder:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 有序规则 ID 列表 rule_ids
+        in: body
+        name: input
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 调整订阅规则顺序
       tags:
       - feed
   /api/v1/feed/subscriptions:
@@ -23782,6 +24535,50 @@ paths:
       summary: 获取分类未读数
       tags:
       - notifications
+  /api/v1/podcast/bookmarks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出播客单集收藏
+      tags:
+      - podcast
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.podcastEpisodeBookmarkInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功
+      summary: 收藏播客单集
+      tags:
+      - podcast
+  /api/v1/podcast/bookmarks/{id}:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 取消收藏播客单集
+      tags:
+      - podcast
   /api/v1/podcast/episodes:
     get:
       description: 返回所有已发布的播客单集。
@@ -24091,6 +24888,76 @@ paths:
       summary: 设置播客单集评分
       tags:
       - podcast
+  /api/v1/podcast/recommend/episodes:
+    get:
+      parameters:
+      - description: 推荐模式
+        in: query
+        name: mode
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取推荐播客单集
+      tags:
+      - podcast
+  /api/v1/podcast/show-bookmarks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出播客节目收藏
+      tags:
+      - podcast
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.podcastShowBookmarkInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功
+      summary: 收藏播客节目
+      tags:
+      - podcast
+  /api/v1/podcast/show-bookmarks/{id}:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 取消收藏播客节目
+      tags:
+      - podcast
   /api/v1/podcast/shows/{channelSlug}/episodes:
     get:
       description: 返回某个频道下已发布的播客单集。
@@ -24352,6 +25219,33 @@ paths:
       summary: 获取用户质量快照
       tags:
       - reputation
+  /api/v1/rss/channels/{slug}:
+    get:
+      description: 输出指定频道已发布且公开可见的博客、播客与视频内容。
+      parameters:
+      - description: 频道 slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/rss+xml
+      responses:
+        "200":
+          description: RSS XML
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      summary: 获取频道公开内容 RSS
+      tags:
+      - feed
   /api/v1/rss/channels/{slug}.xml:
     get:
       description: 输出指定频道已发布且公开可见的博客、播客与视频内容。
@@ -24379,6 +25273,33 @@ paths:
       summary: 获取频道公开内容 RSS
       tags:
       - feed
+  /api/v1/rss/collections/{id}:
+    get:
+      description: 输出指定统一合集内已发布且公开可见的博客、播客与视频内容。
+      parameters:
+      - description: 统一合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/rss+xml
+      responses:
+        "200":
+          description: RSS XML
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      summary: 获取统一合集公开内容 RSS
+      tags:
+      - feed
   /api/v1/rss/collections/{id}.xml:
     get:
       description: 输出指定统一合集内已发布且公开可见的博客、播客与视频内容。
@@ -24404,6 +25325,33 @@ paths:
           schema:
             $ref: '#/definitions/feed.ErrorResponse'
       summary: 获取统一合集公开内容 RSS
+      tags:
+      - feed
+  /api/v1/rss/users/{username}:
+    get:
+      description: 输出指定用户已发布且公开可见的博客、播客与视频内容。
+      parameters:
+      - description: 用户名
+        in: path
+        name: username
+        required: true
+        type: string
+      produces:
+      - application/rss+xml
+      responses:
+        "200":
+          description: RSS XML
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      summary: 获取用户公开内容 RSS
       tags:
       - feed
   /api/v1/rss/users/{username}.xml:
@@ -24563,6 +25511,16 @@ paths:
       summary: 查询已实现的统一搜索能力
       tags:
       - search
+  /api/v1/settings/public/site-access:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 获取公开站点访问设置
+      tags:
+      - settings
   /api/v1/settings/site-access:
     get:
       description: 返回后台模块开关与结构化模块设置，包括 feed/blog/forum 的设置矩阵。
@@ -24693,6 +25651,32 @@ paths:
       summary: PUT /short-notes/{id}
       tags:
       - short-notes
+  /api/v1/site/access:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 获取公开站点访问设置
+      tags:
+      - settings
+  /api/v1/site/resolve/{handle}:
+    get:
+      parameters:
+      - description: handle
+        in: path
+        name: handle
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 解析站点标识
+      tags:
+      - site
   /api/v1/songs:
     get:
       description: 返回所有未关闭的歌曲公开列表。
@@ -27761,6 +28745,37 @@ paths:
       summary: 检查上一张头像
       tags:
       - uploads
+  /api/v1/users/{id}/block:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 取消屏蔽用户
+      tags:
+      - users
+    post:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 屏蔽用户
+      tags:
+      - users
   /api/v1/users/{id}/follow:
     delete:
       description: 当前用户取消关注指定 UUID 用户。
@@ -27966,6 +28981,16 @@ paths:
       summary: 获取用户个性化主题
       tags:
       - user_theme
+  /api/v1/users/blocked:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出已屏蔽用户
+      tags:
+      - users
   /api/v1/users/by-username/{username}:
     get:
       description: 返回公开的用户摘要信息和关注统计。
@@ -28066,7 +29091,63 @@ paths:
       summary: 更新当前用户资料
       tags:
       - users
+  /api/v1/users/me/email:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ChangeEmailInput'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 成功
+      summary: 更换账号邮箱
+      tags:
+      - users
+  /api/v1/users/me/email/send-code:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SendEmailChangeCodeInput'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 成功
+      summary: 发送更换邮箱验证码
+      tags:
+      - users
   /api/v1/users/me/password:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SetPasswordInput'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 成功
+      summary: 设置账号密码
+      tags:
+      - users
     put:
       consumes:
       - application/json
@@ -28092,6 +29173,42 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 修改当前账号密码
+      tags:
+      - users
+  /api/v1/users/me/security-activities:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出账号安全活动
+      tags:
+      - users
+  /api/v1/users/me/sessions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出登录会话
+      tags:
+      - users
+  /api/v1/users/me/sessions/{id}:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 成功
+      summary: 撤销登录会话
       tags:
       - users
   /api/v1/users/me/settings:
@@ -28466,6 +29583,22 @@ paths:
       summary: 更新视频
       tags:
       - videos
+  /api/v1/videos/{id}/duplicate:
+    post:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功
+      summary: 复制视频
+      tags:
+      - videos
   /api/v1/videos/{id}/rating:
     delete:
       description: 清除当前用户对可观看视频的评分。
@@ -28615,6 +29748,104 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 增加视频播放量
+      tags:
+      - videos
+  /api/v1/videos/bookmarks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出视频收藏
+      tags:
+      - videos
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.videoBookmarkInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功
+      summary: 收藏视频
+      tags:
+      - videos
+  /api/v1/videos/bookmarks/{id}:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 取消收藏视频
+      tags:
+      - videos
+  /api/v1/videos/channel-bookmarks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出视频频道收藏
+      tags:
+      - videos
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.channelBookmarkInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 成功
+      summary: 收藏视频频道
+      tags:
+      - videos
+  /api/v1/videos/channel-bookmarks/{id}:
+    delete:
+      parameters:
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 取消收藏视频频道
+      tags:
+      - videos
+  /api/v1/videos/collection-bookmarks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 列出视频合集收藏
       tags:
       - videos
   /api/v1/videos/imports:
@@ -28955,6 +30186,72 @@ paths:
       summary: 点赞或取消点赞视频
       tags:
       - videos
+  /api/v1/videos/recommend/items:
+    get:
+      parameters:
+      - description: 推荐模式
+        in: query
+        name: mode
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取推荐视频条目
+      tags:
+      - videos
+  /api/v1/videos/recommendation-feedback:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.videoRecommendationFeedbackInput'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 成功
+      summary: 提交视频推荐反馈
+      tags:
+      - videos
+  /api/v1/videos/recommendation-feedback/{scope}/{id}:
+    delete:
+      parameters:
+      - description: scope
+        in: path
+        name: scope
+        required: true
+        type: string
+      - description: id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 成功
+      summary: 删除视频推荐反馈
+      tags:
+      - videos
   /api/v1/videos/subscriptions:
     get:
       description: 返回当前用户订阅频道和合集中的已发布视频。
@@ -29021,6 +30318,16 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 上传视频封面
+      tags:
+      - videos
+  /api/v1/videos/upload-subtitle:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+      summary: 上传视频字幕
       tags:
       - videos
   /api/v1/videos/upload-video:

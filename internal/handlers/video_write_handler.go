@@ -113,6 +113,13 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 }
 
 // DuplicateVideo creates an editable draft that reuses the owner's existing media.
+// DuplicateVideo godoc
+// @Summary 复制视频
+// @Tags videos
+// @Produce json
+// @Param id path string true "id"
+// @Success 201 "成功"
+// @Router /api/v1/videos/{id}/duplicate [post]
 func DuplicateVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)

@@ -161,6 +161,12 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 }
 
 // UploadVideoSubtitle stores a verified WebVTT subtitle file in R2.
+// UploadVideoSubtitle godoc
+// @Summary 上传视频字幕
+// @Tags videos
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/videos/upload-subtitle [post]
 func UploadVideoSubtitle(s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		file, header, err := c.Request.FormFile("subtitle")

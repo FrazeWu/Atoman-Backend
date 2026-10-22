@@ -74,6 +74,12 @@ func ToggleStar(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// GetFeedStarGroups godoc
+// @Summary 获取文章收藏分组
+// @Tags feed
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/feed/star-groups [get]
 func GetFeedStarGroups(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -89,6 +95,12 @@ func GetFeedStarGroups(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CreateFeedStarGroup godoc
+// @Summary 创建文章收藏分组
+// @Tags feed
+// @Produce json
+// @Success 201 "成功"
+// @Router /api/v1/feed/star-groups [post]
 func CreateFeedStarGroup(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -118,6 +130,13 @@ func CreateFeedStarGroup(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// UpdateFeedStarGroup godoc
+// @Summary 更新文章收藏分组
+// @Tags feed
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/feed/star-groups/{id} [put]
 func UpdateFeedStarGroup(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -159,6 +178,13 @@ func UpdateFeedStarGroup(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DeleteFeedStarGroup godoc
+// @Summary 删除文章收藏分组
+// @Tags feed
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/feed/star-groups/{id} [delete]
 func DeleteFeedStarGroup(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -192,6 +218,13 @@ func DeleteFeedStarGroup(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// SetFeedStarGroup godoc
+// @Summary 设置文章收藏分组
+// @Tags feed
+// @Produce json
+// @Param feedItemId path string true "feedItemId"
+// @Success 200 "成功"
+// @Router /api/v1/feed/stars/{feedItemId}/group [put]
 func SetFeedStarGroup(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")

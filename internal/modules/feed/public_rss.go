@@ -92,6 +92,7 @@ type publicRSSFilter struct {
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/rss/users/{username}.xml [get]
+// @Router /api/v1/rss/users/{username} [get]
 func GetPublicUserRSS(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var user model.User
@@ -123,6 +124,7 @@ func GetPublicUserRSS(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/rss/channels/{slug}.xml [get]
+// @Router /api/v1/rss/channels/{slug} [get]
 func GetPublicChannelRSS(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var channel model.Channel
@@ -150,6 +152,7 @@ func GetPublicChannelRSS(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/rss/collections/{id}.xml [get]
+// @Router /api/v1/rss/collections/{id} [get]
 func GetPublicCollectionRSS(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		collectionID, err := uuid.Parse(publicRSSParam(c, "id"))

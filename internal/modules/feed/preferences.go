@@ -10,6 +10,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// GetFeedPreferences godoc
+// @Summary 获取订阅阅读偏好
+// @Tags feed
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/feed/preferences [get]
 func GetFeedPreferences(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)
@@ -18,6 +24,14 @@ func GetFeedPreferences(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"data": pref})
 	}
 }
+// UpdateFeedPreferences godoc
+// @Summary 更新订阅阅读偏好
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param input body object true "hidden_keywords 隐藏关键词列表"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/feed/preferences [put]
 func UpdateFeedPreferences(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)
@@ -37,6 +51,14 @@ func UpdateFeedPreferences(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(200, gin.H{"data": pref})
 	}
 }
+// BatchSubscribeFeedSources godoc
+// @Summary 批量订阅来源
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param input body object true "批量订阅参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/feed/sources/batch-subscribe [post]
 func BatchSubscribeFeedSources(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)

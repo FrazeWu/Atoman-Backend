@@ -53,6 +53,14 @@ func ruleInput(c *gin.Context) (subscriptionRuleInput, bool) {
 	return input, true
 }
 
+// createSubscriptionRule godoc
+// @Summary 创建订阅规则
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param input body subscriptionRuleInput true "订阅规则"
+// @Success 201 {object} map[string]interface{}
+// @Router /api/v1/feed/subscription-rules [post]
 func createSubscriptionRule(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, ok := subscriptionRuleUser(c)
@@ -75,6 +83,12 @@ func createSubscriptionRule(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// listSubscriptionRules godoc
+// @Summary 列出订阅规则
+// @Tags feed
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/feed/subscription-rules [get]
 func listSubscriptionRules(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, ok := subscriptionRuleUser(c)
@@ -91,6 +105,15 @@ func listSubscriptionRules(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// updateSubscriptionRule godoc
+// @Summary 更新订阅规则
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param id path string true "id"
+// @Param input body subscriptionRuleInput true "订阅规则"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/feed/subscription-rules/{id} [put]
 func updateSubscriptionRule(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, ok := subscriptionRuleUser(c)
@@ -123,6 +146,13 @@ func updateSubscriptionRule(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// deleteSubscriptionRule godoc
+// @Summary 删除订阅规则
+// @Tags feed
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/feed/subscription-rules/{id} [delete]
 func deleteSubscriptionRule(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, ok := subscriptionRuleUser(c)
@@ -148,6 +178,14 @@ func deleteSubscriptionRule(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// reorderSubscriptionRules godoc
+// @Summary 调整订阅规则顺序
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param input body object true "有序规则 ID 列表 rule_ids"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/feed/subscription-rules/reorder [put]
 func reorderSubscriptionRules(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, ok := subscriptionRuleUser(c)
@@ -178,6 +216,14 @@ func reorderSubscriptionRules(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// applySubscriptionRules godoc
+// @Summary 应用订阅规则
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param input body object true "rule_id 或 all=true"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/feed/subscription-rules/apply [post]
 func applySubscriptionRules(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, ok := subscriptionRuleUser(c)

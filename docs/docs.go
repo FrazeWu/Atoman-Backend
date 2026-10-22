@@ -605,6 +605,430 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/feed/fulltext/health": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "获取全文抓取健康状态",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/fulltext/items": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "列出全文抓取条目",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/fulltext/items/{item_id}/retry": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "重试条目全文抓取",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "item_id",
+                        "name": "item_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/fulltext/settings": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "获取全文抓取设置",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "更新全文抓取设置",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.adminFeedFullTextSettingsInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/fulltext/sources": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "列出全文抓取来源",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "创建管理员订阅来源",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.adminFeedSourceInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/fulltext/sources/{source_id}": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "更新全文抓取来源",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "source_id",
+                        "name": "source_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.adminFeedSourceInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/fulltext/sources/{source_id}/settings": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "更新来源全文抓取设置",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "source_id",
+                        "name": "source_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.adminFeedFullTextSourceSettingsInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/fulltext/sources/{source_id}/sync": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "同步订阅来源",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "source_id",
+                        "name": "source_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/onboarding/recommendations": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "列出管理员入门推荐",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "创建入门订阅推荐",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.onboardingFeedRecommendationInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/onboarding/recommendations/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "删除入门订阅推荐",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "patch": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "更新入门订阅推荐",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/sources": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "列出管理员订阅来源",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/sources/{id}": {
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "删除管理员订阅来源",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.adminFeedSourceDeleteInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "patch": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "更新管理员订阅来源",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.adminFeedSourceUpdateInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/admin/feed/sources/{id}/diagnostics": {
             "get": {
                 "security": [
@@ -802,6 +1226,22 @@ const docTemplate = `{
                             "type": "object",
                             "additionalProperties": true
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/site-access": {
+            "put": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "更新兼容站点访问设置",
+                "responses": {
+                    "200": {
+                        "description": "成功"
                     }
                 }
             }
@@ -3226,6 +3666,66 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/check-email": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "检查邮箱可用性",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CheckEmailInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/check-username": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "检查用户名可用性",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CheckUsernameInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
                     }
                 }
             }
@@ -11791,6 +12291,22 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/discover": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "发现订阅候选来源",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/feed/explore": {
             "get": {
                 "security": [
@@ -12564,6 +13080,22 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/onboarding/recommendations": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取入门订阅推荐",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/feed/opml/export": {
             "get": {
                 "security": [
@@ -12645,6 +13177,54 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/preferences": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取订阅阅读偏好",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "更新订阅阅读偏好",
+                "parameters": [
+                    {
+                        "description": "hidden_keywords 隐藏关键词列表",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -12802,6 +13382,79 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/sources/batch-subscribe": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "批量订阅来源",
+                "parameters": [
+                    {
+                        "description": "批量订阅参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/sources/create-from-provider": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "从服务商创建订阅",
+                "parameters": [
+                    {
+                        "description": "服务商订阅参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionResponse"
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/sources/opml/export": {
             "get": {
                 "security": [
@@ -12912,6 +13565,100 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/sources/retry-import": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "重试订阅来源导入",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/star-groups": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取文章收藏分组",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "创建文章收藏分组",
+                "responses": {
+                    "201": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/star-groups/{id}": {
+            "put": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "更新文章收藏分组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "删除文章收藏分组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/feed/stars": {
             "get": {
                 "security": [
@@ -12956,6 +13703,31 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/stars/{feedItemId}/group": {
+            "put": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "设置文章收藏分组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "feedItemId",
+                        "name": "feedItemId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
                     }
                 }
             }
@@ -13525,6 +14297,194 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscription-rules": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "列出订阅规则",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "创建订阅规则",
+                "parameters": [
+                    {
+                        "description": "订阅规则",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.subscriptionRuleInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscription-rules/apply": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "应用订阅规则",
+                "parameters": [
+                    {
+                        "description": "rule_id 或 all=true",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscription-rules/reorder": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "调整订阅规则顺序",
+                "parameters": [
+                    {
+                        "description": "有序规则 ID 列表 rule_ids",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscription-rules/{id}": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "更新订阅规则",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "订阅规则",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.subscriptionRuleInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "删除订阅规则",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -21596,6 +22556,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/podcast/bookmarks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "列出播客单集收藏",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "收藏播客单集",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.podcastEpisodeBookmarkInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/podcast/bookmarks/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "取消收藏播客单集",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/podcast/episodes": {
             "get": {
                 "description": "返回所有已发布的播客单集。",
@@ -22080,6 +23109,115 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/podcast/recommend/episodes": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "获取推荐播客单集",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "推荐模式",
+                        "name": "mode",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页条数",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/podcast/show-bookmarks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "列出播客节目收藏",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "收藏播客节目",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.podcastShowBookmarkInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/podcast/show-bookmarks/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "podcast"
+                ],
+                "summary": "取消收藏播客节目",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/podcast/shows/{channelSlug}/episodes": {
             "get": {
                 "description": "返回某个频道下已发布的播客单集。",
@@ -22486,6 +23624,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/rss/channels/{slug}": {
+            "get": {
+                "description": "输出指定频道已发布且公开可见的博客、播客与视频内容。",
+                "produces": [
+                    "application/rss+xml"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取频道公开内容 RSS",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "RSS XML",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/rss/channels/{slug}.xml": {
             "get": {
                 "description": "输出指定频道已发布且公开可见的博客、播客与视频内容。",
@@ -22527,6 +23706,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/rss/collections/{id}": {
+            "get": {
+                "description": "输出指定统一合集内已发布且公开可见的博客、播客与视频内容。",
+                "produces": [
+                    "application/rss+xml"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取统一合集公开内容 RSS",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "统一合集 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "RSS XML",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/rss/collections/{id}.xml": {
             "get": {
                 "description": "输出指定统一合集内已发布且公开可见的博客、播客与视频内容。",
@@ -22542,6 +23762,47 @@ const docTemplate = `{
                         "type": "string",
                         "description": "统一合集 UUID",
                         "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "RSS XML",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/rss/users/{username}": {
+            "get": {
+                "description": "输出指定用户已发布且公开可见的博客、播客与视频内容。",
+                "produces": [
+                    "application/rss+xml"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取用户公开内容 RSS",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户名",
+                        "name": "username",
                         "in": "path",
                         "required": true
                     }
@@ -22790,6 +24051,22 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/settings/public/site-access": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "settings"
+                ],
+                "summary": "获取公开站点访问设置",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/settings/site-access": {
             "get": {
                 "security": [
@@ -22990,6 +24267,47 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized"
+                    }
+                }
+            }
+        },
+        "/api/v1/site/access": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "settings"
+                ],
+                "summary": "获取公开站点访问设置",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/site/resolve/{handle}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "site"
+                ],
+                "summary": "解析站点标识",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "handle",
+                        "name": "handle",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
                     }
                 }
             }
@@ -27775,6 +29093,22 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/users/blocked": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "列出已屏蔽用户",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/users/by-username/{username}": {
             "get": {
                 "description": "返回公开的用户摘要信息和关注统计。",
@@ -27937,6 +29271,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/users/me/email": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "更换账号邮箱",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ChangeEmailInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/users/me/email/send-code": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "发送更换邮箱验证码",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SendEmailChangeCodeInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/users/me/password": {
             "put": {
                 "security": [
@@ -27980,6 +29374,91 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "设置账号密码",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SetPasswordInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/users/me/security-activities": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "列出账号安全活动",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/users/me/sessions": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "列出登录会话",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/users/me/sessions/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "撤销登录会话",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "成功"
                     }
                 }
             }
@@ -28267,6 +29746,54 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/{id}/block": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "屏蔽用户",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "取消屏蔽用户",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
                     }
                 }
             }
@@ -28734,6 +30261,160 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/bookmarks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "列出视频收藏",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "收藏视频",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.videoBookmarkInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/bookmarks/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "取消收藏视频",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/channel-bookmarks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "列出视频频道收藏",
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "收藏视频频道",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.channelBookmarkInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/channel-bookmarks/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "取消收藏视频频道",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/collection-bookmarks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "列出视频合集收藏",
+                "responses": {
+                    "200": {
+                        "description": "成功"
                     }
                 }
             }
@@ -29300,6 +30981,108 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/videos/recommend/items": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "获取推荐视频条目",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "推荐模式",
+                        "name": "mode",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页条数",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/recommendation-feedback": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "提交视频推荐反馈",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.videoRecommendationFeedbackInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/recommendation-feedback/{scope}/{id}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "删除视频推荐反馈",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "scope",
+                        "name": "scope",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "成功"
+                    }
+                }
+            }
+        },
         "/api/v1/videos/subscriptions": {
             "get": {
                 "description": "返回当前用户订阅频道和合集中的已发布视频。",
@@ -29402,6 +31185,22 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/upload-subtitle": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "上传视频字幕",
+                "responses": {
+                    "200": {
+                        "description": "成功"
                     }
                 }
             }
@@ -29613,6 +31412,31 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/{id}/duplicate": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "复制视频",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "成功"
                     }
                 }
             }
@@ -34642,6 +36466,9 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.subscriptionRuleInput": {
+            "type": "object"
+        },
         "forum_moderation.ModeratorAssignmentInput": {
             "type": "object",
             "properties": {
@@ -35117,6 +36944,25 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.ChangeEmailInput": {
+            "type": "object",
+            "required": [
+                "code",
+                "current_password",
+                "email"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "current_password": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.ChangePasswordInput": {
             "type": "object",
             "required": [
@@ -35132,6 +36978,28 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "password_confirm": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.CheckEmailInput": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.CheckUsernameInput": {
+            "type": "object",
+            "required": [
+                "username"
+            ],
+            "properties": {
+                "username": {
                     "type": "string"
                 }
             }
@@ -36327,6 +38195,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.SendEmailChangeCodeInput": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.SendVerificationInput": {
             "type": "object",
             "required": [
@@ -36337,6 +38216,21 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "turnstile_token": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.SetPasswordInput": {
+            "type": "object",
+            "required": [
+                "password",
+                "password_confirm"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "password_confirm": {
                     "type": "string"
                 }
             }
@@ -37179,6 +39073,45 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.adminFeedFullTextSettingsInput": {
+            "type": "object",
+            "properties": {
+                "auto_sync_enabled": {
+                    "type": "boolean"
+                },
+                "auto_sync_interval_minutes": {
+                    "type": "integer"
+                },
+                "reader_crawl_batch_size": {
+                    "type": "integer"
+                },
+                "reader_crawl_days": {
+                    "type": "integer"
+                },
+                "reader_crawl_enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.adminFeedFullTextSourceSettingsInput": {
+            "type": "object",
+            "properties": {
+                "full_text_enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "handlers.adminFeedSourceDeleteInput": {
+            "type": "object",
+            "required": [
+                "confirm_title"
+            ],
+            "properties": {
+                "confirm_title": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.adminFeedSourceImpact": {
             "type": "object",
             "properties": {
@@ -37196,6 +39129,28 @@ const docTemplate = `{
                 },
                 "subscriptions": {
                     "type": "integer"
+                }
+            }
+        },
+        "handlers.adminFeedSourceInput": {
+            "type": "object",
+            "properties": {
+                "rss_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.adminFeedSourceUpdateInput": {
+            "type": "object",
+            "properties": {
+                "hidden": {
+                    "type": "boolean"
+                },
+                "title": {
+                    "type": "string"
                 }
             }
         },
@@ -37220,6 +39175,17 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.channelBookmarkInput": {
+            "type": "object",
+            "required": [
+                "channel_id"
+            ],
+            "properties": {
+                "channel_id": {
                     "type": "string"
                 }
             }
@@ -37249,6 +39215,37 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.onboardingFeedRecommendationInput": {
+            "type": "object",
+            "required": [
+                "feed_source_id"
+            ],
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "feed_source_id": {
+                    "type": "string"
+                },
+                "sort_order": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.podcastEpisodeBookmarkInput": {
+            "type": "object",
+            "required": [
+                "episode_id"
+            ],
+            "properties": {
+                "episode_id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.podcastPlaybackInput": {
             "type": "object",
             "required": [
@@ -37270,6 +39267,17 @@ const docTemplate = `{
                     "type": "integer",
                     "maximum": 10,
                     "minimum": 1
+                }
+            }
+        },
+        "handlers.podcastShowBookmarkInput": {
+            "type": "object",
+            "required": [
+                "channel_id"
+            ],
+            "properties": {
+                "channel_id": {
+                    "type": "string"
                 }
             }
         },
@@ -37331,6 +39339,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.videoBookmarkInput": {
+            "type": "object",
+            "required": [
+                "video_id"
+            ],
+            "properties": {
+                "video_id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.videoRatingInput": {
             "type": "object",
             "required": [
@@ -37341,6 +39360,21 @@ const docTemplate = `{
                     "type": "integer",
                     "maximum": 10,
                     "minimum": 1
+                }
+            }
+        },
+        "handlers.videoRecommendationFeedbackInput": {
+            "type": "object",
+            "required": [
+                "scope",
+                "target_id"
+            ],
+            "properties": {
+                "scope": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
                 }
             }
         },

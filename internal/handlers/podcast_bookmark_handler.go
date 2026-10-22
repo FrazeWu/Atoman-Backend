@@ -29,6 +29,12 @@ type podcastShowBookmarkInput struct {
 	ChannelID uuid.UUID `json:"channel_id" binding:"required"`
 }
 
+// GetPodcastEpisodeBookmarks godoc
+// @Summary 列出播客单集收藏
+// @Tags podcast
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/podcast/bookmarks [get]
 func GetPodcastEpisodeBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -65,6 +71,14 @@ func GetPodcastEpisodeBookmarks(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CreatePodcastEpisodeBookmark godoc
+// @Summary 收藏播客单集
+// @Tags podcast
+// @Produce json
+// @Accept json
+// @Param input body podcastEpisodeBookmarkInput true "请求参数"
+// @Success 201 "成功"
+// @Router /api/v1/podcast/bookmarks [post]
 func CreatePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -104,6 +118,13 @@ func CreatePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DeletePodcastEpisodeBookmark godoc
+// @Summary 取消收藏播客单集
+// @Tags podcast
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/podcast/bookmarks/{id} [delete]
 func DeletePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -144,6 +165,12 @@ func hydratePodcastBookmarks(db *gorm.DB, bookmarks []model.PodcastEpisodeBookma
 	return nil
 }
 
+// GetPodcastShowBookmarks godoc
+// @Summary 列出播客节目收藏
+// @Tags podcast
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/podcast/show-bookmarks [get]
 func GetPodcastShowBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -164,6 +191,14 @@ func GetPodcastShowBookmarks(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CreatePodcastShowBookmark godoc
+// @Summary 收藏播客节目
+// @Tags podcast
+// @Produce json
+// @Accept json
+// @Param input body podcastShowBookmarkInput true "请求参数"
+// @Success 201 "成功"
+// @Router /api/v1/podcast/show-bookmarks [post]
 func CreatePodcastShowBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -193,6 +228,13 @@ func CreatePodcastShowBookmark(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DeletePodcastShowBookmark godoc
+// @Summary 取消收藏播客节目
+// @Tags podcast
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/podcast/show-bookmarks/{id} [delete]
 func DeletePodcastShowBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")

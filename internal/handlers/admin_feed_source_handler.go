@@ -171,6 +171,12 @@ func normalizeExternalRSSURL(db *gorm.DB, rawURL string) (string, error) {
 	return trimmed, nil
 }
 
+// AdminListFeedSources godoc
+// @Summary 列出管理员订阅来源
+// @Tags admin
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/sources [get]
 func AdminListFeedSources(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var sources []model.FeedSource
@@ -224,6 +230,15 @@ func AdminListFeedSources(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// AdminUpdateFeedSourceRow godoc
+// @Summary 更新管理员订阅来源
+// @Tags admin
+// @Produce json
+// @Param id path string true "id"
+// @Accept json
+// @Param input body adminFeedSourceUpdateInput true "请求参数"
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/sources/{id} [patch]
 func AdminUpdateFeedSourceRow(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := strings.TrimSpace(c.Param("id"))
@@ -282,6 +297,15 @@ func AdminUpdateFeedSourceRow(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// AdminDeleteFeedSourceRow godoc
+// @Summary 删除管理员订阅来源
+// @Tags admin
+// @Produce json
+// @Param id path string true "id"
+// @Accept json
+// @Param input body adminFeedSourceDeleteInput true "请求参数"
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/sources/{id} [delete]
 func AdminDeleteFeedSourceRow(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		owner, ok := requireFeedSourceOwner(c)
@@ -356,6 +380,14 @@ func AdminDeleteFeedSourceRow(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CreateAdminFeedSource godoc
+// @Summary 创建管理员订阅来源
+// @Tags admin
+// @Produce json
+// @Accept json
+// @Param input body adminFeedSourceInput true "请求参数"
+// @Success 201 "成功"
+// @Router /api/v1/admin/feed/fulltext/sources [post]
 func CreateAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input adminFeedSourceInput
@@ -395,6 +427,15 @@ func CreateAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// UpdateAdminFeedSource godoc
+// @Summary 更新全文抓取来源
+// @Tags admin
+// @Produce json
+// @Param source_id path string true "source_id"
+// @Accept json
+// @Param input body adminFeedSourceInput true "请求参数"
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/sources/{source_id} [put]
 func UpdateAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input adminFeedSourceInput
@@ -452,6 +493,13 @@ func UpdateAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// SyncAdminFeedSource godoc
+// @Summary 同步订阅来源
+// @Tags admin
+// @Produce json
+// @Param source_id path string true "source_id"
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/sources/{source_id}/sync [post]
 func SyncAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var source model.FeedSource

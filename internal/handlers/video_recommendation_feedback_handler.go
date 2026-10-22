@@ -16,6 +16,14 @@ type videoRecommendationFeedbackInput struct {
 	TargetID uuid.UUID `json:"target_id" binding:"required"`
 }
 
+// CreateVideoRecommendationFeedback godoc
+// @Summary 提交视频推荐反馈
+// @Tags videos
+// @Produce json
+// @Accept json
+// @Param input body videoRecommendationFeedbackInput true "请求参数"
+// @Success 204 "成功"
+// @Router /api/v1/videos/recommendation-feedback [post]
 func CreateVideoRecommendationFeedback(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input videoRecommendationFeedbackInput
@@ -37,6 +45,14 @@ func CreateVideoRecommendationFeedback(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DeleteVideoRecommendationFeedback godoc
+// @Summary 删除视频推荐反馈
+// @Tags videos
+// @Produce json
+// @Param scope path string true "scope"
+// @Param id path string true "id"
+// @Success 204 "成功"
+// @Router /api/v1/videos/recommendation-feedback/{scope}/{id} [delete]
 func DeleteVideoRecommendationFeedback(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		targetID, err := uuid.Parse(c.Param("id"))

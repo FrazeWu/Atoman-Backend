@@ -33,6 +33,12 @@ func saveAdminFeedFullTextSettings(db *gorm.DB, settings adminFeedFullTextSettin
 	return service.SaveFeedFullTextSettings(db, settings)
 }
 
+// GetAdminFeedFullTextSettings godoc
+// @Summary 获取全文抓取设置
+// @Tags admin
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/settings [get]
 func GetAdminFeedFullTextSettings(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		settings, err := loadAdminFeedFullTextSettings(db)
@@ -44,6 +50,14 @@ func GetAdminFeedFullTextSettings(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// UpdateAdminFeedFullTextSettings godoc
+// @Summary 更新全文抓取设置
+// @Tags admin
+// @Produce json
+// @Accept json
+// @Param input body adminFeedFullTextSettingsInput true "请求参数"
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/settings [put]
 func UpdateAdminFeedFullTextSettings(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input adminFeedFullTextSettingsInput
@@ -90,6 +104,15 @@ func UpdateAdminFeedFullTextSettings(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// UpdateAdminFeedFullTextSourceSettings godoc
+// @Summary 更新来源全文抓取设置
+// @Tags admin
+// @Produce json
+// @Param source_id path string true "source_id"
+// @Accept json
+// @Param input body adminFeedFullTextSourceSettingsInput true "请求参数"
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/fulltext/sources/{source_id}/settings [put]
 func UpdateAdminFeedFullTextSourceSettings(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input adminFeedFullTextSourceSettingsInput

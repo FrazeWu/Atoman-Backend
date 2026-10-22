@@ -36,6 +36,12 @@ type onboardingFeedRecommendationDTO struct {
 	HealthStatus string `json:"health_status"`
 }
 
+// GetOnboardingFeedRecommendations godoc
+// @Summary 获取入门订阅推荐
+// @Tags feed
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/feed/onboarding/recommendations [get]
 func GetOnboardingFeedRecommendations(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var recommendations []model.OnboardingFeedRecommendation
@@ -65,6 +71,12 @@ func GetOnboardingFeedRecommendations(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// ListAdminOnboardingFeedRecommendations godoc
+// @Summary 列出管理员入门推荐
+// @Tags admin
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/onboarding/recommendations [get]
 func ListAdminOnboardingFeedRecommendations(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var recommendations []model.OnboardingFeedRecommendation
@@ -94,6 +106,14 @@ type onboardingFeedRecommendationInput struct {
 	SortOrder    *int   `json:"sort_order"`
 }
 
+// CreateAdminOnboardingFeedRecommendation godoc
+// @Summary 创建入门订阅推荐
+// @Tags admin
+// @Produce json
+// @Accept json
+// @Param input body onboardingFeedRecommendationInput true "请求参数"
+// @Success 201 "成功"
+// @Router /api/v1/admin/feed/onboarding/recommendations [post]
 func CreateAdminOnboardingFeedRecommendation(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input onboardingFeedRecommendationInput
@@ -138,6 +158,13 @@ func CreateAdminOnboardingFeedRecommendation(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// UpdateAdminOnboardingFeedRecommendation godoc
+// @Summary 更新入门订阅推荐
+// @Tags admin
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/admin/feed/onboarding/recommendations/{id} [patch]
 func UpdateAdminOnboardingFeedRecommendation(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input struct {
@@ -182,6 +209,13 @@ func UpdateAdminOnboardingFeedRecommendation(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DeleteAdminOnboardingFeedRecommendation godoc
+// @Summary 删除入门订阅推荐
+// @Tags admin
+// @Produce json
+// @Param id path string true "id"
+// @Success 204 "成功"
+// @Router /api/v1/admin/feed/onboarding/recommendations/{id} [delete]
 func DeleteAdminOnboardingFeedRecommendation(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))

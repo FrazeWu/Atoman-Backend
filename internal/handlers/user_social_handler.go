@@ -145,6 +145,12 @@ func UnfollowUser(db *gorm.DB) gin.HandlerFunc {
 }
 
 // ListBlockedUsers returns users blocked by the current user.
+// ListBlockedUsers godoc
+// @Summary 列出已屏蔽用户
+// @Tags users
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/users/blocked [get]
 func ListBlockedUsers(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)
@@ -158,6 +164,13 @@ func ListBlockedUsers(db *gorm.DB) gin.HandlerFunc {
 }
 
 // BlockUser blocks a user for private messages.
+// BlockUser godoc
+// @Summary 屏蔽用户
+// @Tags users
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/users/{id}/block [post]
 func BlockUser(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)
@@ -191,6 +204,13 @@ func BlockUser(db *gorm.DB) gin.HandlerFunc {
 }
 
 // UnblockUser removes a private-message block.
+// UnblockUser godoc
+// @Summary 取消屏蔽用户
+// @Tags users
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/users/{id}/block [delete]
 func UnblockUser(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)

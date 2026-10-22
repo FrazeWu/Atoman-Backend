@@ -11,6 +11,13 @@ import (
 	"atoman/internal/service"
 )
 
+// GetPublicSiteAccessHandler godoc
+// @Summary 获取公开站点访问设置
+// @Tags settings
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/settings/public/site-access [get]
+// @Router /api/v1/site/access [get]
 func GetPublicSiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		matrix, err := service.NewSiteAccessService(db).PublicMatrix()
@@ -88,6 +95,12 @@ func UpdateSiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// UpdateLegacySiteAccessHandler godoc
+// @Summary 更新兼容站点访问设置
+// @Tags admin
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/admin/site-access [put]
 func UpdateLegacySiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, err := io.ReadAll(c.Request.Body)

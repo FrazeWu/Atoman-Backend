@@ -35,6 +35,12 @@ var feedDiscoveryHTTPClient = &http.Client{
 	},
 }
 
+// DiscoverFeedCandidates godoc
+// @Summary 发现订阅候选来源
+// @Tags feed
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/feed/discover [post]
 func DiscoverFeedCandidates() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input struct {
