@@ -290,6 +290,12 @@ func (h *Handler) createArtist(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, artist)
 }
 
+// getArtist godoc
+// @Summary GET /music/artists/{artistId}
+// @Tags music
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/music/artists/{artistId} [get]
 func (h *Handler) getArtist(c *gin.Context) {
 	artistID, err := parseMusicID(c.Param("artistId"), "artistId")
 	if err != nil {
@@ -578,6 +584,12 @@ func (h *Handler) listAlbums(c *gin.Context) {
 			last := albums[len(albums)-1]
 			nextCursor = encodeMusicCreatedAtCursor(last.CreatedAt, last.ID)
 		}
+		// getAlbum godoc
+		// @Summary GET /music/albums/{albumId}
+		// @Tags music
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/music/albums/{albumId} [get]
 		writeMusicCursorList(c, albums, pageSize, hasMore, nextCursor)
 		return
 	}

@@ -56,6 +56,12 @@ func (h *Handler) getDrafts(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, dtos)
 }
 
+// getBlogDraft godoc
+// @Summary GET /blog/drafts
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/drafts [get]
 func (h *Handler) getBlogDraft(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -73,6 +79,12 @@ func (h *Handler) getBlogDraft(c *gin.Context) {
 			httpx.Error(c, apperr.NotFound("blog.draft_not_found", "Draft not found"))
 			return
 		}
+		// putBlogDraft godoc
+		// @Summary PUT /blog/drafts
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/drafts [put]
 		httpx.Error(c, err)
 		return
 	}
@@ -171,6 +183,12 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 			return err
 		}
 		return nil
+		// deleteBlogDraft godoc
+		// @Summary DELETE /blog/drafts
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/drafts [delete]
 	}); err != nil {
 		httpx.Error(c, err)
 		return

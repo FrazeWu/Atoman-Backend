@@ -12918,15 +12918,23 @@ paths:
         schema:
           $ref: '#/definitions/blog.bookmarkFolderInput'
       responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
         "201":
           description: Created
           schema:
             $ref: '#/definitions/model.BookmarkFolder'
+        "401":
+          description: Unauthorized
       security:
       - BearerAuth: []
       - CookieAuth: []
       summary: 新建收藏夹
       tags:
+      - blog
       - blog
   /api/v1/blog/bookmark-folders/{id}:
     delete:
@@ -12992,15 +13000,23 @@ paths:
       produces:
       - application/json
       responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
         "201":
           description: Created
           schema:
             $ref: '#/definitions/blog.BlogBookmarkDTO'
+        "401":
+          description: Unauthorized
       security:
       - BearerAuth: []
       - CookieAuth: []
       summary: 收藏文章到指定收藏夹
       tags:
+      - blog
       - blog
   /api/v1/blog/bookmarks/{id}:
     delete:
@@ -13021,6 +13037,199 @@ paths:
       summary: 取消文章收藏
       tags:
       - blog
+  /api/v1/blog/channels:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.ChannelSummary'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取创作频道
+      tags:
+      - blog
+      - studio
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 频道信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.CreateChannelInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/studio.ChannelSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建创作频道
+      tags:
+      - blog
+      - studio
+  /api/v1/blog/channels/{id}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: GET /blog/channels/{id}
+      tags:
+      - blog
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 频道 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 频道信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.UpdateChannelInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.ChannelSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新创作频道
+      tags:
+      - blog
+      - blog
+      - studio
+  /api/v1/blog/channels/{id}/collections:
+    post:
+      parameters:
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.Collection'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取模块合集
+      tags:
+      - blog
+      - blog
+      - studio
+  /api/v1/blog/collections/{id}:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: 合集信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.CreateCollectionInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Collection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建模块合集
+      tags:
+      - blog
+      - blog
+      - studio
   /api/v1/blog/digest:
     get:
       parameters:
@@ -13040,6 +13249,32 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 获取订阅博客摘要
+      tags:
+      - blog
+  /api/v1/blog/drafts:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: GET /blog/drafts
+      tags:
+      - blog
+  /api/v1/blog/imports/markdown:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: POST /blog/imports/markdown
       tags:
       - blog
   /api/v1/blog/imports/markdown/{id}:
@@ -13228,6 +13463,18 @@ paths:
       summary: 获取文章详情
       tags:
       - blog
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: PUT /blog/posts/{id}
+      tags:
+      - blog
   /api/v1/blog/posts/{id}/appeals:
     post:
       consumes:
@@ -13291,6 +13538,19 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 导出文章 Markdown 备份
+      tags:
+      - blog
+  /api/v1/blog/posts/{id}/likes/count:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: GET /blog/posts/{id}/likes/count
       tags:
       - blog
   /api/v1/blog/posts/{id}/public-tags:
@@ -15767,40 +16027,17 @@ paths:
       - books-reviews
   /api/v1/comments/{comment_id}:
     delete:
-      parameters:
-      - description: 评论 UUID
-        in: path
-        name: comment_id
-        required: true
-        type: string
-      produces:
-      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/comment.ActionResponse'
+            additionalProperties: true
+            type: object
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除评论
+      summary: DELETE /short-notes/{id}
       tags:
+      - comments
       - comments
     patch:
       consumes:
@@ -16032,6 +16269,60 @@ paths:
       summary: 获取楼中楼回复
       tags:
       - comments
+  /api/v1/content/{module}/{id}/schedule:
+    delete:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 内容 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/lifecycle.BlogScheduleStatus'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 查询定时发布状态
+      tags:
+      - content
+      - lifecycle
+  /api/v1/content/events:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: POST /content/events
+      tags:
+      - content
   /api/v1/debate/topics:
     get:
       parameters:
@@ -19195,6 +19486,19 @@ paths:
       summary: 检查订阅时间线更新
       tags:
       - feed
+  /api/v1/forum/categories:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: GET /forum/categories
+      tags:
+      - forum
   /api/v1/forum/category-permissions:
     get:
       description: 返回论坛分类与用户组的权限关系，仅管理员可访问。
@@ -19890,53 +20194,17 @@ paths:
       - forum-moderation
   /api/v1/forum/moderation/reports/{reportID}/resolve:
     post:
-      consumes:
-      - application/json
-      description: 标记举报为已处理并记录处理备注。
-      parameters:
-      - description: 举报 UUID
-        in: path
-        name: reportID
-        required: true
-        type: string
-      - description: 处理备注
-        in: body
-        name: input
-        schema:
-          $ref: '#/definitions/handlers.ForumResolveReportInput'
-      produces:
-      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.ForumReportResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            additionalProperties: true
+            type: object
         "401":
           description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 处理论坛举报
+      summary: POST /forum/moderation/reports/{reportID}/resolve
       tags:
-      - forum-moderation
+      - forum
   /api/v1/forum/moderation/user-actions:
     get:
       description: 返回指定用户的警告、禁言和封禁操作记录，仅管理员和站点所有者可访问。
@@ -20164,6 +20432,19 @@ paths:
       summary: 搜索论坛帖子
       tags:
       - forum
+  /api/v1/forum/topics/{topicID}/like:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: POST /forum/topics/{topicID}/like
+      tags:
+      - forum
   /api/v1/forum/trust/me:
     get:
       description: 重新评估并返回当前登录用户的论坛信任等级。
@@ -20311,6 +20592,7 @@ paths:
       - CookieAuth: []
       summary: 查询定时发布状态
       tags:
+      - content
       - lifecycle
   /api/v1/lifecycle/{module}/{id}/schedule/retry:
     post:
@@ -20723,6 +21005,19 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 创建艺术家
+      tags:
+      - music
+  /api/v1/music/artists/{artistId}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: GET /music/artists/{artistId}
       tags:
       - music
   /api/v1/music/artists/{artistId}/album-link-suggestions:
@@ -23450,6 +23745,19 @@ paths:
       summary: 全部标记为已读
       tags:
       - notifications
+  /api/v1/notifications/unread-count:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: GET /notifications/unread-count
+      tags:
+      - notifications
   /api/v1/notifications/unread-counts:
     get:
       description: 返回通知分类和私信的未读数量及总数。
@@ -24346,6 +24654,44 @@ paths:
       summary: 获取短笺列表
       tags:
       - shortnote
+  /api/v1/short-notes/{id}:
+    delete:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: DELETE /short-notes/{id}
+      tags:
+      - comments
+      - comments
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: GET /short-notes/{id}
+      tags:
+      - short-notes
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: PUT /short-notes/{id}
+      tags:
+      - short-notes
   /api/v1/songs:
     get:
       description: 返回所有未关闭的歌曲公开列表。
@@ -24952,6 +25298,8 @@ paths:
       - BearerAuth: []
       summary: 获取模块合集
       tags:
+      - blog
+      - blog
       - studio
     post:
       consumes:
@@ -24975,6 +25323,11 @@ paths:
       produces:
       - application/json
       responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
         "201":
           description: Created
           schema:
@@ -24995,6 +25348,8 @@ paths:
       - BearerAuth: []
       summary: 创建模块合集
       tags:
+      - blog
+      - blog
       - studio
   /api/v1/studio/{module}/collections/{id}:
     delete:
@@ -25701,6 +26056,7 @@ paths:
       - BearerAuth: []
       summary: 获取创作频道
       tags:
+      - blog
       - studio
     post:
       consumes:
@@ -25715,6 +26071,11 @@ paths:
       produces:
       - application/json
       responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
         "201":
           description: Created
           schema:
@@ -25735,6 +26096,7 @@ paths:
       - BearerAuth: []
       summary: 创建创作频道
       tags:
+      - blog
       - studio
   /api/v1/studio/channels/{id}:
     delete:
@@ -25808,6 +26170,21 @@ paths:
       - BearerAuth: []
       summary: 更新创作频道
       tags:
+      - blog
+      - blog
+      - studio
+  /api/v1/studio/collections:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+      summary: POST /studio/collections
+      tags:
       - studio
   /api/v1/studio/collections/{id}/candidates:
     get:
@@ -25880,6 +26257,7 @@ paths:
       - BearerAuth: []
       summary: 获取统一合集成员
       tags:
+      - studio
       - studio
   /api/v1/studio/collections/{id}/contents/{contentId}:
     delete:
@@ -25961,6 +26339,41 @@ paths:
       - BearerAuth: []
       summary: 加入或移动统一合集成员
       tags:
+      - studio
+  /api/v1/studio/collections/{id}/contents/order:
+    put:
+      parameters:
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.StudioCollectionContentItem'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取统一合集成员
+      tags:
+      - studio
       - studio
   /api/v1/studio/dashboard:
     get:
