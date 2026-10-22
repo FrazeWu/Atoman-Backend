@@ -131,7 +131,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			})
 			asset, err := storage.PromoteMusicUploadAsset(
 				s.s3, resolved.Artist.ImageURL,
-				storage.BuildMusicArtistImageVersionKey(resolved.Artist.ID.String(), uuid.NewString(), path.Ext(resolved.Artist.ImageURL)),
+				storage.BuildMusicArtistImageVersionKey(resolved.Artist.ID.String(), uuid.NewString(), musicAssetExtension(resolved.Artist.ImageURL)),
 			)
 			if err != nil {
 				return err
@@ -311,7 +311,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 		promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
 			album.CoverURL,
-			storage.BuildMusicAlbumCoverVersionKey(album.ID.String(), uuid.NewString(), path.Ext(album.CoverURL)),
+			storage.BuildMusicAlbumCoverVersionKey(album.ID.String(), uuid.NewString(), musicAssetExtension(album.CoverURL)),
 			id,
 		)
 		if err != nil {
@@ -485,10 +485,12 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				song.AudioStatus = "ready"
 				audioCheckedAt := time.Now().UTC()
 				song.AudioCheckedAt = &audioCheckedAt
-				if strings.TrimSpace(audioURL) != "" && audioURL != song.AudioURL {
+				// 即使地址未变，旧数据中的会话音频也必须先转存，不能随会话清理。
+				sourceKey, ownedAsset := musicAlbumImportSourceKey(audioURL)
+				if strings.TrimSpace(audioURL) != "" && (audioURL != song.AudioURL || ownedAsset && isPromotableAlbumImportKey(sourceKey, id)) {
 					promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteImportedTrackAsset(
 						audioURL,
-						storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), path.Ext(audioURL)),
+						storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), musicAssetExtension(audioURL)),
 						id,
 						uploadedAudioAsset != nil,
 					)
@@ -557,7 +559,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 			promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteImportedTrackAsset(
 				song.AudioURL,
-				storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), path.Ext(song.AudioURL)),
+				storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), musicAssetExtension(song.AudioURL)),
 				id,
 				uploadedAudioAsset != nil,
 			)
@@ -753,7 +755,7 @@ func (s *Service) commitStandaloneSongImport(
 	newObjectKeys := []string{}
 	promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
 		release.CoverURL,
-		storage.BuildMusicSongCoverVersionKey(song.ID.String(), uuid.NewString(), path.Ext(release.CoverURL)),
+		storage.BuildMusicSongCoverVersionKey(song.ID.String(), uuid.NewString(), musicAssetExtension(release.CoverURL)),
 		importID,
 	)
 	if err != nil {
@@ -767,7 +769,7 @@ func (s *Service) commitStandaloneSongImport(
 	}
 	promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
 		audioURL,
-		storage.BuildMusicSongAudioVersionKey(song.ID.String(), uuid.NewString(), path.Ext(audioURL)),
+		storage.BuildMusicSongAudioVersionKey(song.ID.String(), uuid.NewString(), musicAssetExtension(audioURL)),
 		importID,
 	)
 	if err != nil {
@@ -1180,12 +1182,25 @@ func isPromotableAlbumImportKey(key string, importID uuid.UUID) bool {
 	return strings.Contains(key, "/uploads/") || strings.HasPrefix(key, playbackPrefix)
 }
 
+func musicAssetExtension(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return path.Ext(parsed.Path)
+}
+
 func musicAlbumImportObjectKey(rawURL, urlPrefix string) (string, bool) {
 	prefix := strings.TrimRight(strings.TrimSpace(urlPrefix), "/")
 	if prefix == "" || !strings.HasPrefix(strings.TrimSpace(rawURL), prefix+"/") {
 		return "", false
 	}
-	key, err := url.PathUnescape(strings.TrimPrefix(strings.TrimSpace(rawURL), prefix+"/"))
+	parsed, err := url.Parse(strings.TrimPrefix(strings.TrimSpace(rawURL), prefix+"/"))
+	if err != nil {
+		return "", false
+	}
+	// 查询参数仅控制 CDN 响应，不属于对象键；保留路径中的转义字符语义。
+	key, err := url.PathUnescape(parsed.EscapedPath())
 	return strings.TrimLeft(key, "/"), err == nil && key != ""
 }
 
