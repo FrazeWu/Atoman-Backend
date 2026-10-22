@@ -65,6 +65,14 @@ func TestServeRatingAcceptance(t *testing.T) {
 	edition := model.BookEdition{WorkID: book.ID, Title: book.Title, CoverURL: "/api/v1/__rating_acceptance/cover.svg", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
 	require.NoError(t, db.Create(&edition).Error)
 
+	// 统一搜索深链接验收：只写入本脚本启动的隔离数据库。
+	source := model.FeedSource{Title: "统一搜索验收来源", SourceType: "external_rss", Hash: "unified-search-acceptance", RssURL: "https://example.test/search.xml"}
+	require.NoError(t, db.Create(&source).Error)
+	article := model.FeedItem{Title: "统一搜索验收文章", FeedSourceID: source.ID, GUID: "unified-search-acceptance", Summary: "公开搜索来源与文章落点验收。", PublishedAt: now}
+	require.NoError(t, db.Create(&article).Error)
+	event := model.TimelineEvent{UserID: users[0].UUID, Title: "统一搜索验收事件", Description: "统一搜索事件详情落点", EventDate: now, IsPublic: true}
+	require.NoError(t, db.Create(&event).Error)
+
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
