@@ -14,7 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type musicSearchResponse struct {
@@ -185,6 +184,7 @@ type recordSearchInteractionRequest struct {
 
 // search godoc
 // @Summary 统一搜索音乐内容
+// @Description 兼容旧可见性：登录用户可搜自己的草稿和私人歌单，管理员可搜非公开条目；全站 search 的 public 始终只检索公开内容。四种类型分别分页，复用相同领域查询及稳定相关度排序。
 // @Tags music
 // @Produce json
 // @Param q query string true "关键词"
@@ -196,131 +196,23 @@ type recordSearchInteractionRequest struct {
 // @Router /api/v1/music/search [get]
 func (h *Handler) search(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
-	newResult := func() musicSearchResponse {
-		return musicSearchResponse{
-			Songs: []model.Song{}, Albums: []model.Album{}, Artists: []model.Artist{}, Playlists: []model.Playlist{},
-			Meta: musicSearchMeta{Page: page, PageSize: pageSize, Totals: map[string]int64{"song": 0, "album": 0, "artist": 0, "playlist": 0}, HasMore: map[string]bool{"song": false, "album": false, "artist": false, "playlist": false}},
-		}
-	}
 	query := strings.TrimSpace(c.Query("q"))
-	if query == "" {
-		httpx.OK(c, http.StatusOK, newResult())
+	typeFilter := strings.TrimSpace(c.Query("type"))
+	// 旧 API 的未知类型返回空数组，保持兼容；领域层只接受四种已知类型。
+	if typeFilter != "" && typeFilter != "song" && typeFilter != "album" && typeFilter != "artist" && typeFilter != "playlist" {
+		query, typeFilter = "", ""
+	}
+	viewer, hasViewer := currentMusicUser(c)
+	data, err := h.service.SearchCatalog(c.Request.Context(), musicViewer(viewer, hasViewer), MusicSearchOptions{
+		Query: query, Type: typeFilter, Limit: pageSize, Offset: httpx.Offset(page, pageSize),
+		ExactTotal: true, Summary: c.Query("view") == "summary", Visibility: MusicSearchLegacy,
+	})
+	if err != nil {
+		httpx.Error(c, err)
 		return
 	}
-	offset := httpx.Offset(page, pageSize)
-	pattern := "%" + query + "%"
-	prefix := query + "%"
-	typeFilter := strings.TrimSpace(c.Query("type"))
-	include := func(kind string) bool { return typeFilter == "" || typeFilter == kind }
-	result := newResult()
-	viewer, hasViewer := currentMusicUser(c)
-	viewerPtr := musicViewer(viewer, hasViewer)
-
-	if include("song") {
-		var total int64
-		songQuery := func() *gorm.DB {
-			artistVisibility, artistArgs := musicEntryVisibilityCondition("search_artists", "created_by", viewerPtr, true)
-			albumVisibility, albumArgs := musicEntryVisibilityCondition(`"Albums"`, "uploaded_by", viewerPtr, true)
-			return scopeVisibleMusicEntries(h.service.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewerPtr, false).
-				Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id AND "+albumVisibility, albumArgs...).
-				Joins("LEFT JOIN song_artists ON song_artists.song_id = \"Songs\".id").
-				Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = song_artists.artist_id AND "+artistVisibility, artistArgs...).
-				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = search_artists.id AND artist_aliases.deleted_at IS NULL").
-				Joins("LEFT JOIN music_song_lyrics ON music_song_lyrics.song_id = \"Songs\".id AND music_song_lyrics.deleted_at IS NULL").
-				Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) OR LOWER(music_song_lyrics.content) LIKE LOWER(?) OR LOWER(music_song_lyrics.translation) LIKE LOWER(?)", pattern, pattern, pattern, pattern, pattern, pattern)
-		}
-		if err := songQuery().Distinct("\"Songs\".id").Count(&total).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		result.Meta.Totals["song"] = total
-		selection := `"Songs".*`
-		if c.Query("view") == "summary" {
-			selection = songSummarySelection
-		}
-		if err := songQuery().
-			Distinct(selection+`, CASE WHEN LOWER("Songs".title) = LOWER(?) THEN 0 WHEN LOWER("Songs".title) LIKE LOWER(?) THEN 1 WHEN LOWER("Albums".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 2 ELSE 3 END AS search_rank`, query, prefix, prefix, prefix, prefix).Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).
-			Order(`search_rank ASC, "Songs".play_count DESC, "Songs".title ASC`).Limit(pageSize).Offset(offset).Find(&result.Songs).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		for i := range result.Songs {
-			resolveSongEffectiveSources(&result.Songs[i])
-			result.Songs[i].AudioURL = resolveMusicMediaURL(result.Songs[i].AudioURL)
-			result.Songs[i].CoverURL = resolveMusicMediaURL(result.Songs[i].CoverURL)
-		}
-	}
-	if include("album") {
-		var total int64
-		albumQuery := func() *gorm.DB {
-			artistVisibility, artistArgs := musicEntryVisibilityCondition("search_artists", "created_by", viewerPtr, true)
-			return scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), `"Albums"`, "uploaded_by", viewerPtr, false).
-				Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").
-				Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = album_artists.artist_id AND "+artistVisibility, artistArgs...).
-				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = search_artists.id AND artist_aliases.deleted_at IS NULL").
-				Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern)
-		}
-		if err := albumQuery().Distinct("\"Albums\".id").Count(&total).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		result.Meta.Totals["album"] = total
-		if err := albumQuery().Distinct(`"Albums".*, CASE WHEN LOWER("Albums".title) = LOWER(?) THEN 0 WHEN LOWER("Albums".title) LIKE LOWER(?) THEN 1 ELSE 2 END AS search_rank`, query, prefix).Preload("Artists", visibleArtistPreload(viewerPtr)).
-			Order(`search_rank ASC, "Albums".hot_score DESC, "Albums".title ASC`).Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		for i := range result.Albums {
-			resolveAlbumMediaURLs(&result.Albums[i])
-		}
-	}
-	if include("artist") {
-		var total int64
-		artistQuery := func() *gorm.DB {
-			return scopeVisibleMusicEntries(h.service.db.Model(&model.Artist{}), "\"Artists\"", "created_by", viewerPtr, false).
-				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id AND artist_aliases.deleted_at IS NULL").
-				Where("LOWER(\"Artists\".name) LIKE LOWER(?) OR LOWER("+artistDisambiguationSearchExpression+") LIKE LOWER(?) OR LOWER(\"Artists\".legal_name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern, pattern)
-		}
-		if err := artistQuery().Distinct(`"Artists".id`).Count(&total).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		result.Meta.Totals["artist"] = total
-		if err := artistQuery().Distinct(`"Artists".*, CASE WHEN LOWER("Artists".name) = LOWER(?) THEN 0 WHEN LOWER("Artists".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 1 ELSE 2 END AS search_rank`, query, prefix, prefix).
-			Order(`search_rank ASC, "Artists".name ASC`).Limit(pageSize).Offset(offset).Find(&result.Artists).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		for i := range result.Artists {
-			result.Artists[i].ImageURL = resolveMusicMediaURL(result.Artists[i].ImageURL)
-		}
-	}
-	if include("playlist") {
-		var total int64
-		playlistQuery := func() *gorm.DB {
-			visible := h.service.db.Model(&model.Playlist{}).Where("LOWER(name) LIKE LOWER(?) AND is_public = ?", pattern, true)
-			if user, ok := currentMusicUser(c); ok {
-				visible = visible.Or("LOWER(name) LIKE LOWER(?) AND user_id = ?", pattern, user.ID)
-			}
-			return visible
-		}
-		if err := playlistQuery().Count(&total).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		result.Meta.Totals["playlist"] = total
-		if err := playlistQuery().Order(clause.OrderBy{Expression: clause.Expr{SQL: `CASE WHEN LOWER(name) = LOWER(?) THEN 0 WHEN LOWER(name) LIKE LOWER(?) THEN 1 ELSE 2 END, updated_at DESC`, Vars: []any{query, prefix}, WithoutParentheses: true}}).Limit(pageSize).Offset(offset).Find(&result.Playlists).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		if err := h.service.repo.HydratePlaylistStats(result.Playlists); err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		for i := range result.Playlists {
-			result.Playlists[i].CoverURL = resolveMusicMediaURL(result.Playlists[i].CoverURL)
-		}
-	}
+	result := musicSearchResponse{Songs: data.Songs, Albums: data.Albums, Artists: data.Artists, Playlists: data.Playlists,
+		Meta: musicSearchMeta{Page: page, PageSize: pageSize, Totals: data.Totals, HasMore: map[string]bool{}}}
 	for kind, total := range result.Meta.Totals {
 		result.Meta.HasMore[kind] = int64(page*pageSize) < total
 	}
