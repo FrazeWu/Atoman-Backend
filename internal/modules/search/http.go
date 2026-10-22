@@ -43,6 +43,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 // search godoc
 // @Summary 统一内容搜索
+// @Description music 已接入 song、album、artist、playlist（仅 public），支持歌曲/专辑/艺术家及别名关联、歌词原文与翻译、歌单名称。音乐必须提供关键词，仅声明 relevance 排序；即使管理员登录也不会返回草稿或私人歌单。
 // @Description preview 每组 2 条，grouped 每组 6 条；list 必须选择单个 module/type。filter[key] 仅接受 capabilities 声明的字段，重复值为 OR、不同字段为 AND。已接入 books 的 work、author、book_list（仅 public）；作品支持 language、author_id、year_from、year_to，年份为 1–9999 的整数，匹配任一有效公开版本。rating_desc 复用信誉加权评分和 6 人门槛。现有搜索入口不受影响。
 // @Tags search
 // @Produce json

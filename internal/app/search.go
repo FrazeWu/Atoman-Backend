@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"atoman/internal/modules/books"
+	"atoman/internal/modules/music"
 	"atoman/internal/modules/search"
 	"atoman/internal/modules/search/adapters"
 	"atoman/internal/service"
@@ -25,6 +26,9 @@ func registerSearchRoutes(group *gin.RouterGroup, db *gorm.DB) {
 	})
 	if err := registry.Register(adapters.NewBooksProvider(books.NewService(db))); err != nil {
 		panic(err) // 固定的启动装配错误，不能静默遗漏已实现的 Provider。
+	}
+	if err := registry.Register(adapters.NewMusicProvider(music.NewService(db))); err != nil {
+		panic(err)
 	}
 	search.RegisterRoutes(group, search.NewService(registry))
 }
