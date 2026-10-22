@@ -17,6 +17,13 @@ func SetupSiteRoutes(router *gin.Engine, db *gorm.DB) {
 	group.POST("/visits", RecordSiteVisit(db))
 }
 
+// ResolveSiteHandle godoc
+// @Summary 解析站点标识
+// @Tags site
+// @Produce json
+// @Param handle path string true "handle"
+// @Success 200 "成功"
+// @Router /api/v1/site/resolve/{handle} [get]
 func ResolveSiteHandle(db *gorm.DB) gin.HandlerFunc {
 	namespace := service.NewSiteNamespaceService(db)
 	return func(c *gin.Context) {

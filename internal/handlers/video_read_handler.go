@@ -19,6 +19,15 @@ import (
 	"atoman/internal/platform/httpx"
 )
 
+// GetRecommendedVideoItems godoc
+// @Summary 获取推荐视频条目
+// @Tags videos
+// @Produce json
+// @Param mode query string false "推荐模式"
+// @Param page query int false "页码"
+// @Param page_size query int false "每页条数"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/videos/recommend/items [get]
 func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		mode, err := parseRecommendationMode(c.DefaultQuery("mode", "hot"))

@@ -357,6 +357,12 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 }
 
 // RetryGlobalFeedSource retries one failed global OPML source without requiring the original file.
+// RetryGlobalFeedSource godoc
+// @Summary 重试订阅来源导入
+// @Tags feed
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/feed/sources/retry-import [post]
 func RetryGlobalFeedSource(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input struct {

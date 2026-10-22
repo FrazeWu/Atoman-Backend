@@ -134,6 +134,15 @@ func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CreateSubscriptionFromProvider godoc
+// @Summary 从服务商创建订阅
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param input body object true "服务商订阅参数"
+// @Success 200 {object} SubscriptionResponse
+// @Success 201 {object} SubscriptionResponse
+// @Router /api/v1/feed/sources/create-from-provider [post]
 func CreateSubscriptionFromProvider(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input struct {

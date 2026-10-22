@@ -41,6 +41,14 @@ type SendEmailChangeCodeInput struct {
 	Email string `json:"email" binding:"required,email"`
 }
 
+// SendEmailChangeCode godoc
+// @Summary 发送更换邮箱验证码
+// @Tags users
+// @Produce json
+// @Accept json
+// @Param input body SendEmailChangeCodeInput true "请求参数"
+// @Success 204 "成功"
+// @Router /api/v1/users/me/email/send-code [post]
 func SendEmailChangeCode(db *gorm.DB) gin.HandlerFunc {
 	emailLimiter := ratelimit.NewFromEnv()
 	ipLimiter := ratelimit.NewFromEnv()
@@ -73,6 +81,12 @@ func SendEmailChangeCode(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// ListSessions godoc
+// @Summary 列出登录会话
+// @Tags users
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/users/me/sessions [get]
 func ListSessions(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)
@@ -89,6 +103,13 @@ func ListSessions(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// RevokeSession godoc
+// @Summary 撤销登录会话
+// @Tags users
+// @Produce json
+// @Param id path string true "id"
+// @Success 204 "成功"
+// @Router /api/v1/users/me/sessions/{id} [delete]
 func RevokeSession(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)
@@ -107,6 +128,12 @@ func RevokeSession(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// ListSecurityActivities godoc
+// @Summary 列出账号安全活动
+// @Tags users
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/users/me/security-activities [get]
 func ListSecurityActivities(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("user_id").(uuid.UUID)
@@ -123,6 +150,14 @@ func recordSecurityActivity(db *gorm.DB, userID uuid.UUID, action string) error 
 	return audit.Record(db, audit.Entry{ActorID: &userID, Action: action, EntityType: "user", EntityID: &userID})
 }
 
+// ChangeEmail godoc
+// @Summary 更换账号邮箱
+// @Tags users
+// @Produce json
+// @Accept json
+// @Param input body ChangeEmailInput true "请求参数"
+// @Success 204 "成功"
+// @Router /api/v1/users/me/email [put]
 func ChangeEmail(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input ChangeEmailInput
@@ -184,6 +219,14 @@ func ChangeEmail(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// SetPassword godoc
+// @Summary 设置账号密码
+// @Tags users
+// @Produce json
+// @Accept json
+// @Param input body SetPasswordInput true "请求参数"
+// @Success 204 "成功"
+// @Router /api/v1/users/me/password [post]
 func SetPassword(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input SetPasswordInput

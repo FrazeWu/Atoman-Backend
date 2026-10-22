@@ -20,6 +20,12 @@ type channelBookmarkInput struct {
 	ChannelID uuid.UUID `json:"channel_id" binding:"required"`
 }
 
+// GetVideoBookmarks godoc
+// @Summary 列出视频收藏
+// @Tags videos
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/videos/bookmarks [get]
 func GetVideoBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -56,6 +62,14 @@ func GetVideoBookmarks(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CreateVideoBookmark godoc
+// @Summary 收藏视频
+// @Tags videos
+// @Produce json
+// @Accept json
+// @Param input body videoBookmarkInput true "请求参数"
+// @Success 201 "成功"
+// @Router /api/v1/videos/bookmarks [post]
 func CreateVideoBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -89,6 +103,13 @@ func CreateVideoBookmark(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DeleteVideoBookmark godoc
+// @Summary 取消收藏视频
+// @Tags videos
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/videos/bookmarks/{id} [delete]
 func DeleteVideoBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -128,6 +149,12 @@ func hydrateVideoBookmarks(db *gorm.DB, bookmarks []model.VideoBookmark) error {
 	return nil
 }
 
+// GetChannelBookmarks godoc
+// @Summary 列出视频频道收藏
+// @Tags videos
+// @Produce json
+// @Success 200 "成功"
+// @Router /api/v1/videos/channel-bookmarks [get]
 func GetChannelBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -147,6 +174,14 @@ func GetChannelBookmarks(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CreateChannelBookmark godoc
+// @Summary 收藏视频频道
+// @Tags videos
+// @Produce json
+// @Accept json
+// @Param input body channelBookmarkInput true "请求参数"
+// @Success 201 "成功"
+// @Router /api/v1/videos/channel-bookmarks [post]
 func CreateChannelBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -175,6 +210,13 @@ func CreateChannelBookmark(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DeleteChannelBookmark godoc
+// @Summary 取消收藏视频频道
+// @Tags videos
+// @Produce json
+// @Param id path string true "id"
+// @Success 200 "成功"
+// @Router /api/v1/videos/channel-bookmarks/{id} [delete]
 func DeleteChannelBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)

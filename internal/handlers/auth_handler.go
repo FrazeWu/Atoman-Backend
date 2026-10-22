@@ -542,6 +542,14 @@ func TokenLoginHandler(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CheckEmailHandler godoc
+// @Summary 检查邮箱可用性
+// @Tags auth
+// @Produce json
+// @Accept json
+// @Param input body CheckEmailInput true "请求参数"
+// @Success 200 "成功"
+// @Router /api/v1/auth/check-email [post]
 func CheckEmailHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input CheckEmailInput
@@ -566,6 +574,14 @@ func CheckEmailHandler(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// CheckUsernameHandler godoc
+// @Summary 检查用户名可用性
+// @Tags auth
+// @Produce json
+// @Accept json
+// @Param input body CheckUsernameInput true "请求参数"
+// @Success 200 "成功"
+// @Router /api/v1/auth/check-username [post]
 func CheckUsernameHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input CheckUsernameInput
