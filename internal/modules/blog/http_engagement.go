@@ -14,6 +14,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// getPostLikesCount godoc
+// @Summary GET /blog/posts/{id}/likes/count
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/posts/{id}/likes/count [get]
 func (h *Handler) getPostLikesCount(c *gin.Context) {
 	postID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -48,6 +54,18 @@ func (h *Handler) getPostLikesCount(c *gin.Context) {
 	}
 	count, err := h.service.CountPostLikes(postID)
 	if err != nil {
+		// deleteLike godoc
+		// @Summary DELETE /blog/likes
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/likes [delete]
+		// createLike godoc
+		// @Summary POST /blog/likes
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/likes [post]
 		httpx.Error(c, err)
 		return
 	}
@@ -86,6 +104,12 @@ func (h *Handler) toggleLike(c *gin.Context, isLike bool) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+	// setPostRating godoc
+	// @Summary PUT /blog/posts/{id}/rating
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/blog/posts/{id}/rating [put]
 }
 
 // setPostRating godoc
@@ -116,6 +140,12 @@ func (h *Handler) setPostRating(c *gin.Context) {
 		return
 	}
 	var req postRatingInput
+	// deletePostRating godoc
+	// @Summary DELETE /blog/posts/{id}/rating
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/blog/posts/{id}/rating [delete]
 	if err := bindJSON(c, &req); err != nil {
 		httpx.Error(c, err)
 		return
@@ -197,6 +227,12 @@ func (h *Handler) listBookmarks(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, bookmarks)
 }
 
+// deleteBookmark godoc
+// @Summary DELETE /blog/bookmarks/{id}
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/bookmarks/{id} [delete]
 // createBookmark godoc
 // @Summary 收藏文章到指定收藏夹
 // @Tags blog
@@ -273,6 +309,12 @@ func (h *Handler) listBookmarkFolders(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, folders)
 }
 
+// deleteBookmarkFolder godoc
+// @Summary DELETE /blog/bookmark-folders/{id}
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/bookmark-folders/{id} [delete]
 // createBookmarkFolder godoc
 // @Summary 新建收藏夹
 // @Tags blog

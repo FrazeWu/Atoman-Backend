@@ -244,6 +244,12 @@ func (h *Handler) listNotifications(c *gin.Context) {
 	httpx.List(c, items, query.Page, query.PageSize, total)
 }
 
+// getUnreadCount godoc
+// @Summary GET /notifications/unread-count
+// @Tags notifications
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/notifications/unread-count [get]
 func (h *Handler) getUnreadCount(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -252,6 +258,12 @@ func (h *Handler) getUnreadCount(c *gin.Context) {
 	}
 	count, err := h.service.GetUnreadCount(user)
 	if err != nil {
+		// markRead godoc
+		// @Summary PUT /notifications/{id}/read
+		// @Tags notifications
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/notifications/{id}/read [put]
 		httpx.Error(c, err)
 		return
 	}

@@ -30,6 +30,12 @@ func (h *Handler) listChannels(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, channels)
 }
 
+// getChannel godoc
+// @Summary GET /blog/channels/{id}
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/channels/{id} [get]
 func (h *Handler) getChannel(c *gin.Context) {
 	channelID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -38,6 +44,12 @@ func (h *Handler) getChannel(c *gin.Context) {
 	}
 	channel, err := h.service.GetChannel(channelID)
 	if err != nil {
+		// getChannelCollections godoc
+		// @Summary GET /blog/channels/{id}/collections
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/channels/{id}/collections [get]
 		httpx.Error(c, err)
 		return
 	}
@@ -46,12 +58,30 @@ func (h *Handler) getChannel(c *gin.Context) {
 
 func (h *Handler) getChannelCollections(c *gin.Context) {
 	channelID, err := uuid.Parse(c.Param("id"))
+	// getChannelBySlug godoc
+	// @Summary GET /blog/channels/slug/{slug}
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/blog/channels/slug/{slug} [get]
 	if err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
 		return
+		// getChannelCollectionsBySlug godoc
+		// @Summary GET /blog/channels/slug/{slug}/collections
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/channels/slug/{slug}/collections [get]
 	}
 	collections, err := h.service.ListCollectionsByChannel(channelID)
 	if err != nil {
+		// getCollection godoc
+		// @Summary GET /blog/collections/{id}
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/collections/{id} [get]
 		httpx.Error(c, err)
 		return
 	}
@@ -67,7 +97,20 @@ func (h *Handler) getChannelBySlug(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, channel)
 }
 
+// listUserCollections godoc
+// @Summary GET /blog/collections
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/collections [get]
+
 func (h *Handler) getChannelCollectionsBySlug(c *gin.Context) {
+	// ensureDefaultChannel godoc
+	// @Summary POST /blog/channels/ensure-default
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/blog/channels/ensure-default [post]
 	_, collections, err := h.service.ListCollectionsByChannelSlug(c.Param("slug"))
 	if err != nil {
 		httpx.Error(c, err)

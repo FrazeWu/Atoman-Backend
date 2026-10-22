@@ -89,6 +89,12 @@ func (h *Handler) create(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, note)
 }
 
+// update godoc
+// @Summary PUT /short-notes/{id}
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/short-notes/{id} [put]
 func (h *Handler) update(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -108,9 +114,54 @@ func (h *Handler) update(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, note)
 }
 
+// delete godoc
+// @Summary DELETE /comments/{comment_id}
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/comments/{comment_id} [delete]
+// @Summary DELETE /short-notes/{id}
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/short-notes/{id} [delete]
 func (h *Handler) delete(c *gin.Context) {
 	user, ok := authctx.Current(c)
+	// setVote godoc
+	// @Summary PUT /short-notes/{id}/vote
+	// @Tags short-notes
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/short-notes/{id}/vote [put]
+	// unlike godoc
+	// @Summary DELETE /comments/{comment_id}/like
+	// @Tags comments
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/comments/{comment_id}/like [delete]
+	// @Summary DELETE /short-notes/{id}/like
+	// @Tags comments
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/short-notes/{id}/like [delete]
+	// like godoc
+	// @Summary PUT /comments/{comment_id}/like
+	// @Tags comments
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/comments/{comment_id}/like [put]
+	// @Summary POST /short-notes/{id}/like
+	// @Tags comments
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/short-notes/{id}/like [post]
 	if !ok {
+		// clearVote godoc
+		// @Summary DELETE /short-notes/{id}/vote
+		// @Tags short-notes
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/short-notes/{id}/vote [delete]
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}

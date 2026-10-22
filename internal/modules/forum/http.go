@@ -159,6 +159,12 @@ func (h *Handler) handleAdminTrust(c *gin.Context, evaluate bool) {
 	httpx.OK(c, http.StatusOK, trustResponseFromModel(trust))
 }
 
+// listCategories godoc
+// @Summary GET /forum/categories
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/forum/categories [get]
 func (h *Handler) listCategories(c *gin.Context) {
 	categories, err := h.service.ListCategories(currentForumUser(c))
 	if err != nil {

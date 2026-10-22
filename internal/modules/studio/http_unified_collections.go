@@ -8,6 +8,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// createUnifiedCollection godoc
+// @Summary POST /studio/collections
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/studio/collections [post]
 func (h *Handler) createUnifiedCollection(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -15,6 +21,12 @@ func (h *Handler) createUnifiedCollection(c *gin.Context) {
 	}
 	var input CreateCollectionInput
 	if !httpx.BindRequiredJSON(c, &input) {
+		// updateUnifiedCollection godoc
+		// @Summary PATCH /studio/collections/{id}
+		// @Tags studio
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/studio/collections/{id} [patch]
 		return
 	}
 	collection, err := h.service.CreateUnifiedCollection(user, input)
@@ -38,6 +50,19 @@ func (h *Handler) updateUnifiedCollection(c *gin.Context) {
 	respond(c, http.StatusOK, collection, err)
 }
 
+// listUnifiedCollectionContents godoc
+// @Summary GET /studio/collections/{id}/contents
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/studio/collections/{id}/contents [get]
+
+// reorderUnifiedCollectionContents godoc
+// @Summary PUT /studio/collections/{id}/contents/order
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/studio/collections/{id}/contents/order [put]
 // listUnifiedCollectionContents godoc
 // @Summary 获取统一合集成员
 // @Tags studio
@@ -70,6 +95,12 @@ func (h *Handler) reorderUnifiedCollectionContents(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
+		// deleteUnifiedCollection godoc
+		// @Summary DELETE /studio/collections/{id}
+		// @Tags studio
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/studio/collections/{id} [delete]
 	}
 	var input reorderCollectionContentsInput
 	if !httpx.BindRequiredJSON(c, &input) {

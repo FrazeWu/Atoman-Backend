@@ -28,6 +28,12 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/:module/:id/schedule", h.cancelSchedule)
 }
 
+// recordEvent godoc
+// @Summary POST /content/events
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/content/events [post]
 func (h *Handler) recordEvent(c *gin.Context) {
 	var input EventInput
 	if !httpx.BindRequiredJSON(c, &input) {
@@ -35,6 +41,12 @@ func (h *Handler) recordEvent(c *gin.Context) {
 	}
 	user, _ := authctx.Current(c)
 	if err := h.service.RecordEvent(user, input); err != nil {
+		// saveProgress godoc
+		// @Summary PUT /content/progress
+		// @Tags content
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/content/progress [put]
 		httpx.Error(c, err)
 		return
 	}
@@ -43,6 +55,12 @@ func (h *Handler) recordEvent(c *gin.Context) {
 
 func (h *Handler) saveProgress(c *gin.Context) {
 	var input ProgressInput
+	// getProgress godoc
+	// @Summary GET /content/progress/{module}/{id}
+	// @Tags content
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/content/progress/{module}/{id} [get]
 	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
@@ -51,15 +69,33 @@ func (h *Handler) saveProgress(c *gin.Context) {
 	if err != nil {
 		httpx.Error(c, err)
 		return
+		// listContinue godoc
+		// @Summary GET /content/continue
+		// @Tags content
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/content/continue [get]
 	}
 	httpx.OK(c, http.StatusOK, progress)
 }
 
 func (h *Handler) getProgress(c *gin.Context) {
+	// listNotificationPreferences godoc
+	// @Summary GET /content/notification-preferences
+	// @Tags content
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/content/notification-preferences [get]
 	contentID, ok := pathUUID(c, "id")
 	if !ok {
 		return
 	}
+	// saveNotificationPreference godoc
+	// @Summary PUT /content/notification-preferences
+	// @Tags content
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/content/notification-preferences [put]
 	user, _ := authctx.Current(c)
 	progress, err := h.service.GetProgress(user, c.Param("module"), contentID)
 	if err != nil {
@@ -81,6 +117,12 @@ func (h *Handler) listContinue(c *gin.Context) {
 }
 
 func (h *Handler) listNotificationPreferences(c *gin.Context) {
+	// getSchedule godoc
+	// @Summary GET /content/{module}/{id}/schedule
+	// @Tags content
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/content/{module}/{id}/schedule [get]
 	user, _ := authctx.Current(c)
 	items, err := h.service.ListNotificationPreferences(user)
 	if err != nil {
@@ -93,6 +135,12 @@ func (h *Handler) listNotificationPreferences(c *gin.Context) {
 func (h *Handler) saveNotificationPreference(c *gin.Context) {
 	var input NotificationPreferenceInput
 	if !httpx.BindRequiredJSON(c, &input) {
+		// scheduleContent godoc
+		// @Summary POST /content/{module}/{id}/schedule
+		// @Tags content
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/content/{module}/{id}/schedule [post]
 		return
 	}
 	user, _ := authctx.Current(c)
@@ -104,6 +152,12 @@ func (h *Handler) saveNotificationPreference(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, item)
 }
 
+// cancelSchedule godoc
+// @Summary DELETE /content/{module}/{id}/schedule
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/content/{module}/{id}/schedule [delete]
 // getSchedule godoc
 // @Summary 查询定时发布状态
 // @Tags lifecycle

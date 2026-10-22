@@ -581,6 +581,12 @@ func (s *Service) DeleteModeratorAssignment(user authctx.CurrentUser, assignment
 	return nil
 }
 
+// resolveReport godoc
+// @Summary POST /forum/moderation/reports/{reportID}/resolve
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/forum/moderation/reports/{reportID}/resolve [post]
 func (s *Service) resolveReport(user authctx.CurrentUser, reportID uuid.UUID, req ResolveReportRequest) (model.ForumReport, error) {
 	if err := s.requireAdminOrOwner(user); err != nil {
 		return model.ForumReport{}, err

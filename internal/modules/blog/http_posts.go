@@ -543,6 +543,12 @@ func (h *Handler) restorePostVersion(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, postDTOs[0])
 }
 
+// updatePost godoc
+// @Summary PUT /blog/posts/{id}
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/posts/{id} [put]
 func (h *Handler) updatePost(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -729,6 +735,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	// deletePost godoc
+	// @Summary DELETE /blog/posts/{id}
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/blog/posts/{id} [delete]
 	if wasPublic || isPublicPostState(content.Status, content.Visibility) {
 		indexnow.NotifyPaths(seoPostPath(content.ID))
 	}
@@ -777,6 +789,18 @@ func (h *Handler) deletePost(c *gin.Context) {
 		}
 		if err := tx.Delete(&model.ContentPostExtension{}, "content_id = ?", post.ID).Error; err != nil {
 			return err
+			// unpublishPost godoc
+			// @Summary POST /blog/posts/{id}/unpublish
+			// @Tags blog
+			// @Success 200 {object} map[string]interface{}
+			// @Failure 401 "Unauthorized"
+			// @Router /api/v1/blog/posts/{id}/unpublish [post]
+			// publishPost godoc
+			// @Summary POST /blog/posts/{id}/publish
+			// @Tags blog
+			// @Success 200 {object} map[string]interface{}
+			// @Failure 401 "Unauthorized"
+			// @Router /api/v1/blog/posts/{id}/publish [post]
 		}
 		return tx.Delete(&model.ContentEntry{}, "id = ?", post.ID).Error
 	}); err != nil {
@@ -822,6 +846,24 @@ func cleanupBlogContentRelations(tx *gorm.DB, contentID uuid.UUID) error {
 		return err
 	}
 	if len(targetIDs) > 0 {
+		// reorderCollectionPosts godoc
+		// @Summary PUT /blog/collections/{id}/posts/order
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/collections/{id}/posts/order [put]
+		// unpinPost godoc
+		// @Summary POST /blog/posts/{id}/unpin
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/posts/{id}/unpin [post]
+		// pinPost godoc
+		// @Summary POST /blog/posts/{id}/pin
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/posts/{id}/pin [post]
 		var commentIDs []uuid.UUID
 		if err := tx.Model(&model.CommentEntry{}).Where("target_id IN ?", targetIDs).Pluck("id", &commentIDs).Error; err != nil {
 			return err

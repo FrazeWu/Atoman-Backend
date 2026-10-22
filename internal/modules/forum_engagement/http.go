@@ -21,6 +21,12 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/topics/:topicID/bookmark", h.toggleTopicBookmark)
 }
 
+// toggleTopicLike godoc
+// @Summary POST /forum/topics/{topicID}/like
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/forum/topics/{topicID}/like [post]
 func (h *Handler) toggleTopicLike(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

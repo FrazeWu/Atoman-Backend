@@ -4243,6 +4243,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "新建收藏夹",
@@ -4258,11 +4259,21 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/model.BookmarkFolder"
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
                     }
                 }
             }
@@ -4367,6 +4378,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "收藏文章到指定收藏夹",
@@ -4382,11 +4394,21 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/blog.BlogBookmarkDTO"
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
                     }
                 }
             }
@@ -4424,6 +4446,306 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/blog/channels": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "studio"
+                ],
+                "summary": "获取创作频道",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/studio.ChannelSummary"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "studio"
+                ],
+                "summary": "创建创作频道",
+                "parameters": [
+                    {
+                        "description": "频道信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.CreateChannelInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/studio.ChannelSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/channels/{id}": {
+            "get": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "GET /blog/channels/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog",
+                    "studio"
+                ],
+                "summary": "更新创作频道",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "频道信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.UpdateChannelInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/studio.ChannelSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/channels/{id}/collections": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog",
+                    "studio"
+                ],
+                "summary": "获取模块合集",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.Collection"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/collections/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog",
+                    "studio"
+                ],
+                "summary": "创建模块合集",
+                "parameters": [
+                    {
+                        "description": "合集信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.CreateCollectionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.Collection"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/blog/digest": {
             "get": {
                 "security": [
@@ -4456,6 +4778,46 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/blog.BlogDigestDTO"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/drafts": {
+            "get": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "GET /blog/drafts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/imports/markdown": {
+            "post": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "POST /blog/imports/markdown",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
                     }
                 }
             }
@@ -4794,6 +5156,24 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "put": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "PUT /blog/posts/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
             }
         },
         "/api/v1/blog/posts/{id}/appeals": {
@@ -4898,6 +5278,26 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{id}/likes/count": {
+            "get": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "GET /blog/posts/{id}/likes/count",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
                     }
                 }
             }
@@ -8863,60 +9263,21 @@ const docTemplate = `{
         },
         "/api/v1/comments/{comment_id}": {
             "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
+                    "comments",
                     "comments"
                 ],
-                "summary": "删除评论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "评论 UUID",
-                        "name": "comment_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
+                "summary": "DELETE /short-notes/{id}",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/comment.ActionResponse"
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/comment.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/comment.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/comment.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/comment.ErrorResponse"
-                        }
+                        "description": "Unauthorized"
                     }
                 }
             },
@@ -9278,6 +9639,91 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/content/events": {
+            "post": {
+                "tags": [
+                    "content"
+                ],
+                "summary": "POST /content/events",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
+        "/api/v1/content/{module}/{id}/schedule": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content",
+                    "lifecycle"
+                ],
+                "summary": "查询定时发布状态",
+                "parameters": [
+                    {
+                        "enum": [
+                            "blog"
+                        ],
+                        "type": "string",
+                        "description": "内容模块",
+                        "name": "module",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "内容 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/lifecycle.BlogScheduleStatus"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -14331,6 +14777,26 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/forum/categories": {
+            "get": {
+                "tags": [
+                    "forum"
+                ],
+                "summary": "GET /forum/categories",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
         "/api/v1/forum/category-permissions": {
             "get": {
                 "security": [
@@ -15433,78 +15899,20 @@ const docTemplate = `{
         },
         "/api/v1/forum/moderation/reports/{reportID}/resolve": {
             "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "标记举报为已处理并记录处理备注。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
-                    "forum-moderation"
+                    "forum"
                 ],
-                "summary": "处理论坛举报",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "举报 UUID",
-                        "name": "reportID",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "处理备注",
-                        "name": "input",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ForumResolveReportInput"
-                        }
-                    }
-                ],
+                "summary": "POST /forum/moderation/reports/{reportID}/resolve",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ForumReportResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
+                        "description": "Unauthorized"
                     }
                 }
             }
@@ -15864,6 +16272,26 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/forum/topics/{topicID}/like": {
+            "post": {
+                "tags": [
+                    "forum"
+                ],
+                "summary": "POST /forum/topics/{topicID}/like",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
         "/api/v1/forum/trust/me": {
             "get": {
                 "security": [
@@ -16052,6 +16480,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "content",
                     "lifecycle"
                 ],
                 "summary": "查询定时发布状态",
@@ -16746,6 +17175,26 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/artists/{artistId}": {
+            "get": {
+                "tags": [
+                    "music"
+                ],
+                "summary": "GET /music/artists/{artistId}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
                     }
                 }
             }
@@ -21087,6 +21536,26 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/notifications/unread-count": {
+            "get": {
+                "tags": [
+                    "notifications"
+                ],
+                "summary": "GET /notifications/unread-count",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
         "/api/v1/notifications/unread-counts": {
             "get": {
                 "security": [
@@ -22468,6 +22937,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/short-notes/{id}": {
+            "get": {
+                "tags": [
+                    "short-notes"
+                ],
+                "summary": "GET /short-notes/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "short-notes"
+                ],
+                "summary": "PUT /short-notes/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "comments",
+                    "comments"
+                ],
+                "summary": "DELETE /short-notes/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
         "/api/v1/songs": {
             "get": {
                 "description": "返回所有未关闭的歌曲公开列表。",
@@ -23333,6 +23859,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "studio"
                 ],
                 "summary": "获取创作频道",
@@ -23367,6 +23894,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "studio"
                 ],
                 "summary": "创建创作频道",
@@ -23382,6 +23910,13 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
@@ -23475,6 +24010,8 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
+                    "blog",
                     "studio"
                 ],
                 "summary": "更新创作频道",
@@ -23520,6 +24057,26 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/collections": {
+            "post": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "POST /studio/collections",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
                     }
                 }
             }
@@ -23595,6 +24152,62 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "获取统一合集成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "合集 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/studio.StudioCollectionContentItem"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/collections/{id}/contents/order": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "获取统一合集成员",
@@ -24707,6 +25320,8 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
+                    "blog",
                     "studio"
                 ],
                 "summary": "获取模块合集",
@@ -24774,6 +25389,8 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
+                    "blog",
                     "studio"
                 ],
                 "summary": "创建模块合集",
@@ -24801,6 +25418,13 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {

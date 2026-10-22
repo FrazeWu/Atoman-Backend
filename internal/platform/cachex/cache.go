@@ -108,6 +108,12 @@ func (c *Cache[T]) GetCancelable(ctx context.Context, key string, load func(cont
 	return c.get(ctx, key, load, false)
 }
 
+// get godoc
+// @Summary GET /short-notes/{id}
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/short-notes/{id} [get]
 func (c *Cache[T]) get(ctx context.Context, key string, load func(context.Context) (T, error), detach bool) (T, error) {
 	key = c.cacheKey(key)
 	refresh := func() (any, error) {

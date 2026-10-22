@@ -474,6 +474,12 @@ func (h *Handler) patchState(c *gin.Context) {
 }
 
 // listChannels godoc
+// @Summary GET /blog/channels
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/channels [get]
+// listChannels godoc
 // @Summary 获取创作频道
 // @Tags studio
 // @Produce json
@@ -490,6 +496,12 @@ func (h *Handler) listChannels(c *gin.Context) {
 	respond(c, http.StatusOK, channels, err)
 }
 
+// createChannel godoc
+// @Summary POST /blog/channels
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/channels [post]
 // createChannel godoc
 // @Summary 创建创作频道
 // @Tags studio
@@ -516,6 +528,17 @@ func (h *Handler) createChannel(c *gin.Context) {
 }
 
 // updateChannel godoc
+// @Summary PUT /blog/channels/{id}
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/channels/{id} [put]
+// @Summary PATCH /studio/channels/{id}
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/studio/channels/{id} [patch]
+// updateChannel godoc
 // @Summary 更新创作频道
 // @Tags studio
 // @Accept json
@@ -533,11 +556,28 @@ func (h *Handler) updateChannel(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// deleteChannel godoc
+	// @Summary DELETE /blog/channels/{id}
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/blog/channels/{id} [delete]
+	// @Summary DELETE /studio/channels/{id}
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/studio/channels/{id} [delete]
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
 	}
 	var input UpdateChannelInput
+	// listUnifiedContents godoc
+	// @Summary GET /studio/contents
+	// @Tags studio
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/studio/contents [get]
 	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
@@ -561,6 +601,12 @@ func (h *Handler) deleteChannel(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// listUnifiedCollections godoc
+	// @Summary GET /studio/collections
+	// @Tags studio
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 "Unauthorized"
+	// @Router /api/v1/studio/collections [get]
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -575,6 +621,12 @@ func (h *Handler) deleteChannel(c *gin.Context) {
 func (h *Handler) listUnifiedContents(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
+		// listCollections godoc
+		// @Summary GET /studio/{module}/collections
+		// @Tags studio
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/studio/{module}/collections [get]
 		return
 	}
 	channelID, err := uuid.Parse(c.Query("channel_id"))
@@ -609,6 +661,17 @@ func (h *Handler) listUnifiedCollections(c *gin.Context) {
 	respond(c, http.StatusOK, collections, serviceErr)
 }
 
+// createCollection godoc
+// @Summary POST /blog/channels/{id}/collections
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/channels/{id}/collections [post]
+// @Summary POST /studio/{module}/collections
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/studio/{module}/collections [post]
 // listCollections godoc
 // @Summary 获取模块合集
 // @Tags studio
@@ -630,11 +693,33 @@ func (h *Handler) listCollections(c *gin.Context) {
 	if err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "channel_id must be a valid uuid"))
 		return
+		// updateCollection godoc
+		// @Summary PUT /blog/collections/{id}
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/blog/collections/{id} [put]
+		// @Summary PATCH /studio/{module}/collections/{id}
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 "Unauthorized"
+		// @Router /api/v1/studio/{module}/collections/{id} [patch]
 	}
 	collections, serviceErr := h.service.ListCollections(user, channelID, module)
 	respond(c, http.StatusOK, collections, serviceErr)
 }
 
+// deleteCollection godoc
+// @Summary DELETE /blog/collections/{id}
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/collections/{id} [delete]
+// @Summary DELETE /studio/{module}/collections/{id}
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/studio/{module}/collections/{id} [delete]
 // createCollection godoc
 // @Summary 创建模块合集
 // @Tags studio

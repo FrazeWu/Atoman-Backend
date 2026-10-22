@@ -89,6 +89,12 @@ func (h *Handler) confirmMarkdownImport(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, details)
 }
 
+// previewMarkdownImport godoc
+// @Summary POST /blog/imports/markdown
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 "Unauthorized"
+// @Router /api/v1/blog/imports/markdown [post]
 func (h *Handler) previewMarkdownImport(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
