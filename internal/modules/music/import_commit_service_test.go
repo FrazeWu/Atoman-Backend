@@ -103,7 +103,7 @@ func TestPromoteAlbumImportAssetCopiesLargePlaybackWithoutHTTPDownload(t *testin
 	destination := "music/albums/album/tracks/song/version.mp3"
 	var sources, destinations, deleted []string
 	svc := &Service{s3: fakeMusicPromotionS3Client(t, &sources, &destinations, &deleted)}
-	url, oldKey, newKey, err := svc.promoteAlbumImportAsset(origin.URL+"/"+source, destination, importID)
+	url, oldKey, newKey, err := svc.promoteAlbumImportAsset(origin.URL+"/"+source+"?cors=1", destination, importID)
 	if err != nil || url != "https://cdn.example.test/"+destination || oldKey != source || newKey != destination {
 		t.Fatalf("promotion: url=%q old=%q new=%q error=%v", url, oldKey, newKey, err)
 	}
@@ -190,6 +190,87 @@ func TestMusicAlbumImportSourceKeyAcceptsPlaybackURLPrefix(t *testing.T) {
 	key, ok := musicAlbumImportSourceKey("https://playback.example.test/music/album-imports/playback/sessions/import/track.mp3")
 	if !ok || key != "music/album-imports/playback/sessions/import/track.mp3" {
 		t.Fatalf("source key = %q, ok=%v", key, ok)
+	}
+}
+
+func TestMusicAlbumImportSourceKeyAcceptsPlaybackURLQuery(t *testing.T) {
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
+	for _, suffix := range []string{"?cors=1", "?cors=1#preview", ""} {
+		url := "https://cdn.example.test/music/album-imports/playback/sessions/import/track%20%23%3F.mp3" + suffix
+		key, ok := musicAlbumImportSourceKey(url)
+		if !ok || key != "music/album-imports/playback/sessions/import/track #?.mp3" {
+			t.Fatalf("source key = %q, ok=%v", key, ok)
+		}
+	}
+}
+
+func TestRepairAlbumImportPromotesUnchangedTemporaryAudio(t *testing.T) {
+	for _, copyFails := range []bool{false, true} {
+		t.Run(map[bool]string{false: "success", true: "copy_failure"}[copyFails], func(t *testing.T) {
+			svc, db, user := newMusicTestService(t)
+			var sources, destinations, deleted []string
+			svc.s3 = fakeMusicPromotionS3Client(t, &sources, &destinations, &deleted)
+			if copyFails {
+				svc.s3.Config.MaxRetries = new(int)
+				svc.s3.Handlers.Send.Clear()
+				svc.s3.Handlers.Send.PushBack(func(r *request.Request) { r.Error = errors.New("copy failed") })
+			}
+			t.Setenv("STORAGE_TYPE", "s3")
+			t.Setenv("S3_BUCKET", "atoman-test")
+			t.Setenv("S3_URL_PREFIX", "https://cdn.example.test")
+			artist := model.Artist{Name: "Artist", LifecycleStatus: model.MusicLifecycleActive}
+			if err := db.Create(&artist).Error; err != nil {
+				t.Fatal(err)
+			}
+			album := model.Album{Title: "Album", CoverURL: "/cover.jpg", UploadedBy: &user.ID}
+			if err := db.Create(&album).Error; err != nil {
+				t.Fatal(err)
+			}
+			importID := uuid.New()
+			key := "music/album-imports/playback/sessions/" + importID.String() + "/files/track.mp3"
+			audioURL := "https://cdn.example.test/" + key + "?cors=1"
+			song := model.Song{Title: "Track", AlbumID: &album.ID, AudioURL: audioURL, UploadedBy: &user.ID, TrackNumber: 1}
+			if err := db.Create(&song).Error; err != nil {
+				t.Fatal(err)
+			}
+			payload, err := json.Marshal(map[string]any{"derived_tracks": []map[string]any{{"song_id": song.ID, "title": "Track", "track_number": 1, "audio_url": audioURL}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			session := model.AlbumImportSession{Base: model.Base{ID: importID}, UserID: &user.ID, TargetAlbumID: &album.ID, Status: AlbumImportStatusReady, PayloadJSON: string(payload)}
+			if err := db.Create(&session).Error; err != nil {
+				t.Fatal(err)
+			}
+			committed, err := svc.CommitAlbumImportSession(user, importID, CommitAlbumImportSessionInput{
+				Artists:     []CommitAlbumImportArtistInput{{ArtistID: artist.ID.String()}},
+				AlbumSource: "album source",
+				Album:       AlbumImportAlbumPayload{Title: "Album", CoverURL: "/cover.jpg", ReleaseDate: "2020-01-01", Tracks: []AlbumImportTrackPayload{{SongID: song.ID.String(), Title: "Track", TrackNumber: 1}}},
+			})
+			if committed.Status == AlbumImportStatusNeedsAttention {
+				t.Fatalf("unexpected validation failure: %s", committed.ErrorMessage)
+			}
+			if copyFails && err == nil || !copyFails && err != nil {
+				t.Fatalf("commit error = %v, copyFails = %v", err, copyFails)
+			}
+			if err := db.First(&song, "id = ?", song.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if copyFails {
+				if err := db.First(&session, "id = ?", importID).Error; err != nil {
+					t.Fatal(err)
+				}
+				if song.AudioURL != audioURL || session.Status != AlbumImportStatusReady {
+					t.Fatalf("failed repair must preserve song and session: audio=%q status=%s", song.AudioURL, session.Status)
+				}
+				return
+			}
+			if committed.Status != AlbumImportStatusCommitted || !strings.HasPrefix(song.AudioURL, "https://cdn.example.test/music/albums/"+album.ID.String()+"/tracks/"+song.ID.String()+"/") || !strings.HasSuffix(song.AudioURL, ".mp3") || strings.Contains(song.AudioURL, "?") {
+				t.Fatalf("temporary audio not promoted: audio=%q status=%s", song.AudioURL, committed.Status)
+			}
+			if len(sources) != 1 || sources[0] != "atoman-test/"+key || !containsString(deleted, key) {
+				t.Fatalf("unexpected object operations: sources=%v deleted=%v", sources, deleted)
+			}
+		})
 	}
 }
 
