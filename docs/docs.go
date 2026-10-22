@@ -17628,6 +17628,41 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/albums/{albumId}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取专辑详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "专辑 UUID",
+                        "name": "albumId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.Album"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/albums/{albumId}/convert-to-song": {
             "post": {
                 "security": [

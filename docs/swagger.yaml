@@ -21435,6 +21435,29 @@ paths:
       summary: 获取音乐专辑列表
       tags:
       - music
+  /api/v1/music/albums/{albumId}:
+    get:
+      parameters:
+      - description: 专辑 UUID
+        in: path
+        name: albumId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Album'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取专辑详情
+      tags:
+      - music
   /api/v1/music/albums/{albumId}/convert-to-song:
     post:
       consumes:

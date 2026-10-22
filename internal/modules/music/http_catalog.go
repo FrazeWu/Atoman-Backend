@@ -584,18 +584,20 @@ func (h *Handler) listAlbums(c *gin.Context) {
 			last := albums[len(albums)-1]
 			nextCursor = encodeMusicCreatedAtCursor(last.CreatedAt, last.ID)
 		}
-		// getAlbum godoc
-		// @Summary GET /music/albums/{albumId}
-		// @Tags music
-		// @Success 200 {object} map[string]interface{}
-		// @Failure 401 "Unauthorized"
-		// @Router /api/v1/music/albums/{albumId} [get]
 		writeMusicCursorList(c, albums, pageSize, hasMore, nextCursor)
 		return
 	}
 	httpx.List(c, albums, page, pageSize, total)
 }
 
+// getAlbum godoc
+// @Summary 获取专辑详情
+// @Tags music
+// @Produce json
+// @Param albumId path string true "专辑 UUID"
+// @Success 200 {object} model.Album
+// @Failure 404 {object} map[string]interface{}
+// @Router /api/v1/music/albums/{albumId} [get]
 func (h *Handler) getAlbum(c *gin.Context) {
 	albumID, err := parseMusicID(c.Param("albumId"), "albumId")
 	if err != nil {
