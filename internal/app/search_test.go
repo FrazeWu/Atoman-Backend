@@ -17,10 +17,10 @@ import (
 func TestRegisterV1RoutesMountsUnifiedSearchWithoutSwitchingLegacySearch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.SiteSetting{}, &model.User{}, &model.Revision{}, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{}, &model.BookList{})
+	testdb.Migrate(t, db, &model.SiteSetting{}, &model.User{}, &model.Revision{}, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{}, &model.BookList{}, &model.FeedSource{}, &model.FeedItem{})
 	testdb.Migrate(t, db, &model.Song{}, &model.Album{}, &model.Artist{}, &model.ArtistAlias{}, &model.SongArtist{}, &model.AlbumArtist{}, &model.MusicSongLyric{}, &model.Playlist{}, &model.PlaylistSong{}, &model.PlaylistBookmark{})
 	testdb.Migrate(t, db, &model.Channel{}, &model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentBlogTag{}, &model.ContentBlogUserTag{}, &model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.ShortNote{})
-	testdb.Migrate(t, db, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumUserTrust{}, &model.ForumCategoryPermission{}, &model.ForumGroup{}, &model.ForumGroupMember{}, &model.DiscussionTarget{}, &model.CommentEntry{})
+	testdb.Migrate(t, db, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumUserTrust{}, &model.ForumCategoryPermission{}, &model.ForumGroup{}, &model.ForumGroupMember{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.Video{}, &model.PodcastEpisode{}, &model.Debate{}, &model.TimelinePerson{}, &model.TimelineEvent{})
 	r := gin.New()
 	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 	paths := make(map[string]bool)
@@ -39,8 +39,8 @@ func TestRegisterV1RoutesMountsUnifiedSearchWithoutSwitchingLegacySearch(t *test
 		if path == "/api/v1/search?q=测试" {
 			var envelope search.SearchEnvelope
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
-			require.False(t, envelope.Data.Partial)
-			require.Len(t, envelope.Data.Groups, 12)
+			require.False(t, envelope.Data.Partial, response.Body.String())
+			require.Len(t, envelope.Data.Groups, 20)
 		}
 	}
 }
