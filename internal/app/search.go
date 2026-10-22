@@ -39,5 +39,18 @@ func registerSearchRoutes(group *gin.RouterGroup, db *gorm.DB) {
 	if err := registry.Register(adapters.NewForumProvider(forum.NewRepo(db))); err != nil {
 		panic(err)
 	}
+	publicProviders := []*adapters.PublicProvider{
+		adapters.NewPublicProvider(db, "feed", "RSS", adapters.PublicType("source", "订阅源", "title", "url", "description"), adapters.PublicType("article", "文章", "title", "summary", "author")),
+		adapters.NewPublicProvider(db, "video", "视频", adapters.PublicType("video", "视频", "title", "description")),
+		adapters.NewPublicProvider(db, "podcast", "播客", adapters.PublicType("show", "节目", "name", "description"), adapters.PublicType("episode", "单集", "title", "content")),
+		adapters.NewPublicProvider(db, "debate", "辩题", adapters.PublicType("debate", "辩题", "title", "description", "content")),
+		adapters.NewPublicProvider(db, "timeline", "时间线", adapters.PublicType("person", "人物", "name", "bio"), adapters.PublicType("event", "事件", "title", "description", "content", "location")),
+		adapters.NewPublicProvider(db, "users", "用户", adapters.PublicType("user", "用户", "username", "display_name", "bio")),
+	}
+	for _, provider := range publicProviders {
+		if err := registry.Register(provider); err != nil {
+			panic(err)
+		}
+	}
 	search.RegisterRoutes(group, search.NewService(registry))
 }
