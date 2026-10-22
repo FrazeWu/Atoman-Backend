@@ -8,6 +8,7 @@ import (
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/search"
 	"atoman/internal/platform/apperr"
+	"github.com/google/uuid"
 )
 
 type MusicProvider struct{ service *music.Service }
@@ -15,10 +16,14 @@ type MusicProvider struct{ service *music.Service }
 func NewMusicProvider(service *music.Service) *MusicProvider { return &MusicProvider{service: service} }
 func (p *MusicProvider) Module() string                      { return "music" }
 
-func (p *MusicProvider) Capabilities(_ context.Context, _ search.Viewer, scope search.Scope) search.ModuleCapabilities {
+func (p *MusicProvider) Capabilities(_ context.Context, viewer search.Viewer, scope search.Scope) search.ModuleCapabilities {
 	caps := search.ModuleCapabilities{Module: p.Module(), Label: "音乐", Scope: scope}
+	if scope == search.ScopeMine && viewer.ID != uuid.Nil {
+		caps.Types = []search.TypeCapability{privateTypeCapability("playlist", "我创建的歌单", []string{"name"}), privateTypeCapability("bookmark", "收藏歌单", []string{"name"})}
+		return caps
+	}
 	if scope != search.ScopePublic {
-		return caps // 私人歌单、上传和收藏能力留到 P6。
+		return caps
 	}
 	for _, kind := range []struct {
 		key, label string
@@ -37,9 +42,20 @@ func (p *MusicProvider) Capabilities(_ context.Context, _ search.Viewer, scope s
 	return caps
 }
 
-func (p *MusicProvider) Search(ctx context.Context, _ search.Viewer, req search.ProviderSearchRequest) (search.ProviderSearchResult, error) {
+func (p *MusicProvider) Search(ctx context.Context, viewer search.Viewer, req search.ProviderSearchRequest) (search.ProviderSearchResult, error) {
+	if req.Scope == search.ScopeMine {
+		if req.Type != "playlist" && req.Type != "bookmark" {
+			return search.ProviderSearchResult{}, apperr.BadRequest("search.invalid_type", "Unknown private music type")
+		}
+		data, err := p.service.SearchPrivatePlaylists(ctx, viewer, req.Type == "bookmark", music.MusicSearchOptions{Query: req.Query, Limit: req.Limit, Offset: req.Offset, ExactTotal: req.ExactTotal}, req.Sort)
+		out := search.ProviderSearchResult{Items: []search.SearchHit{}, Total: data.Total}
+		for _, playlist := range data.Items {
+			out.Items = append(out.Items, search.SearchHit{Module: p.Module(), Type: req.Type, ID: playlist.ID.String(), Title: playlist.Name, Snippet: searchSnippet(playlist.Description), CoverURL: playlist.CoverURL, Href: "/music/playlist/" + playlist.ID.String()})
+		}
+		return out, err
+	}
 	if req.Scope != search.ScopePublic {
-		return search.ProviderSearchResult{}, apperr.BadRequest("search.invalid_scope", "Music private search is not available yet")
+		return search.ProviderSearchResult{}, apperr.BadRequest("search.invalid_scope", "Unsupported music search scope")
 	}
 	data, err := p.service.SearchCatalog(ctx, nil, music.MusicSearchOptions{Query: req.Query, Type: req.Type,
 		Limit: req.Limit, Offset: req.Offset, ExactTotal: req.ExactTotal, Summary: true, Visibility: music.MusicSearchPublic})

@@ -101,8 +101,8 @@ func TestMusicProviderPublicAPIContract(t *testing.T) {
 		require.False(t, kind.AllowEmptyQuery)
 		require.Equal(t, "relevance", kind.DefaultSort)
 	}
-	require.Empty(t, provider.Capabilities(context.Background(), search.Viewer{ID: user.UUID}, search.ScopeMine).Types)
-	_, err = provider.Search(context.Background(), search.Viewer{ID: user.UUID}, search.ProviderSearchRequest{Scope: search.ScopeMine, Type: "playlist"})
+	require.Len(t, provider.Capabilities(context.Background(), search.Viewer{ID: user.UUID}, search.ScopeMine).Types, 2)
+	_, err = provider.Search(context.Background(), search.Viewer{}, search.ProviderSearchRequest{Scope: search.ScopeMine, Type: "playlist"})
 	require.Error(t, err)
 	for _, request := range []search.SearchRequest{
 		{Module: "music", Types: []string{"song"}, View: search.ViewList},
