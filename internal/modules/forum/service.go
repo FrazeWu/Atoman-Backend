@@ -1,6 +1,7 @@
 package forum
 
 import (
+	"context"
 	"errors"
 	"log"
 	"strings"
@@ -191,11 +192,18 @@ func (s *Service) ListTopics(user authctx.CurrentUser, query ListTopicsQuery) ([
 }
 
 func (s *Service) SearchTopics(user authctx.CurrentUser, query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
-	topics, total, err := s.repo.SearchTopics(user, query)
+	return s.SearchTopicsContext(s.db.Statement.Context, user, query)
+}
+
+func (s *Service) SearchTopicsContext(ctx context.Context, user authctx.CurrentUser, query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
+	scoped := *s
+	scoped.db = s.db.WithContext(ctx)
+	scoped.repo = NewRepo(scoped.db)
+	topics, total, err := scoped.repo.SearchTopics(user, query)
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := s.applyTopicState(topics, user); err != nil {
+	if err := scoped.applyTopicState(topics, user); err != nil {
 		return nil, 0, err
 	}
 	return topics, total, nil
