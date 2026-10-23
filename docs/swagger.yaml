@@ -6293,6 +6293,94 @@ definitions:
       url:
         type: string
     type: object
+  model.MusicTag:
+    properties:
+      canonical_tag_id:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      created_by_user:
+        $ref: '#/definitions/model.User'
+      depth:
+        type: integer
+      id:
+        type: string
+      kind:
+        type: string
+      name:
+        type: string
+      parent:
+        $ref: '#/definitions/model.MusicTag'
+      parent_id:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
+  model.MusicTagAssignment:
+    properties:
+      created_at:
+        type: string
+      created_by:
+        type: string
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      id:
+        type: string
+      tag:
+        $ref: '#/definitions/model.MusicTag'
+      tag_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.MusicTagRevision:
+    properties:
+      action:
+        type: string
+      actor_id:
+        type: string
+      after:
+        type: object
+      before:
+        type: object
+      created_at:
+        type: string
+      id:
+        type: string
+      object_id:
+        type: string
+      object_type:
+        type: string
+      reverts_id:
+        type: string
+      summary:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
+  model.MusicTagVote:
+    properties:
+      assignment_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+      vote:
+        type: string
+    type: object
   model.NotificationMeta:
     additionalProperties: true
     type: object
@@ -7153,9 +7241,13 @@ definitions:
     properties:
       album_type:
         type: string
+      canonical_album_id:
+        type: string
       cover_url:
         type: string
       description:
+        type: string
+      edition_type:
         type: string
       metadata:
         $ref: '#/definitions/music.AlbumImportMetadataFields'
@@ -7950,6 +8042,8 @@ definitions:
       draft_only:
         description: DraftOnly 保存填写进度，不登记后台创建请求。
         type: boolean
+      metadata_confirmed:
+        type: boolean
     type: object
   music.CompleteAlbumImportMultipartPartInput:
     properties:
@@ -8439,12 +8533,33 @@ definitions:
           $ref: '#/definitions/music.MusicSongLyricsVersionDTO'
         type: array
     type: object
+  music.MusicTagAssignmentEdit:
+    properties:
+      add:
+        items:
+          type: string
+        type: array
+      base_version:
+        type: integer
+      remove:
+        items:
+          type: string
+        type: array
+      revision_id:
+        type: string
+      summary:
+        type: string
+    type: object
   music.MusicTagDTO:
     properties:
       assignment_id:
         type: string
       can_delete:
         type: boolean
+      confidence:
+        type: string
+      confidence_score:
+        type: number
       depth:
         type: integer
       downvotes:
@@ -8464,12 +8579,23 @@ definitions:
       viewer_vote:
         type: string
     type: object
+  music.MusicTagHistory:
+    properties:
+      revisions:
+        items:
+          $ref: '#/definitions/model.MusicTagRevision'
+        type: array
+      version:
+        type: integer
+    type: object
   music.MusicTagOptionDTO:
     properties:
       album_count:
         type: integer
       assignment_count:
         type: integer
+      canonical_tag_id:
+        type: string
       child_count:
         type: integer
       depth:
@@ -8482,7 +8608,30 @@ definitions:
         type: string
       parent_id:
         type: string
+      path:
+        items:
+          type: string
+        type: array
       song_count:
+        type: integer
+      version:
+        type: integer
+    type: object
+  music.MusicTagWikiInput:
+    properties:
+      base_version:
+        type: integer
+      name:
+        type: string
+      parent_id:
+        type: string
+      revision_id:
+        type: string
+      summary:
+        type: string
+      target_id:
+        type: string
+      target_version:
         type: integer
     type: object
   music.PaginationMetaResponse:
@@ -8827,6 +8976,21 @@ definitions:
         type: string
       parent_id:
         type: string
+    type: object
+  music.musicTagSnapshot:
+    properties:
+      assignments:
+        items:
+          $ref: '#/definitions/model.MusicTagAssignment'
+        type: array
+      tags:
+        items:
+          $ref: '#/definitions/model.MusicTag'
+        type: array
+      votes:
+        items:
+          $ref: '#/definitions/model.MusicTagVote'
+        type: array
     type: object
   music.musicTagVoteInput:
     properties:
@@ -22016,6 +22180,65 @@ paths:
       summary: 管理员紧急改变音乐 Wiki 编辑状态
       tags:
       - music-entry-state
+  /api/v1/music/entries/{entityType}/{entityId}/tags:
+    patch:
+      consumes:
+      - application/json
+      description: 所有登录用户可编辑可见且允许 Wiki 编辑的作品。关联版本冲突返回 409；恢复原关联身份及投票；五类共享 12 个上限，同分支风格不能重复绑定。
+      parameters:
+      - description: song 或 album
+        in: path
+        name: entityType
+        required: true
+        type: string
+      - description: 作品 ID
+        in: path
+        name: entityId
+        required: true
+        type: string
+      - description: 操作与关联版本
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.MusicTagAssignmentEdit'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicTagHistory'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 原子增加、解除或替换作品标签
+      tags:
+      - music
+  /api/v1/music/entries/{entityType}/{entityId}/tags/history:
+    get:
+      parameters:
+      - description: song 或 album
+        in: path
+        name: entityType
+        required: true
+        type: string
+      - description: 作品 ID
+        in: path
+        name: entityId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicTagHistory'
+      summary: 查看作品标签关联历史及当前版本
+      tags:
+      - music
   /api/v1/music/history:
     delete:
       responses:
@@ -24102,7 +24325,7 @@ paths:
       - music-entry-state
   /api/v1/music/tags:
     get:
-      description: 按标签类别、父级和关键词浏览公共标签目录；歌曲和专辑计数包含子孙标签，歌曲还包含可见所属专辑的标签。
+      description: 按类别、父级和关键词浏览；歌曲和专辑各自仅统计直接关联，支持子孙风格扩展及高争议关联过滤。
       parameters:
       - description: 标签类别
         enum:
@@ -24173,7 +24396,7 @@ paths:
       - music
   /api/v1/music/tags/{tagId}:
     get:
-      description: 返回标签信息及当前用户可见的歌曲、专辑数量；包含子孙标签和歌曲所属专辑的标签。
+      description: 返回标签信息及可见作品数量；仅扩展子孙风格，不继承所属专辑标签。合并标签返回 canonical_tag_id。
       parameters:
       - description: 标签 ID
         in: path
@@ -24192,6 +24415,70 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取公共音乐标签详情
+      tags:
+      - music
+  /api/v1/music/tags/{tagId}/history:
+    get:
+      parameters:
+      - description: 标签 ID
+        in: path
+        name: tagId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicTagHistory'
+      summary: 查看音乐标签 Wiki 历史
+      tags:
+      - music
+  /api/v1/music/tags/{tagId}/wiki/{action}:
+    post:
+      consumes:
+      - application/json
+      description: rename、move、merge、revert；base_version 必填，merge 同时校验 target_version；preview=true
+        仅事务模拟返回影响范围，不写入。重叠投票采用最后修改的一票，保留来源审计。
+      parameters:
+      - description: 标签 ID
+        in: path
+        name: tagId
+        required: true
+        type: string
+      - description: 操作
+        enum:
+        - rename
+        - move
+        - merge
+        - revert
+        in: path
+        name: action
+        required: true
+        type: string
+      - description: 仅预览影响
+        in: query
+        name: preview
+        type: boolean
+      - description: 变更及版本
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.MusicTagWikiInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.musicTagSnapshot'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 修改音乐标签 Wiki
       tags:
       - music
   /api/v1/music/uploads:

@@ -179,6 +179,12 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			metadataExternalID = musicBrainzReleaseID
 		}
 		metadataMatchStatus := strings.TrimSpace(stringValue(sessionPayload["metadata_match_status"]))
+		if metadataMatchStatus == model.MusicMatchAmbiguous && !input.MetadataConfirmed {
+			return apperr.Conflict("music.metadata_confirmation_required", "候选发行版不明确，请核对版本和曲目后确认")
+		}
+		if metadataMatchStatus == model.MusicMatchAmbiguous && input.MetadataConfirmed {
+			metadataMatchStatus = model.MusicMatchManual
+		}
 		if metadataMatchStatus == "" {
 			// A source URL identifies a candidate only. Complete matching must be
 			// explicitly persisted so legacy payloads cannot become false positives.
@@ -273,9 +279,12 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 
 		isRepair := session.TargetAlbumID != nil
 		if !isRepair {
+			if err := validateImportedAlbumEdition(tx, resolvedArtists, &album, input.Album); err != nil {
+				return err
+			}
 			if duplicate, err := findDuplicateImportedAlbum(tx, resolvedArtists, album.Title); err != nil {
 				return err
-			} else if duplicate != nil {
+			} else if duplicate != nil && album.CanonicalAlbumID == nil {
 				return apperr.Conflict("music.album_duplicate", fmt.Sprintf("艺术家已有同名专辑：%s", duplicate.Title))
 			}
 		}
@@ -340,11 +349,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				return err
 			}
 		}
-		if input.Album.Tags != nil && !isStandaloneSong {
-			if err := replaceAlbumImportTags(tx, user.ID, album.ID, input.Album.Tags); err != nil {
-				return err
-			}
-		}
+		// 导入只保存外部分类元数据；正式标签由独立 Wiki 接口维护，修复导入也不改关联。
 		if err := upsertMusicMatchRecord(tx, "album", album.ID, metadataProvider, metadataExternalID, strings.TrimSpace(stringValue(sessionPayload["metadata_source_url"])), metadataMatchStatus, metadataMatchConfidence, album.MetadataManualOverride, map[string]any{
 			"album_title": payload.Album.Title,
 			"source":      metadataProvider,
@@ -355,7 +360,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			return err
 		}
 		for _, resolved := range resolvedArtists {
-			if resolved.Artist.EntryStatus != artistEntryDraft || !hasAlbumArtistRole(resolved.Roles, "primary") {
+			if resolved.Artist.EntryStatus != artistEntryDraft {
 				continue
 			}
 			if resolved.Artist.CreatedBy == nil || *resolved.Artist.CreatedBy != user.ID {
@@ -368,7 +373,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 					return err
 				}
 			}
-			if artistPublicationFieldsComplete(*resolved.Artist, nil) {
+			{
 				if err := tx.Model(resolved.Artist).Updates(map[string]any{
 					"entry_status":     artistEntryOpen,
 					"lifecycle_status": model.MusicLifecycleActive,
@@ -838,11 +843,11 @@ func (s *Service) commitStandaloneSongImport(
 		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
 	}
 	for _, resolved := range resolvedArtists {
-		if resolved.Artist.EntryStatus == artistEntryDraft && hasAlbumArtistRole(resolved.Roles, "primary") {
+		if resolved.Artist.EntryStatus == artistEntryDraft {
 			if resolved.Artist.CreatedBy == nil || *resolved.Artist.CreatedBy != user.ID {
 				return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, apperr.NotFound("music.artist_not_found", "Artist not found")
 			}
-			artistSources, artistSourcesJSON, err := normalizeMusicSources(input.ArtistSources, input.ArtistSource)
+			artistSources, artistSourcesJSON, err := normalizeOptionalMusicSources(input.ArtistSources, input.ArtistSource)
 			if err != nil {
 				return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
 			}
@@ -1381,7 +1386,7 @@ func matchDerivedTrackAudioWithFallback(rawDerivedTracks []any, track AlbumImpor
 			return audio
 		}
 	}
-	if track.AudioURL != "" {
+	if allowFallback && track.AudioURL != "" {
 		return derivedTrackAudio{AudioURL: strings.TrimSpace(track.AudioURL)}
 	}
 	return derivedTrackAudio{}

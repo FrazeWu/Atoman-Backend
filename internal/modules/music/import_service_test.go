@@ -1380,6 +1380,8 @@ func TestFinalizeSubmittedAlbumImportMarksValidationFailureForAttention(t *testi
 	if stored.Status != AlbumImportStatusNeedsAttention || stored.ErrorMessage == "" {
 		t.Fatalf("expected needs attention with an error, got %#v", stored)
 	}
+	// 重试必须引用服务端真实处理结果，不能仅提交一个任意 URL。
+	seedReadyImportMedia(t, db, session.ID, "", "Complete Track")
 	if retried, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		ArtistSource: "artist source",
 		AlbumSource:  "album source",

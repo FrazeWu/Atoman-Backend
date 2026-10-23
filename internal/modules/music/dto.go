@@ -12,17 +12,19 @@ import (
 type Source = model.MusicSource
 
 type MusicTagDTO struct {
-	ID           uuid.UUID  `json:"id"`
-	AssignmentID uuid.UUID  `json:"assignment_id"`
-	Name         string     `json:"name"`
-	Kind         string     `json:"kind"`
-	ParentID     *uuid.UUID `json:"parent_id,omitempty"`
-	Depth        int        `json:"depth"`
-	Upvotes      int64      `json:"upvotes"`
-	Downvotes    int64      `json:"downvotes"`
-	Score        int64      `json:"score"`
-	ViewerVote   string     `json:"viewer_vote"`
-	CanDelete    bool       `json:"can_delete"`
+	ID              uuid.UUID  `json:"id"`
+	AssignmentID    uuid.UUID  `json:"assignment_id"`
+	Name            string     `json:"name"`
+	Kind            string     `json:"kind"`
+	ParentID        *uuid.UUID `json:"parent_id,omitempty"`
+	Depth           int        `json:"depth"`
+	Upvotes         int64      `json:"upvotes"`
+	Downvotes       int64      `json:"downvotes"`
+	Score           int64      `json:"score"`
+	ViewerVote      string     `json:"viewer_vote"`
+	CanDelete       bool       `json:"can_delete"`
+	Confidence      string     `json:"confidence"`
+	ConfidenceScore float64    `json:"confidence_score"`
 }
 
 type MusicTagOptionDTO struct {
@@ -35,6 +37,9 @@ type MusicTagOptionDTO struct {
 	ChildCount      int64      `json:"child_count"`
 	SongCount       int64      `json:"song_count"`
 	AlbumCount      int64      `json:"album_count"`
+	Version         int        `json:"version"`
+	CanonicalTagID  *uuid.UUID `json:"canonical_tag_id,omitempty"`
+	Path            []string   `json:"path"`
 }
 
 type SubmitEditRequest struct {

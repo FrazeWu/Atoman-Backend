@@ -18547,6 +18547,95 @@
                 }
             }
         },
+        "/api/v1/music/entries/{entityType}/{entityId}/tags": {
+            "patch": {
+                "description": "所有登录用户可编辑可见且允许 Wiki 编辑的作品。关联版本冲突返回 409；恢复原关联身份及投票；五类共享 12 个上限，同分支风格不能重复绑定。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "原子增加、解除或替换作品标签",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "song 或 album",
+                        "name": "entityType",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "作品 ID",
+                        "name": "entityId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "操作与关联版本",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicTagAssignmentEdit"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicTagHistory"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/entries/{entityType}/{entityId}/tags/history": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "查看作品标签关联历史及当前版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "song 或 album",
+                        "name": "entityType",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "作品 ID",
+                        "name": "entityId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicTagHistory"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/history": {
             "get": {
                 "security": [
@@ -21852,7 +21941,7 @@
         },
         "/api/v1/music/tags": {
             "get": {
-                "description": "按标签类别、父级和关键词浏览公共标签目录；歌曲和专辑计数包含子孙标签，歌曲还包含可见所属专辑的标签。",
+                "description": "按类别、父级和关键词浏览；歌曲和专辑各自仅统计直接关联，支持子孙风格扩展及高争议关联过滤。",
                 "produces": [
                     "application/json"
                 ],
@@ -21958,7 +22047,7 @@
         },
         "/api/v1/music/tags/{tagId}": {
             "get": {
-                "description": "返回标签信息及当前用户可见的歌曲、专辑数量；包含子孙标签和歌曲所属专辑的标签。",
+                "description": "返回标签信息及可见作品数量；仅扩展子孙风格，不继承所属专辑标签。合并标签返回 canonical_tag_id。",
                 "produces": [
                     "application/json"
                 ],
@@ -21984,6 +22073,100 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/tags/{tagId}/history": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "查看音乐标签 Wiki 历史",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "标签 ID",
+                        "name": "tagId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicTagHistory"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/tags/{tagId}/wiki/{action}": {
+            "post": {
+                "description": "rename、move、merge、revert；base_version 必填，merge 同时校验 target_version；preview=true 仅事务模拟返回影响范围，不写入。重叠投票采用最后修改的一票，保留来源审计。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "修改音乐标签 Wiki",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "标签 ID",
+                        "name": "tagId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "rename",
+                            "move",
+                            "merge",
+                            "revert"
+                        ],
+                        "type": "string",
+                        "description": "操作",
+                        "name": "action",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "仅预览影响",
+                        "name": "preview",
+                        "in": "query"
+                    },
+                    {
+                        "description": "变更及版本",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicTagWikiInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.musicTagSnapshot"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -41236,6 +41419,140 @@
                 }
             }
         },
+        "model.MusicTag": {
+            "type": "object",
+            "properties": {
+                "canonical_tag_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "created_by_user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "depth": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parent": {
+                    "$ref": "#/definitions/model.MusicTag"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.MusicTagAssignment": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "entity_id": {
+                    "type": "string"
+                },
+                "entity_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "tag": {
+                    "$ref": "#/definitions/model.MusicTag"
+                },
+                "tag_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.MusicTagRevision": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "actor_id": {
+                    "type": "string"
+                },
+                "after": {
+                    "type": "object"
+                },
+                "before": {
+                    "type": "object"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "object_id": {
+                    "type": "string"
+                },
+                "object_type": {
+                    "type": "string"
+                },
+                "reverts_id": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.MusicTagVote": {
+            "type": "object",
+            "properties": {
+                "assignment_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "vote": {
+                    "type": "string"
+                }
+            }
+        },
         "model.NotificationMeta": {
             "type": "object",
             "additionalProperties": true
@@ -42526,10 +42843,16 @@
                 "album_type": {
                     "type": "string"
                 },
+                "canonical_album_id": {
+                    "type": "string"
+                },
                 "cover_url": {
                     "type": "string"
                 },
                 "description": {
+                    "type": "string"
+                },
+                "edition_type": {
                     "type": "string"
                 },
                 "metadata": {
@@ -43734,6 +44057,9 @@
                 "draft_only": {
                     "description": "DraftOnly 保存填写进度，不登记后台创建请求。",
                     "type": "boolean"
+                },
+                "metadata_confirmed": {
+                    "type": "boolean"
                 }
             }
         },
@@ -44479,6 +44805,32 @@
                 }
             }
         },
+        "music.MusicTagAssignmentEdit": {
+            "type": "object",
+            "properties": {
+                "add": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "base_version": {
+                    "type": "integer"
+                },
+                "remove": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "revision_id": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
         "music.MusicTagDTO": {
             "type": "object",
             "properties": {
@@ -44487,6 +44839,12 @@
                 },
                 "can_delete": {
                     "type": "boolean"
+                },
+                "confidence": {
+                    "type": "string"
+                },
+                "confidence_score": {
+                    "type": "number"
                 },
                 "depth": {
                     "type": "integer"
@@ -44517,6 +44875,20 @@
                 }
             }
         },
+        "music.MusicTagHistory": {
+            "type": "object",
+            "properties": {
+                "revisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicTagRevision"
+                    }
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
         "music.MusicTagOptionDTO": {
             "type": "object",
             "properties": {
@@ -44525,6 +44897,9 @@
                 },
                 "assignment_count": {
                     "type": "integer"
+                },
+                "canonical_tag_id": {
+                    "type": "string"
                 },
                 "child_count": {
                     "type": "integer"
@@ -44544,7 +44919,42 @@
                 "parent_id": {
                     "type": "string"
                 },
+                "path": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "song_count": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.MusicTagWikiInput": {
+            "type": "object",
+            "properties": {
+                "base_version": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "revision_id": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_version": {
                     "type": "integer"
                 }
             }
@@ -45072,6 +45482,29 @@
                 },
                 "parent_id": {
                     "type": "string"
+                }
+            }
+        },
+        "music.musicTagSnapshot": {
+            "type": "object",
+            "properties": {
+                "assignments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicTagAssignment"
+                    }
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicTag"
+                    }
+                },
+                "votes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicTagVote"
+                    }
                 }
             }
         },

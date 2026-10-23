@@ -44,6 +44,10 @@ func TestMain(m *testing.M) {
 }
 
 func musicTestModels() []any {
+	return append([]any{&model.MusicTagRevision{}}, musicTestBaseModels()...)
+}
+
+func musicTestBaseModels() []any {
 	return []any{&model.User{}, &model.Artist{}, &model.ArtistMember{}, &model.ArtistAlias{}, &model.ArtistMerge{}, &model.Album{}, &model.AlbumArtist{}, &model.AlbumRating{}, &model.Song{}, &model.SongRating{}, &model.SongArtist{}, &model.ArtistBookmark{}, &model.AlbumBookmark{}, &model.PlaylistBookmark{}, &model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicPlaybackSession{}, &model.MusicPlaybackProgress{}, &model.MusicSearchInteraction{}, &model.MusicRecommendationEvent{}, &model.MusicCatalogLink{}, &model.MusicMatchRecord{}, &model.AlbumImportSession{}, &model.MusicAssetUploadSession{}, &model.MediaAsset{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{}, &model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{}, &model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{}, &model.MusicTag{}, &model.MusicTagAssignment{}, &model.MusicTagVote{}, &model.AuditLog{}, &model.Notification{}, &model.Revision{}, &model.EditConflict{}, &model.MusicEntryStateEvent{}, &model.MusicEntryStateRequest{}, &model.SongAudioReplacement{}}
 
 }
@@ -90,6 +94,7 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.AuditLog{},
 		&model.Notification{},
 		&model.Revision{},
+		&model.MusicTagRevision{},
 	)
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
