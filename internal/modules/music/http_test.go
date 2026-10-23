@@ -66,6 +66,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicTag{},
 		&model.MusicTagAssignment{},
 		&model.MusicTagVote{},
+		&model.MusicTagRevision{},
 		&model.Notification{},
 		&model.AuditLog{},
 		&model.Revision{},

@@ -1,5 +1,7 @@
 package music
 
+import "github.com/google/uuid"
+
 type AlbumImportTrackPayload struct {
 	SongID             string  `json:"song_id"`
 	FileID             string  `json:"file_id,omitempty"`
@@ -73,15 +75,17 @@ type AlbumImportArtistPayload struct {
 }
 
 type AlbumImportAlbumPayload struct {
-	Title       string                     `json:"title"`
-	Description string                     `json:"description"`
-	AlbumType   string                     `json:"album_type"`
-	CoverURL    string                     `json:"cover_url"`
-	ReleaseDate string                     `json:"release_date"` // 支持完全未知日期 ----/--/--
-	ReleaseYear int                        `json:"release_year"`
-	Metadata    *AlbumImportMetadataFields `json:"metadata,omitempty"`
-	Tags        []AlbumImportTagPayload    `json:"tags,omitempty"`
-	Tracks      []AlbumImportTrackPayload  `json:"tracks"`
+	EditionType      string                     `json:"edition_type,omitempty"`
+	CanonicalAlbumID *uuid.UUID                 `json:"canonical_album_id,omitempty"`
+	Title            string                     `json:"title"`
+	Description      string                     `json:"description"`
+	AlbumType        string                     `json:"album_type"`
+	CoverURL         string                     `json:"cover_url"`
+	ReleaseDate      string                     `json:"release_date"` // 支持完全未知日期 ----/--/--
+	ReleaseYear      int                        `json:"release_year"`
+	Metadata         *AlbumImportMetadataFields `json:"metadata,omitempty"`
+	Tags             []AlbumImportTagPayload    `json:"tags,omitempty"`
+	Tracks           []AlbumImportTrackPayload  `json:"tracks"`
 }
 
 type AlbumImportTagPayload struct {
@@ -116,6 +120,7 @@ type CreateAlbumImportSessionInput struct {
 type CommitAlbumImportSessionInput struct {
 	// DraftOnly 保存填写进度，不登记后台创建请求。
 	DraftOnly              bool                           `json:"draft_only,omitempty"`
+	MetadataConfirmed      bool                           `json:"metadata_confirmed,omitempty"`
 	DraftCustomization     map[string]bool                `json:"draft_customization,omitempty"`
 	ArtistID               string                         `json:"artist_id"`
 	Artist                 AlbumImportArtistPayload       `json:"artist"`

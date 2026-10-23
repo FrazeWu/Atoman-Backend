@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestMusicTagCatalogIncludesAlbumSongsAndDescendants(t *testing.T) {
+func TestMusicTagCatalogKeepsAlbumSongsIndependentAndExpandsDescendants(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	root, _, err := service.CreateMusicTag(user, "type", "民谣", nil)
 	if err != nil {
@@ -57,7 +57,10 @@ func TestMusicTagCatalogIncludesAlbumSongsAndDescendants(t *testing.T) {
 			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			want := int64(2)
+			want := int64(0)
+			if tagID == root.ID {
+				want = 1
+			}
 			if entity == "albums" {
 				want = 1
 			}
@@ -75,7 +78,11 @@ func TestMusicTagCatalogIncludesAlbumSongsAndDescendants(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}
-		if result.Data.SongCount != 2 || result.Data.AlbumCount != 1 {
+		wantSongs := int64(0)
+		if tagID == root.ID {
+			wantSongs = 1
+		}
+		if result.Data.SongCount != wantSongs || result.Data.AlbumCount != 1 {
 			t.Fatalf("counts must match lists: %s", response.Body.String())
 		}
 	}
@@ -114,6 +121,10 @@ func TestMusicTagCountsRespectAlbumVisibilityAndViewer(t *testing.T) {
 			want = 1
 		}
 		for _, entity := range []string{"songs", "albums"} {
+			expected := want
+			if entity == "songs" {
+				expected = 0
+			}
 			response := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/"+entity+"?tag_id="+tag.ID.String(), "")
 			var result struct{ Meta struct{ Total int64 } }
 			if response.Code != http.StatusOK {
@@ -122,7 +133,7 @@ func TestMusicTagCountsRespectAlbumVisibilityAndViewer(t *testing.T) {
 			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			if result.Meta.Total != want {
+			if result.Meta.Total != expected {
 				t.Fatalf("%s viewer=%t: %s", entity, authenticated, response.Body.String())
 			}
 		}
@@ -134,7 +145,7 @@ func TestMusicTagCountsRespectAlbumVisibilityAndViewer(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}
-		if len(result.Data) != 1 || result.Data[0].SongCount != want || result.Data[0].AlbumCount != want {
+		if len(result.Data) != 1 || result.Data[0].SongCount != 0 || result.Data[0].AlbumCount != want {
 			t.Fatalf("catalog counts viewer=%t: %s", authenticated, response.Body.String())
 		}
 	}

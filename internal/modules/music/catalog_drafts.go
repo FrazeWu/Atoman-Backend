@@ -22,6 +22,13 @@ const (
 	maxMusicSourceURLBytes   = 2048
 )
 
+func normalizeOptionalMusicSources(sources []Source, legacy string) ([]model.MusicSource, string, error) {
+	if len(sources) == 0 && strings.TrimSpace(legacy) == "" {
+		return []model.MusicSource{}, "[]", nil
+	}
+	return normalizeMusicSources(sources, legacy)
+}
+
 func normalizeMusicSources(sources []Source, legacy string) ([]model.MusicSource, string, error) {
 	if len(sources) == 0 && strings.TrimSpace(legacy) != "" {
 		value := strings.TrimSpace(legacy)

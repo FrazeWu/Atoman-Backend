@@ -9,6 +9,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	revisionservice "atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -72,7 +73,7 @@ func validateMusicTagParent(db *gorm.DB, kind string, parentID *uuid.UUID) (int,
 	}
 
 	var parent model.MusicTag
-	if err := db.Select("id, kind, depth").First(&parent, "id = ?", *parentID).Error; err != nil {
+	if err := db.Select("id, kind, depth").First(&parent, "id = ? AND canonical_tag_id IS NULL", *parentID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return 0, apperr.NotFound("music.tag_parent_not_found", "Parent tag not found")
 		}
@@ -105,6 +106,8 @@ func musicTagOptionDTO(tag model.MusicTag, assignmentCount, childCount int64) Mu
 		Depth:           effectiveMusicTagDepth(tag.Depth),
 		AssignmentCount: assignmentCount,
 		ChildCount:      childCount,
+		Version:         tag.Version,
+		CanonicalTagID:  tag.CanonicalTagID,
 	}
 }
 
@@ -119,7 +122,7 @@ func (s *Service) ListMusicTagOptions(kind, rawQuery string, parentID *uuid.UUID
 		return nil, err
 	}
 
-	queryDB := s.db.Select("id, name, kind, parent_id, depth")
+	queryDB := s.db.Select("id, name, kind, parent_id, depth, version, canonical_tag_id").Where("canonical_tag_id IS NULL")
 	if kind != "" {
 		queryDB = queryDB.Where("kind = ?", kind)
 	}
@@ -188,6 +191,7 @@ func (s *Service) ListMusicTagOptions(kind, rawQuery string, parentID *uuid.UUID
 	}
 	for _, tag := range tags {
 		option := musicTagOptionDTO(tag, assignmentCountByTag[tag.ID], childCountByTag[tag.ID])
+		option.Path = s.musicTagPath(tag)
 		option.SongCount = contentCounts[tag.ID].SongCount
 		option.AlbumCount = contentCounts[tag.ID].AlbumCount
 		result = append(result, option)
@@ -201,7 +205,7 @@ func (s *Service) SearchMusicTags(kind, rawQuery string) ([]MusicTagOptionDTO, e
 
 func (s *Service) GetMusicTag(tagID uuid.UUID, viewers ...*authctx.CurrentUser) (MusicTagOptionDTO, error) {
 	var tag model.MusicTag
-	if err := s.db.Select("id, name, kind, parent_id, depth").First(&tag, "id = ?", tagID).Error; err != nil {
+	if err := s.db.Select("id, name, kind, parent_id, depth, version, canonical_tag_id").First(&tag, "id = ?", tagID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return MusicTagOptionDTO{}, apperr.NotFound("music.tag_not_found", "Tag not found")
 		}
@@ -220,6 +224,7 @@ func (s *Service) GetMusicTag(tagID uuid.UUID, viewers ...*authctx.CurrentUser) 
 		return MusicTagOptionDTO{}, err
 	}
 	option := musicTagOptionDTO(tag, assignmentCount, childCount)
+	option.Path = s.musicTagPath(tag)
 	option.SongCount = counts[tagID].SongCount
 	option.AlbumCount = counts[tagID].AlbumCount
 	return option, nil
@@ -249,7 +254,7 @@ func (s *Service) validateMusicTagEntity(user *authctx.CurrentUser, entityType s
 }
 
 func musicTagCanDelete(user *authctx.CurrentUser, createdBy uuid.UUID) bool {
-	return user != nil && user.ID != uuid.Nil && (user.ID == createdBy || authctx.RoleAtLeast(user.Role, authctx.RoleAdmin))
+	return user != nil && user.ID != uuid.Nil
 }
 
 func (s *Service) ListMusicTags(user *authctx.CurrentUser, entityType string, entityID uuid.UUID) ([]MusicTagDTO, error) {
@@ -300,25 +305,30 @@ func (s *Service) ListMusicTags(user *authctx.CurrentUser, entityType string, en
 		}
 		summary := summaries[assignment.ID]
 		result = append(result, MusicTagDTO{
-			ID:           assignment.Tag.ID,
-			AssignmentID: assignment.ID,
-			Name:         assignment.Tag.Name,
-			Kind:         assignment.Tag.Kind,
-			ParentID:     assignment.Tag.ParentID,
-			Depth:        effectiveMusicTagDepth(assignment.Tag.Depth),
-			Upvotes:      summary.upvotes,
-			Downvotes:    summary.downvotes,
-			Score:        summary.upvotes - summary.downvotes,
-			ViewerVote:   summary.viewer,
-			CanDelete:    musicTagCanDelete(user, assignment.CreatedBy),
+			ID:              assignment.Tag.ID,
+			AssignmentID:    assignment.ID,
+			Name:            assignment.Tag.Name,
+			Kind:            assignment.Tag.Kind,
+			ParentID:        assignment.Tag.ParentID,
+			Depth:           effectiveMusicTagDepth(assignment.Tag.Depth),
+			Upvotes:         summary.upvotes,
+			Downvotes:       summary.downvotes,
+			Score:           summary.upvotes - summary.downvotes,
+			ViewerVote:      summary.viewer,
+			CanDelete:       musicTagCanDelete(user, assignment.CreatedBy),
+			Confidence:      musicTagConfidence(summary.upvotes, summary.downvotes),
+			ConfidenceScore: float64(summary.upvotes+1) / float64(summary.upvotes+summary.downvotes+2),
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].Kind != result[j].Kind {
 			return result[i].Kind < result[j].Kind
 		}
-		if result[i].Score != result[j].Score {
-			return result[i].Score > result[j].Score
+		if result[i].Confidence != result[j].Confidence {
+			return musicTagConfidenceRank(result[i].Confidence) > musicTagConfidenceRank(result[j].Confidence)
+		}
+		if result[i].ConfidenceScore != result[j].ConfidenceScore {
+			return result[i].ConfidenceScore > result[j].ConfidenceScore
 		}
 		if result[i].Upvotes != result[j].Upvotes {
 			return result[i].Upvotes > result[j].Upvotes
@@ -341,6 +351,9 @@ func findOrCreateMusicTag(tx *gorm.DB, userID uuid.UUID, kind, rawName string, p
 	var tag model.MusicTag
 	result := tx.Where("kind = ? AND normalized_name = ?", kind, name).First(&tag)
 	if result.Error == nil {
+		if tag.CanonicalTagID != nil {
+			return model.MusicTag{}, tagWikiConflict("该名称已合并，请选择目标标签")
+		}
 		if !sameMusicTagParent(tag.ParentID, parentID) {
 			return model.MusicTag{}, apperr.Conflict("music.tag_exists", "tag already exists under another parent")
 		}
@@ -361,6 +374,9 @@ func findOrCreateMusicTag(tx *gorm.DB, userID uuid.UUID, kind, rawName string, p
 	if err := tx.Create(&tag).Error; err != nil {
 		return model.MusicTag{}, err
 	}
+	if err := writeTagRevision(tx, userID, "tag", tag.ID, "create", "创建公共标签", musicTagSnapshot{}, musicTagSnapshot{Tags: []model.MusicTag{tag}}, nil); err != nil {
+		return model.MusicTag{}, err
+	}
 	return tag, nil
 }
 
@@ -375,6 +391,9 @@ func (s *Service) CreateMusicTag(user authctx.CurrentUser, kind, rawName string,
 	var tag model.MusicTag
 	created := false
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockMusicTags(tx); err != nil {
+			return err
+		}
 		var err error
 		before := tx.Where("kind = ? AND normalized_name = ?", kind, strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(rawName)), " "))).First(&model.MusicTag{})
 		existed := before.Error == nil
@@ -406,6 +425,15 @@ func (s *Service) AddMusicTag(user authctx.CurrentUser, entityType string, entit
 
 	var assignment model.MusicTagAssignment
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockMusicTags(tx); err != nil {
+			return err
+		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, entityType, entityID, user.ID); err != nil {
+			return err
+		}
+		if err := tagEditWar(tx, entityType, entityID); err != nil {
+			return err
+		}
 		var count int64
 		if err := tx.Model(&model.MusicTagAssignment{}).Where("entity_type = ? AND entity_id = ?", entityType, entityID).Count(&count).Error; err != nil {
 			return err
@@ -426,8 +454,30 @@ func (s *Service) AddMusicTag(user authctx.CurrentUser, entityType string, entit
 		if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return result.Error
 		}
-		assignment = model.MusicTagAssignment{EntityType: entityType, EntityID: entityID, TagID: tag.ID, CreatedBy: user.ID}
-		return tx.Create(&assignment).Error
+		var previous []model.MusicTagAssignment
+		if err := tx.Unscoped().Where("entity_type=? AND entity_id=? AND tag_id=?", entityType, entityID, tag.ID).Find(&previous).Error; err != nil {
+			return err
+		}
+		ids := []uuid.UUID{}
+		for _, a := range previous {
+			ids = append(ids, a.ID)
+		}
+		before, err := captureTagSnapshot(tx, nil, ids)
+		if err != nil {
+			return err
+		}
+		assignment, err = restoreOrAddTagAssignment(tx, user.ID, entityType, entityID, tag.ID)
+		if err != nil {
+			return err
+		}
+		if err := validateAssignedTagBranches(tx, entityType, entityID); err != nil {
+			return err
+		}
+		after, err := captureTagSnapshot(tx, nil, []uuid.UUID{assignment.ID})
+		if err != nil {
+			return err
+		}
+		return writeTagRevision(tx, user.ID, entityType, entityID, "add", "添加标签", before, after, nil)
 	})
 	if err != nil {
 		return MusicTagDTO{}, err
@@ -508,7 +558,32 @@ func (s *Service) DeleteMusicTag(user authctx.CurrentUser, entityType string, en
 	if !musicTagCanDelete(&user, assignment.CreatedBy) {
 		return apperr.Forbidden("music.tag_forbidden", "Only the tag creator or an administrator can delete this tag")
 	}
-	return s.db.Delete(&assignment).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockMusicTags(tx); err != nil {
+			return err
+		}
+		if err := tx.First(&assignment, "id=?", assignment.ID).Error; err != nil {
+			return tagWikiConflict("关联已被修改，请刷新")
+		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, entityType, entityID, user.ID); err != nil {
+			return err
+		}
+		if err := tagEditWar(tx, entityType, entityID); err != nil {
+			return err
+		}
+		before, err := captureTagSnapshot(tx, nil, []uuid.UUID{assignment.ID})
+		if err != nil {
+			return err
+		}
+		if err := tx.Delete(&assignment).Error; err != nil {
+			return err
+		}
+		after, err := captureTagSnapshot(tx, nil, []uuid.UUID{assignment.ID})
+		if err != nil {
+			return err
+		}
+		return writeTagRevision(tx, user.ID, entityType, entityID, "remove", "解除标签关联", before, after, nil)
+	})
 }
 
 func (s *Service) VoteMusicTag(user authctx.CurrentUser, entityType string, entityID, tagID uuid.UUID, vote string) (MusicTagDTO, error) {
@@ -529,17 +604,45 @@ func (s *Service) VoteMusicTag(user authctx.CurrentUser, entityType string, enti
 		return MusicTagDTO{}, err
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockMusicTags(tx); err != nil {
+			return err
+		}
+		if err := tx.First(&assignment, "id=?", assignment.ID).Error; err != nil {
+			return tagWikiConflict("关联已被修改，请刷新")
+		}
 		if vote == "none" {
-			return tx.Where("assignment_id = ? AND user_id = ?", assignment.ID, user.ID).Delete(&model.MusicTagVote{}).Error
+			before, err := captureTagSnapshot(tx, nil, []uuid.UUID{assignment.ID})
+			if err != nil {
+				return err
+			}
+			if err := tx.Where("assignment_id = ? AND user_id = ?", assignment.ID, user.ID).Delete(&model.MusicTagVote{}).Error; err != nil {
+				return err
+			}
+			after, err := captureTagSnapshot(tx, nil, []uuid.UUID{assignment.ID})
+			if err != nil {
+				return err
+			}
+			return writeTagRevision(tx, user.ID, "vote", assignment.ID, "none", "撤销投票", before, after, nil)
+		}
+		before, err := captureTagSnapshot(tx, nil, []uuid.UUID{assignment.ID})
+		if err != nil {
+			return err
 		}
 		entry := model.MusicTagVote{AssignmentID: assignment.ID, UserID: user.ID, Vote: vote}
-		return tx.Clauses(clause.OnConflict{
+		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "assignment_id"}, {Name: "user_id"}},
 			TargetWhere: clause.Where{Exprs: []clause.Expression{
 				clause.Expr{SQL: "deleted_at IS NULL"},
 			}},
 			DoUpdates: clause.AssignmentColumns([]string{"vote", "updated_at"}),
-		}).Create(&entry).Error
+		}).Create(&entry).Error; err != nil {
+			return err
+		}
+		after, err := captureTagSnapshot(tx, nil, []uuid.UUID{assignment.ID})
+		if err != nil {
+			return err
+		}
+		return writeTagRevision(tx, user.ID, "vote", assignment.ID, vote, "修改投票", before, after, nil)
 	}); err != nil {
 		return MusicTagDTO{}, err
 	}

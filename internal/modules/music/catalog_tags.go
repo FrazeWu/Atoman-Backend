@@ -7,38 +7,32 @@ import (
 	"gorm.io/gorm"
 )
 
-// 标签继承只在读取时计算，不向歌曲复制专辑的标签关联。
+// 仅扩展标签分类树；专辑与歌曲的正式关联彼此独立。
 func musicTagEntitiesSQL(viewer *authctx.CurrentUser) (string, []any) {
 	songVisibility, songArgs := musicEntryVisibilityCondition("songs", "uploaded_by", viewer, false)
 	albumVisibility, albumArgs := musicEntryVisibilityCondition("albums", "uploaded_by", viewer, false)
 	query := `SELECT assignment.tag_id, 'song' AS entity_type, songs.id AS entity_id
 		FROM music_tag_assignments assignment JOIN "Songs" songs ON songs.id = assignment.entity_id
 		WHERE assignment.entity_type = 'song' AND assignment.deleted_at IS NULL
-		AND assignment.tag_id IN (SELECT id FROM descendants) AND ` + songVisibility + `
-		UNION ALL
-		SELECT assignment.tag_id, 'song' AS entity_type, songs.id AS entity_id
-		FROM music_tag_assignments assignment
-		JOIN "Albums" albums ON albums.id = assignment.entity_id
-		JOIN "Songs" songs ON songs.album_id = albums.id
-		WHERE assignment.entity_type = 'album' AND assignment.deleted_at IS NULL
-		AND assignment.tag_id IN (SELECT id FROM descendants) AND ` + albumVisibility + ` AND ` + songVisibility + `
+		AND assignment.tag_id IN (SELECT id FROM descendants) AND ` + musicTagSearchEligibleSQL() + ` AND ` + songVisibility + `
 		UNION ALL
 		SELECT assignment.tag_id, 'album' AS entity_type, albums.id AS entity_id
 		FROM music_tag_assignments assignment JOIN "Albums" albums ON albums.id = assignment.entity_id
 		WHERE assignment.entity_type = 'album' AND assignment.deleted_at IS NULL
-		AND assignment.tag_id IN (SELECT id FROM descendants) AND ` + albumVisibility
+		AND assignment.tag_id IN (SELECT id FROM descendants) AND ` + musicTagSearchEligibleSQL() + ` AND ` + albumVisibility
 	args := append([]any{}, songArgs...)
-	args = append(args, albumArgs...)
-	args = append(args, songArgs...)
 	args = append(args, albumArgs...)
 	return query, args
 }
 
-const musicTagDescendantsSQL = `WITH RECURSIVE descendants AS (
-	SELECT id AS root_id, id FROM music_tags WHERE id IN ? AND deleted_at IS NULL
+const musicTagDescendantsSQL = `WITH RECURSIVE redirects AS (
+	SELECT id AS root_id, id, canonical_tag_id FROM music_tags WHERE id IN ? AND deleted_at IS NULL
+	UNION ALL SELECT r.root_id,t.id,t.canonical_tag_id FROM redirects r JOIN music_tags t ON t.id=r.canonical_tag_id WHERE t.deleted_at IS NULL
+), descendants AS (
+	SELECT root_id,id FROM redirects WHERE canonical_tag_id IS NULL
 	UNION ALL
 	SELECT parent.root_id, child.id FROM music_tags child
-	JOIN descendants parent ON child.parent_id = parent.id WHERE child.deleted_at IS NULL
+	JOIN descendants parent ON child.parent_id = parent.id WHERE child.deleted_at IS NULL AND child.canonical_tag_id IS NULL
 )`
 
 func scopeMusicTagEntries(db *gorm.DB, entityType, table string, tagID uuid.UUID, viewer *authctx.CurrentUser) *gorm.DB {

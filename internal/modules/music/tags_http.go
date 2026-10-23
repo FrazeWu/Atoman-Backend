@@ -24,7 +24,7 @@ type musicTagVoteInput struct {
 
 // searchMusicTags godoc
 // @Summary 浏览或搜索公共音乐标签
-// @Description 按标签类别、父级和关键词浏览公共标签目录；歌曲和专辑计数包含子孙标签，歌曲还包含可见所属专辑的标签。
+// @Description 按类别、父级和关键词浏览；歌曲和专辑各自仅统计直接关联，支持子孙风格扩展及高争议关联过滤。
 // @Tags music
 // @Produce json
 // @Param kind query string false "标签类别" Enums(mood,type,scene,theme,instrument)
@@ -86,7 +86,7 @@ func (h *Handler) createMusicTag(c *gin.Context) {
 
 // getMusicTag godoc
 // @Summary 获取公共音乐标签详情
-// @Description 返回标签信息及当前用户可见的歌曲、专辑数量；包含子孙标签和歌曲所属专辑的标签。
+// @Description 返回标签信息及可见作品数量；仅扩展子孙风格，不继承所属专辑标签。合并标签返回 canonical_tag_id。
 // @Tags music
 // @Produce json
 // @Param tagId path string true "标签 ID"

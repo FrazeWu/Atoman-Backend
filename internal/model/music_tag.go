@@ -1,6 +1,9 @@
 package model
 
-import "github.com/google/uuid"
+import (
+	"encoding/json"
+	"github.com/google/uuid"
+)
 
 const (
 	MusicTagKindMood       = "mood"
@@ -20,6 +23,8 @@ type MusicTag struct {
 	Depth          int        `json:"depth" gorm:"not null;default:1"`
 	CreatedBy      uuid.UUID  `json:"created_by" gorm:"type:uuid;not null;index"`
 	CreatedByUser  *User      `json:"created_by_user,omitempty" gorm:"foreignKey:CreatedBy;references:UUID"`
+	Version        int        `json:"version" gorm:"not null;default:1"`
+	CanonicalTagID *uuid.UUID `json:"canonical_tag_id,omitempty" gorm:"type:uuid;index"`
 }
 
 func (MusicTag) TableName() string { return "music_tags" }
@@ -43,3 +48,19 @@ type MusicTagVote struct {
 }
 
 func (MusicTagVote) TableName() string { return "music_tag_votes" }
+
+// 每条修订只记录本次变更涉及的记录，不能用旧的全库快照覆盖后续编辑。
+type MusicTagRevision struct {
+	Base
+	ObjectType string          `json:"object_type" gorm:"not null;uniqueIndex:idx_music_tag_revision_version,priority:1"`
+	ObjectID   uuid.UUID       `json:"object_id" gorm:"type:uuid;not null;uniqueIndex:idx_music_tag_revision_version,priority:2"`
+	Version    int             `json:"version" gorm:"not null;uniqueIndex:idx_music_tag_revision_version,priority:3"`
+	ActorID    uuid.UUID       `json:"actor_id" gorm:"type:uuid;not null;index"`
+	Action     string          `json:"action" gorm:"not null"`
+	Summary    string          `json:"summary" gorm:"type:text;not null"`
+	Before     json.RawMessage `json:"before" gorm:"type:jsonb;not null" swaggertype:"object"`
+	After      json.RawMessage `json:"after" gorm:"type:jsonb;not null" swaggertype:"object"`
+	RevertsID  *uuid.UUID      `json:"reverts_id,omitempty" gorm:"type:uuid"`
+}
+
+func (MusicTagRevision) TableName() string { return "music_tag_revisions" }
