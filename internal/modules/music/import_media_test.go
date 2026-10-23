@@ -20,6 +20,9 @@ func TestCommitAlbumImportSessionFallsBackFromBrowserCover(t *testing.T) {
 		Artist: completeAlbumImportArtistPayload("Kendrick Lamar"), ArtistSource: "artist source", AlbumSource: "album source",
 		Album: AlbumImportAlbumPayload{Title: "C4", CoverURL: "blob:https://site.test/preview", ReleaseDate: "2009-01-01", Tracks: []AlbumImportTrackPayload{{Title: "Welcome to C4", TrackNumber: 1}}},
 	})
+	if committed.Status != AlbumImportStatusCommitted {
+		t.Fatalf("import not committed: status=%s error=%s", committed.Status, committed.ErrorMessage)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,6 +32,34 @@ func TestCommitAlbumImportSessionFallsBackFromBrowserCover(t *testing.T) {
 	}
 	if album.CoverURL != "https://cdn.test/processed.webp" {
 		t.Fatalf("保存的封面错误: %s", album.CoverURL)
+	}
+}
+
+func TestCommitAlbumImportSessionAllowsMissingOptionalAlbumMetadata(t *testing.T) {
+	service, db, user := newMusicTestService(t)
+	payload, _ := json.Marshal(map[string]any{
+		"derived_tracks": []map[string]any{{"title": "Track", "audio_url": "https://cdn.test/track.mp3"}},
+	})
+	session := model.AlbumImportSession{UserID: &user.ID, Status: AlbumImportStatusReady, PayloadJSON: string(payload)}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	committed, err := service.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: completeAlbumImportArtistPayload("Artist"),
+		Album:  AlbumImportAlbumPayload{Title: "Album", Tracks: []AlbumImportTrackPayload{{Title: "Track", TrackNumber: 1}}},
+	})
+	if err != nil {
+		t.Fatalf("optional cover/date/source must not block album creation: %v", err)
+	}
+	if committed.Status != AlbumImportStatusCommitted || committed.TargetAlbumID == nil {
+		t.Fatalf("import not committed: status=%s error=%s target=%v", committed.Status, committed.ErrorMessage, committed.TargetAlbumID)
+	}
+	var album model.Album
+	if err := db.First(&album, "id = ?", committed.TargetAlbumID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if album.CoverURL != "" || !album.ReleaseDate.IsZero() || album.ReleaseDatePrecision != "unknown" || len(album.Sources) != 0 {
+		t.Fatalf("unexpected values for omitted metadata: %#v", album)
 	}
 }
 

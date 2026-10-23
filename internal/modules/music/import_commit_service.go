@@ -116,9 +116,12 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if len(resolvedArtists) == 0 {
 			return apperr.BadRequest("validation.invalid_request", "at least one artist is required")
 		}
-		albumSources, albumSourcesJSON, err := normalizeMusicSources(input.AlbumSources, input.AlbumSource)
-		if err != nil {
-			return err
+		albumSources, albumSourcesJSON := []model.MusicSource{}, "[]"
+		if len(input.AlbumSources) > 0 || strings.TrimSpace(input.AlbumSource) != "" {
+			albumSources, albumSourcesJSON, err = normalizeMusicSources(input.AlbumSources, input.AlbumSource)
+			if err != nil {
+				return err
+			}
 		}
 		artists := make([]*model.Artist, 0, len(resolvedArtists))
 		credits := make([]AlbumArtistCreditInput, 0, len(resolvedArtists))
@@ -161,8 +164,13 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 
 		coverURL := resolveAlbumImportCommitCoverURL(input.Album.CoverURL, sessionPayload)
-		if coverURL == "" || strings.TrimSpace(payload.Album.ReleaseDate) == "" || len(payload.Album.Tracks) == 0 {
-			return apperr.BadRequest("validation.invalid_request", "album cover, release date and at least one track are required")
+		if len(payload.Album.Tracks) == 0 {
+			return apperr.BadRequest("validation.invalid_request", "at least one track is required")
+		}
+		for _, track := range payload.Album.Tracks {
+			if strings.TrimSpace(track.Title) == "" {
+				return apperr.BadRequest("validation.invalid_request", "every track must have a title")
+			}
 		}
 		musicBrainzReleaseID := strings.TrimSpace(stringValue(sessionPayload["musicbrainz_release_id"]))
 		metadataProvider := strings.ToLower(strings.TrimSpace(stringValue(sessionPayload["metadata_source"])))
@@ -245,6 +253,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				}
 				album.Year = album.ReleaseYear
 			}
+		} else {
+			// 零值日期配合 unknown 精度是音乐目录现有的“发行日期未知”语义。
+			album.ReleaseDatePrecision = "unknown"
 		}
 		if isStandaloneSong {
 			standalone, migratedOldKeys, migratedNewKeys, err := s.commitStandaloneSongImport(
@@ -350,9 +361,12 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			if resolved.Artist.CreatedBy == nil || *resolved.Artist.CreatedBy != user.ID {
 				return apperr.NotFound("music.artist_not_found", "Artist not found")
 			}
-			artistSources, artistSourcesJSON, err := normalizeMusicSources(input.ArtistSources, input.ArtistSource)
-			if err != nil {
-				return err
+			artistSources, artistSourcesJSON := []model.MusicSource{}, "[]"
+			if len(input.ArtistSources) > 0 || strings.TrimSpace(input.ArtistSource) != "" {
+				artistSources, artistSourcesJSON, err = normalizeMusicSources(input.ArtistSources, input.ArtistSource)
+				if err != nil {
+					return err
+				}
 			}
 			if artistPublicationFieldsComplete(*resolved.Artist, nil) {
 				if err := tx.Model(resolved.Artist).Updates(map[string]any{
