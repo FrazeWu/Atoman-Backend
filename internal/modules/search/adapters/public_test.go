@@ -1,7 +1,9 @@
 package adapters
 
 import (
+	"bytes"
 	"context"
+	"log"
 	"testing"
 	"time"
 
@@ -10,6 +12,8 @@ import (
 	"atoman/internal/testdb"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestPublicSearchLinksTargetMatchedContent(t *testing.T) {
@@ -120,6 +124,38 @@ func TestEmptyRSSSourcesRemainDiscoverable(t *testing.T) {
 	require.Len(t, result.Items, 1)
 	require.Equal(t, "empty_source", result.Items[0].Title)
 	require.NoError(t, search.ValidateSearchHit(search.NormalizeSearchHit(result.Items[0])))
+}
+
+func TestFeedArticleSearchRetainsAllIndexedFields(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{})
+	source := model.FeedSource{Title: "RSS", SourceType: "external_rss", Hash: "indexed-fields"}
+	require.NoError(t, db.Create(&source).Error)
+	provider := NewPublicProvider(db, "feed", "RSS")
+	var queries bytes.Buffer
+	provider.db = db.Session(&gorm.Session{Logger: logger.New(log.New(&queries, "", 0), logger.Config{LogLevel: logger.Info})})
+	for _, field := range []string{"title", "summary", "author"} {
+		t.Run(field, func(t *testing.T) {
+			article := model.FeedItem{FeedSourceID: source.ID, GUID: field, Title: "Unrelated", PublishedAt: time.Now()}
+			require.NoError(t, db.Create(&article).Error)
+			require.NoError(t, db.Model(&article).Update(field, `MiXeD_百分%路径\中文`).Error)
+			for _, query := range []string{`mixed_百分%路径\中文`, "中文"} {
+				queries.Reset()
+				result, err := provider.Search(context.Background(), search.Viewer{}, search.ProviderSearchRequest{
+					Scope: search.ScopePublic, Type: "article", Query: query, Sort: "relevance", Limit: 10, ExactTotal: true,
+				})
+				require.NoError(t, err)
+				require.EqualValues(t, 1, *result.Total)
+				require.Len(t, result.Items, 1)
+				require.Equal(t, article.ID.String(), result.Items[0].ID)
+				// 防止退回 ILIKE 原列，导致现有 LOWER 表达式索引失效。
+				for _, indexedField := range []string{"title", "summary", "author"} {
+					require.Contains(t, queries.String(), "LOWER(i."+indexedField+") LIKE LOWER(")
+				}
+			}
+			require.NoError(t, db.Delete(&article).Error)
+		})
+	}
 }
 
 func TestPodcastShowRequiresPublicEpisode(t *testing.T) {

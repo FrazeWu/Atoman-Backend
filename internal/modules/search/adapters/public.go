@@ -92,8 +92,9 @@ func (p *PublicProvider) Search(ctx context.Context, _ search.Viewer, req search
 	if query != "" {
 		pattern := "%" + escapePublicSearchQuery(query) + "%"
 		fields := map[string]string{
-			"feed:source":     "(f.title ILIKE ? OR f.rss_url ILIKE ? OR f.site_url ILIKE ?)",
-			"feed:article":    "(i.title ILIKE ? OR i.summary ILIKE ? OR i.author ILIKE ?)",
+			"feed:source": "(f.title ILIKE ? OR f.rss_url ILIKE ? OR f.site_url ILIKE ?)",
+			// 与 RSS 的 LOWER(...) 三元组索引保持一致，三个 OR 分支都必须可用索引。
+			"feed:article":    "(LOWER(i.title) LIKE LOWER(?) OR LOWER(i.summary) LIKE LOWER(?) OR LOWER(i.author) LIKE LOWER(?))",
 			"video:video":     "(v.title ILIKE ? OR v.summary ILIKE ?)",
 			"podcast:show":    "(c.name ILIKE ? OR c.description ILIKE ?)",
 			"podcast:episode": "(e.title ILIKE ? OR e.shownotes ILIKE ?)",
