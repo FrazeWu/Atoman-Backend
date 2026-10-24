@@ -29,7 +29,7 @@ func (s *OAuthService) SendPendingEmailVerification(ctx context.Context, token s
 	if flow.Provider != model.OAuthProviderMicrosoft || flow.Email == "" {
 		return "", apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
 	}
-	code, err := NewEmailServiceWithoutRedis(s.db).SendVerificationCodeForPurpose(flow.Email, VerificationPurposeOAuthEmail)
+	code, err := NewEmailServiceWithoutRedis(s.db).SendVerificationCodeForPurposeContext(ctx, flow.Email, VerificationPurposeOAuthEmail)
 	if err != nil {
 		return "", apperr.Internal(err)
 	}

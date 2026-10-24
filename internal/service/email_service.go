@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -20,6 +21,10 @@ import (
 
 	"atoman/internal/model"
 )
+
+const emailRequestTimeout = 15 * time.Second
+
+var emailHTTPClient = &http.Client{Timeout: emailRequestTimeout}
 
 // EmailService handles email sending operations
 type EmailService struct {
@@ -70,10 +75,18 @@ func generateVerificationCode() (string, error) {
 
 // SendVerificationCode sends a verification code to the given email
 func (s *EmailService) SendVerificationCode(email string) (string, error) {
-	return s.SendVerificationCodeForPurpose(email, VerificationPurposeRegistration)
+	return s.SendVerificationCodeContext(context.Background(), email)
 }
 
 func (s *EmailService) SendVerificationCodeForPurpose(email, purpose string) (string, error) {
+	return s.SendVerificationCodeForPurposeContext(context.Background(), email, purpose)
+}
+
+func (s *EmailService) SendVerificationCodeContext(ctx context.Context, email string) (string, error) {
+	return s.SendVerificationCodeForPurposeContext(ctx, email, VerificationPurposeRegistration)
+}
+
+func (s *EmailService) SendVerificationCodeForPurposeContext(ctx context.Context, email, purpose string) (string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	purpose = strings.TrimSpace(purpose)
 	// Generate verification code
@@ -99,7 +112,7 @@ func (s *EmailService) SendVerificationCodeForPurpose(email, purpose string) (st
 	}
 
 	// Upsert: insert new record, or update existing unused code for this email
-	if err := s.db.Clauses(clause.OnConflict{
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "email"}, {Name: "purpose"}},
 		DoUpdates: clause.AssignmentColumns([]string{"code", "failed_attempts", "expires_at", "used"}),
 	}).Create(&verificationCode).Error; err != nil {
@@ -115,7 +128,7 @@ func (s *EmailService) SendVerificationCodeForPurpose(email, purpose string) (st
 	} else if purpose == VerificationPurposeEmailChange {
 		subject = "Atoman邮箱变更确认"
 	}
-	err = s.sendEmail(email, subject, s.buildVerificationEmail(code, purpose))
+	err = s.sendEmailContext(ctx, email, subject, s.buildVerificationEmail(code, purpose))
 	if err != nil {
 		return "", fmt.Errorf("failed to send email: %w", err)
 	}
@@ -177,6 +190,10 @@ func verificationCodeDigest(email, purpose, code string) (string, error) {
 
 // sendEmail sends an email using Resend API
 func (s *EmailService) sendEmail(to, subject, body string) error {
+	return s.sendEmailContext(context.Background(), to, subject, body)
+}
+
+func (s *EmailService) sendEmailContext(ctx context.Context, to, subject, body string) error {
 	if s.resendAPIKey == "" {
 		log.Printf("[DEV MODE] Verification email skipped; recipient=%s", maskEmailForLog(to))
 		return nil
@@ -198,8 +215,11 @@ func (s *EmailService) sendEmail(to, subject, body string) error {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
+	requestContext, cancel := context.WithTimeout(ctx, emailRequestTimeout)
+	defer cancel()
+
 	// Create HTTP request
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(requestContext, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -209,8 +229,7 @@ func (s *EmailService) sendEmail(to, subject, body string) error {
 	req.Header.Set("Authorization", "Bearer "+s.resendAPIKey)
 
 	// Send request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := emailHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send request: %w", err)
 	}

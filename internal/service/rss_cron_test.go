@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,33 @@ import (
 	"atoman/internal/model"
 	"gorm.io/gorm"
 )
+
+func TestAcquireRSSHostSlotHonorsCanceledContext(t *testing.T) {
+	host := fmt.Sprintf("cancel-%d.example.test", time.Now().UnixNano())
+	limiter := make(chan struct{}, 1)
+	limiter <- struct{}{}
+
+	rssHostLimiterMu.Lock()
+	previous, hadPrevious := rssHostLimiters[host]
+	rssHostLimiters[host] = limiter
+	rssHostLimiterMu.Unlock()
+	t.Cleanup(func() {
+		rssHostLimiterMu.Lock()
+		defer rssHostLimiterMu.Unlock()
+		if hadPrevious {
+			rssHostLimiters[host] = previous
+		} else {
+			delete(rssHostLimiters, host)
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := acquireRSSHostSlot(ctx, host)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled host-slot wait, got %v", err)
+	}
+}
 
 func allowRSSFetchTestHosts(t *testing.T, hosts ...string) {
 	t.Helper()

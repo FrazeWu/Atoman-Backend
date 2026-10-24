@@ -73,7 +73,7 @@ func SendEmailChangeCode(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusConflict, gin.H{"code": "auth.email_taken", "error": "该邮箱已被使用"})
 			return
 		}
-		if _, err := service.NewEmailServiceWithoutRedis(db).SendVerificationCodeForPurpose(email, service.VerificationPurposeEmailChange); err != nil {
+		if _, err := service.NewEmailServiceWithoutRedis(db).SendVerificationCodeForPurposeContext(c.Request.Context(), email, service.VerificationPurposeEmailChange); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "发送验证码失败"})
 			return
 		}

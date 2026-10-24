@@ -2,6 +2,7 @@ package feed
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -111,7 +112,7 @@ func TestSyncSubscriptionHandlerReturnsStructuredResult(t *testing.T) {
 	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
 		t.Fatalf("find external subscription: %v", err)
 	}
-	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+	service.syncSource = func(_ context.Context, _ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
 		return feedservice.RSSSyncResult{FeedSourceID: got.ID, FetchedItems: 4, NewItems: 2, SyncedAt: time.Now().UTC()}, nil
 	}
 
@@ -148,7 +149,7 @@ func TestSyncSubscriptionHandlerReturnsStructuredFeedFailure(t *testing.T) {
 		t.Fatalf("find external subscription: %v", err)
 	}
 	syncedAt := time.Date(2026, 7, 20, 4, 0, 0, 0, time.UTC)
-	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+	service.syncSource = func(_ context.Context, _ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
 		return feedservice.RSSSyncResult{
 			FeedSourceID: got.ID,
 			FetchedItems: 2,
@@ -202,7 +203,7 @@ func TestHealthCheckHandlerUsesSubscriptionSyncPipeline(t *testing.T) {
 	}
 
 	called := 0
-	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+	service.syncSource = func(_ context.Context, _ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
 		called++
 		return feedservice.RSSSyncResult{FeedSourceID: got.ID, FetchedItems: 2, NewItems: 1, SyncedAt: time.Now().UTC()}, nil
 	}
@@ -241,7 +242,7 @@ func TestCheckAllSubscriptionsHealthUsesBoundedSyncPipeline(t *testing.T) {
 	}
 
 	called := 0
-	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+	service.syncSource = func(_ context.Context, _ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
 		called++
 		return feedservice.RSSSyncResult{FeedSourceID: got.ID, FetchedItems: 3, NewItems: 2, SyncedAt: time.Now().UTC()}, nil
 	}
@@ -271,7 +272,7 @@ func TestCheckAllSubscriptionsHealthUsesBoundedSyncPipeline(t *testing.T) {
 func TestSyncAllSubscriptionsHandlerReturnsSummary(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
-	service.syncSource = func(_ *gorm.DB, source model.FeedSource) (feedservice.RSSSyncResult, error) {
+	service.syncSource = func(_ context.Context, _ *gorm.DB, source model.FeedSource) (feedservice.RSSSyncResult, error) {
 		return feedservice.RSSSyncResult{FeedSourceID: source.ID, FetchedItems: 3, NewItems: 1, SyncedAt: time.Now().UTC()}, nil
 	}
 

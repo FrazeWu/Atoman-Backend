@@ -61,7 +61,7 @@ func AutoAddSubscription(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if target.SourceType == "external_rss" && subscription.FeedSource != nil {
-			syncFeedSource(db, *subscription.FeedSource)
+			go syncFeedSource(db, *subscription.FeedSource)
 		}
 
 		c.JSON(http.StatusCreated, gin.H{"data": subscription, "message": "ok"})

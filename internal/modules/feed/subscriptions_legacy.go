@@ -121,7 +121,7 @@ func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if input.TargetType == "external_rss" && created {
-			syncFeedSource(db, *source)
+			go syncFeedSource(db, *source)
 		}
 
 		status := http.StatusCreated

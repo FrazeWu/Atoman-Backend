@@ -645,9 +645,9 @@ func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc
 		}
 
 		// Send verification code
-		_, err := emailService.SendVerificationCode(email)
+		_, err := emailService.SendVerificationCodeContext(c.Request.Context(), email)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification code", "details": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification code"})
 			return
 		}
 
@@ -733,7 +733,7 @@ func PasswordResetSendCodeHandler(db *gorm.DB, emailService *service.EmailServic
 			return
 		}
 		if count > 0 {
-			if _, err := emailService.SendVerificationCodeForPurpose(email, service.VerificationPurposePasswordReset); err != nil {
+			if _, err := emailService.SendVerificationCodeForPurposeContext(c.Request.Context(), email, service.VerificationPurposePasswordReset); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "发送验证码失败"})
 				return
 			}

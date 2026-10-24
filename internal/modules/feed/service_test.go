@@ -2,6 +2,7 @@ package feed
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -873,7 +874,7 @@ func TestSyncSubscriptionChecksOwnershipAndReturnsSyncResult(t *testing.T) {
 	}
 
 	called := 0
-	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+	service.syncSource = func(_ context.Context, _ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
 		called++
 		if got.ID != source.ID {
 			t.Fatalf("sync source=%s want=%s", got.ID, source.ID)
@@ -921,7 +922,7 @@ func TestSyncSubscriptionReturnsResultWhenHealthStateUpdateFails(t *testing.T) {
 	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
 		t.Fatalf("find external subscription: %v", err)
 	}
-	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+	service.syncSource = func(_ context.Context, _ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
 		return feedservice.RSSSyncResult{
 			FeedSourceID: got.ID,
 			FetchedItems: 2,
@@ -972,7 +973,7 @@ func TestSyncAllSubscriptionsLimitsConcurrencyAndKeepsPartialResults(t *testing.
 	var mu sync.Mutex
 	active := 0
 	maxActive := 0
-	service.syncSource = func(_ *gorm.DB, source model.FeedSource) (feedservice.RSSSyncResult, error) {
+	service.syncSource = func(_ context.Context, _ *gorm.DB, source model.FeedSource) (feedservice.RSSSyncResult, error) {
 		mu.Lock()
 		active++
 		if active > maxActive {
@@ -1001,6 +1002,48 @@ func TestSyncAllSubscriptionsLimitsConcurrencyAndKeepsPartialResults(t *testing.
 	}
 	if maxActive > 4 || maxActive < 2 {
 		t.Fatalf("unexpected max concurrency: %d", maxActive)
+	}
+}
+
+func TestSyncSubscriptionPassesRequestContextToRSSFetch(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var subscription model.Subscription
+	if err := db.Preload("FeedSource").Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "external_rss").First(&subscription).Error; err != nil {
+		t.Fatalf("find subscription: %v", err)
+	}
+	started := make(chan struct{})
+	service.syncSource = func(ctx context.Context, _ *gorm.DB, source model.FeedSource) (feedservice.RSSSyncResult, error) {
+		close(started)
+		<-ctx.Done()
+		return feedservice.RSSSyncResult{FeedSourceID: source.ID}, ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan SubscriptionSyncResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		result, err := service.SyncSubscriptionContext(ctx, user, subscription.ID)
+		resultCh <- result
+		errCh <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("RSS sync did not start")
+	}
+	cancel()
+	select {
+	case result := <-resultCh:
+		if result.Success || result.Error != context.Canceled.Error() {
+			t.Fatalf("expected canceled sync result, got %#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("RSS sync did not stop after request cancellation")
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("expected canceled sync to return a result, got %v", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -567,6 +568,32 @@ func TestImportGlobalOPMLSchedulesSyncAsynchronously(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected import to return 200, got %d with body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSyncImportedFeedSourcesUsesFixedWorkerPool(t *testing.T) {
+	sources := make([]model.FeedSource, 100)
+	var mu sync.Mutex
+	active := 0
+	maxActive := 0
+	originalSync := syncFeedSource
+	syncFeedSource = func(_ *gorm.DB, _ model.FeedSource) {
+		mu.Lock()
+		active++
+		if active > maxActive {
+			maxActive = active
+		}
+		mu.Unlock()
+		time.Sleep(time.Millisecond)
+		mu.Lock()
+		active--
+		mu.Unlock()
+	}
+	t.Cleanup(func() { syncFeedSource = originalSync })
+
+	syncImportedFeedSources(nil, sources)
+	if maxActive > maxSubscriptionSyncWorkers || maxActive < 2 {
+		t.Fatalf("unexpected batch sync concurrency: %d", maxActive)
 	}
 }
 

@@ -173,7 +173,7 @@ func (h *Handler) syncSubscription(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "subscription id must be a valid uuid"))
 		return
 	}
-	result, err := h.service.SyncSubscription(user, subscriptionID)
+	result, err := h.service.SyncSubscriptionContext(c.Request.Context(), user, subscriptionID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -197,7 +197,7 @@ func (h *Handler) syncAllSubscriptions(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	result, err := h.service.SyncAllSubscriptions(user)
+	result, err := h.service.SyncAllSubscriptionsContext(c.Request.Context(), user)
 	if err != nil {
 		httpx.Error(c, err)
 		return

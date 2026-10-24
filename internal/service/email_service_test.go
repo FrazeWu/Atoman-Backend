@@ -2,6 +2,8 @@ package service
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"log"
 	"reflect"
 	"sync"
@@ -223,5 +225,15 @@ func TestVerifyCodeLocksAfterFiveWrongAttempts(t *testing.T) {
 	}
 	if stored.FailedAttempts != 5 {
 		t.Fatalf("expected five failed attempts, got %d", stored.FailedAttempts)
+	}
+}
+
+func TestSendEmailHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := (&EmailService{resendAPIKey: "test-key"}).sendEmailContext(ctx, "user@example.com", "subject", "body")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled request, got %v", err)
 	}
 }

@@ -119,6 +119,7 @@ func importFeedSourceFromURL(db *gorm.DB, title, xmlURL string) (importedFeedSou
 
 type userOPMLImportResult struct {
 	Imported bool
+	Source   *model.FeedSource
 }
 
 func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string, groupID *uuid.UUID) (userOPMLImportResult, error) {
@@ -151,8 +152,7 @@ func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string, grou
 	}
 	applySubscriptionRulesForSubscription(db, createdSubscription)
 
-	syncFeedSource(db, *feedSource)
-	return userOPMLImportResult{Imported: true}, nil
+	return userOPMLImportResult{Imported: true, Source: feedSource}, nil
 }
 
 func findOrCreateOPMLGroup(db *gorm.DB, userID uuid.UUID, name string) (*model.SubscriptionGroup, error) {
@@ -213,6 +213,7 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 		reused := 0
 		failed := 0
 		failedSources := []gin.H{}
+		sourcesToSync := make([]model.FeedSource, 0)
 
 		var importOutlines func([]OPMLOutline, *uuid.UUID, string)
 		importOutlines = func(outlines []OPMLOutline, groupID *uuid.UUID, groupName string) {
@@ -253,6 +254,9 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 						})
 					} else if result.Imported {
 						imported++
+						if result.Source != nil {
+							sourcesToSync = append(sourcesToSync, *result.Source)
+						}
 					} else {
 						reused++
 					}
@@ -270,6 +274,7 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 			"failed":         failed,
 			"failed_sources": failedSources,
 		})
+		go syncImportedFeedSources(db, sourcesToSync)
 	}
 }
 
@@ -349,10 +354,7 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 			"failed":         failed,
 			"failed_sources": failedSources,
 		})
-		for _, source := range sourcesToSync {
-			source := source
-			go syncFeedSource(db, source)
-		}
+		go syncImportedFeedSources(db, sourcesToSync)
 	}
 }
 

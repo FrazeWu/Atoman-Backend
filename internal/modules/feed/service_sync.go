@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"errors"
 	"log"
 	"sync"
@@ -13,6 +14,10 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+const maxSubscriptionSyncWorkers = 4
+
+var subscriptionSyncSlots = make(chan struct{}, maxSubscriptionSyncWorkers)
 
 type SubscriptionSyncResult struct {
 	SubscriptionID uuid.UUID `json:"subscription_id"`
@@ -33,8 +38,12 @@ type SubscriptionSyncSummary struct {
 }
 
 func (s *Service) SyncSubscription(user authctx.CurrentUser, subscriptionID uuid.UUID) (SubscriptionSyncResult, error) {
+	return s.SyncSubscriptionContext(context.Background(), user, subscriptionID)
+}
+
+func (s *Service) SyncSubscriptionContext(ctx context.Context, user authctx.CurrentUser, subscriptionID uuid.UUID) (SubscriptionSyncResult, error) {
 	var subscription model.Subscription
-	err := s.db.Preload("FeedSource").
+	err := s.db.WithContext(ctx).Preload("FeedSource").
 		Where("id = ? AND user_id = ?", subscriptionID, user.ID).
 		First(&subscription).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -50,7 +59,7 @@ func (s *Service) SyncSubscription(user authctx.CurrentUser, subscriptionID uuid
 		return SubscriptionSyncResult{}, apperr.BadRequest("feed.subscription_not_external", "Only external RSS subscriptions can be refreshed")
 	}
 
-	result, _ := s.syncLoadedSubscription(subscription)
+	result, _ := s.syncLoadedSubscriptionContext(ctx, subscription)
 	if err := s.persistSubscriptionSyncState(subscription, result); err != nil {
 		log.Printf("failed to persist subscription sync state for %s: %v", subscription.ID, err)
 		result.Success = false
@@ -60,8 +69,12 @@ func (s *Service) SyncSubscription(user authctx.CurrentUser, subscriptionID uuid
 }
 
 func (s *Service) SyncAllSubscriptions(user authctx.CurrentUser) (SubscriptionSyncSummary, error) {
+	return s.SyncAllSubscriptionsContext(context.Background(), user)
+}
+
+func (s *Service) SyncAllSubscriptionsContext(ctx context.Context, user authctx.CurrentUser) (SubscriptionSyncSummary, error) {
 	var subscriptions []model.Subscription
-	if err := s.db.Preload("FeedSource").Where("user_id = ?", user.ID).Find(&subscriptions).Error; err != nil {
+	if err := s.db.WithContext(ctx).Preload("FeedSource").Where("user_id = ?", user.ID).Find(&subscriptions).Error; err != nil {
 		return SubscriptionSyncSummary{}, err
 	}
 
@@ -81,23 +94,25 @@ func (s *Service) SyncAllSubscriptions(user authctx.CurrentUser) (SubscriptionSy
 		result SubscriptionSyncResult
 	}
 	outcomes := make(chan syncOutcome, len(external))
-	const maxConcurrency = 4
-	semaphore := make(chan struct{}, maxConcurrency)
+	jobs := make(chan int)
 	var wg sync.WaitGroup
-	for index, subscription := range external {
+	workerCount := min(maxSubscriptionSyncWorkers, len(external))
+	for range workerCount {
 		wg.Add(1)
-		go func(index int, subscription model.Subscription) {
+		go func() {
 			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-			result, _ := s.syncLoadedSubscription(subscription)
-			outcomes <- syncOutcome{index: index, result: result}
-		}(index, subscription)
+			for index := range jobs {
+				result, _ := s.syncLoadedSubscriptionContext(ctx, external[index])
+				outcomes <- syncOutcome{index: index, result: result}
+			}
+		}()
 	}
-	go func() {
-		wg.Wait()
-		close(outcomes)
-	}()
+	for index := range external {
+		jobs <- index
+	}
+	close(jobs)
+	wg.Wait()
+	close(outcomes)
 	for outcome := range outcomes {
 		results[outcome.index] = outcome.result
 	}
@@ -152,12 +167,23 @@ func (s *Service) HasExternalFeedUpdates(user authctx.CurrentUser, query FeedQue
 }
 
 func (s *Service) syncLoadedSubscription(subscription model.Subscription) (SubscriptionSyncResult, error) {
+	return s.syncLoadedSubscriptionContext(context.Background(), subscription)
+}
+
+func (s *Service) syncLoadedSubscriptionContext(ctx context.Context, subscription model.Subscription) (SubscriptionSyncResult, error) {
 	result := SubscriptionSyncResult{
 		SubscriptionID: subscription.ID,
 		FeedSourceID:   subscription.FeedSourceID,
 		SyncedAt:       time.Now().UTC(),
 	}
-	rssResult, err := s.syncSource(s.db, *subscription.FeedSource)
+	select {
+	case subscriptionSyncSlots <- struct{}{}:
+		defer func() { <-subscriptionSyncSlots }()
+	case <-ctx.Done():
+		result.Error = "refresh canceled"
+		return result, ctx.Err()
+	}
+	rssResult, err := s.syncSource(ctx, s.db.WithContext(ctx), *subscription.FeedSource)
 	result.FetchedItems = rssResult.FetchedItems
 	result.NewItems = rssResult.NewItems
 	if !rssResult.SyncedAt.IsZero() {

@@ -841,12 +841,13 @@ const rssLeaseDuration = 2 * time.Minute
 var (
 	rssHostLimiterMu sync.Mutex
 	rssHostLimiters  = make(map[string]chan struct{})
+	rssFetchSlots    = make(chan struct{}, 8)
 )
 
-func acquireRSSHostSlot(host string) func() {
+func acquireRSSHostSlot(ctx context.Context, host string) (func(), error) {
 	limit := parseEnvPositiveInt("RSS_HOST_CONCURRENCY", 2)
 	if limit < 1 || strings.TrimSpace(host) == "" {
-		return func() {}
+		return func() {}, nil
 	}
 	rssHostLimiterMu.Lock()
 	limiter := rssHostLimiters[host]
@@ -855,8 +856,12 @@ func acquireRSSHostSlot(host string) func() {
 		rssHostLimiters[host] = limiter
 	}
 	rssHostLimiterMu.Unlock()
-	limiter <- struct{}{}
-	return func() { <-limiter }
+	select {
+	case limiter <- struct{}{}:
+		return func() { <-limiter }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 type rssSourceGroup struct {
@@ -1070,6 +1075,10 @@ func syncRSSWorker(jobs <-chan rssSourceGroup, results chan<- rssSyncWorkerResul
 }
 
 func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
+	return syncRSSSourceGroupContext(db.Statement.Context, db, group)
+}
+
+func syncRSSSourceGroupContext(ctx context.Context, db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 	var fetchedItems int
 	var newItems int64
 	var syncErr error
@@ -1081,7 +1090,7 @@ func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 		}
 
 		representative := group.Sources[0]
-		fetchResult, err := fetchAndParseRSS(group.URL, RSSFetchConditions{
+		fetchResult, err := fetchAndParseRSSContext(ctx, group.URL, RSSFetchConditions{
 			ETag:         representative.FetchETag,
 			LastModified: representative.FetchLastModified,
 		})
@@ -1271,6 +1280,11 @@ func SyncSingleRSS(db *gorm.DB, src model.FeedSource) {
 }
 
 func SyncSingleRSSWithResult(db *gorm.DB, src model.FeedSource) (RSSSyncResult, error) {
+	return SyncSingleRSSWithResultContext(db.Statement.Context, db, src)
+}
+
+func SyncSingleRSSWithResultContext(ctx context.Context, db *gorm.DB, src model.FeedSource) (RSSSyncResult, error) {
+	db = db.WithContext(ctx)
 	result := RSSSyncResult{FeedSourceID: src.ID, SyncedAt: time.Now().UTC()}
 	if src.SourceType != "external_rss" || src.RssURL == "" {
 		return result, errors.New("source is not an external RSS feed")
@@ -1295,7 +1309,7 @@ func SyncSingleRSSWithResult(db *gorm.DB, src model.FeedSource) (RSSSyncResult, 
 	if !claimed {
 		return result, fmt.Errorf("RSS source is already being fetched")
 	}
-	fetchedItems, newItems, err := syncRSSSourceGroup(db, group)
+	fetchedItems, newItems, err := syncRSSSourceGroupContext(ctx, db, group)
 	result.FetchedItems = fetchedItems
 	result.NewItems = newItems
 	return result, err
@@ -1310,6 +1324,10 @@ func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {
 }
 
 func fetchAndParseRSS(feedURL string, conditions RSSFetchConditions) (RSSFetchResult, error) {
+	return fetchAndParseRSSContext(context.Background(), feedURL, conditions)
+}
+
+func fetchAndParseRSSContext(ctx context.Context, feedURL string, conditions RSSFetchConditions) (RSSFetchResult, error) {
 	startedAt := time.Now()
 	result := RSSFetchResult{Provider: rssFetchProviderDirect}
 	if err := ValidateFullTextTargetURL(feedURL); err != nil {
@@ -1317,12 +1335,21 @@ func fetchAndParseRSS(feedURL string, conditions RSSFetchConditions) (RSSFetchRe
 	}
 
 	client := rssClientWithRedirectValidation(rssFetchHTTPClient)
-	req, err := http.NewRequest("GET", feedURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
 	if err != nil {
 		return result, &rssFetchError{Code: "invalid_request", Err: err}
 	}
-	releaseHostSlot := acquireRSSHostSlot(req.URL.Hostname())
+	releaseHostSlot, err := acquireRSSHostSlot(ctx, req.URL.Hostname())
+	if err != nil {
+		return result, &rssFetchError{Code: "request_canceled", Err: err}
+	}
 	defer releaseHostSlot()
+	select {
+	case rssFetchSlots <- struct{}{}:
+		defer func() { <-rssFetchSlots }()
+	case <-ctx.Done():
+		return result, &rssFetchError{Code: "request_canceled", Err: ctx.Err()}
+	}
 	// Many servers reject Go default user-agent.
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.1")

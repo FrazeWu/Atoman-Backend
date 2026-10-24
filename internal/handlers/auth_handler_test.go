@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -614,6 +615,30 @@ func TestRegisterHandlerRejectsReservedUsername(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "reserved") {
 		t.Fatalf("expected reserved error, got %s", w.Body.String())
+	}
+}
+
+func TestSendVerificationHandlerDoesNotExposeEmailServiceErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "development")
+	t.Setenv("TURNSTILE_SECRET_KEY", "")
+	db := newAuthTestDB(t)
+	r := gin.New()
+	r.POST("/send-verification", SendVerificationHandler(service.NewEmailServiceWithoutRedis(db)))
+
+	request := httptest.NewRequest(http.MethodPost, "/send-verification", strings.NewReader(`{"email":"alice@example.com"}`))
+	request.Header.Set("Content-Type", "application/json")
+	ctx, cancel := context.WithCancel(request.Context())
+	cancel()
+	request = request.WithContext(ctx)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, request)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "context canceled") || strings.Contains(w.Body.String(), "details") {
+		t.Fatalf("response leaked internal email error: %s", w.Body.String())
 	}
 }
 

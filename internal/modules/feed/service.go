@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"context"
+
 	"atoman/internal/model"
 	legacyfeed "atoman/internal/service"
 	"golang.org/x/sync/singleflight"
@@ -11,7 +13,7 @@ import (
 type Service struct {
 	db                  *gorm.DB
 	repo                *Repo
-	syncSource          func(*gorm.DB, model.FeedSource) (legacyfeed.RSSSyncResult, error)
+	syncSource          func(context.Context, *gorm.DB, model.FeedSource) (legacyfeed.RSSSyncResult, error)
 	recommendationCache recommendationCache
 	recommendationLoads singleflight.Group
 }
@@ -20,7 +22,7 @@ func NewService(db *gorm.DB) *Service {
 	return &Service{
 		db:                  db,
 		repo:                NewRepo(db),
-		syncSource:          legacyfeed.SyncSingleRSSWithResult,
+		syncSource:          legacyfeed.SyncSingleRSSWithResultContext,
 		recommendationCache: newRecommendationCacheFromEnv(),
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"atoman/internal/model"
 	"atoman/internal/service"
@@ -15,7 +16,33 @@ import (
 )
 
 var syncFeedSource = func(db *gorm.DB, source model.FeedSource) {
-	go service.SyncSingleRSS(db, source)
+	subscriptionSyncSlots <- struct{}{}
+	defer func() { <-subscriptionSyncSlots }()
+	service.SyncSingleRSS(db, source)
+}
+
+func syncImportedFeedSources(db *gorm.DB, sources []model.FeedSource) {
+	workerCount := min(maxSubscriptionSyncWorkers, len(sources))
+	if workerCount == 0 {
+		return
+	}
+
+	jobs := make(chan model.FeedSource)
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for source := range jobs {
+				syncFeedSource(db, source)
+			}
+		}()
+	}
+	for _, source := range sources {
+		jobs <- source
+	}
+	close(jobs)
+	workers.Wait()
 }
 
 func normalizeCanonicalFeedURL(raw string) string {
