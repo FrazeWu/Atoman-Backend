@@ -128,7 +128,8 @@ func (s *Service) SearchCatalog(ctx context.Context, viewer *authctx.CurrentUser
 
 // 所有关系匹配均为 EXISTS；一个实体只有一行，相关度不会因别名/贡献角色重复而改变页大小。
 func musicSearchQuery(db *gorm.DB, viewer *authctx.CurrentUser, kind, query string) (*gorm.DB, clause.Expr) {
-	pattern, prefix := "%"+query+"%", query+"%"
+	literal := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(query)
+	pattern, prefix := "%"+literal+"%", literal+"%"
 	switch kind {
 	case "song":
 		artistMatch, artistArgs := musicRelatedArtistMatch(viewer, "song_artists", "song_id", `"Songs".id`, pattern)

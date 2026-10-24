@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/modules/search"
 	"atoman/internal/platform/apperr"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // PublicProvider exposes only anonymous, publicly visible content. Each query
@@ -34,6 +36,10 @@ func (p *PublicProvider) Module() string { return p.module }
 
 func (p *PublicProvider) Capabilities(_ context.Context, _ search.Viewer, scope search.Scope) search.ModuleCapabilities {
 	caps := search.ModuleCapabilities{Module: p.module, Label: p.label, Scope: scope}
+	// 用户资料沿用博客公开主页的站点开关，不虚构 users 配置。
+	if p.module == "users" {
+		caps.AccessModule = "blog"
+	}
 	if scope == search.ScopePublic {
 		caps.Types = p.types
 	}
@@ -42,7 +48,7 @@ func (p *PublicProvider) Capabilities(_ context.Context, _ search.Viewer, scope 
 
 type publicRow struct {
 	ID, Title, Subtitle, Snippet, CoverURL, Href, MatchField string
-	CreatedAt                                                interface{}
+	CreatedAt                                                *time.Time
 }
 
 // SearchPublicRows is shared only for pagination and mapping; SQL and the
@@ -57,7 +63,7 @@ func (p *PublicProvider) Search(ctx context.Context, _ search.Viewer, req search
 	switch p.module + ":" + req.Type {
 	case "feed:source":
 		base = p.db.WithContext(ctx).Table("feed_sources AS f").Select(`f.id::text AS id, COALESCE(NULLIF(f.title,''), f.site_url) AS title, '' AS subtitle, '' AS snippet, COALESCE(f.cover_url,'') AS cover_url, '/feed?source_id=' || f.id::text AS href, f.updated_at AS created_at, 'title' AS match_field`).
-			Where("f.deleted_at IS NULL AND f.hidden = false AND f.source_type = 'external_rss' AND EXISTS (SELECT 1 FROM feed_items i WHERE i.feed_source_id = f.id AND i.deleted_at IS NULL)")
+			Where("f.deleted_at IS NULL AND f.hidden = false AND f.source_type = 'external_rss'")
 	case "feed:article":
 		base = p.db.WithContext(ctx).Table("feed_items AS i").Select(`i.id::text AS id, COALESCE(i.title,'') AS title, COALESCE(f.title,'') AS subtitle, COALESCE(i.summary,'') AS snippet, COALESCE(i.image_url,'') AS cover_url, '/feed/item/' || i.id::text AS href, i.published_at AS created_at, 'title' AS match_field`).
 			Joins("JOIN feed_sources f ON f.id = i.feed_source_id").Where("i.deleted_at IS NULL AND f.deleted_at IS NULL AND f.hidden = false AND f.source_type = 'external_rss'")
@@ -84,7 +90,7 @@ func (p *PublicProvider) Search(ctx context.Context, _ search.Viewer, req search
 		return search.ProviderSearchResult{}, apperr.BadRequest("search.invalid_type", fmt.Sprintf("Unknown %s search type", p.module))
 	}
 	if query != "" {
-		pattern := "%" + query + "%"
+		pattern := "%" + escapePublicSearchQuery(query) + "%"
 		fields := map[string]string{
 			"feed:source":     "(f.title ILIKE ? OR f.rss_url ILIKE ? OR f.site_url ILIKE ?)",
 			"feed:article":    "(i.title ILIKE ? OR i.summary ILIKE ? OR i.author ILIKE ?)",
@@ -111,8 +117,20 @@ func (p *PublicProvider) Search(ctx context.Context, _ search.Viewer, req search
 	}
 	order := "created_at DESC, id DESC"
 	if req.Sort == "relevance" && query != "" {
-		order = "CASE WHEN title ILIKE ? THEN 0 ELSE 1 END, created_at DESC, id DESC"
-		base = base.Order(gorm.Expr(order, query+"%"))
+		// 在投影后的字段上排序，避免 SQL 同层引用 title 别名；
+		// Order(gorm.Expr(...)) 不会生成 ORDER BY，必须使用 clause.OrderBy。
+		base = p.db.WithContext(ctx).Table("(?) AS hits", base)
+		primary := "title"
+		if p.module == "users" {
+			primary = "substring(subtitle from 2)"
+		}
+		base = base.Clauses(clause.OrderBy{Expression: clause.Expr{SQL: fmt.Sprintf(`CASE
+ WHEN LOWER(%s) = LOWER(?) THEN 0
+ WHEN %s ILIKE ? THEN 1
+ WHEN LOWER(title) = LOWER(?) THEN 2
+ WHEN title ILIKE ? THEN 3
+ WHEN title ILIKE ? THEN 4 ELSE 5 END, created_at DESC NULLS LAST, id ASC`, primary, primary),
+			Vars: []any{query, escapePublicSearchQuery(query) + "%", query, escapePublicSearchQuery(query) + "%", "%" + escapePublicSearchQuery(query) + "%"}}})
 	} else {
 		base = base.Order(order)
 	}
@@ -127,4 +145,8 @@ func (p *PublicProvider) Search(ctx context.Context, _ search.Viewer, req search
 		out.Items = append(out.Items, search.SearchHit{Module: p.module, Type: req.Type, ID: row.ID, Title: row.Title, Subtitle: row.Subtitle, Snippet: searchSnippet(row.Snippet), CoverURL: row.CoverURL, Href: row.Href, MatchedFields: []string{row.MatchField}})
 	}
 	return out, nil
+}
+
+func escapePublicSearchQuery(query string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(query)
 }

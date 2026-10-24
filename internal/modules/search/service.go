@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"sync"
@@ -140,8 +141,24 @@ func (s *Service) runProviderTasks(ctx context.Context, viewer Viewer, req Searc
 	return groups, nil
 }
 
-func (s *Service) executeProviderTask(parent context.Context, viewer Viewer, req SearchRequest, task ProviderTask) SearchGroup {
-	group := SearchGroup{Module: task.Module, Type: task.Type.Key, Label: task.Type.Label, Items: []SearchHit{}}
+func (s *Service) executeProviderTask(parent context.Context, viewer Viewer, req SearchRequest, task ProviderTask) (group SearchGroup) {
+	started := time.Now()
+	var queueWait time.Duration
+	defer func() {
+		status := "success"
+		if group.Error != nil {
+			status = group.Error.Code
+		} else if len(group.Items) == 0 {
+			status = "zero_result"
+		}
+		// 不记录查询词、SQL、用户 ID 或私有内容。
+		level := slog.LevelDebug
+		if group.Error != nil {
+			level = slog.LevelWarn
+		}
+		slog.Log(parent, level, "search_provider", "module", task.Module, "type", task.Type.Key, "status", status, "duration_ms", time.Since(started).Milliseconds(), "queue_wait_ms", queueWait.Milliseconds(), "result_count", len(group.Items))
+	}()
+	group = SearchGroup{Module: task.Module, Type: task.Type.Key, Label: task.Type.Label, Items: []SearchHit{}}
 	ctx, cancel := context.WithTimeout(parent, s.providerTimeout)
 	defer cancel()
 	if err := searchlimit.Acquire(ctx); err != nil {
@@ -149,6 +166,7 @@ func (s *Service) executeProviderTask(parent context.Context, viewer Viewer, req
 		return group
 	}
 	defer searchlimit.Release()
+	queueWait = time.Since(started)
 	limit := GroupedLimit
 	if req.View == ViewPreview {
 		limit = PreviewLimit

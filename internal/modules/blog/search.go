@@ -63,7 +63,7 @@ func filterBlogContainer(db *gorm.DB, table, query string) *gorm.DB {
 func orderBlogContainer(db *gorm.DB, table string, opts ContainerSearchOptions) *gorm.DB {
 	if opts.Sort != blogSearchSortRecent {
 		text := strings.ToLower(strings.TrimSpace(opts.Query))
-		db = db.Order(clause.OrderBy{Expression: clause.Expr{SQL: "CASE WHEN LOWER(" + table + ".name) = ? THEN 2 WHEN LOWER(" + table + ".name) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END DESC, " + table + ".created_at DESC, " + table + ".id DESC", Vars: []any{text, escapeBlogSearchLike(text) + "%"}}})
+		db = db.Clauses(clause.OrderBy{Expression: clause.Expr{SQL: "CASE WHEN LOWER(" + table + ".name) = ? THEN 2 WHEN LOWER(" + table + ".name) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END DESC, " + table + ".created_at DESC, " + table + ".id DESC", Vars: []any{text, escapeBlogSearchLike(text) + "%"}}})
 		return db
 	}
 	return db.Order(table + ".created_at DESC, " + table + ".id DESC")

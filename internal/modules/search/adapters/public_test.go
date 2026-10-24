@@ -91,3 +91,66 @@ func TestPublicMediaSearchReadsCanonicalContent(t *testing.T) {
 		require.Equal(t, tc.href, result.Items[0].Href)
 	}
 }
+
+func TestEmptyRSSSourcesRemainDiscoverable(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{})
+	for _, tc := range []struct {
+		title, kind     string
+		hidden, deleted bool
+	}{
+		{"empty_source", "external_rss", false, false},
+		{"emptyXsource", "external_rss", false, false},
+		{"empty_source_hidden", "external_rss", true, false},
+		{"empty_source_deleted", "external_rss", false, true},
+		{"empty_source_internal", "internal", false, false},
+	} {
+		source := model.FeedSource{Title: tc.title, SourceType: tc.kind, Hidden: tc.hidden, Hash: tc.title}
+		require.NoError(t, db.Create(&source).Error)
+		if tc.deleted {
+			require.NoError(t, db.Delete(&source).Error)
+		}
+	}
+	provider := NewPublicProvider(db, "feed", "RSS", PublicType("source", "来源"))
+	result, err := provider.Search(context.Background(), search.Viewer{}, search.ProviderSearchRequest{
+		Scope: search.ScopePublic, Type: "source", Query: "empty_", Sort: "relevance", Limit: 20, ExactTotal: true,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, *result.Total)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "empty_source", result.Items[0].Title)
+	require.NoError(t, search.ValidateSearchHit(search.NormalizeSearchHit(result.Items[0])))
+}
+
+func TestPodcastShowRequiresPublicEpisode(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.ContentEntry{}, &model.ContentEpisodeExtension{})
+	user := model.User{Username: "show-qualification", Email: "show@example.test", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&user).Error)
+	for _, state := range []string{"empty", "draft", "private", "deleted", "published"} {
+		channel := model.Channel{Name: "节目 " + state, Slug: "show-" + state, UserID: &user.UUID}
+		require.NoError(t, db.Create(&channel).Error)
+		if state == "empty" {
+			continue
+		}
+		entry := model.ContentEntry{AuthorID: &user.UUID, ChannelID: channel.ID, Kind: "podcast", Title: "单集", Status: "published", Visibility: "public"}
+		if state == "draft" {
+			entry.Status = "draft"
+		}
+		if state == "private" {
+			entry.Visibility = "private"
+		}
+		require.NoError(t, db.Create(&entry).Error)
+		require.NoError(t, db.Create(&model.ContentEpisodeExtension{ContentID: entry.ID, EpisodeID: uuid.New(), LegacyPostID: entry.ID}).Error)
+		if state == "deleted" {
+			require.NoError(t, db.Delete(&entry).Error)
+		}
+	}
+	result, err := NewPublicProvider(db, "podcast", "播客").Search(context.Background(), search.Viewer{}, search.ProviderSearchRequest{
+		Scope: search.ScopePublic, Type: "show", Query: "节目", Sort: "relevance", Limit: 20, ExactTotal: true,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, *result.Total)
+	require.Len(t, result.Items, 1)
+	require.Equal(t, "/podcasts/show/show-published", result.Items[0].Href)
+}

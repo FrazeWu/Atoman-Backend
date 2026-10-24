@@ -75,6 +75,27 @@ func TestSearchCatalogMatchesLyricsAliasesAndRelationsWithoutDuplicates(t *testi
 	}
 }
 
+func TestSearchCatalogTreatsWildcardsLiterally(t *testing.T) {
+	s, db, user := newMusicTestService(t)
+	for _, title := range []string{"literal_name", "literalXname", "percent%name", "percentXname", `slash\name`, "slashXname"} {
+		require.NoError(t, db.Create(&model.Artist{Name: title}).Error)
+		require.NoError(t, db.Create(&model.Album{Title: title}).Error)
+		require.NoError(t, db.Create(&model.Song{Title: title}).Error)
+		require.NoError(t, db.Create(&model.Playlist{Name: title, UserID: user.ID, IsPublic: true}).Error)
+	}
+	for _, query := range []string{"literal_", "percent%", `slash\`} {
+		got, err := s.SearchCatalog(context.Background(), nil, MusicSearchOptions{Query: query, ExactTotal: true})
+		require.NoError(t, err)
+		for _, kind := range []string{"song", "album", "artist", "playlist"} {
+			require.EqualValues(t, 1, got.Totals[kind], "%s: %s", kind, query)
+		}
+		require.Len(t, got.Songs, 1)
+		require.Len(t, got.Albums, 1)
+		require.Len(t, got.Artists, 1)
+		require.Len(t, got.Playlists, 1)
+	}
+}
+
 func TestSearchCatalogPublicAndLegacyVisibility(t *testing.T) {
 	s, db, owner := newMusicTestService(t)
 	other := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
