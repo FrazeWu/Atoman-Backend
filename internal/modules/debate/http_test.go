@@ -100,6 +100,28 @@ func TestWikiHTTPValidationAuthorizationAndEnvelopes(t *testing.T) {
 	assertDebateDataEnvelope(t, response)
 }
 
+func TestDebatePublicResponsesDoNotExposePrivateUserFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := newDebateTestContext(t)
+	created := createDebateForTest(t, ctx, "Private fields", "body")
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1"), ctx.service)
+	paths := []string{
+		"/api/v1/debate/topics",
+		"/api/v1/debate/topics/" + created.ID.String(),
+		"/api/v1/debate/topics/" + created.ID.String() + "/revisions",
+		"/api/v1/debates/" + created.ID.String() + "/relations",
+	}
+	for _, path := range paths {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		for _, privateField := range [][]byte{[]byte(`"email"`), []byte(`"password"`), []byte(`"auth_version"`)} {
+			require.NotContains(t, response.Body.String(), string(privateField), "response %s contains private user data", path)
+		}
+	}
+}
+
 func TestWikiHTTPAdminAuthorization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := newDebateTestContext(t)

@@ -31969,7 +31969,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "channel": {
-                    "$ref": "#/definitions/model.Channel"
+                    "$ref": "#/definitions/blog.channelResponseDTO"
                 },
                 "channel_id": {
                     "type": "string"
@@ -32007,7 +32007,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "channel": {
-                    "$ref": "#/definitions/model.Channel"
+                    "$ref": "#/definitions/blog.channelResponseDTO"
                 },
                 "channel_id": {
                     "type": "string"
@@ -32085,7 +32085,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user": {
-                    "$ref": "#/definitions/model.User"
+                    "$ref": "#/definitions/model.PublicUserDTO"
                 },
                 "user_id": {
                     "type": "string"
@@ -32254,7 +32254,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "channel": {
-                    "$ref": "#/definitions/model.Channel"
+                    "$ref": "#/definitions/blog.channelResponseDTO"
                 },
                 "channel_id": {
                     "type": "string"
@@ -32338,7 +32338,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user": {
-                    "$ref": "#/definitions/model.User"
+                    "$ref": "#/definitions/model.PublicUserDTO"
                 },
                 "user_id": {
                     "type": "string"
@@ -32728,6 +32728,47 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "content_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.channelResponseDTO": {
+            "type": "object",
+            "properties": {
+                "ban_reason": {
+                    "type": "string"
+                },
+                "ban_until": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_anonymous": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
                     "type": "string"
                 }
             }
@@ -34927,7 +34968,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user": {
-                    "$ref": "#/definitions/model.User"
+                    "$ref": "#/definitions/model.PublicUserDTO"
                 },
                 "user_id": {
                     "type": "string"
@@ -34946,10 +34987,13 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "has_more": {
+                    "type": "boolean"
+                },
                 "nodes": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Debate"
+                        "$ref": "#/definitions/debate.DebateGraphNodeDTO"
                     }
                 },
                 "relations": {
@@ -34960,6 +35004,106 @@ const docTemplate = `{
                 },
                 "root_id": {
                     "type": "string"
+                }
+            }
+        },
+        "debate.DebateGraphNodeDTO": {
+            "type": "object",
+            "properties": {
+                "conclusion_type": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "current_conclusion_event_id": {
+                    "type": "string"
+                },
+                "current_revision_id": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "debate.DebateListItemDTO": {
+            "type": "object",
+            "properties": {
+                "conclusion_type": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "current_conclusion_event_id": {
+                    "type": "string"
+                },
+                "current_revision_id": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -35048,7 +35192,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "editor": {
-                    "$ref": "#/definitions/model.User"
+                    "$ref": "#/definitions/model.PublicUserDTO"
                 },
                 "editor_id": {
                     "type": "string"
@@ -36464,6 +36608,85 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.TimelineChannelDTO": {
+            "type": "object",
+            "properties": {
+                "ban_reason": {
+                    "type": "string"
+                },
+                "ban_until": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_anonymous": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.TimelineCollectionDTO": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "$ref": "#/definitions/feed.TimelineChannelDTO"
+                },
+                "channel_id": {
+                    "type": "string"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "feed.TimelineItem": {
             "type": "object",
             "properties": {
@@ -36494,7 +36717,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "podcast_episode": {
-                    "$ref": "#/definitions/model.PodcastEpisode"
+                    "$ref": "#/definitions/feed.TimelinePodcastEpisodeDTO"
                 },
                 "post": {
                     "$ref": "#/definitions/feed.TimelinePostDTO"
@@ -36506,13 +36729,13 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "short_note": {
-                    "$ref": "#/definitions/model.ShortNote"
+                    "$ref": "#/definitions/feed.TimelineShortNoteDTO"
                 },
                 "type": {
                     "type": "string"
                 },
                 "video": {
-                    "$ref": "#/definitions/model.Video"
+                    "$ref": "#/definitions/feed.TimelineVideoDTO"
                 }
             }
         },
@@ -36550,6 +36773,62 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.TimelinePodcastEpisodeDTO": {
+            "type": "object",
+            "properties": {
+                "audio_url": {
+                    "description": "Audio file: always local upload (S3/MinIO)",
+                    "type": "string"
+                },
+                "channel": {
+                    "$ref": "#/definitions/feed.TimelineChannelDTO"
+                },
+                "channel_id": {
+                    "type": "string"
+                },
+                "content_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "duration_sec": {
+                    "type": "integer"
+                },
+                "episode_cover_url": {
+                    "description": "Episode cover: optional; falls back to channel cover in RSS",
+                    "type": "string"
+                },
+                "episode_number": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "post": {
+                    "$ref": "#/definitions/feed.TimelinePostDTO"
+                },
+                "post_id": {
+                    "type": "string"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "season_number": {
+                    "description": "Episode ordering",
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "viewer_rating": {
+                    "type": "integer"
+                }
+            }
+        },
         "feed.TimelinePostDTO": {
             "type": "object",
             "properties": {
@@ -36557,13 +36836,13 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "channel": {
-                    "$ref": "#/definitions/model.Channel"
+                    "$ref": "#/definitions/feed.TimelineChannelDTO"
                 },
                 "channel_id": {
                     "type": "string"
                 },
                 "collection": {
-                    "$ref": "#/definitions/model.Collection"
+                    "$ref": "#/definitions/feed.TimelineCollectionDTO"
                 },
                 "collection_conflict": {
                     "type": "boolean"
@@ -36577,7 +36856,7 @@ const docTemplate = `{
                 "collections": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Collection"
+                        "$ref": "#/definitions/feed.TimelineCollectionDTO"
                     }
                 },
                 "comments_count": {
@@ -36630,7 +36909,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user": {
-                    "$ref": "#/definitions/model.User"
+                    "$ref": "#/definitions/model.PublicUserDTO"
                 },
                 "user_id": {
                     "type": "string"
@@ -36673,6 +36952,41 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.TimelineShortNoteDTO": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "media": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ShortNoteMedia"
+                    }
+                },
+                "media_attachment_id": {
+                    "type": "string"
+                },
+                "media_attachment_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "feed.TimelineUpdatesResponse": {
             "type": "object",
             "properties": {
@@ -36681,6 +36995,129 @@ const docTemplate = `{
                 },
                 "has_updates": {
                     "type": "boolean"
+                }
+            }
+        },
+        "feed.TimelineVideoDTO": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "$ref": "#/definitions/feed.TimelineChannelDTO"
+                },
+                "channel_id": {
+                    "type": "string"
+                },
+                "chapters": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "collection": {
+                    "$ref": "#/definitions/feed.TimelineCollectionDTO"
+                },
+                "collection_conflict": {
+                    "type": "boolean"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "collection_position": {
+                    "type": "integer"
+                },
+                "collections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/feed.TimelineCollectionDTO"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "duration_sec": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "like_count": {
+                    "type": "integer"
+                },
+                "liked": {
+                    "type": "boolean"
+                },
+                "preview_thumbnails": {
+                    "type": "array",
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "processing_error": {
+                    "type": "string"
+                },
+                "processing_status": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "scheduled_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "draft | scheduled | published",
+                    "type": "string"
+                },
+                "storage_type": {
+                    "description": "StorageType: \"local\" (S3/MinIO) or \"external\" (YouTube, Bilibili, etc.)",
+                    "type": "string"
+                },
+                "subtitle_url": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.VideoTag"
+                    }
+                },
+                "thumbnail_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "video_url": {
+                    "description": "S3 key or external URL",
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                },
+                "viewer_rating": {
+                    "type": "integer"
+                },
+                "visibility": {
+                    "description": "Visibility: public | followers | private",
+                    "type": "string"
                 }
             }
         },
@@ -37454,7 +37891,7 @@ const docTemplate = `{
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Debate"
+                        "$ref": "#/definitions/debate.DebateListItemDTO"
                     }
                 },
                 "meta": {
@@ -38125,7 +38562,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.ContentProtection"
+                    "$ref": "#/definitions/handlers.contentProtectionResponse"
                 },
                 "message": {
                     "type": "string",
@@ -38152,7 +38589,7 @@ const docTemplate = `{
                     "example": "018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"
                 },
                 "protected_user": {
-                    "$ref": "#/definitions/model.User"
+                    "$ref": "#/definitions/model.PublicUserDTO"
                 },
                 "protection_level": {
                     "type": "string",
@@ -38585,7 +39022,7 @@ const docTemplate = `{
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.TimelineEvent"
+                        "$ref": "#/definitions/handlers.timelineEventDTO"
                     }
                 },
                 "limit": {
@@ -38606,7 +39043,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.TimelineEvent"
+                    "$ref": "#/definitions/handlers.timelineEventDTO"
                 }
             }
         },
@@ -38616,7 +39053,7 @@ const docTemplate = `{
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.TimelinePerson"
+                        "$ref": "#/definitions/handlers.timelinePersonDTO"
                     }
                 },
                 "limit": {
@@ -38637,7 +39074,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.TimelinePerson"
+                    "$ref": "#/definitions/handlers.timelinePersonDTO"
                 }
             }
         },
@@ -38675,7 +39112,7 @@ const docTemplate = `{
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.TimelineRevision"
+                        "$ref": "#/definitions/handlers.timelineRevisionDTO"
                     }
                 }
             }
@@ -39408,6 +39845,45 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.contentProtectionResponse": {
+            "type": "object",
+            "properties": {
+                "content_id": {
+                    "type": "string"
+                },
+                "content_type": {
+                    "description": "'album' / 'song'",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "description": "Optional expiration",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "protected_by": {
+                    "description": "Admin who set protection",
+                    "type": "string"
+                },
+                "protected_user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "protection_level": {
+                    "description": "'none' / 'semi' / 'full'",
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.contentRatingSummary": {
             "type": "object",
             "properties": {
@@ -39499,6 +39975,115 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.timelineEventDTO": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "event_date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_public": {
+                    "type": "boolean"
+                },
+                "latitude": {
+                    "description": "地理坐标（可选）",
+                    "type": "number"
+                },
+                "location": {
+                    "description": "事件发生地点描述（必填）",
+                    "type": "string"
+                },
+                "longitude": {
+                    "type": "number"
+                },
+                "source": {
+                    "description": "来源/参考资料（必填）",
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.timelinePersonDTO": {
+            "type": "object",
+            "properties": {
+                "bio": {
+                    "type": "string"
+                },
+                "birth_date": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "death_date": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_public": {
+                    "type": "boolean"
+                },
+                "locations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.PersonLocation"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.timelineProposalRequest": {
             "type": "object",
             "properties": {
@@ -39523,6 +40108,68 @@ const docTemplate = `{
                 "patch": {
                     "type": "object",
                     "additionalProperties": {}
+                }
+            }
+        },
+        "handlers.timelineRevisionDTO": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "editor": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "editor_id": {
+                    "type": "string"
+                },
+                "end_date": {
+                    "type": "string"
+                },
+                "event_date": {
+                    "type": "string"
+                },
+                "event_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_public": {
+                    "type": "boolean"
+                },
+                "latitude": {
+                    "type": "number"
+                },
+                "location": {
+                    "type": "string"
+                },
+                "longitude": {
+                    "type": "number"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -40409,45 +41056,6 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.ContentProtection": {
-            "type": "object",
-            "properties": {
-                "content_id": {
-                    "type": "string"
-                },
-                "content_type": {
-                    "description": "'album' / 'song'",
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "expires_at": {
-                    "description": "Optional expiration",
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "protected_by": {
-                    "description": "Admin who set protection",
-                    "type": "string"
-                },
-                "protected_user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "protection_level": {
-                    "description": "'none' / 'semi' / 'full'",
-                    "type": "string"
-                },
-                "reason": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -41861,6 +42469,29 @@ const docTemplate = `{
                 }
             }
         },
+        "model.PublicUserDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "model.ReadingListItem": {
             "type": "object",
             "properties": {
@@ -41953,41 +42584,6 @@ const docTemplate = `{
                 "version_number": {
                     "description": "Version control",
                     "type": "integer"
-                }
-            }
-        },
-        "model.ShortNote": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "media": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.ShortNoteMedia"
-                    }
-                },
-                "media_attachment_id": {
-                    "type": "string"
-                },
-                "media_attachment_type": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
                 }
             }
         },
@@ -42449,68 +43045,6 @@ const docTemplate = `{
                 }
             }
         },
-        "model.TimelineEvent": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string"
-                },
-                "content": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "end_date": {
-                    "type": "string"
-                },
-                "event_date": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "is_public": {
-                    "type": "boolean"
-                },
-                "latitude": {
-                    "description": "地理坐标（可选）",
-                    "type": "number"
-                },
-                "location": {
-                    "description": "事件发生地点描述（必填）",
-                    "type": "string"
-                },
-                "longitude": {
-                    "type": "number"
-                },
-                "source": {
-                    "description": "来源/参考资料（必填）",
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
         "model.TimelinePerson": {
             "type": "object",
             "properties": {
@@ -42554,68 +43088,6 @@ const docTemplate = `{
                     "$ref": "#/definitions/model.User"
                 },
                 "user_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.TimelineRevision": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string"
-                },
-                "content": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "editor": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "editor_id": {
-                    "type": "string"
-                },
-                "end_date": {
-                    "type": "string"
-                },
-                "event_date": {
-                    "type": "string"
-                },
-                "event_id": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "is_public": {
-                    "type": "boolean"
-                },
-                "latitude": {
-                    "type": "number"
-                },
-                "location": {
-                    "type": "string"
-                },
-                "longitude": {
-                    "type": "number"
-                },
-                "source": {
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updated_at": {
                     "type": "string"
                 }
             }
@@ -46804,7 +47276,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user": {
-                    "$ref": "#/definitions/model.User"
+                    "$ref": "#/definitions/model.PublicUserDTO"
                 },
                 "user_id": {
                     "type": "string"

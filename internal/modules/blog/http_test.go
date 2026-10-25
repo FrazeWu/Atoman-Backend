@@ -532,6 +532,53 @@ func TestRegisterRoutesMountsChannelReadEndpointsAndEnsureDefault(t *testing.T) 
 	}
 }
 
+func TestPublicChannelResponsesDoNotExposePrivateUserFields(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	router := newBlogHTTPRouter(service, nil)
+	for _, path := range []string{
+		"/api/v1/blog/channels",
+		"/api/v1/blog/channels/" + channel.ID.String(),
+		"/api/v1/blog/channels/slug/" + channel.Slug,
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected 200 for %s, got %d: %s", path, response.Code, response.Body.String())
+		}
+		for _, privateField := range []string{`"email"`, `"password"`, `"auth_version"`} {
+			if strings.Contains(response.Body.String(), privateField) {
+				t.Fatalf("channel response %s includes private user field %s: %s", path, privateField, response.Body.String())
+			}
+		}
+	}
+}
+
+func TestPublicBlogPostResponseDoesNotExposePrivateUserFields(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "Privacy")
+	post, err := service.CreatePost(user, CreatePostRequest{
+		ChannelID: channel.ID, CollectionID: collection.ID, Title: "Public post", Content: "body",
+		Status: "published", Visibility: "public",
+	})
+	if err != nil {
+		t.Fatalf("create public post: %v", err)
+	}
+	response := httptest.NewRecorder()
+	newBlogHTTPRouter(service, nil).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected public post read 200, got %d: %s", response.Code, response.Body.String())
+	}
+	for _, privateField := range []string{`"email"`, `"password"`, `"auth_version"`} {
+		if strings.Contains(response.Body.String(), privateField) {
+			t.Fatalf("public blog post response includes private field %s: %s", privateField, response.Body.String())
+		}
+	}
+}
+
 func TestRegisterRoutesMountsChannelAndCollectionMutationEndpoints(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	r := newBlogHTTPRouter(service, &user)

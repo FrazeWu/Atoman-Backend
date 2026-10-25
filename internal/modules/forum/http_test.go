@@ -179,6 +179,11 @@ func TestCreateTopicPersistsAndReturnsReferences(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body.String())
 	}
+	for _, privateField := range [][]byte{[]byte(`"email"`), []byte(`"password"`), []byte(`"auth_version"`)} {
+		if bytes.Contains(response.Body.Bytes(), privateField) {
+			t.Fatalf("forum topic response includes private user field %s: %s", privateField, response.Body.String())
+		}
+	}
 	topic, _ := decodeForumData[struct {
 		model.ForumTopic
 		References []reference.ResolvedReference `json:"references"`

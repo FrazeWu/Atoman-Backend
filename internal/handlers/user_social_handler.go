@@ -159,7 +159,15 @@ func ListBlockedUsers(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch blocked users"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": blocks, "message": "ok"})
+		type blockDTO struct {
+			model.UserBlock
+			Blocked *model.PublicUserDTO `json:"blocked,omitempty"`
+		}
+		data := make([]blockDTO, 0, len(blocks))
+		for _, block := range blocks {
+			data = append(data, blockDTO{UserBlock: block, Blocked: model.PublicUserFromUser(block.Blocked)})
+		}
+		c.JSON(http.StatusOK, gin.H{"data": data, "message": "ok"})
 	}
 }
 

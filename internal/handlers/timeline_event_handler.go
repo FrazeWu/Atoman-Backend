@@ -61,7 +61,10 @@ func GetTimelineEvents(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var total int64
-		query.Count(&total)
+		if err := query.Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count events"})
+			return
+		}
 
 		var events []model.TimelineEvent
 		if err := query.Order("event_date ASC, timeline_events.id ASC").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
@@ -70,7 +73,7 @@ func GetTimelineEvents(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"data":  events,
+			"data":  timelineEventsFromModels(events),
 			"total": total,
 			"page":  page,
 			"limit": limit,
@@ -95,7 +98,7 @@ func GetTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": event})
+		c.JSON(http.StatusOK, gin.H{"data": timelineEventFromModel(event)})
 	}
 }
 
@@ -176,7 +179,7 @@ func CreateTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 		db.Preload("User").First(&event, event.ID)
 		// Save initial revision
 		saveEventRevision(db, event, userID.(uuid.UUID))
-		c.JSON(http.StatusCreated, gin.H{"data": event})
+		c.JSON(http.StatusCreated, gin.H{"data": timelineEventFromModel(event)})
 	}
 }
 
@@ -258,7 +261,7 @@ func UpdateTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 		db.Preload("User").First(&event, event.ID)
 		// Save revision snapshot after update
 		saveEventRevision(db, event, userID.(uuid.UUID))
-		c.JSON(http.StatusOK, gin.H{"data": event})
+		c.JSON(http.StatusOK, gin.H{"data": timelineEventFromModel(event)})
 	}
 }
 

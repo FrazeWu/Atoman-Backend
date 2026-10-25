@@ -53,7 +53,7 @@ func runSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID stri
 		if song.AlbumID != nil {
 			destinationKey = storage.BuildMusicAlbumTrackVersionKey(song.AlbumID.String(), song.ID.String(), uuid.NewString(), path.Ext(candidate.AudioURL))
 		}
-		asset, err := storage.PromoteMusicUploadAsset(mediaService.s3, candidate.AudioURL, destinationKey)
+		asset, err := storage.PromoteMusicUploadAsset(db.WithContext(ctx), mediaService.s3, candidate.RequestedBy, candidate.AudioURL, destinationKey)
 		if err != nil {
 			return failSongAudioReplacement(db, candidate.ID, leaseToken, err)
 		}

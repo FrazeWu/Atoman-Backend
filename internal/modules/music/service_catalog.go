@@ -99,7 +99,7 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 			return err
 		}
 		asset, err := storage.PromoteMusicUploadAsset(
-			s.s3, artist.ImageURL,
+			tx, s.s3, user.ID, artist.ImageURL,
 			storage.BuildMusicArtistImageVersionKey(artist.ID.String(), uuid.NewString(), path.Ext(artist.ImageURL)),
 		)
 		if err != nil {

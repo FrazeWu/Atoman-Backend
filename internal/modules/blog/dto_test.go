@@ -2,8 +2,11 @@ package blog
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
+
+	"atoman/internal/model"
 
 	"github.com/google/uuid"
 )
@@ -12,6 +15,8 @@ func TestNewBlogContentDTOProducesFlatCanonicalResponse(t *testing.T) {
 	postID := uuid.New()
 	channelID := uuid.New()
 	collectionID := uuid.New()
+	privateUser := &model.User{UUID: uuid.New(), Username: "blog-author", Email: "private-blog-author@example.test", Password: "private-hash"}
+	channel := &model.Channel{User: privateUser}
 	publishedAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	rating := 8
 	content := BlogContent{
@@ -19,6 +24,10 @@ func TestNewBlogContentDTOProducesFlatCanonicalResponse(t *testing.T) {
 		CreatedAt:          publishedAt,
 		UpdatedAt:          publishedAt,
 		UserID:             uuid.New(),
+		User:               privateUser,
+		Channel:            channel,
+		Collection:         &BlogCollection{Channel: channel},
+		Collections:        []BlogCollection{{Channel: channel}},
 		ChannelID:          &channelID,
 		CollectionID:       &collectionID,
 		CollectionPosition: 3,
@@ -46,6 +55,11 @@ func TestNewBlogContentDTOProducesFlatCanonicalResponse(t *testing.T) {
 	var response map[string]any
 	if err := json.Unmarshal(payload, &response); err != nil {
 		t.Fatalf("unmarshal post DTO: %v", err)
+	}
+	for _, privateField := range []string{`"email"`, `"password"`, `"auth_version"`} {
+		if strings.Contains(string(payload), privateField) {
+			t.Fatalf("blog content response includes private field %s: %s", privateField, payload)
+		}
 	}
 
 	if _, ok := response["Post"]; ok {

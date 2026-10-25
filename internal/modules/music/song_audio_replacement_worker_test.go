@@ -57,7 +57,7 @@ func TestRunSongAudioReplacementOnceCreatesRevisionBeforeSwitchingAudio(t *testi
 func TestSongAudioReplacementPromotesUploadIntoAlbumRevisionDirectory(t *testing.T) {
 	db := testdb.OpenPostgres(t, "music_audio_replacement_promotion")
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Album{}, &model.Song{}, &model.SongAudioReplacement{}, &model.Revision{}, &model.EditConflict{},
+		&model.User{}, &model.MediaAsset{}, &model.Album{}, &model.Song{}, &model.SongAudioReplacement{}, &model.Revision{}, &model.EditConflict{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
 	)
@@ -74,8 +74,12 @@ func TestSongAudioReplacementPromotesUploadIntoAlbumRevisionDirectory(t *testing
 		t.Fatal(err)
 	}
 	uploadKey := "music/audio/uploads/users/" + requester.UUID.String() + "/replacement.flac"
+	asset := model.MediaAsset{UserID: &requester.UUID, Purpose: "music.audio", URL: "https://cdn.atoman.test/" + uploadKey, Key: uploadKey, ContentType: "audio/flac", Size: 64}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatal(err)
+	}
 	job := model.SongAudioReplacement{
-		SongID: song.ID, RequestedBy: requester.UUID, AudioURL: "https://cdn.atoman.test/" + uploadKey,
+		SongID: song.ID, RequestedBy: requester.UUID, AssetID: &asset.ID, AudioURL: "https://cdn.atoman.test/" + uploadKey,
 		PreviousAudioURL: song.AudioURL, Status: "pending",
 	}
 	if err := db.Create(&job).Error; err != nil {

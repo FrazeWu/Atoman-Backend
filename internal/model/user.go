@@ -30,6 +30,25 @@ type User struct {
 	ForumTrustLevel       int             `json:"forum_trust_level" gorm:"-"`
 }
 
+type PublicUserDTO struct {
+	UUID        uuid.UUID `json:"uuid"`
+	ID          uint      `json:"id"`
+	Username    string    `json:"username"`
+	Role        string    `json:"role"`
+	DisplayName string    `json:"display_name"`
+	AvatarURL   string    `json:"avatar_url"`
+}
+
+func PublicUserFromUser(user *User) *PublicUserDTO {
+	if user == nil {
+		return nil
+	}
+	return &PublicUserDTO{
+		UUID: user.UUID, ID: user.ID, Username: user.Username, Role: user.Role,
+		DisplayName: user.DisplayName, AvatarURL: user.AvatarURL,
+	}
+}
+
 func DisplayNameOrUsername(displayName, username string) string {
 	if name := strings.TrimSpace(displayName); name != "" {
 		return name

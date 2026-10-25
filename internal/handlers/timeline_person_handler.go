@@ -39,7 +39,10 @@ func GetTimelinePersons(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var total int64
-		query.Count(&total)
+		if err := query.Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count persons"})
+			return
+		}
 
 		var persons []model.TimelinePerson
 		if err := query.Order("name ASC").Limit(limit).Offset(offset).Find(&persons).Error; err != nil {
@@ -48,7 +51,7 @@ func GetTimelinePersons(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"data":  persons,
+			"data":  timelinePersonsFromModels(persons),
 			"total": total,
 			"page":  page,
 			"limit": limit,
@@ -76,10 +79,13 @@ func GetTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var locations []model.PersonLocation
-		db.Where("person_id = ?", person.ID).Order("date ASC").Find(&locations)
+		if err := db.Where("person_id = ?", person.ID).Order("date ASC").Find(&locations).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch locations"})
+			return
+		}
 		person.Locations = locations
 
-		c.JSON(http.StatusOK, gin.H{"data": person})
+		c.JSON(http.StatusOK, gin.H{"data": timelinePersonFromModel(person)})
 	}
 }
 
@@ -174,7 +180,7 @@ func CreateTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		db.Preload("User").First(&person, person.ID)
-		c.JSON(http.StatusCreated, gin.H{"data": person})
+		c.JSON(http.StatusCreated, gin.H{"data": timelinePersonFromModel(person)})
 	}
 }
 
@@ -249,7 +255,7 @@ func UpdateTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		db.Preload("User").First(&person, person.ID)
-		c.JSON(http.StatusOK, gin.H{"data": person})
+		c.JSON(http.StatusOK, gin.H{"data": timelinePersonFromModel(person)})
 	}
 }
 

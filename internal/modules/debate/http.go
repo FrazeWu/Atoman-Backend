@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"atoman/internal/middleware"
+	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -51,7 +52,11 @@ func (h *Handler) list(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.List(c, items, page, pageSize, total)
+	publicItems := make([]DebateListItemDTO, 0, len(items))
+	for _, item := range items {
+		publicItems = append(publicItems, DebateListItemDTO{Debate: item, User: model.PublicUserFromUser(item.User)})
+	}
+	httpx.List(c, publicItems, page, pageSize, total)
 }
 
 // create godoc

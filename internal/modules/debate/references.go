@@ -199,7 +199,7 @@ func (s *Service) resolveRevisionReference(tx *gorm.DB, _ authctx.CurrentUser, d
 }
 
 func (s *Service) attachCurrentReferences(debate model.Debate) (DebateDTO, error) {
-	result := DebateDTO{Debate: debate, References: []DebateReferenceDTO{}}
+	result := DebateDTO{Debate: debate, User: model.PublicUserFromUser(debate.User), References: []DebateReferenceDTO{}}
 	if debate.CurrentRevisionID == nil {
 		return result, nil
 	}

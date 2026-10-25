@@ -9,6 +9,7 @@ import (
 
 type TopicDTO struct {
 	model.ForumTopic
+	User        *model.PublicUserDTO          `json:"user,omitempty"`
 	State       TopicStateDTO                 `json:"state"`
 	Permissions TopicPermissionsDTO           `json:"permissions"`
 	References  []reference.ResolvedReference `json:"references"`

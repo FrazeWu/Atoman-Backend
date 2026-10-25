@@ -133,7 +133,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				Position: index + 1,
 			})
 			asset, err := storage.PromoteMusicUploadAsset(
-				s.s3, resolved.Artist.ImageURL,
+				tx, s.s3, user.ID, resolved.Artist.ImageURL,
 				storage.BuildMusicArtistImageVersionKey(resolved.Artist.ID.String(), uuid.NewString(), musicAssetExtension(resolved.Artist.ImageURL)),
 			)
 			if err != nil {
@@ -508,6 +508,8 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				sourceKey, ownedAsset := musicAlbumImportSourceKey(audioURL)
 				if strings.TrimSpace(audioURL) != "" && (audioURL != song.AudioURL || ownedAsset && isPromotableAlbumImportKey(sourceKey, id)) {
 					promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteImportedTrackAsset(
+						tx,
+						user.ID,
 						audioURL,
 						storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), musicAssetExtension(audioURL)),
 						id,
@@ -577,6 +579,8 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				return err
 			}
 			promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteImportedTrackAsset(
+				tx,
+				user.ID,
 				song.AudioURL,
 				storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), musicAssetExtension(song.AudioURL)),
 				id,
@@ -1188,9 +1192,9 @@ func (s *Service) promoteRemoteAlbumAsset(rawURL, destinationKey string) (string
 	return prefix + "/" + destinationKey, "", destinationKey, nil
 }
 
-func (s *Service) promoteImportedTrackAsset(rawURL, destinationKey string, importID uuid.UUID, uploadedAsset bool) (string, string, string, error) {
+func (s *Service) promoteImportedTrackAsset(db *gorm.DB, ownerID uuid.UUID, rawURL, destinationKey string, importID uuid.UUID, uploadedAsset bool) (string, string, string, error) {
 	if uploadedAsset {
-		asset, err := storage.PromoteMusicUploadAsset(s.s3, rawURL, destinationKey)
+		asset, err := storage.PromoteMusicUploadAsset(db, s.s3, ownerID, rawURL, destinationKey)
 		return asset.URL, asset.SourceKey, asset.DestinationKey, err
 	}
 	return s.promoteAlbumImportAsset(rawURL, destinationKey, importID)
