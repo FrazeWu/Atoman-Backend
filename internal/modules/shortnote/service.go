@@ -2,7 +2,6 @@ package shortnote
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"atoman/internal/model"
@@ -75,13 +74,9 @@ func (s *Service) List(page, pageSize int, viewerID uuid.UUID, authorID *uuid.UU
 		Order("created_at DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&notes).Error; err != nil {
 		return nil, 0, err
 	}
-	items := make([]NoteDTO, 0, len(notes))
-	for _, note := range notes {
-		item, err := s.dto(note, viewerID)
-		if err != nil {
-			return nil, 0, err
-		}
-		items = append(items, item)
+	items, err := s.dtoBatch(notes, viewerID)
+	if err != nil {
+		return nil, 0, err
 	}
 	return items, total, nil
 }
@@ -235,82 +230,11 @@ func (s *Service) ownedNote(user authctx.CurrentUser, id uuid.UUID) (model.Short
 }
 
 func (s *Service) dto(note model.ShortNote, viewerID uuid.UUID) (NoteDTO, error) {
-	likesCount, dislikesCount, viewerVote, err := s.voteSummary(note.ID, viewerID)
+	items, err := s.dtoBatch([]model.ShortNote{note}, viewerID)
 	if err != nil {
 		return NoteDTO{}, err
 	}
-	var target model.DiscussionTarget
-	commentsCount := 0
-	if err := s.db.Select("comment_count").Where("kind = ? AND resource_id = ?", "short_note", note.ID).Limit(1).Find(&target).Error; err != nil {
-		return NoteDTO{}, err
-	}
-	commentsCount = target.CommentCount
-	liked := viewerVote == "up"
-	media := make([]MediaDTO, 0, len(note.Media))
-	for _, item := range note.Media {
-		media = append(media, MediaDTO{ID: item.ID, URL: item.URL, Position: item.Position})
-	}
-	mediaAttachment, err := s.resolveMediaAttachment(note)
-	if err != nil {
-		return NoteDTO{}, err
-	}
-	return NoteDTO{
-		ID:              note.ID,
-		UserID:          note.UserID,
-		User:            note.User,
-		Content:         note.Content,
-		Media:           media,
-		MediaAttachment: mediaAttachment,
-		LikesCount:      likesCount,
-		DislikesCount:   dislikesCount,
-		VoteScore:       likesCount - dislikesCount,
-		ViewerVote:      viewerVote,
-		CommentsCount:   commentsCount,
-		Liked:           liked,
-		Edited:          note.UpdatedAt.After(note.CreatedAt),
-		CreatedAt:       note.CreatedAt,
-		UpdatedAt:       note.UpdatedAt,
-	}, nil
-}
-
-func (s *Service) voteSummary(noteID, viewerID uuid.UUID) (int64, int64, string, error) {
-	var votes []model.ShortNoteVote
-	if err := s.db.Where("short_note_id = ?", noteID).Find(&votes).Error; err != nil {
-		return 0, 0, "", err
-	}
-	explicitVotes := make(map[uuid.UUID]string, len(votes))
-	var likesCount, dislikesCount int64
-	for _, vote := range votes {
-		explicitVotes[vote.UserID] = vote.Direction
-		if vote.Direction == "up" {
-			likesCount++
-		} else {
-			dislikesCount++
-		}
-	}
-	var legacyLikes []model.Like
-	if err := s.db.Where("target_type = ? AND target_id = ?", "short_note", noteID).Find(&legacyLikes).Error; err != nil {
-		return 0, 0, "", err
-	}
-	for _, like := range legacyLikes {
-		if _, hasExplicitVote := explicitVotes[like.UserID]; !hasExplicitVote {
-			likesCount++
-		}
-	}
-	viewerVote := "none"
-	if viewerID != uuid.Nil {
-		if direction, ok := explicitVotes[viewerID]; ok {
-			viewerVote = direction
-		} else {
-			for _, like := range legacyLikes {
-				if like.UserID == viewerID {
-					viewerVote = "up"
-					break
-				}
-			}
-		}
-	}
-	return likesCount, dislikesCount, viewerVote, nil
+	return items[0], nil
 }
 
 func validateInput(input noteInput) (string, []string, *string, *uuid.UUID, error) {
@@ -346,150 +270,6 @@ func createMedia(tx *gorm.DB, noteID uuid.UUID, urls []string) error {
 		}
 	}
 	return nil
-}
-
-func (s *Service) resolveMediaAttachment(note model.ShortNote) (*MediaAttachmentDTO, error) {
-	if note.MediaAttachmentType == nil || note.MediaAttachmentID == nil || *note.MediaAttachmentType == "" || *note.MediaAttachmentID == uuid.Nil {
-		return nil, nil
-	}
-	switch *note.MediaAttachmentType {
-	case "song":
-		var song model.Song
-		err := s.db.Model(&model.Song{}).
-			Preload("Album").
-			Preload("Album.Artists").
-			Preload("Artists").
-			Where("id = ?", *note.MediaAttachmentID).
-			First(&song).Error
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return &MediaAttachmentDTO{Type: "song", ID: *note.MediaAttachmentID}, nil
-			}
-			return nil, err
-		}
-
-		artistName := ""
-		if len(song.Artists) > 0 && strings.TrimSpace(song.Artists[0].Name) != "" {
-			artistName = strings.TrimSpace(song.Artists[0].Name)
-		} else if song.Album != nil && len(song.Album.Artists) > 0 && strings.TrimSpace(song.Album.Artists[0].Name) != "" {
-			artistName = strings.TrimSpace(song.Album.Artists[0].Name)
-		}
-
-		var albumTitle string
-		var albumID *uuid.UUID
-		year := 0
-		if song.Album != nil {
-			albumTitle = strings.TrimSpace(song.Album.Title)
-			albumID = song.AlbumID
-			year = song.Album.Year
-			if year == 0 && song.Album.ReleaseYear != 0 {
-				year = song.Album.ReleaseYear
-			}
-		}
-		if year == 0 && !song.ReleaseDate.IsZero() {
-			year = song.ReleaseDate.Year()
-		}
-
-		coverURL := song.CoverURL
-		if coverURL == "" && song.Album != nil {
-			coverURL = song.Album.CoverURL
-		}
-
-		var subParts []string
-		if artistName != "" {
-			subParts = append(subParts, artistName)
-		}
-		if albumTitle != "" {
-			subParts = append(subParts, albumTitle)
-		}
-		subtitle := strings.Join(subParts, " · ")
-
-		return &MediaAttachmentDTO{
-			Type:       "song",
-			ID:         song.ID,
-			Title:      song.Title,
-			Subtitle:   subtitle,
-			CoverURL:   coverURL,
-			AudioURL:   song.AudioURL,
-			Duration:   song.DurationSec,
-			Artist:     artistName,
-			AlbumID:    albumID,
-			AlbumTitle: albumTitle,
-			Year:       year,
-		}, nil
-	case "album":
-		var album model.Album
-		err := s.db.Model(&model.Album{}).
-			Preload("Artists").
-			Preload("Songs").
-			Where("id = ?", *note.MediaAttachmentID).
-			First(&album).Error
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return &MediaAttachmentDTO{Type: "album", ID: *note.MediaAttachmentID}, nil
-			}
-			return nil, err
-		}
-
-		artistName := ""
-		if len(album.Artists) > 0 && strings.TrimSpace(album.Artists[0].Name) != "" {
-			artistName = strings.TrimSpace(album.Artists[0].Name)
-		}
-
-		year := album.Year
-		if year == 0 && album.ReleaseYear != 0 {
-			year = album.ReleaseYear
-		}
-		if year == 0 && !album.ReleaseDate.IsZero() {
-			year = album.ReleaseDate.Year()
-		}
-
-		var subParts []string
-		if artistName != "" {
-			subParts = append(subParts, artistName)
-		}
-		if year > 0 {
-			subParts = append(subParts, fmt.Sprintf("%d", year))
-		}
-		if len(album.Songs) > 0 {
-			subParts = append(subParts, fmt.Sprintf("%d 首曲目", len(album.Songs)))
-		}
-		subtitle := strings.Join(subParts, " · ")
-
-		return &MediaAttachmentDTO{
-			Type:      "album",
-			ID:        album.ID,
-			Title:     album.Title,
-			Subtitle:  subtitle,
-			CoverURL:  album.CoverURL,
-			Artist:    artistName,
-			Year:      year,
-			SongCount: len(album.Songs),
-		}, nil
-	case "video":
-		var row struct {
-			ID           uuid.UUID `gorm:"column:id"`
-			Title        string    `gorm:"column:title"`
-			ThumbnailURL string    `gorm:"column:thumbnail_url"`
-			DurationSec  int       `gorm:"column:duration_sec"`
-		}
-		err := s.db.Model(&model.Video{}).Select("id, title, thumbnail_url, duration_sec").Where("id = ?", *note.MediaAttachmentID).First(&row).Error
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return &MediaAttachmentDTO{Type: "video", ID: *note.MediaAttachmentID}, nil
-			}
-			return nil, err
-		}
-		return &MediaAttachmentDTO{
-			Type:     "video",
-			ID:       row.ID,
-			Title:    row.Title,
-			CoverURL: row.ThumbnailURL,
-			Duration: row.DurationSec,
-		}, nil
-	default:
-		return nil, nil
-	}
 }
 
 func (s *Service) syncShortNoteReferences(tx *gorm.DB, note model.ShortNote) ([]reference.ResolvedReference, error) {

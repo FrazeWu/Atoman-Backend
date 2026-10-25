@@ -27,7 +27,7 @@ func (h *Handler) listChannels(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, channels)
+	httpx.OK(c, http.StatusOK, channelResponsesFromModels(channels))
 }
 
 // getChannel godoc
@@ -53,7 +53,7 @@ func (h *Handler) getChannel(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, channel)
+	httpx.OK(c, http.StatusOK, channelResponseFromModel(channel))
 }
 
 func (h *Handler) getChannelCollections(c *gin.Context) {
@@ -94,7 +94,7 @@ func (h *Handler) getChannelBySlug(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, channel)
+	httpx.OK(c, http.StatusOK, channelResponseFromModel(channel))
 }
 
 // listUserCollections godoc
@@ -158,7 +158,7 @@ func (h *Handler) ensureDefaultChannel(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, channel)
+	httpx.OK(c, http.StatusOK, channelResponseFromModel(channel))
 }
 
 func (h *Handler) createChannel(c *gin.Context) {
@@ -177,7 +177,7 @@ func (h *Handler) createChannel(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusCreated, channel)
+	httpx.OK(c, http.StatusCreated, channelResponseFromModel(channel))
 }
 
 func (h *Handler) updateChannel(c *gin.Context) {
@@ -201,7 +201,7 @@ func (h *Handler) updateChannel(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, channel)
+	httpx.OK(c, http.StatusOK, channelResponseFromModel(channel))
 }
 
 func (h *Handler) deleteChannel(c *gin.Context) {

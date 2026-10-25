@@ -251,7 +251,7 @@ func (s *Service) getSubscribedBlogFeed(
 	for i := range shortNotes {
 		items = append(items, TimelineItemDTO{
 			Type:        "short_note",
-			ShortNote:   &shortNotes[i],
+			ShortNote:   timelineShortNoteDTO(shortNotes[i]),
 			PublishedAt: shortNotes[i].CreatedAt,
 			IsRead:      shortNoteRead[shortNotes[i].ID],
 		})
@@ -545,9 +545,8 @@ func timelinePostDTO(post model.Post, engagement PostEngagementCount) *TimelineP
 	post.BookmarksCount = engagement.BookmarksCount
 	post.RatingScore = engagement.RatingScore
 	post.RatingCount = engagement.RatingCount
-	return &TimelinePostDTO{
-		Post:          post,
-		LikesCount:    engagement.LikesCount,
-		CommentsCount: engagement.CommentsCount,
-	}
+	dto := timelinePostDTOFromModel(post)
+	dto.LikesCount = engagement.LikesCount
+	dto.CommentsCount = engagement.CommentsCount
+	return dto
 }

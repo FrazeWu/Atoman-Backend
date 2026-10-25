@@ -47,7 +47,7 @@ func (s *Service) ConvertStandaloneSongToAlbum(user authctx.CurrentUser, songID 
 
 	albumID := uuid.New()
 	promoted, err := storage.PromoteMusicUploadAsset(
-		s.s3, input.CoverURL,
+		s.db, s.s3, user.ID, input.CoverURL,
 		storage.BuildMusicAlbumCoverVersionKey(albumID.String(), uuid.NewString(), path.Ext(input.CoverURL)),
 	)
 	if err != nil {
@@ -182,7 +182,7 @@ func (s *Service) ConvertAlbumToStandaloneSong(user authctx.CurrentUser, albumID
 		song := songs[0]
 		songID = song.ID
 		promoted, err = storage.PromoteMusicUploadAsset(
-			s.s3, input.CoverURL,
+			s.db, s.s3, user.ID, input.CoverURL,
 			storage.BuildMusicSongCoverVersionKey(song.ID.String(), uuid.NewString(), path.Ext(input.CoverURL)),
 		)
 		if err != nil {

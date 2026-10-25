@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"atoman/internal/model"
@@ -76,6 +77,41 @@ func TestSetAlbumProtectionCanBeReenabledAfterSoftDelete(t *testing.T) {
 	}
 	if rows[1].ProtectionLevel != "semi" {
 		t.Fatalf("expected latest protection level semi, got %q", rows[1].ProtectionLevel)
+	}
+}
+
+func TestPublicProtectionReadsDoNotExposeProtectedUserPrivateFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.ContentProtection{})
+	admin := model.User{Username: "protection-reader", Email: "private-protection-reader@example.test", Password: "private-hash", Role: authctx.RoleAdmin, IsActive: true}
+	if err := db.Create(&admin).Error; err != nil {
+		t.Fatalf("create protection user: %v", err)
+	}
+	contentID := uuid.New()
+	if err := db.Create(&model.ContentProtection{ContentType: "album", ContentID: contentID, ProtectionLevel: "full", ProtectedBy: admin.UUID}).Error; err != nil {
+		t.Fatalf("create content protection: %v", err)
+	}
+
+	router := gin.New()
+	router.GET("/api/v1/albums/:id/protection", GetAlbumProtectionHandler(db))
+	router.GET("/api/v1/songs/:id/protection", GetSongProtectionHandler(db))
+	router.GET("/api/v1/artists/:id/protection", GetArtistProtectionHandler(db))
+	for _, path := range []string{
+		"/api/v1/albums/" + contentID.String() + "/protection",
+		"/api/v1/songs/" + contentID.String() + "/protection",
+		"/api/v1/artists/" + contentID.String() + "/protection",
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected public protection read 200 for %s, got %d: %s", path, response.Code, response.Body.String())
+		}
+		for _, privateField := range []string{`"email"`, `"password"`, `"auth_version"`} {
+			if strings.Contains(response.Body.String(), privateField) {
+				t.Fatalf("protection response %s includes private field %s: %s", path, privateField, response.Body.String())
+			}
+		}
 	}
 }
 

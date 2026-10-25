@@ -104,13 +104,13 @@ func (s *Service) GetBookmarkedFeed(user authctx.CurrentUser, query FeedQuery) (
 	}
 	for index := range episodes {
 		rows = append(rows, bookmarkedTimelineItem{
-			item: TimelineItemDTO{Type: "podcast_episode", PodcastEpisode: &episodes[index], PublishedAt: postTimelinePublishedAt(*episodes[index].Post)},
+			item: TimelineItemDTO{Type: "podcast_episode", PodcastEpisode: timelinePodcastEpisodeDTO(episodes[index]), PublishedAt: postTimelinePublishedAt(*episodes[index].Post)},
 			at:   podcastTimes[episodes[index].ID],
 		})
 	}
 	for index := range videos {
 		rows = append(rows, bookmarkedTimelineItem{
-			item: TimelineItemDTO{Type: "video", Video: &videos[index], PublishedAt: videos[index].CreatedAt},
+			item: TimelineItemDTO{Type: "video", Video: timelineVideoDTO(videos[index]), PublishedAt: videos[index].CreatedAt},
 			at:   videoTimes[videos[index].ID],
 		})
 	}

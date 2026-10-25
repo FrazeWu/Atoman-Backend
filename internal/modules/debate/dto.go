@@ -85,7 +85,18 @@ type DebateReferenceRelationDTO struct {
 
 type DebateDTO struct {
 	model.Debate
+	User       *model.PublicUserDTO `json:"user,omitempty"`
 	References []DebateReferenceDTO `json:"references"`
+}
+
+type DebateListItemDTO struct {
+	model.Debate
+	User *model.PublicUserDTO `json:"user,omitempty"`
+}
+
+type DebateGraphNodeDTO struct {
+	model.Debate
+	User *model.PublicUserDTO `json:"user,omitempty"`
 }
 
 type DebateSnapshot struct {
@@ -100,7 +111,7 @@ type DebateRevisionDTO struct {
 	VersionNumber      int                  `json:"version_number"`
 	PreviousRevisionID *uuid.UUID           `json:"previous_revision_id,omitempty"`
 	EditorID           uuid.UUID            `json:"editor_id"`
-	Editor             *model.User          `json:"editor,omitempty"`
+	Editor             *model.PublicUserDTO `json:"editor,omitempty"`
 	EditSummary        string               `json:"edit_summary"`
 	EditType           string               `json:"edit_type"`
 	Status             string               `json:"status"`
@@ -124,7 +135,8 @@ type RevisionDiffDTO struct {
 
 type DebateGraph struct {
 	RootID            uuid.UUID              `json:"root_id"`
-	Nodes             []model.Debate         `json:"nodes"`
+	Nodes             []DebateGraphNodeDTO   `json:"nodes"`
 	Relations         []model.DebateRelation `json:"relations"`
 	ExpandableNodeIDs []uuid.UUID            `json:"expandable_node_ids"`
+	HasMore           bool                   `json:"has_more"`
 }

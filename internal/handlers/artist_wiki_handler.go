@@ -207,7 +207,7 @@ func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionS
 		var promoted storage.PromotedMusicAsset
 		if imageURL, ok := input.Changes["image_url"].(string); ok && strings.TrimSpace(imageURL) != "" {
 			promoted, err = storage.PromoteMusicUploadAsset(
-				s3Client, imageURL,
+				db, s3Client, editorUUID, imageURL,
 				storage.BuildMusicArtistImageVersionKey(artistID.String(), uuid.NewString(), path.Ext(imageURL)),
 			)
 			if err != nil {

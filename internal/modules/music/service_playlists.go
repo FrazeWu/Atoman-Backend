@@ -32,7 +32,7 @@ func (s *Service) CreatePlaylist(user authctx.CurrentUser, req CreatePlaylistReq
 		IsPublic:    req.IsPublic,
 	}
 	asset, err := storage.PromoteMusicUploadAsset(
-		s.s3, playlist.CoverURL,
+		s.db, s.s3, user.ID, playlist.CoverURL,
 		storage.BuildMusicPlaylistCoverVersionKey(playlist.ID.String(), uuid.NewString(), path.Ext(playlist.CoverURL)),
 	)
 	if err != nil {
@@ -87,6 +87,9 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 		}
 		return model.Playlist{}, err
 	}
+	if req.IsPublic != nil && isSystemPlaylist(playlist) && *req.IsPublic {
+		return model.Playlist{}, apperr.Conflict("music.system_playlist_protected", "System playlist cannot be public")
+	}
 
 	updates := map[string]any{}
 	oldObjectKey, newObjectKey := "", ""
@@ -105,7 +108,7 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 	}
 	if req.CoverURL != nil {
 		asset, err := storage.PromoteMusicUploadAsset(
-			s.s3, strings.TrimSpace(*req.CoverURL),
+			s.db, s.s3, user.ID, strings.TrimSpace(*req.CoverURL),
 			storage.BuildMusicPlaylistCoverVersionKey(playlist.ID.String(), uuid.NewString(), path.Ext(*req.CoverURL)),
 		)
 		if err != nil {
@@ -115,9 +118,6 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 		oldObjectKey, newObjectKey = asset.SourceKey, asset.DestinationKey
 	}
 	if req.IsPublic != nil {
-		if isSystemPlaylist(playlist) && *req.IsPublic {
-			return model.Playlist{}, apperr.Conflict("music.system_playlist_protected", "System playlist cannot be public")
-		}
 		updates["is_public"] = *req.IsPublic
 	}
 	if len(updates) == 0 {

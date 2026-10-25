@@ -213,7 +213,7 @@ func revisionDTO(revision model.Revision) (DebateRevisionDTO, error) {
 	}
 	return DebateRevisionDTO{
 		ID: revision.ID, VersionNumber: revision.VersionNumber, PreviousRevisionID: revision.PreviousRevisionID,
-		EditorID: revision.EditorID, Editor: revision.Editor, EditSummary: revision.EditSummary,
+		EditorID: revision.EditorID, Editor: model.PublicUserFromUser(revision.Editor), EditSummary: revision.EditSummary,
 		EditType: revision.EditType, Status: revision.Status, IsCurrent: revision.IsCurrent,
 		CreatedAt: revision.CreatedAt, Snapshot: snapshot,
 	}, nil

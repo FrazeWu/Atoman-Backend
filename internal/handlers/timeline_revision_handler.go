@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"atoman/internal/platform/authctx"
@@ -52,12 +53,37 @@ func saveEventRevision(db *gorm.DB, event model.TimelineEvent, editorID uuid.UUI
 func GetTimelineEventHistory(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		viewer, ok := authctx.Current(c)
+		if !ok || viewer.ID == uuid.Nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
+			return
+		}
+		var event model.TimelineEvent
+		if err := db.First(&event, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch event"})
+			return
+		}
+		isOwner := event.UserID == viewer.ID
+		isAdmin := authctx.RoleAtLeast(viewer.Role, authctx.RoleAdmin)
+		canSeePrivateHistory := isOwner || isAdmin
 		var revisions []model.TimelineRevision
-		if err := db.Preload("Editor").Where("event_id = ?", id).Order("created_at DESC").Find(&revisions).Error; err != nil {
+		query := db.Preload("Editor").Where("event_id = ?", id)
+		if !event.IsPublic && !canSeePrivateHistory {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+		if !canSeePrivateHistory {
+			query = query.Where("is_public = ?", true)
+		}
+		if err := query.Order("created_at DESC").Find(&revisions).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch history"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"data": revisions})
+		c.JSON(http.StatusOK, gin.H{"data": timelineRevisionsFromModels(revisions)})
 	}
 }
 

@@ -59,6 +59,7 @@ func (s *Service) topicDTOs(db *gorm.DB, topics []model.ForumTopic, user authctx
 	for index, topic := range topics {
 		dtos[index] = TopicDTO{
 			ForumTopic: topic,
+			User:       model.PublicUserFromUser(topic.User),
 			State: TopicStateDTO{
 				Closed: topic.Closed, Solved: topic.IsSolved, Pinned: topic.Pinned, Featured: topic.Featured,
 			},

@@ -33,6 +33,23 @@ type SEOSitemapResponse struct {
 	Data []SEOSitemapItemDTO `json:"data"`
 }
 
+type channelResponseDTO struct {
+	model.Channel
+	User *model.PublicUserDTO `json:"user,omitempty"`
+}
+
+func channelResponseFromModel(channel model.Channel) channelResponseDTO {
+	return channelResponseDTO{Channel: channel, User: model.PublicUserFromUser(channel.User)}
+}
+
+func channelResponsesFromModels(channels []model.Channel) []channelResponseDTO {
+	result := make([]channelResponseDTO, 0, len(channels))
+	for _, channel := range channels {
+		result = append(result, channelResponseFromModel(channel))
+	}
+	return result
+}
+
 type CreatePostRequest struct {
 	Title        string    `json:"title"`
 	Content      string    `json:"content"`
@@ -95,16 +112,16 @@ type BookmarkBlogContentDTO struct {
 }
 
 type BlogCollectionDTO struct {
-	ID          uuid.UUID      `json:"id"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	ChannelID   uuid.UUID      `json:"channel_id"`
-	Channel     *model.Channel `json:"channel,omitempty"`
-	CreatedBy   *uuid.UUID     `json:"created_by,omitempty"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	CoverURL    string         `json:"cover_url"`
-	IsDefault   bool           `json:"is_default"`
+	ID          uuid.UUID           `json:"id"`
+	CreatedAt   time.Time           `json:"created_at"`
+	UpdatedAt   time.Time           `json:"updated_at"`
+	ChannelID   uuid.UUID           `json:"channel_id"`
+	Channel     *channelResponseDTO `json:"channel,omitempty"`
+	CreatedBy   *uuid.UUID          `json:"created_by,omitempty"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	CoverURL    string              `json:"cover_url"`
+	IsDefault   bool                `json:"is_default"`
 }
 
 type BlogContentDTO struct {
@@ -112,9 +129,9 @@ type BlogContentDTO struct {
 	CreatedAt            time.Time                     `json:"created_at"`
 	UpdatedAt            time.Time                     `json:"updated_at"`
 	UserID               uuid.UUID                     `json:"user_id"`
-	User                 *model.User                   `json:"user,omitempty"`
+	User                 *model.PublicUserDTO          `json:"user,omitempty"`
 	ChannelID            *uuid.UUID                    `json:"channel_id,omitempty"`
-	Channel              *model.Channel                `json:"channel,omitempty"`
+	Channel              *channelResponseDTO           `json:"channel,omitempty"`
 	CollectionID         *uuid.UUID                    `json:"collection_id,omitempty"`
 	Collection           *BlogCollectionDTO            `json:"collection,omitempty"`
 	Collections          []BlogCollectionDTO           `json:"collections,omitempty"`
@@ -145,13 +162,31 @@ type BlogContentDTO struct {
 func newBlogContentDTOFromCanonical(content BlogContent) BlogContentDTO {
 	var collection *BlogCollectionDTO
 	if content.Collection != nil {
-		collection = &BlogCollectionDTO{ID: content.Collection.ID, CreatedAt: content.Collection.CreatedAt, UpdatedAt: content.Collection.UpdatedAt, ChannelID: content.Collection.ChannelID, Channel: content.Collection.Channel, CreatedBy: content.Collection.CreatedBy, Name: content.Collection.Name, Description: content.Collection.Description, CoverURL: content.Collection.CoverURL, IsDefault: content.Collection.IsDefault}
+		converted := blogCollectionDTOFromCanonical(*content.Collection)
+		collection = &converted
 	}
 	collections := make([]BlogCollectionDTO, 0, len(content.Collections))
 	for _, item := range content.Collections {
-		collections = append(collections, BlogCollectionDTO(item))
+		collections = append(collections, blogCollectionDTOFromCanonical(item))
 	}
-	return BlogContentDTO{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt, UserID: content.UserID, User: content.User, ChannelID: content.ChannelID, Channel: content.Channel, CollectionID: content.CollectionID, Collection: collection, Collections: collections, CollectionPosition: content.CollectionPosition, CollectionConflict: content.CollectionConflict, Title: content.Title, Content: content.Content, Summary: content.Summary, LanguageCode: content.LanguageCode, CoverURL: content.CoverURL, Status: content.Status, Visibility: content.Visibility, Pinned: content.Pinned, ScheduledAt: content.ScheduledAt, PublishedAt: content.PublishedAt, ViewCount: content.ViewCount, BookmarksCount: content.BookmarksCount, RatingScore: content.RatingScore, RatingCount: content.RatingCount, ViewerRating: content.ViewerRating, WeightedRatingScore: content.WeightedRatingScore, WeightedRatingCount: content.WeightedRatingCount, WeightedRatingActive: content.WeightedRatingActive, Tags: content.Tags, References: []reference.ResolvedReference{}}
+	return BlogContentDTO{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt, UserID: content.UserID, User: model.PublicUserFromUser(content.User), ChannelID: content.ChannelID, Channel: channelResponsePtr(content.Channel), CollectionID: content.CollectionID, Collection: collection, Collections: collections, CollectionPosition: content.CollectionPosition, CollectionConflict: content.CollectionConflict, Title: content.Title, Content: content.Content, Summary: content.Summary, LanguageCode: content.LanguageCode, CoverURL: content.CoverURL, Status: content.Status, Visibility: content.Visibility, Pinned: content.Pinned, ScheduledAt: content.ScheduledAt, PublishedAt: content.PublishedAt, ViewCount: content.ViewCount, BookmarksCount: content.BookmarksCount, RatingScore: content.RatingScore, RatingCount: content.RatingCount, ViewerRating: content.ViewerRating, WeightedRatingScore: content.WeightedRatingScore, WeightedRatingCount: content.WeightedRatingCount, WeightedRatingActive: content.WeightedRatingActive, Tags: content.Tags, References: []reference.ResolvedReference{}}
+}
+
+func blogCollectionDTOFromCanonical(collection BlogCollection) BlogCollectionDTO {
+	return BlogCollectionDTO{
+		ID: collection.ID, CreatedAt: collection.CreatedAt, UpdatedAt: collection.UpdatedAt,
+		ChannelID: collection.ChannelID, Channel: channelResponsePtr(collection.Channel),
+		CreatedBy: collection.CreatedBy, Name: collection.Name, Description: collection.Description,
+		CoverURL: collection.CoverURL, IsDefault: collection.IsDefault,
+	}
+}
+
+func channelResponsePtr(channel *model.Channel) *channelResponseDTO {
+	if channel == nil {
+		return nil
+	}
+	response := channelResponseFromModel(*channel)
+	return &response
 }
 
 type BlogContentVersionDTO struct {

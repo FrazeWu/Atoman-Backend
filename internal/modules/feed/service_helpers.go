@@ -248,7 +248,7 @@ func (priorities subscriptionPriorityIndex) priorityForItem(item TimelineItemDTO
 	}
 	if item.PodcastEpisode != nil {
 		if item.PodcastEpisode.Post != nil {
-			return priorities.priorityForPost(item.PodcastEpisode.Post)
+			return priorities.priorityForPost(&item.PodcastEpisode.Post.Post)
 		}
 		return highestConfiguredPriority(priorities.channels[item.PodcastEpisode.ChannelID])
 	}

@@ -1030,6 +1030,11 @@ func TestUserBlockRoutesCreateListAndDeleteBlock(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected list 200, got %d: %s", w.Code, w.Body.String())
 	}
+	for _, privateField := range []string{`"email"`, `"password"`, `"auth_version"`} {
+		if strings.Contains(w.Body.String(), privateField) {
+			t.Fatalf("blocked-user response includes private user field %s: %s", privateField, w.Body.String())
+		}
+	}
 	var listResponse struct {
 		Data []struct {
 			BlockedID string `json:"blocked_id"`

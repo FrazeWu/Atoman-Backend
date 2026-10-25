@@ -32,7 +32,7 @@ func TestTimelineFeedItemTypeRecognizesLegacyGitHubRSSSources(t *testing.T) {
 
 func TestTimelineHelpersSortUnifiedTypesWithStableIDs(t *testing.T) {
 	noteID := uuid.New()
-	item := TimelineItemDTO{Type: "short_note", ShortNote: &model.ShortNote{Base: model.Base{ID: noteID}}}
+	item := TimelineItemDTO{Type: "short_note", ShortNote: timelineShortNoteDTO(model.ShortNote{Base: model.Base{ID: noteID}})}
 	require.Equal(t, noteID.String(), timelineItemID(item))
 	require.Equal(t, 1, timelineTypeRank("short_note"))
 	require.Equal(t, 4, timelineTypeRank("project_update"))

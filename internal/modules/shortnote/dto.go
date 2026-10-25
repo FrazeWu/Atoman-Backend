@@ -35,21 +35,21 @@ type voteInput struct {
 }
 
 type NoteDTO struct {
-	ID              uuid.UUID           `json:"id"`
-	UserID          uuid.UUID           `json:"user_id"`
-	User            *model.User         `json:"user,omitempty"`
-	Content         string              `json:"content"`
-	Media           []MediaDTO          `json:"media"`
-	MediaAttachment *MediaAttachmentDTO `json:"media_attachment,omitempty"`
-	LikesCount      int64               `json:"likes_count"`
-	DislikesCount   int64               `json:"dislikes_count"`
-	VoteScore       int64               `json:"vote_score"`
-	ViewerVote      string              `json:"viewer_vote"`
-	CommentsCount   int                 `json:"comments_count"`
-	Liked           bool                `json:"liked"`
-	Edited          bool                `json:"edited"`
-	CreatedAt       time.Time           `json:"created_at"`
-	UpdatedAt       time.Time           `json:"updated_at"`
+	ID              uuid.UUID            `json:"id"`
+	UserID          uuid.UUID            `json:"user_id"`
+	User            *model.PublicUserDTO `json:"user,omitempty"`
+	Content         string               `json:"content"`
+	Media           []MediaDTO           `json:"media"`
+	MediaAttachment *MediaAttachmentDTO  `json:"media_attachment,omitempty"`
+	LikesCount      int64                `json:"likes_count"`
+	DislikesCount   int64                `json:"dislikes_count"`
+	VoteScore       int64                `json:"vote_score"`
+	ViewerVote      string               `json:"viewer_vote"`
+	CommentsCount   int                  `json:"comments_count"`
+	Liked           bool                 `json:"liked"`
+	Edited          bool                 `json:"edited"`
+	CreatedAt       time.Time            `json:"created_at"`
+	UpdatedAt       time.Time            `json:"updated_at"`
 }
 
 type MediaDTO struct {
