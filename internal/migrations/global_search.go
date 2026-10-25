@@ -24,7 +24,7 @@ func RunGlobalSearchIndexes(db *gorm.DB) error {
 			return fmt.Errorf("create global search index: %w", err)
 		}
 	}
-	return nil
+	return RunFeedShortSearchIndexes(db)
 }
 
 func globalSearchIndexStatements(operatorClass ...string) []string {

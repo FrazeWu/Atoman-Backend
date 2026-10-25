@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/modules/search"
@@ -109,6 +110,11 @@ func (p *PublicProvider) Search(ctx context.Context, _ search.Viewer, req search
 			args[i] = pattern
 		}
 		base = base.Where(fields, args...)
+		if p.module == "feed" && req.Type == "article" && utf8.RuneCountInString(query) == 2 {
+			// 索引只筛候选，原 LIKE 条件仍负责精确匹配、权限和分页计数。
+			base = base.Where(`public.atoman_feed_search_bigrams_v1(i.title, i.summary, i.author)
+				@> public.atoman_feed_search_bigrams_v1(?, '', '')`, query)
+		}
 	}
 	var total int64
 	if req.ExactTotal {

@@ -8,6 +8,7 @@ import (
 
 	"atoman/internal/collab"
 	"atoman/internal/middleware"
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/modules/search"
 	"atoman/internal/platform/authsession"
@@ -20,6 +21,7 @@ func TestRegisterV1RoutesMountsUnifiedSearchWithoutSwitchingLegacySearch(t *test
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.SiteSetting{}, &model.User{}, &model.UserSettings{}, &model.Revision{}, &model.BookWork{}, &model.BookEdition{}, &model.BookPerson{}, &model.BookContribution{}, &model.BookRating{}, &model.BookList{}, &model.FeedSource{}, &model.FeedItem{})
+	require.NoError(t, migrations.RunFeedShortSearchIndexes(db))
 	testdb.Migrate(t, db, &model.Song{}, &model.Album{}, &model.Artist{}, &model.ArtistAlias{}, &model.SongArtist{}, &model.AlbumArtist{}, &model.MusicSongLyric{}, &model.Playlist{}, &model.PlaylistSong{}, &model.PlaylistBookmark{})
 	testdb.Migrate(t, db, &model.Channel{}, &model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentBlogTag{}, &model.ContentBlogUserTag{}, &model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.ShortNote{})
 	testdb.Migrate(t, db, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumUserTrust{}, &model.ForumCategoryPermission{}, &model.ForumGroup{}, &model.ForumGroupMember{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.Video{}, &model.PodcastEpisode{}, &model.Debate{}, &model.TimelinePerson{}, &model.TimelineEvent{})

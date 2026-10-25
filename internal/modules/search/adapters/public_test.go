@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/modules/search"
 	"atoman/internal/testdb"
@@ -19,6 +20,7 @@ import (
 func TestPublicSearchLinksTargetMatchedContent(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Post{}, &model.PodcastEpisode{}, &model.FeedSource{}, &model.FeedItem{}, &model.TimelineEvent{})
+	require.NoError(t, migrations.RunFeedShortSearchIndexes(db))
 	user := model.User{Username: "search-links", Email: "search-links@example.test", Password: "hash", IsActive: true}
 	require.NoError(t, db.Create(&user).Error)
 	channel := model.Channel{Name: "搜索节目", Slug: "search-show", UserID: &user.UUID}
@@ -129,6 +131,7 @@ func TestEmptyRSSSourcesRemainDiscoverable(t *testing.T) {
 func TestFeedArticleSearchRetainsAllIndexedFields(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{})
+	require.NoError(t, migrations.RunFeedShortSearchIndexes(db))
 	source := model.FeedSource{Title: "RSS", SourceType: "external_rss", Hash: "indexed-fields"}
 	require.NoError(t, db.Create(&source).Error)
 	provider := NewPublicProvider(db, "feed", "RSS")
