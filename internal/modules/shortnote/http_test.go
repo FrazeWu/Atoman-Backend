@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -97,6 +99,11 @@ func TestShortNoteCreateAndDetailIncludesMediaAndCounts(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"likes_count":1`) || !strings.Contains(w.Body.String(), `"comments_count":3`) || !strings.Contains(w.Body.String(), `"liked":true`) || !strings.Contains(w.Body.String(), `"user":{"`) {
 		t.Fatalf("unexpected detail: %d %s", w.Code, w.Body.String())
 	}
+	for _, privateField := range []string{`"email"`, `"password"`, `"auth_version"`} {
+		if strings.Contains(w.Body.String(), privateField) {
+			t.Fatalf("short-note response includes private user field %s: %s", privateField, w.Body.String())
+		}
+	}
 }
 
 func TestShortNoteVoteReturnsNetScoreAndReplacesLegacyLike(t *testing.T) {
@@ -171,6 +178,68 @@ func TestShortNoteTimelineFiltersByAuthor(t *testing.T) {
 	w := shortNoteRequest(t, r, http.MethodGet, "/api/v1/short-notes?user_id="+other.UUID.String(), "")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"content":"bob note"`) || strings.Contains(w.Body.String(), `"content":"alice note"`) || !strings.Contains(w.Body.String(), `"total":1`) {
 		t.Fatalf("unexpected author timeline: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestShortNoteListUsesBoundedQueriesForPage(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	other := model.User{Username: "note-voter", Email: "note-voter@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		note := model.ShortNote{UserID: user.ID, Content: strconv.Itoa(i)}
+		if err := db.Create(&note).Error; err != nil {
+			t.Fatal(err)
+		}
+		direction := "up"
+		if i%2 == 1 {
+			direction = "down"
+		}
+		if err := db.Create(&model.ShortNoteVote{ShortNoteID: note.ID, UserID: user.ID, Direction: direction}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&model.DiscussionTarget{Kind: "short_note", ResourceID: note.ID, ResourceKey: note.ID.String(), CommentCount: i + 1, NextFloor: 1}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			if err := db.Create(&model.Like{UserID: user.ID, TargetType: "short_note", TargetID: note.ID}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&model.Like{UserID: other.UUID, TargetType: "short_note", TargetID: note.ID}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	var queryCount atomic.Int64
+	callbackName := "test:short-note-list-query-count-" + uuid.NewString()
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(*gorm.DB) {
+		queryCount.Add(1)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+	items, total, err := service.List(1, 20, user.ID, nil)
+	if err != nil {
+		t.Fatalf("list notes: %v", err)
+	}
+	if total != 20 || len(items) != 20 {
+		t.Fatalf("expected 20 notes, got len=%d total=%d", len(items), total)
+	}
+	var first NoteDTO
+	for _, item := range items {
+		if item.Content == "0" {
+			first = item
+			break
+		}
+	}
+	if first.LikesCount != 2 || first.ViewerVote != "up" || first.CommentsCount != 1 {
+		t.Fatalf("unexpected batched counts for first note: %+v", first)
+	}
+	if got := queryCount.Load(); got > 12 {
+		t.Fatalf("expected page query count to stay bounded, got %d", got)
 	}
 }
 

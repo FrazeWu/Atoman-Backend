@@ -18,7 +18,7 @@ definitions:
   blog.BlogCollectionDTO:
     properties:
       channel:
-        $ref: '#/definitions/model.Channel'
+        $ref: '#/definitions/blog.channelResponseDTO'
       channel_id:
         type: string
       cover_url:
@@ -43,7 +43,7 @@ definitions:
       bookmarks_count:
         type: integer
       channel:
-        $ref: '#/definitions/model.Channel'
+        $ref: '#/definitions/blog.channelResponseDTO'
       channel_id:
         type: string
       collection:
@@ -95,7 +95,7 @@ definitions:
       updated_at:
         type: string
       user:
-        $ref: '#/definitions/model.User'
+        $ref: '#/definitions/model.PublicUserDTO'
       user_id:
         type: string
       view_count:
@@ -206,7 +206,7 @@ definitions:
       bookmarks_count:
         type: integer
       channel:
-        $ref: '#/definitions/model.Channel'
+        $ref: '#/definitions/blog.channelResponseDTO'
       channel_id:
         type: string
       collection:
@@ -262,7 +262,7 @@ definitions:
       updated_at:
         type: string
       user:
-        $ref: '#/definitions/model.User'
+        $ref: '#/definitions/model.PublicUserDTO'
       user_id:
         type: string
       view_count:
@@ -517,6 +517,33 @@ definitions:
         type: string
     required:
     - content_id
+    type: object
+  blog.channelResponseDTO:
+    properties:
+      ban_reason:
+        type: string
+      ban_until:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      is_anonymous:
+        type: boolean
+      name:
+        type: string
+      slug:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
     type: object
   blog.markdownImportConfirmInput:
     properties:
@@ -1948,7 +1975,7 @@ definitions:
       updated_at:
         type: string
       user:
-        $ref: '#/definitions/model.User'
+        $ref: '#/definitions/model.PublicUserDTO'
       user_id:
         type: string
       view_count:
@@ -1960,9 +1987,11 @@ definitions:
         items:
           type: string
         type: array
+      has_more:
+        type: boolean
       nodes:
         items:
-          $ref: '#/definitions/model.Debate'
+          $ref: '#/definitions/debate.DebateGraphNodeDTO'
         type: array
       relations:
         items:
@@ -1970,6 +1999,72 @@ definitions:
         type: array
       root_id:
         type: string
+    type: object
+  debate.DebateGraphNodeDTO:
+    properties:
+      conclusion_type:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      current_conclusion_event_id:
+        type: string
+      current_revision_id:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      status:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
+      view_count:
+        type: integer
+    type: object
+  debate.DebateListItemDTO:
+    properties:
+      conclusion_type:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      current_conclusion_event_id:
+        type: string
+      current_revision_id:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      status:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
+      view_count:
+        type: integer
     type: object
   debate.DebateReferenceDTO:
     properties:
@@ -2027,7 +2122,7 @@ definitions:
       edit_type:
         type: string
       editor:
-        $ref: '#/definitions/model.User'
+        $ref: '#/definitions/model.PublicUserDTO'
       editor_id:
         type: string
       id:
@@ -2963,6 +3058,58 @@ definitions:
       total:
         type: integer
     type: object
+  feed.TimelineChannelDTO:
+    properties:
+      ban_reason:
+        type: string
+      ban_until:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      is_anonymous:
+        type: boolean
+      name:
+        type: string
+      slug:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
+    type: object
+  feed.TimelineCollectionDTO:
+    properties:
+      channel:
+        $ref: '#/definitions/feed.TimelineChannelDTO'
+      channel_id:
+        type: string
+      content_type:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
   feed.TimelineItem:
     properties:
       feed_item:
@@ -2983,7 +3130,7 @@ definitions:
       is_read:
         type: boolean
       podcast_episode:
-        $ref: '#/definitions/model.PodcastEpisode'
+        $ref: '#/definitions/feed.TimelinePodcastEpisodeDTO'
       post:
         $ref: '#/definitions/feed.TimelinePostDTO'
       priority_reason:
@@ -2991,11 +3138,11 @@ definitions:
       published_at:
         type: string
       short_note:
-        $ref: '#/definitions/model.ShortNote'
+        $ref: '#/definitions/feed.TimelineShortNoteDTO'
       type:
         type: string
       video:
-        $ref: '#/definitions/model.Video'
+        $ref: '#/definitions/feed.TimelineVideoDTO'
     type: object
   feed.TimelineListResponseDTO:
     properties:
@@ -3019,16 +3166,54 @@ definitions:
       total:
         type: integer
     type: object
+  feed.TimelinePodcastEpisodeDTO:
+    properties:
+      audio_url:
+        description: 'Audio file: always local upload (S3/MinIO)'
+        type: string
+      channel:
+        $ref: '#/definitions/feed.TimelineChannelDTO'
+      channel_id:
+        type: string
+      content_id:
+        type: string
+      created_at:
+        type: string
+      duration_sec:
+        type: integer
+      episode_cover_url:
+        description: 'Episode cover: optional; falls back to channel cover in RSS'
+        type: string
+      episode_number:
+        type: integer
+      id:
+        type: string
+      post:
+        $ref: '#/definitions/feed.TimelinePostDTO'
+      post_id:
+        type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      season_number:
+        description: Episode ordering
+        type: integer
+      updated_at:
+        type: string
+      viewer_rating:
+        type: integer
+    type: object
   feed.TimelinePostDTO:
     properties:
       bookmarks_count:
         type: integer
       channel:
-        $ref: '#/definitions/model.Channel'
+        $ref: '#/definitions/feed.TimelineChannelDTO'
       channel_id:
         type: string
       collection:
-        $ref: '#/definitions/model.Collection'
+        $ref: '#/definitions/feed.TimelineCollectionDTO'
       collection_conflict:
         type: boolean
       collection_id:
@@ -3037,7 +3222,7 @@ definitions:
         type: integer
       collections:
         items:
-          $ref: '#/definitions/model.Collection'
+          $ref: '#/definitions/feed.TimelineCollectionDTO'
         type: array
       comments_count:
         type: integer
@@ -3073,7 +3258,7 @@ definitions:
       updated_at:
         type: string
       user:
-        $ref: '#/definitions/model.User'
+        $ref: '#/definitions/model.PublicUserDTO'
       user_id:
         type: string
       view_count:
@@ -3102,12 +3287,119 @@ definitions:
         example: 20
         type: integer
     type: object
+  feed.TimelineShortNoteDTO:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      media:
+        items:
+          $ref: '#/definitions/model.ShortNoteMedia'
+        type: array
+      media_attachment_id:
+        type: string
+      media_attachment_type:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
+    type: object
   feed.TimelineUpdatesResponse:
     properties:
       checked_at:
         type: string
       has_updates:
         type: boolean
+    type: object
+  feed.TimelineVideoDTO:
+    properties:
+      channel:
+        $ref: '#/definitions/feed.TimelineChannelDTO'
+      channel_id:
+        type: string
+      chapters:
+        items:
+          type: object
+        type: array
+      collection:
+        $ref: '#/definitions/feed.TimelineCollectionDTO'
+      collection_conflict:
+        type: boolean
+      collection_id:
+        type: string
+      collection_position:
+        type: integer
+      collections:
+        items:
+          $ref: '#/definitions/feed.TimelineCollectionDTO'
+        type: array
+      created_at:
+        type: string
+      description:
+        type: string
+      duration_sec:
+        type: integer
+      id:
+        type: string
+      like_count:
+        type: integer
+      liked:
+        type: boolean
+      preview_thumbnails:
+        items:
+          type: object
+        type: array
+      processing_error:
+        type: string
+      processing_status:
+        type: string
+      published_at:
+        type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      scheduled_at:
+        type: string
+      status:
+        description: draft | scheduled | published
+        type: string
+      storage_type:
+        description: 'StorageType: "local" (S3/MinIO) or "external" (YouTube, Bilibili,
+          etc.)'
+        type: string
+      subtitle_url:
+        type: string
+      tags:
+        items:
+          $ref: '#/definitions/model.VideoTag'
+        type: array
+      thumbnail_url:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
+      video_url:
+        description: S3 key or external URL
+        type: string
+      view_count:
+        type: integer
+      viewer_rating:
+        type: integer
+      visibility:
+        description: 'Visibility: public | followers | private'
+        type: string
     type: object
   feed.subscriptionRuleInput:
     type: object
@@ -3627,7 +3919,7 @@ definitions:
     properties:
       data:
         items:
-          $ref: '#/definitions/model.Debate'
+          $ref: '#/definitions/debate.DebateListItemDTO'
         type: array
       meta:
         $ref: '#/definitions/httpx.PageMeta'
@@ -4080,7 +4372,7 @@ definitions:
   handlers.ProtectionActionResponse:
     properties:
       data:
-        $ref: '#/definitions/model.ContentProtection'
+        $ref: '#/definitions/handlers.contentProtectionResponse'
       message:
         example: Protection set successfully
         type: string
@@ -4100,7 +4392,7 @@ definitions:
         format: uuid
         type: string
       protected_user:
-        $ref: '#/definitions/model.User'
+        $ref: '#/definitions/model.PublicUserDTO'
       protection_level:
         example: semi
         type: string
@@ -4398,7 +4690,7 @@ definitions:
     properties:
       data:
         items:
-          $ref: '#/definitions/model.TimelineEvent'
+          $ref: '#/definitions/handlers.timelineEventDTO'
         type: array
       limit:
         example: 20
@@ -4413,13 +4705,13 @@ definitions:
   handlers.TimelineEventResponse:
     properties:
       data:
-        $ref: '#/definitions/model.TimelineEvent'
+        $ref: '#/definitions/handlers.timelineEventDTO'
     type: object
   handlers.TimelinePersonListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/model.TimelinePerson'
+          $ref: '#/definitions/handlers.timelinePersonDTO'
         type: array
       limit:
         example: 20
@@ -4434,7 +4726,7 @@ definitions:
   handlers.TimelinePersonResponse:
     properties:
       data:
-        $ref: '#/definitions/model.TimelinePerson'
+        $ref: '#/definitions/handlers.timelinePersonDTO'
     type: object
   handlers.TimelineProposalDecisionInput:
     properties:
@@ -4458,7 +4750,7 @@ definitions:
     properties:
       data:
         items:
-          $ref: '#/definitions/model.TimelineRevision'
+          $ref: '#/definitions/handlers.timelineRevisionDTO'
         type: array
     type: object
   handlers.UpdateAdminUserInput:
@@ -4954,6 +5246,33 @@ definitions:
     required:
     - channel_id
     type: object
+  handlers.contentProtectionResponse:
+    properties:
+      content_id:
+        type: string
+      content_type:
+        description: '''album'' / ''song'''
+        type: string
+      created_at:
+        type: string
+      expires_at:
+        description: Optional expiration
+        type: string
+      id:
+        type: string
+      protected_by:
+        description: Admin who set protection
+        type: string
+      protected_user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      protection_level:
+        description: '''none'' / ''semi'' / ''full'''
+        type: string
+      reason:
+        type: string
+      updated_at:
+        type: string
+    type: object
   handlers.contentRatingSummary:
     properties:
       rating_count:
@@ -5013,6 +5332,79 @@ definitions:
     required:
     - channel_id
     type: object
+  handlers.timelineEventDTO:
+    properties:
+      category:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      end_date:
+        type: string
+      event_date:
+        type: string
+      id:
+        type: string
+      is_public:
+        type: boolean
+      latitude:
+        description: 地理坐标（可选）
+        type: number
+      location:
+        description: 事件发生地点描述（必填）
+        type: string
+      longitude:
+        type: number
+      source:
+        description: 来源/参考资料（必填）
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
+    type: object
+  handlers.timelinePersonDTO:
+    properties:
+      bio:
+        type: string
+      birth_date:
+        type: string
+      created_at:
+        type: string
+      death_date:
+        type: string
+      id:
+        type: string
+      is_public:
+        type: boolean
+      locations:
+        items:
+          $ref: '#/definitions/model.PersonLocation'
+        type: array
+      name:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
+    type: object
   handlers.timelineProposalRequest:
     properties:
       attachment_ids:
@@ -5030,6 +5422,47 @@ definitions:
       patch:
         additionalProperties: {}
         type: object
+    type: object
+  handlers.timelineRevisionDTO:
+    properties:
+      category:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      editor:
+        $ref: '#/definitions/model.PublicUserDTO'
+      editor_id:
+        type: string
+      end_date:
+        type: string
+      event_date:
+        type: string
+      event_id:
+        type: string
+      id:
+        type: string
+      is_public:
+        type: boolean
+      latitude:
+        type: number
+      location:
+        type: string
+      longitude:
+        type: number
+      source:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      updated_at:
+        type: string
     type: object
   handlers.transferChannelOwnershipInput:
     properties:
@@ -5617,33 +6050,6 @@ definitions:
       is_default:
         type: boolean
       name:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  model.ContentProtection:
-    properties:
-      content_id:
-        type: string
-      content_type:
-        description: '''album'' / ''song'''
-        type: string
-      created_at:
-        type: string
-      expires_at:
-        description: Optional expiration
-        type: string
-      id:
-        type: string
-      protected_by:
-        description: Admin who set protection
-        type: string
-      protected_user:
-        $ref: '#/definitions/model.User'
-      protection_level:
-        description: '''none'' / ''semi'' / ''full'''
-        type: string
-      reason:
         type: string
       updated_at:
         type: string
@@ -6584,6 +6990,21 @@ definitions:
       visibility:
         type: string
     type: object
+  model.PublicUserDTO:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: integer
+      role:
+        type: string
+      username:
+        type: string
+      uuid:
+        type: string
+    type: object
   model.ReadingListItem:
     properties:
       created_at:
@@ -6648,29 +7069,6 @@ definitions:
       version_number:
         description: Version control
         type: integer
-    type: object
-  model.ShortNote:
-    properties:
-      content:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      media:
-        items:
-          $ref: '#/definitions/model.ShortNoteMedia'
-        type: array
-      media_attachment_id:
-        type: string
-      media_attachment_type:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
     type: object
   model.ShortNoteMedia:
     properties:
@@ -6975,48 +7373,6 @@ definitions:
       user_id:
         type: string
     type: object
-  model.TimelineEvent:
-    properties:
-      category:
-        type: string
-      content:
-        type: string
-      created_at:
-        type: string
-      description:
-        type: string
-      end_date:
-        type: string
-      event_date:
-        type: string
-      id:
-        type: string
-      is_public:
-        type: boolean
-      latitude:
-        description: 地理坐标（可选）
-        type: number
-      location:
-        description: 事件发生地点描述（必填）
-        type: string
-      longitude:
-        type: number
-      source:
-        description: 来源/参考资料（必填）
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      title:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-    type: object
   model.TimelinePerson:
     properties:
       bio:
@@ -7046,47 +7402,6 @@ definitions:
       user:
         $ref: '#/definitions/model.User'
       user_id:
-        type: string
-    type: object
-  model.TimelineRevision:
-    properties:
-      category:
-        type: string
-      content:
-        type: string
-      created_at:
-        type: string
-      description:
-        type: string
-      editor:
-        $ref: '#/definitions/model.User'
-      editor_id:
-        type: string
-      end_date:
-        type: string
-      event_date:
-        type: string
-      event_id:
-        type: string
-      id:
-        type: string
-      is_public:
-        type: boolean
-      latitude:
-        type: number
-      location:
-        type: string
-      longitude:
-        type: number
-      source:
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      title:
-        type: string
-      updated_at:
         type: string
     type: object
   model.User:
@@ -9840,7 +10155,7 @@ definitions:
       updated_at:
         type: string
       user:
-        $ref: '#/definitions/model.User'
+        $ref: '#/definitions/model.PublicUserDTO'
       user_id:
         type: string
       viewer_vote:

@@ -63,6 +63,11 @@ func TestGetExploreFeedHandlerAllowsAnonymousPublicRead(t *testing.T) {
 	if len(payload.Data) == 0 {
 		t.Fatalf("expected public explore items, got body %s", rr.Body.String())
 	}
+	for _, privateField := range []string{`"email"`, `"password"`, `"auth_version"`} {
+		if strings.Contains(rr.Body.String(), privateField) {
+			t.Fatalf("public explore response includes private field %s: %s", privateField, rr.Body.String())
+		}
+	}
 }
 
 func TestSubscribedFeedHandlerPriorityInboxExposesReason(t *testing.T) {

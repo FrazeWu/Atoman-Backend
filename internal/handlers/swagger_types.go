@@ -325,12 +325,12 @@ type BookmarkFolderListResponse struct {
 }
 
 type ProtectionPayload struct {
-	ProtectionLevel string      `json:"protection_level" example:"semi"`
-	Reason          string      `json:"reason,omitempty" example:"条目进入审核期"`
-	ProtectedBy     string      `json:"protected_by,omitempty" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
-	ProtectedUser   *model.User `json:"protected_user,omitempty"`
-	ExpiresAt       string      `json:"expires_at,omitempty" format:"date-time" example:"2026-06-01T00:00:00Z"`
-	CreatedAt       string      `json:"created_at,omitempty" format:"date-time" example:"2026-05-25T12:00:00Z"`
+	ProtectionLevel string               `json:"protection_level" example:"semi"`
+	Reason          string               `json:"reason,omitempty" example:"条目进入审核期"`
+	ProtectedBy     string               `json:"protected_by,omitempty" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
+	ProtectedUser   *model.PublicUserDTO `json:"protected_user,omitempty"`
+	ExpiresAt       string               `json:"expires_at,omitempty" format:"date-time" example:"2026-06-01T00:00:00Z"`
+	CreatedAt       string               `json:"created_at,omitempty" format:"date-time" example:"2026-05-25T12:00:00Z"`
 }
 
 type ProtectionResponse struct {
@@ -338,8 +338,8 @@ type ProtectionResponse struct {
 }
 
 type ProtectionActionResponse struct {
-	Message string                  `json:"message" example:"Protection set successfully"`
-	Data    model.ContentProtection `json:"data"`
+	Message string                    `json:"message" example:"Protection set successfully"`
+	Data    contentProtectionResponse `json:"data"`
 }
 
 type ForumCategoryInput struct {
@@ -818,25 +818,25 @@ type SubscriptionStatusResponse struct {
 }
 
 type TimelineEventResponse struct {
-	Data model.TimelineEvent `json:"data"`
+	Data timelineEventDTO `json:"data"`
 }
 
 type TimelineEventListResponse struct {
-	Data  []model.TimelineEvent `json:"data"`
-	Total int64                 `json:"total" example:"42"`
-	Page  int                   `json:"page" example:"1"`
-	Limit int                   `json:"limit" example:"20"`
+	Data  []timelineEventDTO `json:"data"`
+	Total int64              `json:"total" example:"42"`
+	Page  int                `json:"page" example:"1"`
+	Limit int                `json:"limit" example:"20"`
 }
 
 type TimelinePersonResponse struct {
-	Data model.TimelinePerson `json:"data"`
+	Data timelinePersonDTO `json:"data"`
 }
 
 type TimelinePersonListResponse struct {
-	Data  []model.TimelinePerson `json:"data"`
-	Total int64                  `json:"total" example:"18"`
-	Page  int                    `json:"page" example:"1"`
-	Limit int                    `json:"limit" example:"20"`
+	Data  []timelinePersonDTO `json:"data"`
+	Total int64               `json:"total" example:"18"`
+	Page  int                 `json:"page" example:"1"`
+	Limit int                 `json:"limit" example:"20"`
 }
 
 type PersonLocationResponse struct {
@@ -848,7 +848,7 @@ type PersonLocationListResponse struct {
 }
 
 type TimelineRevisionListResponse struct {
-	Data []model.TimelineRevision `json:"data"`
+	Data []timelineRevisionDTO `json:"data"`
 }
 
 type DebateResponse struct {
@@ -856,8 +856,8 @@ type DebateResponse struct {
 }
 
 type DebateListResponse struct {
-	Data []model.Debate `json:"data"`
-	Meta httpx.PageMeta `json:"meta"`
+	Data []debate.DebateListItemDTO `json:"data"`
+	Meta httpx.PageMeta             `json:"meta"`
 }
 
 type DebateRevisionResponse struct {

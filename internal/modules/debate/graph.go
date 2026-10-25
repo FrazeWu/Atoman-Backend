@@ -11,6 +11,11 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	maxDebateGraphNodes = 200
+	maxDebateGraphEdges = 500
+)
+
 func (s *Service) GetDebateGraph(rootID uuid.UUID, view string, depth int) (DebateGraph, error) {
 	if view == "" {
 		view = "tree"
@@ -39,79 +44,140 @@ func (s *Service) GetDebateGraph(rootID uuid.UUID, view string, depth int) (Deba
 	nodes := map[uuid.UUID]model.Debate{root.ID: root}
 	seenRelations := map[uuid.UUID]bool{}
 	relations := []model.DebateRelation{}
-	type queueItem struct {
-		id    uuid.UUID
-		level int
-	}
-	queue := []queueItem{{id: root.ID}}
-	boundary := []uuid.UUID{}
-	for len(queue) > 0 {
-		item := queue[0]
-		queue = queue[1:]
-		if item.level == depth {
-			boundary = append(boundary, item.id)
-			continue
-		}
-		edges, err := graphEdges(s.db, item.id, view)
+	frontier := []uuid.UUID{root.ID}
+	graph := DebateGraph{RootID: rootID}
+	for level := 0; level < depth && len(frontier) > 0; level++ {
+		sort.Slice(frontier, func(i, j int) bool { return frontier[i].String() < frontier[j].String() })
+		edges, truncated, err := graphEdgesForNodes(s.db, frontier, view, maxDebateGraphEdges-len(relations)+1)
 		if err != nil {
 			return DebateGraph{}, err
 		}
+		graph.HasMore = graph.HasMore || truncated
+		frontierSet := make(map[uuid.UUID]struct{}, len(frontier))
+		for _, id := range frontier {
+			frontierSet[id] = struct{}{}
+		}
+		pending := make([]uuid.UUID, 0)
+		pendingSet := make(map[uuid.UUID]struct{})
 		for _, edge := range edges {
-			if !seenRelations[edge.ID] {
-				seenRelations[edge.ID] = true
-				relations = append(relations, edge)
-			}
-			nextID := edge.SourceDebateID
-			if nextID == item.id {
-				nextID = edge.TargetDebateID
-			}
-			if _, seen := nodes[nextID]; seen {
+			if seenRelations[edge.ID] {
 				continue
 			}
-			var node model.Debate
-			if err := s.db.Preload("User").First(&node, "id = ?", nextID).Error; err != nil {
-				return DebateGraph{}, err
+			if len(relations) >= maxDebateGraphEdges {
+				graph.HasMore = true
+				continue
 			}
-			nodes[nextID] = node
-			queue = append(queue, queueItem{id: nextID, level: item.level + 1})
+			nextID := graphNextNode(edge, view, frontierSet, nodes, pendingSet)
+			if nextID != uuid.Nil {
+				if len(nodes)+len(pendingSet) >= maxDebateGraphNodes {
+					graph.HasMore = true
+					continue
+				}
+				pendingSet[nextID] = struct{}{}
+				pending = append(pending, nextID)
+			}
+			seenRelations[edge.ID] = true
+			relations = append(relations, edge)
+		}
+		if len(pending) == 0 {
+			frontier = nil
+			continue
+		}
+		var loaded []model.Debate
+		if err := s.db.Preload("User").Where("id IN ?", pending).Find(&loaded).Error; err != nil {
+			return DebateGraph{}, err
+		}
+		frontier = make([]uuid.UUID, 0, len(loaded))
+		for _, node := range loaded {
+			if _, exists := nodes[node.ID]; exists {
+				continue
+			}
+			nodes[node.ID] = node
+			frontier = append(frontier, node.ID)
 		}
 	}
 
-	expandable := []uuid.UUID{}
-	for _, id := range boundary {
-		edges, err := graphEdges(s.db, id, view)
+	boundary := frontier
+	expandableSet := make(map[uuid.UUID]struct{})
+	if len(boundary) > 0 {
+		edges, truncated, err := graphEdgesForNodes(s.db, boundary, view, maxDebateGraphEdges+1)
 		if err != nil {
 			return DebateGraph{}, err
 		}
+		graph.HasMore = graph.HasMore || truncated
+		boundarySet := make(map[uuid.UUID]struct{}, len(boundary))
+		for _, id := range boundary {
+			boundarySet[id] = struct{}{}
+		}
 		for _, edge := range edges {
-			other := edge.SourceDebateID
-			if other == id {
-				other = edge.TargetDebateID
-			}
-			if _, loaded := nodes[other]; !loaded {
-				expandable = append(expandable, id)
-				break
+			if nextID := graphNextNode(edge, view, boundarySet, nodes, nil); nextID != uuid.Nil {
+				if view == "tree" {
+					expandableSet[edge.TargetDebateID] = struct{}{}
+				} else if _, ok := boundarySet[edge.SourceDebateID]; ok {
+					expandableSet[edge.SourceDebateID] = struct{}{}
+				} else {
+					expandableSet[edge.TargetDebateID] = struct{}{}
+				}
 			}
 		}
 	}
-	nodeList := make([]model.Debate, 0, len(nodes))
+	nodeList := make([]DebateGraphNodeDTO, 0, len(nodes))
 	for _, node := range nodes {
-		nodeList = append(nodeList, node)
+		nodeList = append(nodeList, DebateGraphNodeDTO{Debate: node, User: model.PublicUserFromUser(node.User)})
 	}
 	sort.Slice(nodeList, func(i, j int) bool { return nodeList[i].ID.String() < nodeList[j].ID.String() })
 	sort.Slice(relations, func(i, j int) bool { return relations[i].ID.String() < relations[j].ID.String() })
+	expandable := make([]uuid.UUID, 0, len(expandableSet))
+	for id := range expandableSet {
+		expandable = append(expandable, id)
+	}
 	sort.Slice(expandable, func(i, j int) bool { return expandable[i].String() < expandable[j].String() })
-	return DebateGraph{RootID: rootID, Nodes: nodeList, Relations: relations, ExpandableNodeIDs: expandable}, nil
+	graph.Nodes = nodeList
+	graph.Relations = relations
+	graph.ExpandableNodeIDs = expandable
+	return graph, nil
 }
 
-func graphEdges(db *gorm.DB, nodeID uuid.UUID, view string) ([]model.DebateRelation, error) {
+func graphNextNode(edge model.DebateRelation, view string, frontier map[uuid.UUID]struct{}, nodes map[uuid.UUID]model.Debate, pending map[uuid.UUID]struct{}) uuid.UUID {
+	candidate := uuid.Nil
+	if view == "tree" {
+		if _, ok := frontier[edge.TargetDebateID]; ok {
+			candidate = edge.SourceDebateID
+		}
+	} else if _, ok := frontier[edge.SourceDebateID]; ok {
+		candidate = edge.TargetDebateID
+	} else if _, ok := frontier[edge.TargetDebateID]; ok {
+		candidate = edge.SourceDebateID
+	}
+	if candidate == uuid.Nil {
+		return uuid.Nil
+	}
+	if _, ok := nodes[candidate]; ok {
+		return uuid.Nil
+	}
+	if _, ok := pending[candidate]; ok {
+		return uuid.Nil
+	}
+	return candidate
+}
+
+func graphEdgesForNodes(db *gorm.DB, nodeIDs []uuid.UUID, view string, limit int) ([]model.DebateRelation, bool, error) {
+	if len(nodeIDs) == 0 {
+		return nil, false, nil
+	}
 	query := db.Where("status = ?", model.DebateRelationActive)
 	if view == "tree" {
-		query = query.Where("target_debate_id = ? AND stance = ?", nodeID, model.DebateRelationSupport)
+		query = query.Where("target_debate_id IN ? AND stance = ?", nodeIDs, model.DebateRelationSupport)
 	} else {
-		query = query.Where("source_debate_id = ? OR target_debate_id = ?", nodeID, nodeID)
+		query = query.Where("source_debate_id IN ? OR target_debate_id IN ?", nodeIDs, nodeIDs)
 	}
 	var edges []model.DebateRelation
-	err := query.Find(&edges).Error
-	return edges, err
+	if err := query.Order("id ASC").Limit(limit).Find(&edges).Error; err != nil {
+		return nil, false, err
+	}
+	truncated := len(edges) == limit
+	if truncated {
+		edges = edges[:len(edges)-1]
+	}
+	return edges, truncated, nil
 }

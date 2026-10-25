@@ -562,7 +562,7 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 				return
 			}
 		}
-		oldObjectKeys, newObjectKeys, err := promoteSongRevisionAssets(db, s3Client, songID, input.Changes)
+		oldObjectKeys, newObjectKeys, err := promoteSongRevisionAssets(db, s3Client, editorUUID, songID, input.Changes)
 		if err != nil {
 			storage.DeleteMusicObjects(s3Client, newObjectKeys)
 			writeRevisionCreateError(c, err)
@@ -616,7 +616,7 @@ func promoteAlbumRevisionAssets(db *gorm.DB, s3Client *s3.S3, albumID, editorID 
 	newKeys := []string{}
 	consumedAssetIDs := []uuid.UUID{}
 	promote := func(rawURL, destinationKey string) (string, error) {
-		asset, err := storage.PromoteMusicUploadAsset(s3Client, rawURL, destinationKey)
+		asset, err := storage.PromoteMusicUploadAsset(db, s3Client, editorID, rawURL, destinationKey)
 		if err != nil {
 			return "", err
 		}
@@ -701,7 +701,7 @@ func promoteAlbumRevisionAssets(db *gorm.DB, s3Client *s3.S3, albumID, editorID 
 	return oldKeys, newKeys, consumedAssetIDs, nil
 }
 
-func promoteSongRevisionAssets(db *gorm.DB, s3Client *s3.S3, songID uuid.UUID, changes map[string]interface{}) ([]string, []string, error) {
+func promoteSongRevisionAssets(db *gorm.DB, s3Client *s3.S3, editorID, songID uuid.UUID, changes map[string]interface{}) ([]string, []string, error) {
 	coverURL, ok := changes["cover_url"].(string)
 	if !ok || strings.TrimSpace(coverURL) == "" {
 		return nil, nil, nil
@@ -715,7 +715,7 @@ func promoteSongRevisionAssets(db *gorm.DB, s3Client *s3.S3, songID uuid.UUID, c
 		destinationKey = storage.BuildMusicAlbumCoverVersionKey(song.AlbumID.String(), uuid.NewString(), path.Ext(coverURL))
 	}
 	asset, err := storage.PromoteMusicUploadAsset(
-		s3Client, coverURL, destinationKey,
+		db, s3Client, editorID, coverURL, destinationKey,
 	)
 	if err != nil {
 		return nil, nil, err

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -401,6 +402,48 @@ func TestGetDebateGraphTreeAndGraphViews(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, graph.Nodes, 3)
 	require.Len(t, graph.Relations, 2)
+}
+
+func TestGetDebateGraphBoundsNodesAndDatabaseQueries(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	root := createDebateForTest(t, ctx, "High degree root", "root")
+	children := make([]model.Debate, maxDebateGraphNodes+5)
+	for i := range children {
+		children[i] = model.Debate{UserID: ctx.owner.ID, Title: fmt.Sprintf("Child %03d", i)}
+	}
+	require.NoError(t, ctx.db.Create(&children).Error)
+	relations := make([]model.DebateRelation, 0, len(children))
+	for _, child := range children {
+		relations = append(relations, model.DebateRelation{
+			SourceDebateID: child.ID, TargetDebateID: root.ID, Stance: model.DebateRelationSupport,
+			TargetRevisionID: uuid.New(), SourceConclusionEventID: uuid.New(), Status: model.DebateRelationActive,
+		})
+	}
+	require.NoError(t, ctx.db.Create(&relations).Error)
+
+	var queryCount atomic.Int64
+	callbackName := "test:debate-graph-query-count-" + uuid.NewString()
+	require.NoError(t, ctx.db.Callback().Query().Before("gorm:query").Register(callbackName, func(*gorm.DB) {
+		queryCount.Add(1)
+	}))
+	t.Cleanup(func() { _ = ctx.db.Callback().Query().Remove(callbackName) })
+
+	graph, err := ctx.service.GetDebateGraph(root.ID, "graph", 2)
+	require.NoError(t, err)
+	require.Len(t, graph.Nodes, maxDebateGraphNodes)
+	require.Len(t, graph.Relations, maxDebateGraphNodes-1)
+	require.True(t, graph.HasMore)
+	require.LessOrEqual(t, queryCount.Load(), int64(12), "graph queries should be bounded by depth, not degree")
+
+	queryCount.Store(0)
+	second, err := ctx.service.GetDebateGraph(root.ID, "graph", 2)
+	require.NoError(t, err)
+	for i := range graph.Nodes {
+		require.Equal(t, graph.Nodes[i].ID, second.Nodes[i].ID)
+	}
+	for i := range graph.Relations {
+		require.Equal(t, graph.Relations[i].ID, second.Relations[i].ID)
+	}
 }
 
 func setConclusionForTest(t *testing.T, db *gorm.DB, debateID uuid.UUID, direction string) model.DebateConclusionEvent {

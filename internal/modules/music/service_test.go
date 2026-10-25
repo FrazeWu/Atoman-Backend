@@ -134,6 +134,67 @@ func seedReadyImportMedia(t *testing.T, db *gorm.DB, sessionID uuid.UUID, coverU
 	}
 }
 
+func TestCreatePlaylistAcceptsOwnedCoverAndRejectsAnotherUsersUpload(t *testing.T) {
+	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test/assets")
+	t.Setenv("S3_BUCKET", "atoman-test")
+	svc, db, user := newMusicTestService(t)
+	other := model.User{Username: "cover-owner-" + uuid.NewString()[:8], Email: uuid.NewString() + "@test.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	makeCover := func(ownerID uuid.UUID) string {
+		key := "music/covers/uploads/users/" + ownerID.String() + "/2026/10/cover.webp"
+		url := "https://cdn.example.test/assets/" + key
+		asset := model.MediaAsset{UserID: &ownerID, Purpose: "music.cover", URL: url, Key: key, ContentType: "image/webp", Size: 32}
+		if err := db.Create(&asset).Error; err != nil {
+			t.Fatalf("create cover asset: %v", err)
+		}
+		return url
+	}
+	ownedURL := makeCover(user.ID)
+	playlist, err := svc.CreatePlaylist(user, CreatePlaylistRequest{Name: "Owned cover", CoverURL: ownedURL})
+	if err != nil || playlist.CoverURL != ownedURL {
+		t.Fatalf("expected own cover upload to be accepted, playlist=%+v err=%v", playlist, err)
+	}
+
+	_, err = svc.CreatePlaylist(user, CreatePlaylistRequest{Name: "Other cover", CoverURL: makeCover(other.UUID)})
+	var appErr *apperr.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "music.upload_asset_forbidden" {
+		t.Fatalf("expected another user's cover to be forbidden, got %v", err)
+	}
+	var count int64
+	if err := db.Model(&model.Playlist{}).Where("user_id = ? AND name = ?", user.ID, "Other cover").Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("expected unauthorized playlist not to be created, count=%d err=%v", count, err)
+	}
+}
+
+func TestUpdateSystemPlaylistRejectsVisibilityBeforePromotingCover(t *testing.T) {
+	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.test/assets")
+	t.Setenv("S3_BUCKET", "atoman-test")
+	svc, db, user := newMusicTestService(t)
+	other := model.User{Username: "playlist-cover-owner-" + uuid.NewString()[:8], Email: uuid.NewString() + "@test.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	key := "music/covers/uploads/users/" + other.UUID.String() + "/2026/10/cover.webp"
+	coverURL := "https://cdn.example.test/assets/" + key
+	if err := db.Create(&model.MediaAsset{UserID: &other.UUID, Purpose: "music.cover", URL: coverURL, Key: key, ContentType: "image/webp", Size: 32}).Error; err != nil {
+		t.Fatalf("create other user's cover asset: %v", err)
+	}
+	playlist, err := svc.repo.EnsureFavoritePlaylist(user.ID)
+	if err != nil {
+		t.Fatalf("create favorite playlist: %v", err)
+	}
+	makePublic := true
+	_, err = svc.UpdatePlaylist(user, playlist.ID, UpdatePlaylistRequest{CoverURL: &coverURL, IsPublic: &makePublic})
+	var appErr *apperr.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "music.system_playlist_protected" {
+		t.Fatalf("expected system playlist visibility conflict before cover validation, got %v", err)
+	}
+}
+
 func completeAlbumImportArtistPayload(name string) AlbumImportArtistPayload {
 	return AlbumImportArtistPayload{
 		Name: name, LegalName: name, ImageURL: "/artist.jpg",

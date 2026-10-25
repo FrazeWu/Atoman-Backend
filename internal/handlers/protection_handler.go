@@ -60,6 +60,17 @@ type SetProtectionInput struct {
 	ExpiresAt       *string `json:"expires_at"` // ISO 8601 format
 }
 
+type contentProtectionResponse struct {
+	model.ContentProtection
+	ProtectedUser *model.PublicUserDTO `json:"protected_user,omitempty"`
+}
+
+func contentProtectionResponseFromModel(protection model.ContentProtection) contentProtectionResponse {
+	user := model.PublicUserFromUser(protection.ProtectedUser)
+	protection.ProtectedUser = nil
+	return contentProtectionResponse{ContentProtection: protection, ProtectedUser: user}
+}
+
 // GetAlbumProtectionHandler godoc
 // @Summary 获取专辑保护状态
 // @Description 返回专辑当前的保护级别与保护元数据；未设置时返回 none。
@@ -106,7 +117,7 @@ func GetAlbumProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 				"protection_level": protection.ProtectionLevel,
 				"reason":           protection.Reason,
 				"protected_by":     protection.ProtectedBy,
-				"protected_user":   protection.ProtectedUser,
+				"protected_user":   model.PublicUserFromUser(protection.ProtectedUser),
 				"expires_at":       protection.ExpiresAt,
 				"created_at":       protection.CreatedAt,
 			},
@@ -152,7 +163,7 @@ func GetSongProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": protection})
+		c.JSON(http.StatusOK, gin.H{"data": contentProtectionResponseFromModel(protection)})
 	}
 }
 
@@ -193,7 +204,7 @@ func GetArtistProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": protection})
+		c.JSON(http.StatusOK, gin.H{"data": contentProtectionResponseFromModel(protection)})
 	}
 }
 
@@ -327,7 +338,7 @@ func setProtectionHandler(db *gorm.DB, contentType string) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Protection set successfully",
-			"data":    protection,
+			"data":    contentProtectionResponseFromModel(protection),
 		})
 	}
 }
