@@ -32,19 +32,19 @@ func TestFeedShortSearchIndex(t *testing.T) {
 			require.NoError(t, db.Model(&item).Update(field, "prefix"+text+"suffix").Error)
 		}
 		var same bool
-		// 候选过滤前后必须得到完全相同的 ID 集合，包括 NULL 和特殊符号。
+		// 两字时跳过冗余 LIKE，仍必须与原查询得到相同的 ID 集合。
 		pattern := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(text) + "%"
 		require.NoError(t, db.Raw(`WITH expected AS (
 			SELECT id FROM feed_items WHERE deleted_at IS NULL AND
 			(lower(title) LIKE lower(?) OR lower(summary) LIKE lower(?) OR lower(author) LIKE lower(?))
 		), actual AS (
 			SELECT id FROM feed_items WHERE deleted_at IS NULL AND
-			(lower(title) LIKE lower(?) OR lower(summary) LIKE lower(?) OR lower(author) LIKE lower(?))
+			(char_length(lower(?)) = 2 OR lower(title) LIKE lower(?) OR lower(summary) LIKE lower(?) OR lower(author) LIKE lower(?))
 			AND public.atoman_feed_search_bigrams_v1(title, summary, author)
 			@> public.atoman_feed_search_bigrams_v1(?, '', '')
 		) SELECT NOT EXISTS ((SELECT id FROM expected EXCEPT SELECT id FROM actual)
 			UNION ALL (SELECT id FROM actual EXCEPT SELECT id FROM expected))`,
-			pattern, pattern, pattern, pattern, pattern, pattern, text).Scan(&same).Error)
+			pattern, pattern, pattern, text, pattern, pattern, pattern, text).Scan(&same).Error)
 		require.True(t, same, text)
 	}
 	require.NoError(t, db.Exec("VACUUM ANALYZE feed_items").Error)

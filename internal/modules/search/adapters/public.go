@@ -109,11 +109,14 @@ func (p *PublicProvider) Search(ctx context.Context, _ search.Viewer, req search
 		for i := range args {
 			args[i] = pattern
 		}
-		base = base.Where(fields, args...)
 		if p.module == "feed" && req.Type == "article" && utf8.RuneCountInString(query) == 2 {
-			// 索引只筛候选，原 LIKE 条件仍负责精确匹配、权限和分页计数。
+			// 小写后仍为两字时，一个双字词的包含判断就等价于原子串匹配。
+			// 避免重复扫描摘要，以及规划器误选三元组索引；特殊大小写长度变化仍校验 LIKE。
 			base = base.Where(`public.atoman_feed_search_bigrams_v1(i.title, i.summary, i.author)
 				@> public.atoman_feed_search_bigrams_v1(?, '', '')`, query)
+			base = base.Where("(CHAR_LENGTH(LOWER(?)) = 2 OR "+fields+")", append([]any{query}, args...)...)
+		} else {
+			base = base.Where(fields, args...)
 		}
 	}
 	var total int64
