@@ -1052,9 +1052,16 @@ func startRSSSyncWorker(workers *sync.WaitGroup, jobs <-chan rssSourceGroup, res
 	}(jobs, results, db, now)
 }
 
-func syncRSSWorker(jobs <-chan rssSourceGroup, results chan<- rssSyncWorkerResult, db *gorm.DB, now time.Time) {
+func syncRSSWorker(jobs <-chan rssSourceGroup, results chan<- rssSyncWorkerResult, db *gorm.DB, batchStartedAt time.Time) {
+	warnedAboutBacklog := false
 	for group := range jobs {
-		claimed, claimErr := claimRSSSourceGroup(db, &group, now)
+		if !warnedAboutBacklog && time.Since(batchStartedAt) > rssLeaseDuration {
+			log.Printf("WARN: RSS worker queue delay exceeded the fetch lease duration")
+			warnedAboutBacklog = true
+		}
+		// The batch selection time can be minutes old on a long queue.
+		// Start each lease at claim time, not when the batch was listed.
+		claimed, claimErr := claimRSSSourceGroup(db, &group, time.Now().UTC())
 		if claimErr != nil {
 			log.Printf("RSS sync failed to claim %s: %v", sanitizeRSSLogURL(group.URL), claimErr)
 			results <- rssSyncWorkerResult{}
@@ -1201,8 +1208,12 @@ func markRSSFetchSuccess(db *gorm.DB, group rssSourceGroup, result RSSFetchResul
 		"fetch_lease_token":          "",
 		"fetch_lease_until":          nil,
 	}
-	if err := rssLeaseQuery(db, group).Updates(updates).Error; err != nil {
-		return err
+	updated := rssLeaseQuery(db, group).Updates(updates)
+	if updated.Error != nil {
+		return updated.Error
+	}
+	if group.LeaseToken != "" && updated.RowsAffected != int64(len(group.Sources)) {
+		return fmt.Errorf("RSS fetch lease lost before successful completion for %s", sanitizeRSSLogURL(group.URL))
 	}
 	recordRSSFetchRecoveryOperations(db, group, now)
 	return nil
@@ -1242,8 +1253,12 @@ func markRSSFetchFailure(db *gorm.DB, group rssSourceGroup, err error, result RS
 		"fetch_lease_token":          "",
 		"fetch_lease_until":          nil,
 	}
-	if err := rssLeaseQuery(db, group).Updates(updates).Error; err != nil {
-		return err
+	updated := rssLeaseQuery(db, group).Updates(updates)
+	if updated.Error != nil {
+		return updated.Error
+	}
+	if group.LeaseToken != "" && updated.RowsAffected != int64(len(group.Sources)) {
+		return fmt.Errorf("RSS fetch lease lost before failure recording for %s", sanitizeRSSLogURL(group.URL))
 	}
 	recordRSSFetchFailureOperations(db, group, code, message, attempt)
 	return nil

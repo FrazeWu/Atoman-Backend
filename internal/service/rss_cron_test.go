@@ -1167,3 +1167,84 @@ func TestSyncSingleRSSDoesNotMarkSourceFetchedWhenPersistenceFails(t *testing.T)
 		t.Fatalf("last_fetched_at=%v", refreshed.LastFetchedAt)
 	}
 }
+
+func TestRSSQueuedWorkerClaimsFreshLeaseAfterLongBacklog(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "rss-queued-lease-test",
+		RssURL:     "http://127.0.0.1/feed/queued-lease.xml",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	var observedLeaseUntil time.Time
+	const hook = "audit:rss_queued_lease"
+	if err := db.Callback().Update().Before("gorm:update").Register(hook, func(tx *gorm.DB) {
+		if !observedLeaseUntil.IsZero() {
+			return
+		}
+		updates, ok := tx.Statement.Dest.(map[string]any)
+		if !ok {
+			return
+		}
+		if until, ok := updates["fetch_lease_until"].(time.Time); ok {
+			observedLeaseUntil = until
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(hook) })
+	jobs := make(chan rssSourceGroup, 1)
+	results := make(chan rssSyncWorkerResult, 1)
+	jobs <- rssSourceGroup{URL: source.RssURL, Sources: []model.FeedSource{source}}
+	close(jobs)
+	// Simulate a batch that waited in the queue beyond its lease duration.
+	batchStarted := time.Now().UTC().Add(-3 * rssLeaseDuration)
+	syncRSSWorker(jobs, results, db, batchStarted)
+	if observedLeaseUntil.IsZero() {
+		t.Fatal("worker did not claim an RSS fetch lease")
+	}
+	if observedLeaseUntil.Before(time.Now().UTC().Add(rssLeaseDuration / 2)) {
+		t.Fatalf("queued worker used stale batch time: lease_until=%s", observedLeaseUntil)
+	}
+}
+
+func TestRSSStaleLeaseCannotAcknowledgeFetchCompletion(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "rss-stale-finalization-test",
+		RssURL:     "https://example.com/race.xml",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&source).Updates(map[string]any{
+		"fetch_lease_token": "newer-worker",
+		"fetch_lease_until": time.Now().UTC().Add(2 * time.Minute),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	stale := rssSourceGroup{URL: source.RssURL, Sources: []model.FeedSource{source}, LeaseToken: "expired-worker"}
+	now := time.Now().UTC()
+	if err := markRSSFetchSuccess(db, stale, RSSFetchResult{}, now, 0, false); err == nil {
+		t.Fatal("lost RSS lease must not be acknowledged as a successful fetch")
+	}
+	if err := markRSSFetchFailure(db, stale, errors.New("simulated timeout"), RSSFetchResult{}, now); err == nil {
+		t.Fatal("lost RSS lease must not be acknowledged as a failed fetch")
+	}
+	var current model.FeedSource
+	if err := db.First(&current, "id = ?", source.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if current.FetchLeaseToken != "newer-worker" || current.FetchConsecutiveFailures != 0 {
+		t.Fatalf("stale worker changed the active owner: token=%q failures=%d", current.FetchLeaseToken, current.FetchConsecutiveFailures)
+	}
+}
