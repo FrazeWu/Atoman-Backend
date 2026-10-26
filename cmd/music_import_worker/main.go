@@ -135,12 +135,16 @@ func requiredWorkerConfig() error {
 }
 
 func workerIDFromEnv() string {
-	if id := strings.TrimSpace(os.Getenv("MUSIC_IMPORT_WORKER_ID")); id != "" {
-		return id
+	base := strings.TrimSpace(os.Getenv("MUSIC_IMPORT_WORKER_ID"))
+	if base == "" {
+		host, err := os.Hostname()
+		if err != nil || strings.TrimSpace(host) == "" {
+			base = "music-import-worker"
+		} else {
+			base = "music-import-" + host
+		}
 	}
-	host, err := os.Hostname()
-	if err != nil || strings.TrimSpace(host) == "" {
-		return "music-import-worker"
-	}
-	return "music-import-" + host
+	// This is a process instance identity, not a stable hostname. After a
+	// crash/restart, the previous worker must not match the new job lease.
+	return base + ":" + uuid.NewString()
 }

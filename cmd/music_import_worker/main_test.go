@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"atoman/internal/modules/music"
+
+	"github.com/google/uuid"
 )
 
 type fakeMediaRunner struct{ paths map[string]string }
@@ -36,8 +39,24 @@ func (w *fakeWorkerRunner) RunOnce(context.Context, music.ImportProcessor) (bool
 
 func TestWorkerIDFromEnvUsesExplicitValue(t *testing.T) {
 	t.Setenv("MUSIC_IMPORT_WORKER_ID", "  import-host-a  ")
-	if got := workerIDFromEnv(); got != "import-host-a" {
-		t.Fatalf("worker id = %q", got)
+	first := workerIDFromEnv()
+	second := workerIDFromEnv()
+	if !strings.HasPrefix(first, "import-host-a:") || !strings.HasPrefix(second, "import-host-a:") {
+		t.Fatalf("worker id did not retain configured prefix: %q, %q", first, second)
+	}
+	if first == second {
+		t.Fatal("separate worker instances must not share the same lease owner")
+	}
+	if _, err := uuid.Parse(strings.TrimPrefix(first, "import-host-a:")); err != nil {
+		t.Fatalf("worker id suffix is not a UUID: %q", first)
+	}
+}
+
+func TestWorkerIDFromEnvWithoutExplicitValueIsUnique(t *testing.T) {
+	t.Setenv("MUSIC_IMPORT_WORKER_ID", "")
+	first, second := workerIDFromEnv(), workerIDFromEnv()
+	if first == second || !strings.Contains(first, ":") {
+		t.Fatalf("default worker ID must have a unique instance suffix: %q, %q", first, second)
 	}
 }
 

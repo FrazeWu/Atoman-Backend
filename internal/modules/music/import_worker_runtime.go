@@ -37,6 +37,8 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 	if workerID == "" {
 		workerID = "music-import-worker"
 	}
+	// Ensure two processes on the same host never share the same lease owner.
+	workerID += ":" + uuid.NewString()
 
 	playbackURLPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("MUSIC_PLAYBACK_URL_PREFIX")), "/")
 	if playbackURLPrefix == "" {
