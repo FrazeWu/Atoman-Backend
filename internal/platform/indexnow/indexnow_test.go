@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestSubmitBatchesCanonicalSameHostURLs(t *testing.T) {
@@ -65,5 +67,53 @@ func TestSubmitRejectsForeignHost(t *testing.T) {
 func TestNewRejectsInvalidKey(t *testing.T) {
 	if _, err := New(Config{Key: "short", SiteURL: "https://www.atoman.org"}, nil); err == nil {
 		t.Fatal("expected invalid key rejection")
+	}
+}
+
+func TestWorkerRetriesTransientIndexNowFailureWithoutDroppingURL(t *testing.T) {
+	var calls atomic.Int32
+	seen := make(chan []string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request submission
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		seen <- request.URLList
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	submitter, err := New(Config{Key: "test-12345678", SiteURL: "https://www.atoman.org", Endpoint: server.URL}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	worker := &Worker{submitter: submitter, queue: make(chan string, 4)}
+	go func() { worker.run(ctx); close(done) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("worker did not stop")
+		}
+	}()
+
+	worker.queue <- "/posts/post/retry"
+	for i := 0; i < 2; i++ {
+		select {
+		case urls := <-seen:
+			if len(urls) != 1 || urls[0] != "https://www.atoman.org/posts/post/retry" {
+				t.Fatalf("retry #%d submitted different URLs: %#v", i+1, urls)
+			}
+		case <-time.After(4 * time.Second):
+			t.Fatalf("expected transient failure to be retried (got %d attempt(s))", calls.Load())
+		}
 	}
 }

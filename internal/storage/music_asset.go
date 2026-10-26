@@ -2,6 +2,7 @@ package storage
 
 import (
 	"errors"
+	"log"
 	"net/url"
 	"os"
 	"strings"
@@ -110,6 +111,12 @@ func DeleteMusicObjects(client *s3.S3, keys []string) {
 			continue
 		}
 		seen[key] = true
-		_, _ = client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+		if _, err := client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)}); err != nil {
+			// Storage cleanup is best-effort, but failures must be observable.
+			log.Printf("WARN: music object cleanup failed for %s: %v", key, err)
+			if enqueueErr := enqueueFailedMusicObjectDeletion(key); enqueueErr != nil {
+				log.Printf("WARN: failed to persist music object cleanup retry for %s: %v", key, enqueueErr)
+			}
+		}
 	}
 }

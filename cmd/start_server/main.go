@@ -39,6 +39,7 @@ import (
 	"atoman/internal/platform/indexnow"
 	"atoman/internal/platform/redisx"
 	"atoman/internal/service"
+	"atoman/internal/storage"
 )
 
 //go:generate go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/start_server/main.go -d ../.. -o ../../docs
@@ -394,10 +395,11 @@ func main() {
 	defer stop()
 	rssCronDone := service.StartRSSCron(ctx, db)
 	fullTextWorkerDone := service.StartFullTextWorker(ctx, db)
-	indexNowWorkerDone := indexnow.StartWorker(ctx)
+	indexNowWorkerDone := indexnow.StartWorker(ctx, db)
 	lifecycleWorkerDone := lifecycle.StartWorker(ctx, db)
 	reputationWorkerDone := reputation.StartWorker(ctx, db)
 	bookProcessingWorkerDone := books.StartProcessingWorker(ctx, db, s3Client)
+	musicCleanupWorkerDone := storage.StartMusicCleanupWorker(ctx, db, s3Client)
 
 	log.Println("Initializing Casbin Enforcer...")
 	if err := middleware.InitCasbin(db); err != nil {
@@ -444,7 +446,7 @@ func main() {
 	if err := serveUntilShutdown(ctx, server, shutdownTimeout); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)
 	}
-	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, reputationWorkerDone, indexNowWorkerDone, bookProcessingWorkerDone); err != nil {
+	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, reputationWorkerDone, indexNowWorkerDone, bookProcessingWorkerDone, musicCleanupWorkerDone); err != nil {
 		log.Printf("WARN: timed out waiting for background workers to stop: %v", err)
 	}
 	log.Println("Server stopped")

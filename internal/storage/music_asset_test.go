@@ -1,9 +1,12 @@
 package storage
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -71,4 +74,33 @@ func TestPromoteMusicUploadAssetRequiresOwnerAndCopiesOwnedAsset(t *testing.T) {
 	_, err = PromoteMusicUploadAsset(db, s3Client, owner.UUID, assetURL, "music/albums/album-1/tracks/song-1/audio.mp3")
 	require.Error(t, err, "a cover upload must not be promoted to an audio target")
 	require.EqualValues(t, 1, copyCalls.Load())
+}
+
+func TestDeleteMusicObjectsLogsS3FailureAndDeduplicatesKeys(t *testing.T) {
+	t.Setenv("S3_BUCKET", "atoman-test")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "simulated delete failure", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	client := s3.New(session.Must(session.NewSession(&aws.Config{
+		Region: aws.String("us-east-1"), Endpoint: aws.String(server.URL),
+		S3ForcePathStyle: aws.Bool(true), DisableSSL: aws.Bool(true),
+		Credentials: credentials.NewStaticCredentials("access", "secret", ""),
+		MaxRetries:  aws.Int(0),
+	})))
+	var logOutput bytes.Buffer
+	previousLogOutput := log.Writer()
+	log.SetOutput(&logOutput)
+	defer log.SetOutput(previousLogOutput)
+
+	key := "music/audio/cleanup-failure.flac"
+	DeleteMusicObjects(client, []string{key, key, ""})
+	if calls.Load() != 1 {
+		t.Fatalf("expected a single S3 delete attempt per key, got %d", calls.Load())
+	}
+	if !strings.Contains(logOutput.String(), "music object cleanup failed") || !strings.Contains(logOutput.String(), key) {
+		t.Fatalf("failed storage deletion must be logged for repair, got: %q", logOutput.String())
+	}
 }

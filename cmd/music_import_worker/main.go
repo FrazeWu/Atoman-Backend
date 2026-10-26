@@ -36,6 +36,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("initialize object store: %v", err)
 	}
+	storage.ConfigureMusicCleanupQueue(db)
 	store := music.NewMusicImportObjectStore(client)
 	if store == nil {
 		log.Fatal("MUSIC_SOURCE_BUCKET or S3_BUCKET is required")
@@ -63,11 +64,15 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Standalone music import deployments also drain durable S3 cleanup jobs.
+	// Concurrent server instances coordinate claims through PostgreSQL.
+	cleanupDone := storage.StartMusicCleanupWorker(ctx, db, client)
 	metadataDone := music.StartMetadataMatchWorker(ctx, importService, workerPollIntervalFromEnv())
 	if err := runWorker(ctx, worker, processor, workerPollIntervalFromEnv()); err != nil {
 		log.Fatal(err)
 	}
 	<-metadataDone
+	<-cleanupDone
 }
 
 func validateWorkerToolchain(runner music.MediaCommandRunner) error {

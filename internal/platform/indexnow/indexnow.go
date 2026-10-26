@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -146,11 +148,12 @@ func (s *Submitter) normalizeURLs(values []string) ([]string, error) {
 type Worker struct {
 	submitter *Submitter
 	queue     chan string
+	db        *gorm.DB
 }
 
 var activeWorker atomic.Pointer[Worker]
 
-func StartWorker(ctx context.Context) <-chan struct{} {
+func StartWorker(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	done := make(chan struct{})
 	key := strings.TrimSpace(os.Getenv("INDEXNOW_KEY"))
 	if key == "" {
@@ -165,7 +168,7 @@ func StartWorker(ctx context.Context) <-chan struct{} {
 		close(done)
 		return done
 	}
-	worker := &Worker{submitter: submitter, queue: make(chan string, 1000)}
+	worker := &Worker{submitter: submitter, db: db, queue: make(chan string, 1000)}
 	activeWorker.Store(worker)
 	go func() {
 		defer close(done)
@@ -180,6 +183,17 @@ func NotifyPaths(paths ...string) {
 	if worker == nil {
 		return
 	}
+	if worker.db != nil {
+		if err := worker.enqueueDurable(paths); err != nil {
+			log.Printf("WARN: persist IndexNow URL notification: %v", err)
+			return
+		}
+		select {
+		case worker.queue <- "wake":
+		default:
+		}
+		return
+	}
 	for _, path := range paths {
 		select {
 		case worker.queue <- path:
@@ -190,37 +204,59 @@ func NotifyPaths(paths ...string) {
 }
 
 func (w *Worker) run(ctx context.Context) {
+	if w.db != nil {
+		w.runDurable(ctx)
+		return
+	}
 	pending := map[string]struct{}{}
+	retryDelay := time.Second
+	var nextRetry time.Time
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-	flush := func() {
-		if len(pending) == 0 {
+	flush := func(force bool) {
+		if len(pending) == 0 || (!force && time.Now().Before(nextRetry)) {
 			return
 		}
 		paths := make([]string, 0, len(pending))
 		for path := range pending {
 			paths = append(paths, path)
 		}
-		pending = map[string]struct{}{}
 		submitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err := w.submitter.Submit(submitCtx, paths)
 		cancel()
 		if err != nil {
-			log.Printf("WARN: IndexNow submission failed: %v", err)
+			// Keep the bounded in-memory batch for a later attempt instead of
+			// silently losing the update after a transient network failure.
+			log.Printf("WARN: IndexNow submission failed (retrying): %v", err)
+			nextRetry = time.Now().Add(retryDelay)
+			if retryDelay < time.Minute {
+				retryDelay *= 2
+				if retryDelay > time.Minute {
+					retryDelay = time.Minute
+				}
+			}
+			return
 		}
+		pending = map[string]struct{}{}
+		nextRetry = time.Time{}
+		retryDelay = time.Second
 	}
 	for {
 		select {
 		case <-ctx.Done():
-			flush()
+			flush(true) // One final best-effort attempt before shutdown.
 			return
 		case path := <-w.queue:
-			pending[path] = struct{}{}
+			if len(pending) < maxURLs {
+				pending[path] = struct{}{}
+			} else if _, alreadyPending := pending[path]; !alreadyPending {
+				log.Printf("WARN: IndexNow pending URL limit reached; dropping %s", path)
+			}
 			if len(pending) >= maxURLs {
-				flush()
+				flush(false)
 			}
 		case <-ticker.C:
-			flush()
+			flush(false)
 		}
 	}
 }

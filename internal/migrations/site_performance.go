@@ -8,7 +8,7 @@ import (
 
 // 并发建索引，不在迁移期间阻塞线上内容写入。
 func RunSitePerformanceIndexes(db *gorm.DB) error {
-	if err := db.AutoMigrate(&model.MusicMetadataMatchJob{}); err != nil {
+	if err := db.AutoMigrate(&model.MusicMetadataMatchJob{}, &model.IndexNowSubmission{}, &model.MusicCleanupJob{}); err != nil {
 		return err
 	}
 	if db.Dialector.Name() != "postgres" {
