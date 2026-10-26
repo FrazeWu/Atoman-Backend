@@ -1,6 +1,7 @@
 package notification
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -51,9 +52,9 @@ func TestServicePublishAnnouncementDeliversToActiveUsersAndPublishesAfterCommit(
 	}
 
 	service := NewService(db)
-	pushed := make([]model.Notification, 0)
+	pushed := make(chan model.Notification, 2)
 	service.SetNotificationPublisher(func(_ uuid.UUID, notification *model.Notification) {
-		pushed = append(pushed, *notification)
+		pushed <- *notification
 	})
 
 	delivered, err := service.PublishAnnouncement(
@@ -66,8 +67,12 @@ func TestServicePublishAnnouncementDeliversToActiveUsersAndPublishesAfterCommit(
 	if delivered != 2 {
 		t.Fatalf("expected two active recipients, got %d", delivered)
 	}
-	if len(pushed) != 2 {
-		t.Fatalf("expected two notifications to publish after commit, got %d", len(pushed))
+	for i := 0; i < 2; i++ {
+		select {
+		case <-pushed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("expected two realtime notifications after commit")
+		}
 	}
 
 	var notifications []model.Notification
@@ -128,5 +133,36 @@ func TestServiceListAnnouncementsGroupsRecipientsAndSupportsSearchPagination(t *
 	}
 	if total != 1 || len(items) != 1 || items[0].SourceID != firstSource.String() || items[0].Delivered != 2 {
 		t.Fatalf("unexpected search result: total=%d items=%#v", total, items)
+	}
+}
+
+func TestAnnouncementBatchingPersistsAllRecipients(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{})
+	users := make([]model.User, 0, 510)
+	for i := 0; i < 510; i++ {
+		users = append(users, model.User{
+			Username: fmt.Sprintf("announcement-batch-%d", i),
+			Email:    fmt.Sprintf("announcement-batch-%d@example.test", i),
+			Password: "hash", Role: authctx.RoleUser, IsActive: true,
+		})
+	}
+	users[0].Role = authctx.RoleAdmin
+	if err := db.CreateInBatches(&users, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	count, err := NewService(db).PublishAnnouncement(
+		authctx.CurrentUser{ID: users[0].UUID, Role: authctx.RoleAdmin},
+		PublishAnnouncementInput{Title: "Batch announcement", Body: "Hello", Path: "/status"},
+	)
+	if err != nil || count != len(users) {
+		t.Fatalf("delivered=%d expected=%d err=%v", count, len(users), err)
+	}
+	var stored int64
+	if err := db.Model(&model.Notification{}).Where("source_type = ?", announcementNotificationType).Count(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored != int64(len(users)) {
+		t.Fatalf("multi-batch delivery persisted %d, expected %d", stored, len(users))
 	}
 }

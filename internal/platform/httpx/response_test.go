@@ -228,3 +228,29 @@ func TestPageParamsWithUsesNamedSizeAndConfiguredBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestPaginationRejectsIntegerOverflow(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	if got := Offset(maxInt, 100); got < 0 {
+		t.Fatalf("offset overflowed into a negative number: %d", got)
+	}
+	if got := Offset(2, 10); got != 10 {
+		t.Fatalf("ordinary offset changed: %d", got)
+	}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", func(c *gin.Context) {
+		List(c, []string{}, maxInt, 100, int64(maxInt))
+	})
+	recorder := httptest.NewRecorder()
+	r.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	var envelope struct {
+		Meta PageMeta `json:"meta"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Meta.HasMore {
+		t.Fatalf("last page must not report more after integer overflow: %+v", envelope.Meta)
+	}
+}

@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -108,5 +109,96 @@ func TestAdminOnboardingFeedRecommendationsCRUD(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/recommendations/"+created.Item.ID.String(), nil))
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("delete status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func failOnboardingCount(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	const callback = "audit:fail_onboarding_count"
+	if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if _, isCount := tx.Statement.Dest.(*int64); isCount {
+			tx.AddError(errors.New("simulated count failure"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callback) })
+}
+
+func TestCreateOnboardingRecommendationReportsCountFailure(t *testing.T) {
+	db := newOnboardingTestDB(t)
+	source := model.FeedSource{
+		SourceType: "external_rss", RssURL: "https://new.example/feed.xml",
+		Hash: uuid.NewString(), Title: "new", HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	failOnboardingCount(t, db)
+	router := gin.New()
+	router.POST("/recommendations", CreateAdminOnboardingFeedRecommendation(db))
+	result := httptest.NewRecorder()
+	body := `{"feed_source_id":"` + source.ID.String() + `","enabled":true}`
+	router.ServeHTTP(result, httptest.NewRequest(http.MethodPost, "/recommendations", bytes.NewBufferString(body)))
+	if result.Code != http.StatusInternalServerError {
+		t.Fatalf("expected HTTP 500 on failed count, got %d: %s", result.Code, result.Body.String())
+	}
+}
+
+func TestEnableOnboardingRecommendationReportsCountFailure(t *testing.T) {
+	db := newOnboardingTestDB(t)
+	source := model.FeedSource{
+		SourceType: "external_rss", RssURL: "https://disabled.example/feed.xml",
+		Hash: uuid.NewString(), Title: "disabled", HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	recommendation := model.OnboardingFeedRecommendation{FeedSourceID: source.ID, Enabled: false}
+	if err := db.Create(&recommendation).Error; err != nil {
+		t.Fatal(err)
+	}
+	// The model has a database default of enabled=true; explicitly persist false.
+	if err := db.Model(&recommendation).Update("enabled", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	failOnboardingCount(t, db)
+	router := gin.New()
+	router.PATCH("/recommendations/:id", UpdateAdminOnboardingFeedRecommendation(db))
+	result := httptest.NewRecorder()
+	router.ServeHTTP(result, httptest.NewRequest(http.MethodPatch, "/recommendations/"+recommendation.ID.String(), bytes.NewBufferString(`{"enabled":true}`)))
+	if result.Code != http.StatusInternalServerError {
+		t.Fatalf("expected HTTP 500 on failed count, got %d: %s", result.Code, result.Body.String())
+	}
+}
+
+func TestCreateDisabledOnboardingRecommendationStaysDisabled(t *testing.T) {
+	db := newOnboardingTestDB(t)
+	source := model.FeedSource{
+		SourceType: "external_rss", RssURL: "https://keep-disabled.example/feed.xml",
+		Hash: uuid.NewString(), Title: "Disabled by admin", HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.POST("/recommendations", CreateAdminOnboardingFeedRecommendation(db))
+	result := httptest.NewRecorder()
+	body := `{"feed_source_id":"` + source.ID.String() + `","enabled":false}`
+	router.ServeHTTP(result, httptest.NewRequest(http.MethodPost, "/recommendations", bytes.NewBufferString(body)))
+	if result.Code != http.StatusCreated {
+		t.Fatalf("expected HTTP 201, got %d: %s", result.Code, result.Body.String())
+	}
+	var recommendation model.OnboardingFeedRecommendation
+	if err := db.Where("feed_source_id = ?", source.ID).First(&recommendation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if recommendation.Enabled {
+		t.Fatal("explicit enabled:false must remain false in the database")
+	}
+	duplicate := httptest.NewRecorder()
+	router.ServeHTTP(duplicate, httptest.NewRequest(http.MethodPost, "/recommendations", bytes.NewBufferString(body)))
+	if duplicate.Code != http.StatusConflict {
+		t.Fatalf("duplicate must report HTTP 409, got %d: %s", duplicate.Code, duplicate.Body.String())
 	}
 }

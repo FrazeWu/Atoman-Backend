@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // searchBlogPosts godoc
@@ -197,7 +198,16 @@ func (h *Handler) updateBlogRecommendationPreference(c *gin.Context) {
 		return
 	}
 	pref := model.BlogRecommendationPreference{UserID: user.ID, Enabled: input.Enabled, UpdatedAt: time.Now().UTC()}
-	if err := h.service.db.Save(&pref).Error; err != nil {
+	// Insert a map so a first-write false is not replaced by GORM's default:true.
+	// Upsert keeps the existing update behavior and is atomic for concurrent requests.
+	if err := h.service.db.Model(&model.BlogRecommendationPreference{}).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"enabled", "updated_at"}),
+		}).
+		Create(map[string]any{
+			"user_id": user.ID, "enabled": input.Enabled, "updated_at": pref.UpdatedAt,
+		}).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}

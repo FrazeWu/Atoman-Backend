@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,13 +14,13 @@ import (
 // ====== Location Handlers ======
 
 type CreateLocationInput struct {
-	Date      string  `json:"date" binding:"required"`
-	EndDate   string  `json:"end_date"`
-	PlaceName string  `json:"place_name" binding:"required"`
-	Latitude  float64 `json:"latitude" binding:"required"`
-	Longitude float64 `json:"longitude" binding:"required"`
-	Source    string  `json:"source" binding:"required"`
-	Note      string  `json:"note"`
+	Date      string   `json:"date" binding:"required"`
+	EndDate   string   `json:"end_date"`
+	PlaceName string   `json:"place_name" binding:"required"`
+	Latitude  *float64 `json:"latitude" binding:"required,gte=-90,lte=90"`
+	Longitude *float64 `json:"longitude" binding:"required,gte=-180,lte=180"`
+	Source    string   `json:"source" binding:"required"`
+	Note      string   `json:"note"`
 }
 
 // AddPersonLocation godoc
@@ -72,16 +73,19 @@ func AddPersonLocation(db *gorm.DB) gin.HandlerFunc {
 			PersonID:  pid,
 			Date:      date,
 			PlaceName: input.PlaceName,
-			Latitude:  input.Latitude,
-			Longitude: input.Longitude,
+			Latitude:  *input.Latitude,
+			Longitude: *input.Longitude,
 			Source:    input.Source,
 			Note:      input.Note,
 		}
 
 		if input.EndDate != "" {
-			if endDate, err := parseDateTime(input.EndDate); err == nil {
-				location.EndDate = &endDate
+			endDate, err := parseDateTime(input.EndDate)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid end_date format"})
+				return
 			}
+			location.EndDate = &endDate
 		}
 
 		if err := db.Create(&location).Error; err != nil {
@@ -120,7 +124,14 @@ func UpdatePersonLocation(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var person model.TimelinePerson
-		db.First(&person, "id = ?", location.PersonID)
+		if err := db.First(&person, "id = ?", location.PersonID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Person not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch person"})
+			}
+			return
+		}
 
 		userID, _ := c.Get("user_id")
 		role, _ := c.Get("role")
@@ -144,16 +155,19 @@ func UpdatePersonLocation(db *gorm.DB) gin.HandlerFunc {
 		updates := map[string]interface{}{
 			"date":       date,
 			"place_name": input.PlaceName,
-			"latitude":   input.Latitude,
-			"longitude":  input.Longitude,
+			"latitude":   *input.Latitude,
+			"longitude":  *input.Longitude,
 			"source":     input.Source,
 			"note":       input.Note,
 		}
 
 		if input.EndDate != "" {
-			if endDate, err := parseDateTime(input.EndDate); err == nil {
-				updates["end_date"] = endDate
+			endDate, err := parseDateTime(input.EndDate)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid end_date format"})
+				return
 			}
+			updates["end_date"] = endDate
 		} else {
 			updates["end_date"] = nil
 		}
@@ -190,7 +204,14 @@ func DeletePersonLocation(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var person model.TimelinePerson
-		db.First(&person, "id = ?", location.PersonID)
+		if err := db.First(&person, "id = ?", location.PersonID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Person not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch person"})
+			}
+			return
+		}
 
 		userID, _ := c.Get("user_id")
 		role, _ := c.Get("role")
@@ -199,7 +220,10 @@ func DeletePersonLocation(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		db.Delete(&location)
+		if err := db.Delete(&location).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete location"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "Location deleted"})
 	}
 }

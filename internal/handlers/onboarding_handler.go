@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"atoman/internal/middleware"
@@ -11,7 +12,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func SetupOnboardingRoutes(router *gin.Engine, db *gorm.DB) {
@@ -100,6 +104,25 @@ func ListAdminOnboardingFeedRecommendations(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+const onboardingRecommendationLockKey int64 = 2026102602
+
+var errOnboardingRecommendationLimit = errors.New("at most 5 onboarding recommendations can be enabled")
+
+func lockOnboardingRecommendationCapacity(tx *gorm.DB) error {
+	return tx.Exec("SELECT pg_advisory_xact_lock(?)", onboardingRecommendationLockKey).Error
+}
+
+func checkOnboardingRecommendationCapacity(tx *gorm.DB) error {
+	var count int64
+	if err := tx.Model(&model.OnboardingFeedRecommendation{}).Where("enabled = ?", true).Count(&count).Error; err != nil {
+		return err
+	}
+	if count >= 5 {
+		return errOnboardingRecommendationLimit
+	}
+	return nil
+}
+
 type onboardingFeedRecommendationInput struct {
 	FeedSourceID string `json:"feed_source_id" binding:"required"`
 	Enabled      *bool  `json:"enabled"`
@@ -135,23 +158,44 @@ func CreateAdminOnboardingFeedRecommendation(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load feed source"})
 			return
 		}
-		var count int64
-		db.Model(&model.OnboardingFeedRecommendation{}).Where("enabled = ?", true).Count(&count)
 		enabled := true
 		if input.Enabled != nil {
 			enabled = *input.Enabled
-		}
-		if enabled && count >= 5 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "at most 5 onboarding recommendations can be enabled"})
-			return
 		}
 		sortOrder := 0
 		if input.SortOrder != nil {
 			sortOrder = *input.SortOrder
 		}
 		recommendation := model.OnboardingFeedRecommendation{FeedSourceID: source.ID, Enabled: enabled, SortOrder: sortOrder}
-		if err := db.Create(&recommendation).Error; err != nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "feed source is already recommended"})
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := lockOnboardingRecommendationCapacity(tx); err != nil {
+				return err
+			}
+			if enabled {
+				if err := checkOnboardingRecommendationCapacity(tx); err != nil {
+					return err
+				}
+			}
+			if err := tx.Create(&recommendation).Error; err != nil {
+				return err
+			}
+			if !enabled {
+				// GORM's default:true field tag otherwise overrides false on INSERT.
+				if err := tx.Model(&recommendation).Update("enabled", false).Error; err != nil {
+					return err
+				}
+				recommendation.Enabled = false
+			}
+			return nil
+		}); err != nil {
+			switch {
+			case errors.Is(err, errOnboardingRecommendationLimit):
+				c.JSON(http.StatusBadRequest, gin.H{"error": errOnboardingRecommendationLimit.Error()})
+			case isDuplicateOnboardingRecommendation(err):
+				c.JSON(http.StatusConflict, gin.H{"error": "feed source is already recommended"})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create onboarding recommendation"})
+			}
 			return
 		}
 		c.JSON(http.StatusCreated, gin.H{"item": recommendation})
@@ -181,30 +225,41 @@ func UpdateAdminOnboardingFeedRecommendation(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		var recommendation model.OnboardingFeedRecommendation
-		if err := db.First(&recommendation, "id = ?", id).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "onboarding recommendation not found"})
-			return
-		}
-		if input.Enabled != nil && *input.Enabled && !recommendation.Enabled {
-			var count int64
-			db.Model(&model.OnboardingFeedRecommendation{}).Where("enabled = ?", true).Count(&count)
-			if count >= 5 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "at most 5 onboarding recommendations can be enabled"})
-				return
+		err = db.Transaction(func(tx *gorm.DB) error {
+			if err := lockOnboardingRecommendationCapacity(tx); err != nil {
+				return err
 			}
-		}
-		updates := map[string]any{}
-		if input.Enabled != nil {
-			updates["enabled"] = *input.Enabled
-		}
-		if input.SortOrder != nil {
-			updates["sort_order"] = *input.SortOrder
-		}
-		if err := db.Model(&recommendation).Updates(updates).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update onboarding recommendation"})
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&recommendation, "id = ?", id).Error; err != nil {
+				return err
+			}
+			if input.Enabled != nil && *input.Enabled && !recommendation.Enabled {
+				if err := checkOnboardingRecommendationCapacity(tx); err != nil {
+					return err
+				}
+			}
+			updates := map[string]any{}
+			if input.Enabled != nil {
+				updates["enabled"] = *input.Enabled
+			}
+			if input.SortOrder != nil {
+				updates["sort_order"] = *input.SortOrder
+			}
+			if err := tx.Model(&recommendation).Updates(updates).Error; err != nil {
+				return err
+			}
+			return tx.First(&recommendation, "id = ?", id).Error
+		})
+		if err != nil {
+			switch {
+			case errors.Is(err, gorm.ErrRecordNotFound):
+				c.JSON(http.StatusNotFound, gin.H{"error": "onboarding recommendation not found"})
+			case errors.Is(err, errOnboardingRecommendationLimit):
+				c.JSON(http.StatusBadRequest, gin.H{"error": errOnboardingRecommendationLimit.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update onboarding recommendation"})
+			}
 			return
 		}
-		db.First(&recommendation, "id = ?", id)
 		c.JSON(http.StatusOK, gin.H{"item": recommendation})
 	}
 }
@@ -267,4 +322,24 @@ func CompleteOnboardingHandler(db *gorm.DB) gin.HandlerFunc {
 			"onboarding_completed_at": completedAt,
 		})
 	}
+}
+
+func isDuplicateOnboardingRecommendation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return true
+	}
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint failed") &&
+		strings.Contains(message, "onboarding_feed_recommendations")
 }

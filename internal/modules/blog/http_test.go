@@ -3149,3 +3149,22 @@ func TestRegisterRoutesReorderCollectionPostsPersistsPosition(t *testing.T) {
 		}
 	}
 }
+
+func TestBlogRecommendationPreferenceFirstWriteCanDisable(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	router := newBlogHTTPRouter(service, &user)
+	result := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/blog/recommendation-preference", bytes.NewBufferString(`{"enabled":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(result, request)
+	if result.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", result.Code, result.Body.String())
+	}
+	var pref model.BlogRecommendationPreference
+	if err := db.Where("user_id = ?", user.ID).First(&pref).Error; err != nil {
+		t.Fatal(err)
+	}
+	if pref.Enabled {
+		t.Fatalf("first write must persist enabled=false: %s", result.Body.String())
+	}
+}

@@ -297,3 +297,21 @@ func TestDeleteTheme_ResetTheme(t *testing.T) {
 		t.Fatalf("expected 200 on PUT after delete, got %d: %s", wPut2.Code, wPut2.Body.String())
 	}
 }
+
+func TestPutThemeFirstWriteExplicitlyDisabled(t *testing.T) {
+	_, handler, db, user := newTestEnv(t)
+	current := authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role}
+	router := newTestRouter(handler, &current)
+	result := themeRequest(t, router, http.MethodPut, "/api/v1/users/me/theme",
+		`{"is_enabled":false,"mode":"preset","preset_config":{"accent":"#125688"}}`)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"is_enabled":false`) {
+		t.Fatalf("expected disabled first-write response, got %d: %s", result.Code, result.Body.String())
+	}
+	var stored model.UserTheme
+	if err := db.Where("user_id = ?", user.UUID).First(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.IsEnabled {
+		t.Fatal("first write must store is_enabled=false, not apply the database default")
+	}
+}

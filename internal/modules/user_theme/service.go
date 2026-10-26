@@ -150,7 +150,19 @@ func (s *Service) UpdateTheme(ctx context.Context, userID uuid.UUID, input Updat
 				CustomCSS:    input.CustomCSS,
 				SanitizedCSS: sanitizedCSS,
 			}
-			if err := s.db.WithContext(ctx).Create(&theme).Error; err != nil {
+			if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				if err := tx.Create(&theme).Error; err != nil {
+					return err
+				}
+				if !isEnabled {
+					// GORM applies default:true to a zero bool during INSERT.
+					if err := tx.Model(&theme).Update("is_enabled", false).Error; err != nil {
+						return err
+					}
+					theme.IsEnabled = false
+				}
+				return nil
+			}); err != nil {
 				return nil, apperr.Internal(err)
 			}
 		}

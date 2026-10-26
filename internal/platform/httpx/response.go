@@ -27,7 +27,10 @@ func OKMeta(c *gin.Context, status int, data any, meta any) {
 }
 
 func List(c *gin.Context, data any, page int, pageSize int, total int64) {
-	meta := PageMeta{Page: page, PageSize: pageSize, Total: total, HasMore: int64(page*pageSize) < total}
+	// Avoid overflow in page*pageSize for large client-supplied page values.
+	hasMore := page > 0 && pageSize > 0 && total > 0 &&
+		int64(page) <= (total-1)/int64(pageSize)
+	meta := PageMeta{Page: page, PageSize: pageSize, Total: total, HasMore: hasMore}
 	OKMeta(c, http.StatusOK, data, meta)
 }
 
@@ -71,8 +74,12 @@ func PageParamsWith(c *gin.Context, sizeKey string, defaultSize, maxSize int) (i
 }
 
 func Offset(page int, pageSize int) int {
-	if page < 1 {
-		page = 1
+	if page <= 1 || pageSize <= 0 {
+		return 0
+	}
+	maxInt := int(^uint(0) >> 1)
+	if page-1 > maxInt/pageSize {
+		return maxInt
 	}
 	return (page - 1) * pageSize
 }

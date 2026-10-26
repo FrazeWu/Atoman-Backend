@@ -81,7 +81,7 @@ func assertDebateSwaggerContract(t *testing.T, document map[string]any) {
 		t.Errorf("DebateListResponse.data type = %v, want array", got)
 	}
 	items := swaggerMap(t, listData, "items")
-	if got := items["$ref"]; got != "#/definitions/model.Debate" {
+	if got := items["$ref"]; got != "#/definitions/debate.DebateListItemDTO" {
 		t.Errorf("DebateListResponse.data items = %v", got)
 	}
 	meta := swaggerMap(t, listProperties, "meta")

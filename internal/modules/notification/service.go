@@ -1,6 +1,8 @@
 package notification
 
 import (
+	"context"
+	"log"
 	"strings"
 	"time"
 
@@ -67,6 +69,10 @@ func (s *Service) SetNotificationPublisher(publisher NotificationPublisher) {
 	s.publisher = publisher
 }
 
+// Each DB batch is bounded; a site with millions of users must not load
+// every recipient or generated notification into one request's memory.
+const announcementBatchSize = 250
+
 func (s *Service) PublishAnnouncement(user authctx.CurrentUser, input PublishAnnouncementInput) (int, error) {
 	if user.ID == uuid.Nil {
 		return 0, apperr.Unauthorized("Login required")
@@ -74,7 +80,6 @@ func (s *Service) PublishAnnouncement(user authctx.CurrentUser, input PublishAnn
 	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 		return 0, apperr.Forbidden("notification.announcement_forbidden", "Administrator access required")
 	}
-
 	input.Title = strings.TrimSpace(input.Title)
 	input.Body = strings.TrimSpace(input.Body)
 	input.Path = strings.TrimSpace(input.Path)
@@ -84,41 +89,74 @@ func (s *Service) PublishAnnouncement(user authctx.CurrentUser, input PublishAnn
 
 	sourceID := uuid.New()
 	actorID := user.ID
-	notifications := make([]model.Notification, 0)
+	delivered := 0
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		var recipients []model.User
-		if err := tx.Select("uuid").Where("is_active = ?", true).Find(&recipients).Error; err != nil {
-			return err
+		lastUser := uuid.Nil
+		for {
+			var recipients []uuid.UUID
+			query := tx.Model(&model.User{}).Where("is_active = ?", true).
+				Order("uuid ASC").Limit(announcementBatchSize)
+			if lastUser != uuid.Nil {
+				query = query.Where("uuid > ?", lastUser)
+			}
+			if err := query.Pluck("uuid", &recipients).Error; err != nil {
+				return err
+			}
+			if len(recipients) == 0 {
+				return nil
+			}
+			batch := make([]model.Notification, 0, len(recipients))
+			for _, recipientID := range recipients {
+				batch = append(batch, model.Notification{
+					RecipientID: recipientID, ActorID: &actorID,
+					Type: announcementNotificationType, SourceType: announcementNotificationType, SourceID: sourceID,
+					Meta: model.NotificationMeta{"title": input.Title, "body": input.Body, "path": input.Path},
+				})
+			}
+			if err := tx.CreateInBatches(&batch, 100).Error; err != nil {
+				return err
+			}
+			delivered += len(batch)
+			lastUser = recipients[len(recipients)-1]
 		}
-		notifications = make([]model.Notification, 0, len(recipients))
-		for _, recipient := range recipients {
-			notifications = append(notifications, model.Notification{
-				RecipientID: recipient.UUID,
-				ActorID:     &actorID,
-				Type:        announcementNotificationType,
-				SourceType:  announcementNotificationType,
-				SourceID:    sourceID,
-				Meta: model.NotificationMeta{
-					"title": input.Title,
-					"body":  input.Body,
-					"path":  input.Path,
-				},
-			})
-		}
-		if len(notifications) == 0 {
-			return nil
-		}
-		return tx.CreateInBatches(&notifications, 100).Error
 	}); err != nil {
-		return 0, err
+		return 0, err // No websocket signal for a rolled-back announcement.
 	}
 
-	if s.publisher != nil {
-		for i := range notifications {
-			s.publisher(notifications[i].RecipientID, &notifications[i])
-		}
+	// Notifications are durable before this point. Realtime websocket
+	// signals are best-effort and must not block a large admin request.
+	if delivered > 0 && s.publisher != nil {
+		go s.pushAnnouncementRealtime(sourceID)
 	}
-	return len(notifications), nil
+	return delivered, nil
+}
+
+func (s *Service) pushAnnouncementRealtime(sourceID uuid.UUID) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	lastID := uuid.Nil
+	for {
+		var batch []model.Notification
+		query := s.db.WithContext(ctx).Where("source_type = ? AND source_id = ?", announcementNotificationType, sourceID).
+			Order("id ASC").Limit(announcementBatchSize)
+		if lastID != uuid.Nil {
+			query = query.Where("id > ?", lastID)
+		}
+		if err := query.Find(&batch).Error; err != nil {
+			log.Printf("WARN: announcement realtime push failed for %s: %v", sourceID, err)
+			return
+		}
+		if len(batch) == 0 {
+			return
+		}
+		for i := range batch {
+			s.publisher(batch[i].RecipientID, &batch[i])
+		}
+		if len(batch) < announcementBatchSize {
+			return
+		}
+		lastID = batch[len(batch)-1].ID
+	}
 }
 
 func (s *Service) ListAnnouncements(user authctx.CurrentUser, query ListAnnouncementsQuery) ([]AnnouncementDTO, int64, error) {
@@ -251,7 +289,7 @@ func (s *Service) SavePreferences(user authctx.CurrentUser, input SavePreference
 	for _, item := range input.Items {
 		category := strings.TrimSpace(item.Category)
 		eventType := strings.TrimSpace(item.EventType)
-		if !validNotificationCategory(category) || !validNotificationType(eventType) || len(eventType) > maxNotificationEventType {
+		if !validNotificationCategory(category) || !validNotificationType(eventType) || category != categoryForType(eventType) || len(eventType) > maxNotificationEventType {
 			return nil, apperr.BadRequest("notification.invalid_preference", "Notification preference is invalid")
 		}
 		if _, exists := seen[eventType]; exists {
