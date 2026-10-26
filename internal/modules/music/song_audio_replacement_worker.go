@@ -2,6 +2,8 @@ package music
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"path"
 	"time"
@@ -87,7 +89,10 @@ func runSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID stri
 }
 
 func failSongAudioReplacement(db *gorm.DB, jobID uuid.UUID, leaseToken string, err error) (bool, error) {
-	db.Model(&model.SongAudioReplacement{}).Where("id = ? AND status = ? AND locked_by = ?", jobID, "processing", leaseToken).
+	result := db.Model(&model.SongAudioReplacement{}).Where("id = ? AND status = ? AND locked_by = ?", jobID, "processing", leaseToken).
 		Updates(map[string]any{"status": "failed", "error_message": err.Error(), "finished_at": time.Now().UTC()})
+	if result.Error != nil {
+		return true, errors.Join(err, fmt.Errorf("persist song audio replacement failure for %s: %w", jobID, result.Error))
+	}
 	return true, err
 }

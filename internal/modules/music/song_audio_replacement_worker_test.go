@@ -2,11 +2,15 @@ package music
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func TestRunSongAudioReplacementOnceCreatesRevisionBeforeSwitchingAudio(t *testing.T) {
@@ -104,5 +108,26 @@ func TestSongAudioReplacementPromotesUploadIntoAlbumRevisionDirectory(t *testing
 	}
 	if len(copiedDestinations) != 1 || !containsString(deletedKeys, uploadKey) {
 		t.Fatalf("unexpected storage operations: copied=%v deleted=%v", copiedDestinations, deletedKeys)
+	}
+}
+
+func TestFailedSongAudioReplacementReportsPersistenceError(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.SongAudioReplacement{})
+	cause := errors.New("source processing failed")
+	persistenceErr := errors.New("simulated status write failure")
+	const callback = "audit:fail_audio_replacement_status"
+	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == (model.SongAudioReplacement{}).TableName() {
+			tx.AddError(persistenceErr)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callback) })
+
+	processed, err := failSongAudioReplacement(db, uuid.New(), "stale-worker-token", cause)
+	if !processed || !errors.Is(err, cause) || !errors.Is(err, persistenceErr) {
+		t.Fatalf("expected both processing and failure-write errors; processed=%v err=%v", processed, err)
 	}
 }

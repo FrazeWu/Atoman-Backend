@@ -647,8 +647,14 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 			return contentError(err)
 		}
 		if err := s.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
-				return err
+			update := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").
+				Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil})
+			if update.Error != nil {
+				return update.Error
+			}
+			if update.RowsAffected != 1 {
+				// Canceled or already published since the candidate query.
+				return nil
 			}
 			return enqueuePublication(tx, "podcast", episode.ID, episode.ChannelID, episode.Post.UserID)
 		}); err != nil {
@@ -676,8 +682,14 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 			return contentError(err)
 		}
 		if err := s.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
-				return err
+			update := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").
+				Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil})
+			if update.Error != nil {
+				return update.Error
+			}
+			if update.RowsAffected != 1 {
+				// Canceled or already published since the candidate query.
+				return nil
 			}
 			if video.ChannelID == nil {
 				return fmt.Errorf("video %s has no channel", video.ID)

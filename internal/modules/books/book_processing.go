@@ -63,20 +63,20 @@ func (s *Service) ProcessBookAssets(ctx context.Context) (int, error) {
 	processed := 0
 	var processingErr error
 	for _, candidate := range candidates {
-		claimed, err := s.claimBookAsset(ctx, candidate.ID)
+		token, err := s.claimBookAsset(ctx, candidate.ID)
 		if err != nil {
 			processingErr = errors.Join(processingErr, fmt.Errorf("claim book asset %s: %w", candidate.ID, err))
 			continue
 		}
-		if !claimed {
+		if token == "" {
 			continue
 		}
 		processed++
 		assetCtx, cancel := context.WithTimeout(ctx, bookProcessingTimeout)
-		processErr := s.processBookAsset(assetCtx, candidate.ID)
+		processErr := s.processBookAsset(assetCtx, candidate.ID, token)
 		cancel()
 		if processErr != nil {
-			if markErr := s.markBookAssetFailed(ctx, candidate.ID, processErr); markErr != nil {
+			if markErr := s.markBookAssetFailed(ctx, candidate.ID, token, processErr); markErr != nil {
 				processingErr = errors.Join(processingErr, fmt.Errorf("mark book asset %s failed: %w", candidate.ID, markErr))
 			} else {
 				processingErr = errors.Join(processingErr, fmt.Errorf("process book asset %s: %w", candidate.ID, processErr))
@@ -92,24 +92,33 @@ func (s *Service) recoverStaleBookAssets(ctx context.Context) error {
 		Where("processing_status = ? AND updated_at < ?", model.BookAssetStatusProcessing, cutoff).
 		Updates(map[string]any{
 			"processing_status": model.BookAssetStatusScanning,
+			"processing_token":  "",
 			"scan_status":       "pending",
 			"error_message":     "",
 		}).Error
 }
 
-func (s *Service) claimBookAsset(ctx context.Context, assetID uuid.UUID) (bool, error) {
+func (s *Service) claimBookAsset(ctx context.Context, assetID uuid.UUID) (string, error) {
+	token := uuid.NewString()
 	result := s.db.WithContext(ctx).Model(&model.UserBookAsset{}).
 		Where("id = ? AND processing_status = ?", assetID, model.BookAssetStatusScanning).
 		Updates(map[string]any{
 			"processing_status": model.BookAssetStatusProcessing,
+			"processing_token":  token,
 			"scan_status":       "processing",
 		})
-	return result.RowsAffected == 1, result.Error
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected != 1 {
+		return "", nil
+	}
+	return token, nil
 }
 
-func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error {
+func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID, token string) error {
 	var asset model.UserBookAsset
-	if err := s.db.WithContext(ctx).Where("id = ? AND processing_status = ?", assetID, model.BookAssetStatusProcessing).First(&asset).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id = ? AND processing_status = ? AND processing_token = ?", assetID, model.BookAssetStatusProcessing, token).First(&asset).Error; err != nil {
 		return err
 	}
 	object, err := s.bookUpload.OpenObject(asset.ObjectKey)
@@ -262,10 +271,10 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", assetID).First(&locked).Error; err != nil {
 			return err
 		}
-		if locked.ProcessingStatus != model.BookAssetStatusProcessing {
-			return nil
+		if locked.ProcessingStatus != model.BookAssetStatusProcessing || locked.ProcessingToken != token {
+			return nil // Reclaimed job: an old worker cannot complete the new lease.
 		}
-		if err := tx.Model(&model.UserBookAsset{}).Where("id = ? AND processing_status = ?", assetID, model.BookAssetStatusProcessing).Updates(map[string]any{
+		if err := tx.Model(&model.UserBookAsset{}).Where("id = ? AND processing_status = ? AND processing_token = ?", assetID, model.BookAssetStatusProcessing, token).Updates(map[string]any{
 			"sha256":             sha,
 			"format":             readerFormat,
 			"content_type":       readerContentType,
@@ -273,6 +282,7 @@ func (s *Service) processBookAsset(ctx context.Context, assetID uuid.UUID) error
 			"derived_object_key": derivedObjectKey,
 			"scan_status":        scanStatus,
 			"processing_status":  model.BookAssetStatusPrivateAvailable,
+			"processing_token":   "",
 			"error_message":      "",
 		}).Error; err != nil {
 			return err
@@ -333,9 +343,27 @@ func convertBookToEPUB(ctx context.Context, inputPath string) (string, error) {
 // The source remains in the owner's private area so private reading progress
 // and notes keep working independently from the public copy.
 func (s *Service) publishScannedBookAsset(ctx context.Context, source model.UserBookAsset) error {
+	// Before copying anything, verify that this worker still owns the scan.
+	// Recheck under a row lock at publication time to fence stale workers.
+	if source.ProcessingToken == "" {
+		return nil
+	}
+	var live int64
+	if err := s.db.WithContext(ctx).Model(&model.UserBookAsset{}).
+		Where("id = ? AND processing_status = ? AND processing_token = ?", source.ID, model.BookAssetStatusProcessing, source.ProcessingToken).
+		Count(&live).Error; err != nil {
+		return err
+	}
+	if live != 1 {
+		return nil
+	}
 	var existing model.PublishedBookAsset
 	if err := s.db.WithContext(ctx).Where("source_asset_id = ?", source.ID).First(&existing).Error; err == nil {
 		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			current, err := bookProcessingLeaseIsCurrent(tx, source)
+			if err != nil || !current {
+				return err
+			}
 			var latestImport model.UserBookImport
 			if err := tx.First(&latestImport, "id = ?", source.ImportID).Error; err != nil {
 				return err
@@ -360,7 +388,12 @@ func (s *Service) publishScannedBookAsset(ctx context.Context, source model.User
 		SHA256:        source.SHA256,
 		Status:        model.BookPublicationStatusPublished,
 	}
+	inserted := false
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		currentLease, err := bookProcessingLeaseIsCurrent(tx, source)
+		if err != nil || !currentLease {
+			return err
+		}
 		var current model.PublishedBookAsset
 		if err := tx.Where("source_asset_id = ?", source.ID).First(&current).Error; err == nil {
 			var latestImport model.UserBookImport
@@ -377,15 +410,36 @@ func (s *Service) publishScannedBookAsset(ctx context.Context, source model.User
 		}
 		published.WorkID = latestImport.WorkID
 		published.EditionID = latestImport.EditionID
-		return tx.Create(&published).Error
+		if err := tx.Create(&published).Error; err != nil {
+			return err
+		}
+		inserted = true
+		return nil
 	}); err != nil {
 		_ = s.bookUpload.DeleteObject(publicKey)
 		return err
 	}
+	if !inserted {
+		// Another worker already published, or our lease was reclaimed.
+		_ = s.bookUpload.DeleteObject(publicKey)
+	}
 	return nil
 }
 
-func (s *Service) markBookAssetFailed(ctx context.Context, assetID uuid.UUID, cause error) error {
+// Read-lock the current owner before creating/updating a public record.
+// A recovered worker cannot publish even if its scan finishes afterwards.
+func bookProcessingLeaseIsCurrent(tx *gorm.DB, source model.UserBookAsset) (bool, error) {
+	var locked model.UserBookAsset
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND processing_status = ? AND processing_token = ?", source.ID, model.BookAssetStatusProcessing, source.ProcessingToken).
+		First(&locked).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (s *Service) markBookAssetFailed(ctx context.Context, assetID uuid.UUID, token string, cause error) error {
 	message := truncateBookUploadError(cause.Error())
 	assetStatus := model.BookAssetStatusFailed
 	scanStatus := "failed"
@@ -400,12 +454,13 @@ func (s *Service) markBookAssetFailed(ctx context.Context, assetID uuid.UUID, ca
 		if err := tx.Where("id = ?", assetID).First(&asset).Error; err != nil {
 			return err
 		}
-		if asset.ProcessingStatus != model.BookAssetStatusProcessing {
+		if asset.ProcessingStatus != model.BookAssetStatusProcessing || asset.ProcessingToken != token {
 			return nil
 		}
-		if err := tx.Model(&model.UserBookAsset{}).Where("id = ? AND processing_status = ?", assetID, model.BookAssetStatusProcessing).Updates(map[string]any{
+		if err := tx.Model(&model.UserBookAsset{}).Where("id = ? AND processing_status = ? AND processing_token = ?", assetID, model.BookAssetStatusProcessing, token).Updates(map[string]any{
 			"scan_status":       scanStatus,
 			"processing_status": assetStatus,
+			"processing_token":  "",
 			"error_message":     message,
 		}).Error; err != nil {
 			return err

@@ -190,30 +190,39 @@ func metadataResultFromPreview(preview AlbumImportMetadataPreviewDTO) AlbumImpor
 
 func (s *Service) persistAlbumImportMetadataMatchGeneration(ctx context.Context, session *model.AlbumImportSession, result AlbumImportMetadataResult, generation int64) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var latest model.AlbumImportSession
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&latest, "id = ?", session.ID).Error; err != nil {
-			return err
-		}
-		payload, err := readAlbumImportPayloadMap(latest.PayloadJSON)
-		if err != nil {
-			return err
-		}
-		if latest.Status == AlbumImportStatusCanceled || latest.Status == AlbumImportStatusCommitted || (generation > 0 && int64Value(payload["metadata_match_generation"]) != generation) {
-			return nil
-		}
-		tracks := metadataResultTrackMaps(result)
-		mergeImportTrackAudio(tracks, payload["derived_tracks"])
-		payload["metadata_match_locked"] = false
-		payload["metadata_match_status"] = ""
-		mergeDerivedMetadataPayload(payload, tracks, result)
-		payload["metadata_match_started"] = true
-		payload["metadata_match_locked"] = result.MatchStatus == model.MusicMatchMatched || result.MatchStatus == model.MusicMatchManual || result.MatchStatus == model.MusicMatchAmbiguous
-		encoded, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		return tx.Model(&latest).Update("payload_json", string(encoded)).Error
+		_, err := persistAlbumImportMetadataMatchGenerationTx(tx, session.ID, result, generation)
+		return err
 	})
+}
+
+// Both the synchronous path and the leased async path use this transactional
+// implementation. The async caller holds the matching job's row lock before
+// writing the session and completing the job in the same transaction.
+func persistAlbumImportMetadataMatchGenerationTx(tx *gorm.DB, sessionID uuid.UUID, result AlbumImportMetadataResult, generation int64) (bool, error) {
+	var latest model.AlbumImportSession
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&latest, "id = ?", sessionID).Error; err != nil {
+		return false, err
+	}
+	payload, err := readAlbumImportPayloadMap(latest.PayloadJSON)
+	if err != nil {
+		return false, err
+	}
+	if latest.Status == AlbumImportStatusCanceled || latest.Status == AlbumImportStatusCommitted || (generation > 0 && int64Value(payload["metadata_match_generation"]) != generation) {
+		return false, nil
+	}
+	tracks := metadataResultTrackMaps(result)
+	mergeImportTrackAudio(tracks, payload["derived_tracks"])
+	payload["metadata_match_locked"] = false
+	payload["metadata_match_status"] = ""
+	mergeDerivedMetadataPayload(payload, tracks, result)
+	payload["metadata_match_started"] = true
+	payload["metadata_match_locked"] = result.MatchStatus == model.MusicMatchMatched || result.MatchStatus == model.MusicMatchManual || result.MatchStatus == model.MusicMatchAmbiguous
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return false, err
+	}
+	update := tx.Model(&latest).Update("payload_json", string(encoded))
+	return update.RowsAffected == 1, update.Error
 }
 
 func (s *Service) PreviewAlbumImportMetadata(ctx context.Context, input AlbumImportMetadataPreviewInput) (AlbumImportMetadataPreviewDTO, error) {

@@ -1,15 +1,20 @@
 package music
 
 import (
-	"atoman/internal/model"
 	"context"
 	"encoding/json"
 	"errors"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"log"
 	"time"
+
+	"atoman/internal/model"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+const metadataMatchLeaseDuration = 2 * time.Minute
 
 func StartMetadataMatchWorker(ctx context.Context, service *Service, interval time.Duration) <-chan struct{} {
 	done := make(chan struct{})
@@ -34,9 +39,10 @@ func StartMetadataMatchWorker(ctx context.Context, service *Service, interval ti
 func (s *Service) RunMetadataMatchOnce(ctx context.Context) (bool, error) {
 	var job model.MusicMetadataMatchJob
 	now := time.Now().UTC()
+	token := uuid.NewString()
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		claim := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("status = ? OR (status = ? AND locked_at < ?)", "queued", "running", now.Add(-2*time.Minute)).
+			Where("status = ? OR (status = ? AND locked_at < ?)", "queued", "running", now.Add(-metadataMatchLeaseDuration)).
 			Order("created_at ASC").Limit(1).Find(&job)
 		if claim.Error != nil {
 			return claim.Error
@@ -44,7 +50,9 @@ func (s *Service) RunMetadataMatchOnce(ctx context.Context) (bool, error) {
 		if claim.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
 		}
-		return tx.Model(&job).Updates(map[string]any{"status": "running", "locked_at": now}).Error
+		return tx.Model(&job).Updates(map[string]any{
+			"status": "running", "locked_at": now, "lease_token": token,
+		}).Error
 	})
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
@@ -54,20 +62,24 @@ func (s *Service) RunMetadataMatchOnce(ctx context.Context) (bool, error) {
 	}
 	var session model.AlbumImportSession
 	if err := s.db.WithContext(ctx).First(&session, "id = ?", job.ImportID).Error; err != nil {
+		// A transient database failure is retried when the claim expires.
 		return true, err
 	}
 	values, err := readAlbumImportPayloadMap(session.PayloadJSON)
 	if err != nil {
-		return true, err
+		return true, errors.Join(err, s.setMetadataMatchJobStatus(ctx, job.ID, token, "failed"))
 	}
-	if session.Status == AlbumImportStatusCanceled || session.Status == AlbumImportStatusCommitted || int64Value(values["metadata_match_generation"]) != job.Generation {
-		return true, s.db.WithContext(ctx).Model(&job).Update("status", "canceled").Error
+	if session.Status == AlbumImportStatusCanceled || session.Status == AlbumImportStatusCommitted ||
+		int64Value(values["metadata_match_generation"]) != job.Generation {
+		return true, s.setMetadataMatchJobStatus(ctx, job.ID, token, "canceled")
 	}
 	var input AlbumImportMetadataPreviewInput
 	if err := json.Unmarshal([]byte(job.InputJSON), &input); err != nil {
-		return true, err
+		return true, errors.Join(err, s.setMetadataMatchJobStatus(ctx, job.ID, token, "failed"))
 	}
-	// API 和 worker 可以处于不同进程，定期核对会话以取消已撤销或被重试替代的请求。
+
+	// Both API cancellation and another worker's stale-lease reclamation
+	// invalidate the running lookup, including across process boundaries.
 	lookupCtx, cancelLookup := context.WithCancel(ctx)
 	defer cancelLookup()
 	monitorDone := make(chan struct{})
@@ -80,6 +92,13 @@ func (s *Service) RunMetadataMatchOnce(ctx context.Context) (bool, error) {
 			case <-lookupCtx.Done():
 				return
 			case <-ticker.C:
+				result := s.db.WithContext(lookupCtx).Model(&model.MusicMetadataMatchJob{}).
+					Where("id = ? AND status = ? AND lease_token = ?", job.ID, "running", token).
+					Update("locked_at", time.Now().UTC())
+				if result.Error != nil || result.RowsAffected != 1 {
+					cancelLookup()
+					return
+				}
 				var current struct {
 					Status     string
 					Generation int64
@@ -89,7 +108,8 @@ func (s *Service) RunMetadataMatchOnce(ctx context.Context) (bool, error) {
 					Where("id = ?", job.ImportID).Take(&current).Error; err != nil {
 					continue
 				}
-				if current.Status == AlbumImportStatusCanceled || current.Status == AlbumImportStatusCommitted || current.Generation != job.Generation {
+				if current.Status == AlbumImportStatusCanceled || current.Status == AlbumImportStatusCommitted ||
+					current.Generation != job.Generation {
 					cancelLookup()
 					return
 				}
@@ -103,10 +123,40 @@ func (s *Service) RunMetadataMatchOnce(ctx context.Context) (bool, error) {
 		preview.MetadataError = lookupErr.Error()
 	}
 	result := metadataResultFromPreview(preview)
+	// Finish with a fresh short-lived context after request cancellation,
+	// but only the current lease owner may publish the result.
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := s.persistAlbumImportMetadataMatchGeneration(persistCtx, &session, result, job.Generation); err != nil {
-		return true, err
-	}
-	return true, s.db.WithContext(persistCtx).Model(&job).Update("status", "done").Error
+	return true, s.finishMetadataMatchJob(persistCtx, &session, job, token, result)
+}
+
+func (s *Service) setMetadataMatchJobStatus(ctx context.Context, jobID uuid.UUID, token, status string) error {
+	return s.db.WithContext(ctx).Model(&model.MusicMetadataMatchJob{}).
+		Where("id = ? AND status = ? AND lease_token = ?", jobID, "running", token).
+		Update("status", status).Error
+}
+
+func (s *Service) finishMetadataMatchJob(ctx context.Context, session *model.AlbumImportSession, job model.MusicMetadataMatchJob, token string, result AlbumImportMetadataResult) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.MusicMetadataMatchJob
+		claimed := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ? AND lease_token = ?", job.ID, "running", token).First(&current)
+		if errors.Is(claimed.Error, gorm.ErrRecordNotFound) {
+			return nil // A newer worker reclaimed the lease; never publish old results.
+		}
+		if claimed.Error != nil {
+			return claimed.Error
+		}
+		written, err := persistAlbumImportMetadataMatchGenerationTx(tx, session.ID, result, job.Generation)
+		if err != nil {
+			return err
+		}
+		status := "done"
+		if !written {
+			status = "canceled"
+		}
+		return tx.Model(&model.MusicMetadataMatchJob{}).
+			Where("id = ? AND status = ? AND lease_token = ?", job.ID, "running", token).
+			Update("status", status).Error
+	})
 }

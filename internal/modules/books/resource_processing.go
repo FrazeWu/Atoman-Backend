@@ -11,6 +11,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -25,7 +26,8 @@ func (s *Service) ProcessBookResourceUploads(ctx context.Context) (int, error) {
 		return 0, apperr.New(http.StatusServiceUnavailable, "books.scanner_unavailable", "Public book safety scanner is unavailable", nil)
 	}
 	cutoff := time.Now().UTC().Add(-bookProcessingStaleAfter)
-	if err := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).Where("status = 'scanning' AND updated_at < ?", cutoff).Update("status", "uploaded").Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).Where("status = 'scanning' AND updated_at < ?", cutoff).
+		Updates(map[string]any{"status": "uploaded", "scan_lease_token": ""}).Error; err != nil {
 		return 0, err
 	}
 	if err := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).Where("status = 'completing' AND updated_at < ?", cutoff).Update("status", "uploading").Error; err != nil {
@@ -38,7 +40,9 @@ func (s *Service) ProcessBookResourceUploads(ctx context.Context) (int, error) {
 	processed := 0
 	var failures error
 	for _, session := range sessions {
-		claim := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).Where("id = ? AND status = 'uploaded'", session.ID).Update("status", "scanning")
+		token := uuid.NewString()
+		claim := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).Where("id = ? AND status = 'uploaded'", session.ID).
+			Updates(map[string]any{"status": "scanning", "scan_lease_token": token})
 		if claim.Error != nil {
 			failures = errors.Join(failures, claim.Error)
 			continue
@@ -55,14 +59,18 @@ func (s *Service) ProcessBookResourceUploads(ctx context.Context) (int, error) {
 			if errors.Is(err, ErrBookVirusDetected) {
 				status = "quarantined"
 			}
-			markErr := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).Where("id = ? AND status = 'scanning'", session.ID).Updates(map[string]any{"status": status, "error_message": truncateBookUploadError(err.Error())}).Error
+			markErr := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).
+				Where("id = ? AND status = 'scanning' AND scan_lease_token = ?", session.ID, token).
+				Updates(map[string]any{"status": status, "scan_lease_token": "", "error_message": truncateBookUploadError(err.Error())}).Error
 			failures = errors.Join(failures, err, markErr)
 			continue
 		}
-		if err := s.publishBookResourceUpload(ctx, session, hash); err != nil {
+		if err := s.publishBookResourceUpload(ctx, session, hash, token); err != nil {
 			// A concurrent catalog merge or transient database error can be retried
 			// safely. No existing revision or current file has been overwritten.
-			resetErr := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).Where("id = ? AND status = 'scanning'", session.ID).Update("status", "uploaded").Error
+			resetErr := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).
+				Where("id = ? AND status = 'scanning' AND scan_lease_token = ?", session.ID, token).
+				Updates(map[string]any{"status": "uploaded", "scan_lease_token": ""}).Error
 			failures = errors.Join(failures, err, resetErr)
 		}
 	}
@@ -108,7 +116,7 @@ func (s *Service) inspectBookResourceUpload(ctx context.Context, session model.B
 	return hash, ctx.Err()
 }
 
-func (s *Service) publishBookResourceUpload(ctx context.Context, session model.BookUploadSession, hash string) error {
+func (s *Service) publishBookResourceUpload(ctx context.Context, session model.BookUploadSession, hash, token string) error {
 	var initialAsset model.BookAsset
 	if err := s.db.WithContext(ctx).First(&initialAsset, "id = ?", session.AssetID).Error; err != nil {
 		return err
@@ -126,8 +134,8 @@ func (s *Service) publishBookResourceUpload(ctx context.Context, session model.B
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", session.ID).Error; err != nil {
 			return err
 		}
-		if locked.Status != "scanning" {
-			return nil
+		if locked.Status != "scanning" || locked.ScanLeaseToken != token {
+			return nil // Reclaimed scan: the old worker cannot publish a revision.
 		}
 		media := model.MediaAsset{UserID: &session.UserID, Purpose: "books.file", Key: session.ObjectKey, ContentType: session.ContentType, Size: session.SizeBytes}
 		if err := tx.Create(&media).Error; err != nil {
@@ -144,6 +152,6 @@ func (s *Service) publishBookResourceUpload(ctx context.Context, session model.B
 		if err := tx.Model(&asset).Update("current_revision_id", revision.ID).Error; err != nil {
 			return err
 		}
-		return tx.Model(&locked).Updates(map[string]any{"status": "ready", "revision_id": revision.ID, "error_message": ""}).Error
+		return tx.Model(&locked).Updates(map[string]any{"status": "ready", "scan_lease_token": "", "revision_id": revision.ID, "error_message": ""}).Error
 	})
 }

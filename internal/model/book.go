@@ -255,6 +255,7 @@ type UserBookAsset struct {
 	DerivedObjectKey string    `json:"-" gorm:"type:text;not null;default:''"`
 	ScanStatus       string    `json:"-" gorm:"not null;default:'pending';index"`
 	ProcessingStatus string    `json:"-" gorm:"not null;default:'pending_upload';index;check:chk_user_book_assets_processing_status,processing_status IN ('pending_upload','uploading','uploaded','scanning','processing','metadata_ready','private_available','publication_requested','pending_review','failed','rejected','quarantined','removed')"`
+	ProcessingToken  string    `json:"-" gorm:"type:varchar(64);not null;default:''"`
 	ErrorMessage     string    `json:"-" gorm:"type:text;not null;default:''"`
 }
 

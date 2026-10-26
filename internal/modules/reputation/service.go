@@ -25,6 +25,11 @@ const (
 	WeightAlgorithmVersionV1  = "linear-quality-v1"
 )
 
+// Reputation runs must not publish from two API/worker processes at once.
+const reputationRunLockKey int64 = 2026102601
+
+var ErrReputationRunInProgress = errors.New("another reputation calculation is already running")
+
 type Service struct{ db *gorm.DB }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db} }
@@ -71,6 +76,13 @@ func (s *Service) RunShadow(ctx context.Context, now time.Time) (*model.Reputati
 		StartedAt: now,
 	}
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var lease struct{ Acquired bool }
+		if err := tx.Raw("SELECT pg_try_advisory_xact_lock(?) AS acquired", reputationRunLockKey).Scan(&lease).Error; err != nil {
+			return err
+		}
+		if !lease.Acquired {
+			return ErrReputationRunInProgress
+		}
 		var published model.ReputationRun
 		if err := tx.Where("status = ?", model.ReputationRunPublished).Order("published_at DESC").First(&published).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err

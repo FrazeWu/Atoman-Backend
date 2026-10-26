@@ -22,6 +22,7 @@ type BookUploadSession struct {
 	Status                      string     `json:"status" gorm:"not null;index;check:chk_book_upload_session_status,status IN ('uploading','completing','uploaded','scanning','ready','failed','quarantined')"`
 	RevisionID                  *uuid.UUID `json:"revision_id,omitempty" gorm:"type:uuid"`
 	ErrorMessage                string     `json:"error_message" gorm:"not null;default:''"`
+	ScanLeaseToken              string     `json:"-" gorm:"type:varchar(64);not null;default:''"`
 	PublicDistributionConfirmed bool       `json:"-" gorm:"not null"`
 }
 

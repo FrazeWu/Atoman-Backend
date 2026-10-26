@@ -2,6 +2,7 @@ package reputation
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -94,6 +95,10 @@ func (h *Handler) runShadow(c *gin.Context) {
 		return
 	}
 	run, err := h.service.RunShadow(c.Request.Context(), time.Now().UTC())
+	if errors.Is(err, ErrReputationRunInProgress) {
+		httpx.Error(c, apperr.Conflict("reputation.run_in_progress", "Another reputation calculation is already running"))
+		return
+	}
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -130,6 +135,9 @@ func StartWorker(ctx context.Context, db *gorm.DB) <-chan struct{} {
 		service := NewService(db)
 		run := func() {
 			result, err := service.RunShadow(ctx, time.Now().UTC())
+			if errors.Is(err, ErrReputationRunInProgress) {
+				return // Another instance or an admin request is already computing.
+			}
 			if err != nil {
 				log.Printf("reputation shadow run failed: %v", err)
 				return

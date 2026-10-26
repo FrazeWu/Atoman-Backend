@@ -88,6 +88,7 @@ type MusicMetadataMatchJob struct {
 	InputJSON  string    `gorm:"type:text;not null"`
 	Status     string    `gorm:"not null;default:'queued';index"`
 	LockedAt   *time.Time
+	LeaseToken string `gorm:"type:varchar(64);not null;default:''"`
 }
 
 func (MusicMetadataMatchJob) TableName() string { return "music_metadata_match_jobs" }

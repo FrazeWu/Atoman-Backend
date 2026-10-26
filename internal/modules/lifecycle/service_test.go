@@ -1230,3 +1230,71 @@ func TestSchedulePublishesDueContentAndEnqueuesPublication(t *testing.T) {
 		t.Fatalf("expected publication event, got %d", publications)
 	}
 }
+
+func TestPublishDueDoesNotEnqueueCanceledVideo(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	collection := model.Collection{ChannelID: fixture.channel.ID, ContentType: "video", Name: "Canceled scheduled videos"}
+	if err := fixture.db.Create(&collection).Error; err != nil {
+		t.Fatal(err)
+	}
+	canonicalCollection := model.ContentCollection{Base: collection.Base, ChannelID: collection.ChannelID, Name: collection.Name}
+	if err := fixture.db.Create(&canonicalCollection).Error; err != nil {
+		t.Fatal(err)
+	}
+	publishAt := time.Now().UTC().Add(-time.Minute)
+	video := model.Video{
+		UserID: fixture.owner.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID,
+		Title: "Canceled scheduled video", StorageType: "local", VideoURL: "https://cdn.example.com/video/imports/cancel.mp4",
+		ProcessingStatus: "pending", Status: "scheduled", Visibility: "public", ScheduledAt: &publishAt,
+	}
+	if err := fixture.db.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	entry := model.ContentEntry{
+		Base: video.Base, AuthorID: &fixture.owner.ID, ChannelID: fixture.channel.ID,
+		Kind: "video", Title: video.Title, Status: "scheduled", Visibility: "public", ScheduledAt: &publishAt,
+	}
+	if err := fixture.db.Create(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentVideoExtension{
+		ContentID: entry.ID, VideoID: video.ID, CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
+		StorageType: video.StorageType, VideoURL: video.VideoURL, ProcessingStatus: video.ProcessingStatus,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentCollectionMembership{ContentID: entry.ID, CollectionID: canonicalCollection.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate another request canceling the schedule after the candidate query
+	// but immediately before the worker's conditional scheduled -> published UPDATE.
+	const callback = "audit:cancel_scheduled_video_before_publish"
+	var canceled bool
+	if err := fixture.db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if canceled || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "content_entries" {
+			return
+		}
+		canceled = true
+		if err := tx.Exec("UPDATE content_entries SET status = 'draft', scheduled_at = NULL WHERE id = ?", entry.ID).Error; err != nil {
+			tx.AddError(err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Update().Remove(callback) })
+
+	if err := fixture.service.PublishDue(time.Now().UTC(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if !canceled {
+		t.Fatal("test failed to simulate concurrent schedule cancellation")
+	}
+	var eventCount int64
+	if err := fixture.db.Model(&model.ContentPublicationEvent{}).Where("content_type = ? AND content_id = ?", "video", video.ID).Count(&eventCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if eventCount != 0 {
+		t.Fatalf("canceled video must not reserve the publication event (found %d)", eventCount)
+	}
+}

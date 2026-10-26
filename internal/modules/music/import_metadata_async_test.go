@@ -323,3 +323,54 @@ func waitAsyncMetadataSignal(t *testing.T, signal <-chan struct{}) {
 		t.Fatal("等待元数据任务超时")
 	}
 }
+
+func TestMetadataMatchCompletionFencesReclaimedLease(t *testing.T) {
+	svc, db, user, session, _ := newAsyncMetadataTestSession(t)
+	if _, err := svc.MatchAlbumImportMetadata(context.Background(), user, session.ID, asyncMetadataInput("Fenced album")); err != nil {
+		t.Fatal(err)
+	}
+	var job model.MusicMetadataMatchJob
+	if err := db.Where("import_id = ?", session.ID).First(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	const newestToken = "new-worker-lease"
+	if err := db.Model(&job).Updates(map[string]any{
+		"status": "running", "lease_token": newestToken, "locked_at": time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	staleResult := AlbumImportMetadataResult{AlbumTitle: "stale", MetadataSource: "musicbrainz", ExternalID: "stale", MatchStatus: model.MusicMatchMatched}
+	if err := svc.finishMetadataMatchJob(context.Background(), &session, job, "old-worker-lease", staleResult); err != nil {
+		t.Fatal(err)
+	}
+	var current model.MusicMetadataMatchJob
+	if err := db.First(&current, "id = ?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != "running" || current.LeaseToken != newestToken {
+		t.Fatalf("stale worker changed job ownership: %+v", current)
+	}
+	_, values := loadCreationRegressionPayload(t, db, session.ID)
+	if stringValue(values["metadata_external_id"]) == "stale" {
+		t.Fatal("stale worker overwrote current session")
+	}
+
+	newResult := AlbumImportMetadataResult{AlbumTitle: "newest", MetadataSource: "musicbrainz", ExternalID: "new", MatchStatus: model.MusicMatchMatched}
+	if err := svc.finishMetadataMatchJob(context.Background(), &session, job, newestToken, newResult); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&current, "id = ?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, values = loadCreationRegressionPayload(t, db, session.ID)
+	if current.Status != "done" || stringValue(values["metadata_external_id"]) != "new" {
+		t.Fatalf("valid lease did not atomically commit: status=%s metadata=%v", current.Status, values["metadata_external_id"])
+	}
+	if err := svc.finishMetadataMatchJob(context.Background(), &session, job, "old-worker-lease", staleResult); err != nil {
+		t.Fatal(err)
+	}
+	_, values = loadCreationRegressionPayload(t, db, session.ID)
+	if stringValue(values["metadata_external_id"]) != "new" {
+		t.Fatal("completed newer worker result was overwritten")
+	}
+}
