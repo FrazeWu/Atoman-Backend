@@ -496,6 +496,14 @@ func (r *Repo) UpdatePlaylist(playlist *model.Playlist, updates map[string]any) 
 func (r *Repo) UpsertPlaylistSong(playlistID uuid.UUID, songID uuid.UUID) (model.PlaylistSong, error) {
 	var playlistSong model.PlaylistSong
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		// Lock the song and revalidate its lifecycle inside the same transaction.
+		// This prevents a concurrent merge from moving playlist relations before
+		// a stale add request inserts a relation to the merged source song.
+		var song model.Song
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "lifecycle_status").First(&song, "id = ? AND lifecycle_status = ?", songID, model.MusicLifecycleActive).Error; err != nil {
+			return err
+		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("id").First(&model.Playlist{}, "id = ?", playlistID).Error; err != nil {
 			return err

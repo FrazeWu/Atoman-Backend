@@ -12,6 +12,7 @@ import (
 	"atoman/internal/model"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type importWorkerStore struct {
@@ -389,6 +390,93 @@ func TestImportWorkerCleanupRetriesTargets(t *testing.T) {
 	}
 }
 
+func TestImportWorkerCleanupRetriesPlaybackAfterPartialObjectFailure(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	expires := time.Now().UTC().Add(-time.Minute)
+	session := model.AlbumImportSession{Status: AlbumImportStatusCanceled, ExpiresAt: &expires, PayloadJSON: `{}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	file := model.AlbumImportFile{ImportID: session.ID, FileName: "track.flac", SourceKey: "temp/source.flac", PlaybackKey: "temp/playback.mp3", UploadStatus: AlbumImportFileUploadStatusUploaded, CleanupJSON: "[]"}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &importWorkerStore{deleteErrFor: map[string]error{"temp/playback.mp3": errors.New("transient storage outage")}}
+	worker := NewImportWorker(db, store, "worker")
+	if err := worker.CleanupExpired(context.Background()); err == nil {
+		t.Fatal("expected playback cleanup failure")
+	}
+	var pending model.AlbumImportFile
+	if err := db.First(&pending, "id = ?", file.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if pending.SourceKey != "" || pending.PlaybackKey != file.PlaybackKey {
+		t.Fatalf("partial cleanup not persisted: %#v", pending)
+	}
+	delete(store.deleteErrFor, file.PlaybackKey)
+	if err := worker.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var done model.AlbumImportFile
+	if err := db.First(&done, "id = ?", file.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if done.SourceKey != "" || done.PlaybackKey != "" {
+		t.Fatalf("temporary objects retained: %#v", done)
+	}
+	if len(store.deleted) != 2 || store.deleted[0] != file.SourceKey || store.deleted[1] != file.PlaybackKey {
+		t.Fatalf("unexpected cleanup calls: %v", store.deleted)
+	}
+	if err := worker.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.deleted) != 2 {
+		t.Fatalf("cleanup repeated after success: %v", store.deleted)
+	}
+}
+
+func TestImportWorkerCleanupDoesNotDeletePlaybackReferencedBySong(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	expires := time.Now().UTC().Add(-time.Minute)
+	session := model.AlbumImportSession{Status: AlbumImportStatusCanceled, ExpiresAt: &expires, PayloadJSON: `{}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := "music/album-imports/playback/sessions/legacy/track.mp3"
+	file := model.AlbumImportFile{ImportID: session.ID, FileName: "track.flac", PlaybackKey: key, CleanupJSON: "[]"}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+	song := model.Song{Title: "published audio", AudioURL: key, AudioStatus: "ready"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &importWorkerStore{}
+	worker := NewImportWorker(db, store, "worker")
+	if err := worker.CleanupExpired(context.Background()); err == nil {
+		t.Fatal("cleanup should defer deletion while a song references the object")
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("still referenced audio was deleted: %v", store.deleted)
+	}
+	var pending model.AlbumImportFile
+	if err := db.First(&pending, "id = ?", file.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if pending.PlaybackKey != key {
+		t.Fatal("cleanup lost the pending object key")
+	}
+	if err := db.Model(&song).Update("audio_url", "durable/track.mp3").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != key {
+		t.Fatalf("cleanup did not resume: %v", store.deleted)
+	}
+}
+
 func TestImportWorkerCleanupRemovesCanceledFileSourceWithoutRecordedTarget(t *testing.T) {
 	db := newImportWorkerTestDB(t)
 	expires := time.Now().UTC().Add(-time.Minute)
@@ -507,6 +595,60 @@ func TestImportWorkerRunOnceWithoutProcessorStillCleansExpiredSession(t *testing
 	}
 	if stored.Attempts != 0 || stored.StartedAt != nil {
 		t.Fatalf("nil processor claimed job: %#v", stored)
+	}
+}
+
+func TestImportWorkerCompleteWaitsForCancelAndPreservesCanceledState(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	worker := NewImportWorker(db, nil, "worker")
+	claimed, ok, err := worker.Claim(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	lock := db.Begin()
+	if lock.Error != nil {
+		t.Fatal(lock.Error)
+	}
+	defer lock.Rollback()
+	var locked model.AlbumImportSession
+	if err := lock.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", job.ImportID).Error; err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- worker.Complete(context.Background(), claimed.ID, claimed.LeaseToken) }()
+	select {
+	case err := <-result:
+		t.Fatalf("completion returned before cancellation lock released: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := lock.Model(&model.AlbumImportSession{}).Where("id = ?", job.ImportID).Update("status", AlbumImportStatusCanceled).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Model(&model.AlbumImportJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": AlbumImportJobStatusCanceled, "locked_by": "", "lease_token": ""}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("completion revived canceled import")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("completion blocked after cancellation")
+	}
+	var storedJob model.AlbumImportJob
+	var storedSession model.AlbumImportSession
+	if err := db.First(&storedJob, "id = ?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&storedSession, "id = ?", job.ImportID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedJob.Status != AlbumImportJobStatusCanceled || storedSession.Status != AlbumImportStatusCanceled {
+		t.Fatalf("job=%s session=%s", storedJob.Status, storedSession.Status)
 	}
 }
 

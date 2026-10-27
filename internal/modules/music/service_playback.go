@@ -145,6 +145,16 @@ func (s *Service) SavePlaybackProgress(user authctx.CurrentUser, input SavePlayb
 
 	var result model.MusicPlaybackProgress
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		// Serialize playback-progress writes with song merges, then revalidate the
+		// song after acquiring the lock so a stale preflight check cannot write
+		// progress against a song that has already been merged or retired.
+		var song model.Song
+		if err := scopeVisibleMusicEntries(tx.Model(&model.Song{}), `"Songs"`, "uploaded_by", &user, false).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where(`"Songs".id = ? AND "Songs".audio_url <> ? AND "Songs".audio_status = ?`, input.SongID, "", "ready").
+			First(&song).Error; err != nil {
+			return apperr.NotFound("music.song_not_found", "Song not found")
+		}
 		var stored model.MusicPlaybackProgress
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND song_id = ?", user.ID, input.SongID).First(&stored).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {

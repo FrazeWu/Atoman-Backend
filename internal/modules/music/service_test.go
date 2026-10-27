@@ -472,6 +472,31 @@ func TestDeletePlaylistSoftDeletesPlaylistSongs(t *testing.T) {
 	}
 }
 
+func TestUpsertPlaylistSongRevalidatesLifecycleInsideTransaction(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	playlist := model.Playlist{UserID: user.ID, Name: "Lifecycle Recheck"}
+	song := model.Song{Title: "Lifecycle Recheck", AudioURL: "/audio/recheck.mp3", LifecycleStatus: model.MusicLifecycleActive}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Song{}).Where("id = ?", song.ID).Update("lifecycle_status", model.MusicLifecycleMerged).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.repo.UpsertPlaylistSong(playlist.ID, song.ID); err == nil {
+		t.Fatal("expected inactive song to be rejected")
+	}
+	var count int64
+	if err := db.Model(&model.PlaylistSong{}).Where("playlist_id = ? AND song_id = ?", playlist.ID, song.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no playlist relation, got %d", count)
+	}
+}
+
 func TestUpsertPlaylistSongLocksPlaylistBeforeAssigningPosition(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	playlist := model.Playlist{UserID: user.ID, Name: "Serialized Positions"}
