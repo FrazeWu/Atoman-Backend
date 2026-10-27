@@ -180,6 +180,19 @@ func mergeAlbumBookmarks(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 }
 
 func mergeSongRelations(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
+	// Serialize relation migration against concurrent song writes. Use a stable
+	// lock order so two merge operations cannot deadlock by locking songs in
+	// opposite directions.
+	ids := []uuid.UUID{sourceID, targetID}
+	if ids[0].String() > ids[1].String() {
+		ids[0], ids[1] = ids[1], ids[0]
+	}
+	for _, id := range ids {
+		var song model.Song
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&song, "id = ?", id).Error; err != nil {
+			return err
+		}
+	}
 	if err := mergeMusicEntityRelations(tx, "song", sourceID, targetID); err != nil {
 		return err
 	}
