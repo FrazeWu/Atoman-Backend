@@ -512,6 +512,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.CommentTimeAnchor{}, &model.CommentPublishRecord{}, &model.ContentReference{},
 		&model.TimelineEvent{}, &model.TimelinePerson{}, &model.PersonLocation{},
 		&model.TimelineRevisionProposal{}, &model.TimelineRevision{},
+		&model.PaperAccessGrant{}, &model.PaperProject{}, &model.PaperFile{}, &model.PaperFileVersion{},
 	}
 	if !db.Migrator().HasTable(&model.ForumDraft{}) {
 		models = append(models, &model.ForumDraft{})
@@ -523,6 +524,9 @@ func MigrateSchema(db *gorm.DB) error {
 		return err
 	}
 	if db.Dialector.Name() == "postgres" {
+		if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_files_project_active_path ON paper_files (project_id, path) WHERE deleted_at IS NULL`).Error; err != nil {
+			return fmt.Errorf("papers active file path index: %w", err)
+		}
 		if err := db.Exec("DISCARD PLANS").Error; err != nil {
 			return fmt.Errorf("discard PostgreSQL prepared plans after schema migration: %w", err)
 		}

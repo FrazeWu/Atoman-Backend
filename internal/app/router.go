@@ -22,6 +22,7 @@ import (
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
+	"atoman/internal/modules/papers"
 	"atoman/internal/modules/podcast"
 	"atoman/internal/modules/portal"
 	"atoman/internal/modules/reference"
@@ -55,6 +56,10 @@ func RegisterV1Routes(
 			return
 		}
 		path := c.Request.URL.Path
+		// Papers edits are private and must never churn public portal/feed caches.
+		if strings.HasPrefix(path, "/api/v1/papers/") {
+			return
+		}
 		// 书目总数在书目修改服务中失效，收藏、评分、阅读状态不会改变总数。
 		// 统计、阅读进度和播放上报不改变公共列表，避免每次曝光都清空缓存。
 		if c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPatch || c.Request.Method == http.MethodDelete {
@@ -133,6 +138,7 @@ func RegisterV1Routes(
 	reputation.RegisterRoutes(group.Group("/reputation"), reputation.NewService(db))
 	portal.RegisterRoutes(group.Group("/portal"), portalService)
 	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
+	papers.RegisterRoutes(group.Group("/papers"), papers.NewService(db))
 	lifecycle.RegisterRoutes(group.Group("/content"), lifecycle.NewService(db))
 	timeline.RegisterRoutes(r, db)
 	video.RegisterRoutes(r, db, s3Client)
