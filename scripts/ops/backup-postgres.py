@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Private logical backups with one exported snapshot and isolated restore checks.
-Never connects a restore to production and never removes old backups.
+Never restores into production. Explicit retention only prunes this tool's completed backups.
 """
 import argparse
 import datetime as dt
