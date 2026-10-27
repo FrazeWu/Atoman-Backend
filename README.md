@@ -77,7 +77,7 @@ GEOIP_DB_PATH=/var/lib/atoman/geoip/GeoLite2-City.mmdb
 
 - Go 应用构建为主机二进制，由 systemd 管理。
 - Nginx 负责反向代理、TLS 和站点入口。
-- PostgreSQL 使用 Neon。
+- PostgreSQL 通过 `DATABASE_URL` 指定，支持主机实例和托管实例。
 - 对象存储使用 Cloudflare R2。
 - Cloudflare 位于公网入口前层并提供 CDN。
 
@@ -98,3 +98,8 @@ Apply it in a controlled maintenance window after checking database clients and
 backup readiness. Do not use `down -v`: the existing named data volumes must be
 preserved. A post-change check must verify actual Docker port bindings, not only
 the Compose file. No live database recreation is part of the audit tests.
+
+Deployment rollback restores the API and music worker as one release pair. It
+does not undo database migrations; schema changes require their own compatible
+rollout and recovery plan. A first installation has no previous binary pair, so
+rollback unavailability is explicitly reported rather than claimed as success.

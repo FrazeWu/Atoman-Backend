@@ -67,6 +67,8 @@ EOF
 chmod +x "$bin_dir/go"
 
 source "$repo/scripts/deploy-functions.sh"
+# Restore the fixture cleanup after sourcing deployment helper traps.
+trap 'cleanup; rm -rf "$workspace"' EXIT
 PATH="$bin_dir:$PATH"
 
 check_prerequisites

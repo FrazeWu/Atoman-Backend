@@ -46,6 +46,8 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: bash scripts/test-isolated_test.sh
+      - run: bash scripts/deploy-production_test.sh
+      - run: bash scripts/deploy-rollback_test.sh
       - run: make swagger-check
       - name: go test
         run: |
