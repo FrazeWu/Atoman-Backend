@@ -37,7 +37,7 @@ func NewGoogleProvider(config GoogleConfig) (*GoogleProvider, error) {
 	return &GoogleProvider{
 		config:     config,
 		tokenURL:   googleTokenURL,
-		httpClient: http.DefaultClient,
+		httpClient: newOAuthHTTPClient(),
 		verifier:   newRemoteIDTokenVerifier(config.ClientID, googleJWKSURL),
 	}, nil
 }

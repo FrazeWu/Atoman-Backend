@@ -45,6 +45,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - run: bash scripts/test-isolated_test.sh
       - run: make swagger-check
       - name: go test
         run: |
@@ -61,5 +62,7 @@ jobs:
             echo "::error title=go test failed packages::$(echo "$pkgs" | cut -c1-170)"
             exit "$rc"
           fi
+      - name: Check reachable Go vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - run: go vet ./...
       - run: go build ./...

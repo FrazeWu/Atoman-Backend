@@ -8,16 +8,17 @@ test-postgres-down:
 	docker compose -f docker-compose.test.yml down
 
 # No exported DSN is needed. PACKAGE and TEST_ARGS can narrow the test run.
-test: test-postgres-up
-	go test -p 1 $(or $(PACKAGE),./...) $(TEST_ARGS)
+test:
+	./scripts/test-isolated.sh $(or $(PACKAGE),./...) $(TEST_ARGS)
 
 # Limit Go package-level parallelism on memory-constrained development machines.
 build-low-memory:
 	go build -p 1 ./...
 
 # PACKAGE is required. Example: make test-focused PACKAGE=./internal/modules/blog TEST_ARGS='-run TestPostRating -count=1'
-test-focused: test-postgres-up
-	go test -p 1 $(PACKAGE) $(TEST_ARGS)
+test-focused:
+	@test -n "$(PACKAGE)" || { echo "PACKAGE is required" >&2; exit 2; }
+	./scripts/test-isolated.sh $(PACKAGE) $(TEST_ARGS)
 
 migrate:
 	go run ./cmd/migrate -env .env.dev

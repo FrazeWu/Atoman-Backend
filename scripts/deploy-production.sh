@@ -47,7 +47,7 @@ Usage: scripts/deploy-production.sh <install|update|check>
   check    Validate production prerequisites without changing the system.
 
 Required before install:
-  - Git, Go 1.24+, Docker Compose, systemd, Nginx and curl
+  - Git, the Go version required by go.mod, Docker Compose, systemd, Nginx and curl
   - .env.prod
   - nginx/ssl/atoman.org.pem and nginx/ssl/atoman.org.key
 EOF
@@ -93,14 +93,22 @@ validate_database_credentials() {
 }
 
 check_go_version() {
-  local version major minor
-  version="$(go env GOVERSION)"
+  local version required major minor patch required_major required_minor required_patch
+  require_file "$REPO_DIR/go.mod"
+  required="$(awk '$1 == "go" { print $2; exit }' "$REPO_DIR/go.mod")"
+  [[ "$required" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || die "go.mod has no valid Go version"
+  # Resolve the toolchain inside this repository, not the caller's directory.
+  version="$(cd "$REPO_DIR" && go env GOVERSION)"
   version="${version#go}"
-  major="${version%%.*}"
-  minor="${version#*.}"
-  minor="${minor%%.*}"
-  if (( major < 1 || (major == 1 && minor < 24) )); then
-    die "Go 1.24+ is required, found $(go version)"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || die "unsupported Go toolchain: $version"
+  IFS=. read -r major minor patch <<<"$version"
+  IFS=. read -r required_major required_minor required_patch <<<"$required"
+  patch="${patch:-0}"
+  required_patch="${required_patch:-0}"
+  if (( major < required_major ||
+        (major == required_major && minor < required_minor) ||
+        (major == required_major && minor == required_minor && patch < required_patch) )); then
+    die "Go $required+ is required by go.mod, found go$version"
   fi
 }
 

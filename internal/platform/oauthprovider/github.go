@@ -39,7 +39,7 @@ func NewGitHubProvider(config GitHubConfig) (*GitHubProvider, error) {
 		return nil, errors.New("github oauth configuration is incomplete")
 	}
 	return &GitHubProvider{
-		config: config, tokenURL: githubTokenURL, apiURL: githubAPIURL, httpClient: http.DefaultClient,
+		config: config, tokenURL: githubTokenURL, apiURL: githubAPIURL, httpClient: newOAuthHTTPClient(),
 	}, nil
 }
 

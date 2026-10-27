@@ -34,7 +34,9 @@ cp .env.example .env.dev
 go run ./cmd/start_server --mode dev
 ```
 
-`go test` 在未显式设置 `TEST_POSTGRES_DSN` 时，会读取 `.env.dev` 中的测试 DSN，并为每个测试创建和清理独立 schema。需要改用其他实例时设置 `TEST_POSTGRES_DSN`；该变量优先于兼容字段 `TEST_DATABASE_URL`。
+`make test` 和 `make test-focused` 默认创建独占、自动分配回环端口的临时 PostgreSQL，结束时只清理本次创建的容器，避免多个 worktree 互相停止测试数据库。显式提供 `TEST_POSTGRES_DSN`（兼容 `TEST_DATABASE_URL`）时复用该测试实例，不会停止它。`make test-postgres-up/down` 仍用于手工管理共享测试实例。
+
+直接执行 `go test` 在未显式设置 `TEST_POSTGRES_DSN` 时，会读取 `.env.dev` 中的测试 DSN，并为每个测试创建和清理独立 schema。需要改用其他实例时设置 `TEST_POSTGRES_DSN`；该变量优先于兼容字段 `TEST_DATABASE_URL`。
 
 常用命令：
 

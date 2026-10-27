@@ -34,7 +34,7 @@ type remoteIDTokenVerifier struct {
 }
 
 func newRemoteIDTokenVerifier(clientID string, jwksURL string) idTokenVerifier {
-	keySet := oidc.NewRemoteKeySet(context.Background(), jwksURL)
+	keySet := oidc.NewRemoteKeySet(oidc.ClientContext(context.Background(), newOAuthHTTPClient()), jwksURL)
 	return &remoteIDTokenVerifier{verifier: oidc.NewVerifier("", keySet, &oidc.Config{
 		ClientID:        clientID,
 		SkipIssuerCheck: true,

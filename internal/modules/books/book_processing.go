@@ -2,6 +2,7 @@ package books
 
 import (
 	"archive/zip"
+	"atoman/internal/platform/archiveguard"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -19,7 +20,7 @@ import (
 	"atoman/internal/storage"
 
 	"github.com/google/uuid"
-	"github.com/nwaples/rardecode"
+	"github.com/nwaples/rardecode/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -623,7 +624,7 @@ func validateBookCBZ(reader io.ReaderAt, size int64) (map[string]any, error) {
 }
 
 func validateBookCBR(filename string) (map[string]any, error) {
-	reader, err := rardecode.OpenReader(filename, "")
+	reader, err := rardecode.OpenReader(filename, rardecode.MaxDictionarySize(archiveguard.MaxRARDictionaryBytes))
 	if err != nil {
 		return nil, fmt.Errorf("invalid CBR archive: %w", err)
 	}
@@ -667,13 +668,17 @@ func validateBookCBR(filename string) (map[string]any, error) {
 		if header.UnPackedSize > bookComicMaxExpandedBytes-totalExpanded {
 			return nil, errors.New("CBR expands beyond size limit")
 		}
-		totalExpanded += header.UnPackedSize
 		if isBookComicImage(clean) {
 			imageCount++
 		}
-		if _, copyErr := io.Copy(io.Discard, reader); copyErr != nil {
+		written, copyErr := archiveguard.CopyBounded(io.Discard, reader, bookComicMaxExpandedBytes-totalExpanded)
+		if copyErr != nil {
 			return nil, fmt.Errorf("read CBR entry %q: %w", header.Name, copyErr)
 		}
+		if !header.UnKnownSize && written != header.UnPackedSize {
+			return nil, fmt.Errorf("CBR entry %q has an unexpected size", header.Name)
+		}
+		totalExpanded += written
 	}
 	if imageCount == 0 {
 		return nil, errors.New("CBR contains no supported comic images")

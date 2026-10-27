@@ -1,6 +1,7 @@
 package music
 
 import (
+	"atoman/internal/platform/archiveguard"
 	"bufio"
 	"bytes"
 	"context"
@@ -23,7 +24,7 @@ import (
 	"atoman/internal/model"
 
 	"github.com/google/uuid"
-	"github.com/nwaples/rardecode"
+	"github.com/nwaples/rardecode/v2"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -539,7 +540,7 @@ func mediaCommandError(err error, output []byte) error {
 }
 
 func extractRARArchive(archivePath, extracted string) error {
-	reader, err := rardecode.OpenReader(archivePath, "")
+	reader, err := rardecode.OpenReader(archivePath, rardecode.MaxDictionarySize(archiveguard.MaxRARDictionaryBytes))
 	if err != nil {
 		return err
 	}
@@ -597,7 +598,7 @@ func extractRARArchive(archivePath, extracted string) error {
 		if err != nil {
 			return err
 		}
-		written, copyErr := io.Copy(output, reader)
+		written, copyErr := archiveguard.CopyBounded(output, reader, mediaArchiveMaxBytes-totalSize)
 		closeErr := output.Close()
 		if copyErr != nil {
 			return copyErr

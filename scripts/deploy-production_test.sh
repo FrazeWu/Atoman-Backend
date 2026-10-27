@@ -22,6 +22,7 @@ awk '/^case "\$MODE" in/{exit} {print}' "$repo/scripts/deploy-production.sh" >"$
 : >"$repo/nginx/conf.d/00-real-ip.conf"
 : >"$repo/nginx/api.atoman.org.conf"
 : >"$repo/docker-compose.dev.yml"
+printf "module deployment-fixture\n\ngo 1.26.10\n" >"$repo/go.mod"
 
 cat >"$repo/.env.prod" <<'EOF'
 DATABASE_TYPE=postgres
@@ -58,7 +59,7 @@ chmod +x "$bin_dir/docker"
 cat >"$bin_dir/go" <<'EOF'
 #!/bin/sh
 if [ "$1" = "env" ] && [ "$2" = "GOVERSION" ]; then
-  printf 'go1.24.0\n'
+  printf "%s\n" "${MOCK_GO_VERSION:-go1.26.10}"
   exit 0
 fi
 exit 1
@@ -69,6 +70,15 @@ source "$repo/scripts/deploy-functions.sh"
 PATH="$bin_dir:$PATH"
 
 check_prerequisites
+for old_version in go1.24.4 go1.26.9; do
+  if output="$(MOCK_GO_VERSION="$old_version" check_go_version 2>&1)"; then
+    echo "expected old toolchain $old_version to be rejected" >&2
+    exit 1
+  fi
+  printf '%s' "$output" | grep -q 'Go 1.26.10+ is required'
+done
+MOCK_GO_VERSION=go1.27.0 check_go_version
+MOCK_GO_VERSION=go1.26.10 check_go_version
 DOCKER_CALL_FILE="$workspace/docker-compose-config-called" run_compose config --quiet
 [ -f "$workspace/docker-compose-config-called" ]
 

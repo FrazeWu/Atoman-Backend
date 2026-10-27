@@ -37780,10 +37780,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "latitude": {
-                    "type": "number"
+                    "type": "number",
+                    "maximum": 90,
+                    "minimum": -90
                 },
                 "longitude": {
-                    "type": "number"
+                    "type": "number",
+                    "maximum": 180,
+                    "minimum": -180
                 },
                 "note": {
                     "type": "string"

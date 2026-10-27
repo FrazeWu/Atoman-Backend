@@ -86,6 +86,13 @@ func clientAddress(c *gin.Context) (netip.Addr, bool, bool) {
 	}
 	peer, peerOK := parseAddress(remote)
 	if peerOK && peer.IsLoopback() {
+		// Nginx overwrites X-Real-IP after validating trusted real-IP sources.
+		// A direct visitor may supply CF-Connecting-IP, so it must not override
+		// this normalized address in login/session audit records.
+		if address, ok := parseAddress(c.GetHeader("X-Real-IP")); ok {
+			cloudflareAddress, cloudflareOK := parseAddress(c.GetHeader("CF-Connecting-IP"))
+			return address, cloudflareOK && cloudflareAddress == address, true
+		}
 		for index, raw := range []string{
 			c.GetHeader("CF-Connecting-IP"),
 			c.GetHeader("X-Real-IP"),

@@ -48,7 +48,7 @@ func NewMicrosoftProvider(config MicrosoftConfig) (*MicrosoftProvider, error) {
 		config:       config,
 		authorizeURL: base + "/authorize",
 		tokenURL:     base + "/token",
-		httpClient:   http.DefaultClient,
+		httpClient:   newOAuthHTTPClient(),
 		verifier:     newRemoteIDTokenVerifier(config.ClientID, microsoftJWKSURL),
 	}, nil
 }

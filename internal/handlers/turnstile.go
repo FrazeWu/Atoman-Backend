@@ -48,10 +48,18 @@ func verifyTurnstileToken(token string, remoteIP string) error {
 		return fmt.Errorf("failed to verify Turnstile token")
 	}
 	defer resp.Body.Close()
+	return checkTurnstileResponse(resp)
+}
 
-	body, err := io.ReadAll(resp.Body)
+func checkTurnstileResponse(resp *http.Response) error {
+	const maxResponseBytes = 64 << 10
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("failed to read Turnstile verification response")
+	}
+
+	if len(body) > maxResponseBytes {
+		return fmt.Errorf("Turnstile verification response exceeds size limit")
 	}
 
 	var result turnstileVerifyResponse

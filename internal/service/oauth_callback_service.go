@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -33,7 +34,9 @@ func (s *OAuthService) HandleCallback(ctx context.Context, input OAuthCallbackIn
 		return OAuthCallbackResult{}, apperr.Internal(err)
 	}
 
-	profile, err := provider.Exchange(ctx, oauthprovider.CallbackRequest{
+	providerCtx, cancelProvider := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelProvider()
+	profile, err := provider.Exchange(providerCtx, oauthprovider.CallbackRequest{
 		Code:         input.Code,
 		CodeVerifier: flow.CodeVerifier,
 		NonceHash:    flow.NonceHash,
