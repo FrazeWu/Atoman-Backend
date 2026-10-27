@@ -17,7 +17,7 @@ services:
       - -c
       - ssl_key_file=/etc/postgresql/certs/server.key
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - atoman-postgres-data:/var/lib/postgresql/data
       - ./.postgres-certs:/etc/postgresql/certs:ro
@@ -63,8 +63,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9101"
     ports:
-      - "9100:9000"
-      - "9101:9101"
+      - "127.0.0.1:9100:9000"
+      - "127.0.0.1:9101:9101"
     volumes:
       - atoman-minio-data:/data
     healthcheck:

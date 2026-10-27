@@ -85,3 +85,16 @@ GEOIP_DB_PATH=/var/lib/atoman/geoip/GeoLite2-City.mmdb
 go build -o start_server ./cmd/start_server
 ./start_server --mode prod
 ```
+## Development service network boundary
+
+The backend Compose file publishes PostgreSQL, Redis and both MinIO ports on the
+host loopback interface only. Use an SSH tunnel for remote development; do not
+publish the development MinIO console or its sample credentials to the Internet.
+The sample MinIO credentials are development-only and must not be reused in a
+production object store.
+
+Changing this file does not change an already running container's port bindings.
+Apply it in a controlled maintenance window after checking database clients and
+backup readiness. Do not use `down -v`: the existing named data volumes must be
+preserved. A post-change check must verify actual Docker port bindings, not only
+the Compose file. No live database recreation is part of the audit tests.
