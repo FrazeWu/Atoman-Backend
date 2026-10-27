@@ -313,10 +313,10 @@ func TestImportWorkerHeartbeatAndRetryLimit(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("claim: %v %v", ok, err)
 	}
-	if err := w.Heartbeat(context.Background(), claimed.ID); err != nil {
+	if err := w.Heartbeat(context.Background(), claimed.ID, claimed.LeaseToken); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Retry(context.Background(), claimed.ID, errors.New("temporary")); err != nil {
+	if err := w.Retry(context.Background(), claimed.ID, claimed.LeaseToken, errors.New("temporary")); err != nil {
 		t.Fatal(err)
 	}
 	var retried model.AlbumImportJob
@@ -333,7 +333,7 @@ func TestImportWorkerHeartbeatAndRetryLimit(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("second claim: %v %v", ok, err)
 	}
-	if err := w.Retry(context.Background(), claimed.ID, errors.New("permanent")); err != nil {
+	if err := w.Retry(context.Background(), claimed.ID, claimed.LeaseToken, errors.New("permanent")); err != nil {
 		t.Fatal(err)
 	}
 	var failed model.AlbumImportJob
@@ -521,7 +521,7 @@ func TestImportWorkerCompleteDoesNotOverwriteCanceledSession(t *testing.T) {
 	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", job.ImportID).Updates(map[string]any{"status": AlbumImportStatusCanceled, "stage": AlbumImportStageCanceled}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Complete(context.Background(), claimed.ID); err == nil {
+	if err := w.Complete(context.Background(), claimed.ID, claimed.LeaseToken); err == nil {
 		t.Fatal("expected lost lease error")
 	}
 	var stored model.AlbumImportJob
@@ -544,7 +544,7 @@ func TestImportWorkerRetryDoesNotOverwriteCanceledSession(t *testing.T) {
 	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", job.ImportID).Update("status", AlbumImportStatusCanceled).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Retry(context.Background(), claimed.ID, errors.New("retry")); err == nil {
+	if err := w.Retry(context.Background(), claimed.ID, claimed.LeaseToken, errors.New("retry")); err == nil {
 		t.Fatal("expected lost lease error")
 	}
 	var stored model.AlbumImportJob
@@ -658,5 +658,85 @@ func TestImportWorkerAutomaticallyHeartbeatsBlockingProcessor(t *testing.T) {
 	})
 	if _, err := w.RunOnce(context.Background(), processor); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestImportWorkerReclaimBySameProcessFencesPreviousClaim(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	worker := NewImportWorker(db, nil, "same-worker-instance")
+	worker.leaseTimeout = time.Minute
+
+	first, ok, err := worker.Claim(context.Background())
+	if err != nil || !ok || first.LeaseToken == "" {
+		t.Fatalf("first claim: ok=%v err=%v token=%q", ok, err, first.LeaseToken)
+	}
+	expired := time.Now().UTC().Add(-2 * time.Minute)
+	if err := db.Model(&model.AlbumImportJob{}).Where("id = ?", job.ID).
+		Updates(map[string]any{"heartbeat_at": expired, "locked_at": expired}).Error; err != nil {
+		t.Fatal(err)
+	}
+	next, ok, err := worker.Claim(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("reclaimed job: ok=%v err=%v", ok, err)
+	}
+	if next.ID != first.ID || next.LeaseToken == "" || next.LeaseToken == first.LeaseToken || next.LockedBy != first.LockedBy {
+		t.Fatalf("reclaim must change claim token, not process name: first=%+v next=%+v", first, next)
+	}
+	if err := worker.Heartbeat(context.Background(), first.ID, first.LeaseToken); err == nil {
+		t.Fatal("stale claim refreshed newer claim heartbeat")
+	}
+	if err := worker.Complete(context.Background(), first.ID, first.LeaseToken); err == nil {
+		t.Fatal("stale claim completed newer claim")
+	}
+	if err := worker.Retry(context.Background(), first.ID, first.LeaseToken, errors.New("old task failed")); err == nil {
+		t.Fatal("stale claim requeued newer claim")
+	}
+	var stored model.AlbumImportJob
+	if err := db.First(&stored, "id = ?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != AlbumImportJobStatusRunning || stored.LeaseToken != next.LeaseToken {
+		t.Fatalf("stale claim changed current owner: %+v", stored)
+	}
+	if err := worker.Heartbeat(context.Background(), next.ID, next.LeaseToken); err != nil {
+		t.Fatalf("current claim cannot heartbeat: %v", err)
+	}
+	if err := worker.Complete(context.Background(), next.ID, next.LeaseToken); err != nil {
+		t.Fatalf("current claim cannot complete: %v", err)
+	}
+	if err := db.First(&stored, "id = ?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "completed" || stored.LeaseToken != "" {
+		t.Fatalf("completed job must clear lease: %+v", stored)
+	}
+}
+
+func TestImportWorkerLostLeaseCancelsRunningProcessor(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	worker := NewImportWorker(db, nil, "worker")
+	claimed, ok, err := worker.Claim(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	worker.heartbeatInterval = 5 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	err = worker.processWithHeartbeat(ctx, importProcessorFunc(func(processingCtx context.Context, job model.AlbumImportJob, _ func() error) error {
+		// Simulate another execution taking ownership while media conversion runs.
+		if err := db.Model(&model.AlbumImportJob{}).Where("id = ?", job.ID).
+			Update("lease_token", uuid.NewString()).Error; err != nil {
+			return err
+		}
+		<-processingCtx.Done()
+		return processingCtx.Err()
+	}), claimed)
+	if err == nil || !strings.Contains(err.Error(), "heartbeat") {
+		t.Fatalf("lost lease should cancel the processor and surface heartbeat failure, got %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("worker failed to cancel the processor before its parent timed out: %v", ctx.Err())
 	}
 }

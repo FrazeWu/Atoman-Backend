@@ -221,6 +221,7 @@ func queueAlbumImportSession(tx *gorm.DB, session *model.AlbumImportSession, res
 	job.Attempts = 0
 	job.MaxAttempts = 2
 	job.LockedBy = ""
+	job.LeaseToken = ""
 	job.LockedAt = nil
 	job.HeartbeatAt = nil
 	job.StartedAt = nil

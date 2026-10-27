@@ -120,9 +120,10 @@ func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, e
 		return model.AlbumImportJob{}, false, err
 	}
 	for _, candidate := range candidates {
+		leaseToken := uuid.NewString()
 		// The correlated session clause keeps canceled and terminal imports out of the queue.
 		result := w.db.WithContext(ctx).Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND EXISTS (SELECT 1 FROM music_album_import_sessions s WHERE s.id = music_album_import_jobs.import_id AND s.status IN ?)", candidate.ID, AlbumImportJobStatusQueued, now, []string{AlbumImportStatusQueued, AlbumImportStatusExtracting, AlbumImportStatusAnalyzing, AlbumImportStatusTranscoding}).Updates(map[string]any{
-			"status": AlbumImportJobStatusRunning, "stage": AlbumImportStageExtracting, "locked_by": w.workerID, "locked_at": now, "heartbeat_at": now, "started_at": now, "attempts": gorm.Expr("attempts + 1"), "next_attempt_at": nil,
+			"status": AlbumImportJobStatusRunning, "stage": AlbumImportStageExtracting, "locked_by": w.workerID, "lease_token": leaseToken, "locked_at": now, "heartbeat_at": now, "started_at": now, "attempts": gorm.Expr("attempts + 1"), "next_attempt_at": nil,
 		})
 		if result.Error != nil {
 			return model.AlbumImportJob{}, false, result.Error
@@ -167,7 +168,7 @@ func (w *ImportWorker) recoverExpiredLeases(ctx context.Context, now time.Time) 
 			}
 			if job.Attempts >= job.MaxAttempts {
 				expires := now.Add(importWorkerRetention)
-				result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND ((heartbeat_at IS NOT NULL AND heartbeat_at <= ?) OR (heartbeat_at IS NULL AND locked_at <= ?))", job.ID, AlbumImportJobStatusRunning, cutoff, cutoff).Updates(map[string]any{"status": AlbumImportJobStatusFailed, "stage": AlbumImportStageFailed, "last_error": "worker lease expired", "locked_by": "", "locked_at": nil, "heartbeat_at": nil, "finished_at": now})
+				result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND ((heartbeat_at IS NOT NULL AND heartbeat_at <= ?) OR (heartbeat_at IS NULL AND locked_at <= ?))", job.ID, AlbumImportJobStatusRunning, cutoff, cutoff).Updates(map[string]any{"status": AlbumImportJobStatusFailed, "stage": AlbumImportStageFailed, "last_error": "worker lease expired", "locked_by": "", "lease_token": "", "locked_at": nil, "heartbeat_at": nil, "finished_at": now})
 				if result.Error != nil || result.RowsAffected == 0 {
 					return result.Error
 				}
@@ -177,7 +178,7 @@ func (w *ImportWorker) recoverExpiredLeases(ctx context.Context, now time.Time) 
 				event, recovered = "lease_failed", job
 				return nil
 			}
-			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND ((heartbeat_at IS NOT NULL AND heartbeat_at <= ?) OR (heartbeat_at IS NULL AND locked_at <= ?))", job.ID, AlbumImportJobStatusRunning, cutoff, cutoff).Updates(map[string]any{"status": AlbumImportJobStatusQueued, "stage": AlbumImportStageQueued, "locked_by": "", "locked_at": nil, "heartbeat_at": nil, "next_attempt_at": now})
+			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND ((heartbeat_at IS NOT NULL AND heartbeat_at <= ?) OR (heartbeat_at IS NULL AND locked_at <= ?))", job.ID, AlbumImportJobStatusRunning, cutoff, cutoff).Updates(map[string]any{"status": AlbumImportJobStatusQueued, "stage": AlbumImportStageQueued, "locked_by": "", "lease_token": "", "locked_at": nil, "heartbeat_at": nil, "next_attempt_at": now})
 			if result.Error != nil || result.RowsAffected == 0 {
 				return result.Error
 			}
@@ -208,9 +209,12 @@ func leaseExpired(job model.AlbumImportJob, cutoff time.Time) bool {
 	return job.LockedAt != nil && !job.LockedAt.After(cutoff)
 }
 
-func (w *ImportWorker) Heartbeat(ctx context.Context, jobID uuid.UUID) error {
+func (w *ImportWorker) Heartbeat(ctx context.Context, jobID uuid.UUID, leaseToken string) error {
+	if leaseToken == "" {
+		return errors.New("music import job lease token is required")
+	}
 	now := w.now()
-	result := w.db.WithContext(ctx).Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ?", jobID, AlbumImportJobStatusRunning, w.workerID).Update("heartbeat_at", now)
+	result := w.db.WithContext(ctx).Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ? AND lease_token = ?", jobID, AlbumImportJobStatusRunning, w.workerID, leaseToken).Update("heartbeat_at", now)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -220,7 +224,10 @@ func (w *ImportWorker) Heartbeat(ctx context.Context, jobID uuid.UUID) error {
 	return nil
 }
 
-func (w *ImportWorker) Complete(ctx context.Context, jobID uuid.UUID) error {
+func (w *ImportWorker) Complete(ctx context.Context, jobID uuid.UUID, leaseToken string) error {
+	if leaseToken == "" {
+		return errors.New("music import job lease token is required")
+	}
 	now := w.now()
 	var completed model.AlbumImportJob
 	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -232,7 +239,7 @@ func (w *ImportWorker) Complete(ctx context.Context, jobID uuid.UUID) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status IN ?", job.ImportID, activeImportSessionStatuses).First(&session).Error; err != nil {
 			return errors.New("music import job is not held by this worker")
 		}
-		result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ?", job.ID, AlbumImportJobStatusRunning, w.workerID).Updates(map[string]any{"status": "completed", "stage": AlbumImportStageCompleted, "finished_at": now, "locked_by": "", "locked_at": nil})
+		result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ? AND lease_token = ?", job.ID, AlbumImportJobStatusRunning, w.workerID, leaseToken).Updates(map[string]any{"status": "completed", "stage": AlbumImportStageCompleted, "finished_at": now, "locked_by": "", "lease_token": "", "locked_at": nil})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -255,7 +262,10 @@ func (w *ImportWorker) Complete(ctx context.Context, jobID uuid.UUID) error {
 	return err
 }
 
-func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) error {
+func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, leaseToken string, cause error) error {
+	if leaseToken == "" {
+		return errors.New("music import job lease token is required")
+	}
 	now := w.now()
 	message := "processor failed"
 	if cause != nil {
@@ -275,9 +285,9 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 		var needsAttention *importNeedsAttentionError
 		if errors.As(cause, &needsAttention) {
 			expires := now.Add(importWorkerRetention)
-			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ?", job.ID, AlbumImportJobStatusRunning, w.workerID).Updates(map[string]any{
+			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ? AND lease_token = ?", job.ID, AlbumImportJobStatusRunning, w.workerID, leaseToken).Updates(map[string]any{
 				"status": AlbumImportJobStatusFailed, "stage": AlbumImportStageFailed, "last_error": message,
-				"finished_at": now, "locked_by": "", "locked_at": nil, "heartbeat_at": nil,
+				"finished_at": now, "locked_by": "", "lease_token": "", "locked_at": nil, "heartbeat_at": nil,
 			})
 			if result.Error != nil {
 				return result.Error
@@ -299,7 +309,7 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 		}
 		if job.Attempts >= job.MaxAttempts {
 			expires := now.Add(importWorkerRetention)
-			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ?", job.ID, AlbumImportJobStatusRunning, w.workerID).Updates(map[string]any{"status": AlbumImportJobStatusFailed, "stage": AlbumImportStageFailed, "last_error": message, "finished_at": now, "locked_by": "", "locked_at": nil})
+			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ? AND lease_token = ?", job.ID, AlbumImportJobStatusRunning, w.workerID, leaseToken).Updates(map[string]any{"status": AlbumImportJobStatusFailed, "stage": AlbumImportStageFailed, "last_error": message, "finished_at": now, "locked_by": "", "lease_token": "", "locked_at": nil})
 			if result.Error != nil {
 				return result.Error
 			}
@@ -317,7 +327,7 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 			return nil
 		}
 		next := now.Add(importRetryDelay(job.Attempts))
-		result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ?", job.ID, AlbumImportJobStatusRunning, w.workerID).Updates(map[string]any{"status": AlbumImportJobStatusQueued, "stage": AlbumImportStageQueued, "last_error": message, "locked_by": "", "locked_at": nil, "heartbeat_at": nil, "next_attempt_at": next})
+		result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ? AND lease_token = ?", job.ID, AlbumImportJobStatusRunning, w.workerID, leaseToken).Updates(map[string]any{"status": AlbumImportJobStatusQueued, "stage": AlbumImportStageQueued, "last_error": message, "locked_by": "", "lease_token": "", "locked_at": nil, "heartbeat_at": nil, "next_attempt_at": next})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -490,9 +500,9 @@ func (w *ImportWorker) RunOnce(ctx context.Context, processor ImportProcessor) (
 		return false, err
 	}
 	if err := w.processWithHeartbeat(ctx, processor, job); err != nil {
-		return true, w.Retry(ctx, job.ID, err)
+		return true, w.Retry(ctx, job.ID, job.LeaseToken, err)
 	}
-	if err := w.Complete(ctx, job.ID); err != nil {
+	if err := w.Complete(ctx, job.ID, job.LeaseToken); err != nil {
 		return true, err
 	}
 	if w.completionFinalizer != nil {
@@ -537,6 +547,8 @@ func (w *ImportWorker) CleanupCommitted(ctx context.Context) (bool, error) {
 }
 
 func (w *ImportWorker) processWithHeartbeat(ctx context.Context, processor ImportProcessor, job model.AlbumImportJob) error {
+	processingCtx, cancelProcessing := context.WithCancel(ctx)
+	defer cancelProcessing()
 	interval := w.heartbeatInterval
 	if interval <= 0 {
 		interval = 30 * time.Second
@@ -552,30 +564,29 @@ func (w *ImportWorker) processWithHeartbeat(ctx context.Context, processor Impor
 			select {
 			case <-done:
 				return
-			case <-ctx.Done():
+			case <-processingCtx.Done():
 				return
 			case <-ticker.C:
-				if err := w.Heartbeat(ctx, job.ID); err != nil {
+				if err := w.Heartbeat(processingCtx, job.ID, job.LeaseToken); err != nil {
 					select {
 					case heartbeatErr <- err:
 					default:
 					}
+					// Abort in-flight media commands as soon as ownership is lost.
+					cancelProcessing()
 					return
 				}
 			}
 		}
 	}()
-	err := processor.Process(ctx, job, func() error { return w.Heartbeat(ctx, job.ID) })
+	err := processor.Process(processingCtx, job, func() error { return w.Heartbeat(processingCtx, job.ID, job.LeaseToken) })
 	close(done)
 	<-heartbeatDone
-	if err != nil {
-		return err
-	}
 	select {
-	case err := <-heartbeatErr:
-		return fmt.Errorf("import worker heartbeat: %w", err)
+	case heartbeatFailure := <-heartbeatErr:
+		return fmt.Errorf("import worker heartbeat: %w", heartbeatFailure)
 	default:
-		return nil
+		return err
 	}
 }
 

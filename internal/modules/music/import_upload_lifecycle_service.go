@@ -179,7 +179,7 @@ func (s *Service) CancelAlbumImportSession(user authctx.CurrentUser, sessionID u
 		}
 		return tx.Model(&model.AlbumImportJob{}).Where("import_id = ?", sessionID).Updates(map[string]any{
 			"status": AlbumImportJobStatusCanceled, "stage": AlbumImportStageCanceled,
-			"locked_by": "", "locked_at": nil, "heartbeat_at": nil, "finished_at": nil,
+			"locked_by": "", "lease_token": "", "locked_at": nil, "heartbeat_at": nil, "finished_at": nil,
 		}).Error
 	})
 	if err != nil {
