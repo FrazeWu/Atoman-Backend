@@ -435,6 +435,48 @@ func TestImportWorkerCleanupRetriesPlaybackAfterPartialObjectFailure(t *testing.
 	}
 }
 
+func TestImportWorkerCleanupDoesNotDeletePlaybackReferencedBySong(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	expires := time.Now().UTC().Add(-time.Minute)
+	session := model.AlbumImportSession{Status: AlbumImportStatusCanceled, ExpiresAt: &expires, PayloadJSON: `{}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := "music/album-imports/playback/sessions/legacy/track.mp3"
+	file := model.AlbumImportFile{ImportID: session.ID, FileName: "track.flac", PlaybackKey: key, CleanupJSON: "[]"}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+	song := model.Song{Title: "published audio", AudioURL: key, AudioStatus: "ready"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &importWorkerStore{}
+	worker := NewImportWorker(db, store, "worker")
+	if err := worker.CleanupExpired(context.Background()); err == nil {
+		t.Fatal("cleanup should defer deletion while a song references the object")
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("still referenced audio was deleted: %v", store.deleted)
+	}
+	var pending model.AlbumImportFile
+	if err := db.First(&pending, "id = ?", file.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if pending.PlaybackKey != key {
+		t.Fatal("cleanup lost the pending object key")
+	}
+	if err := db.Model(&song).Update("audio_url", "durable/track.mp3").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != key {
+		t.Fatalf("cleanup did not resume: %v", store.deleted)
+	}
+}
+
 func TestImportWorkerCleanupRemovesCanceledFileSourceWithoutRecordedTarget(t *testing.T) {
 	db := newImportWorkerTestDB(t)
 	expires := time.Now().UTC().Add(-time.Minute)

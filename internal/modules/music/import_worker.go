@@ -652,6 +652,9 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, db *gorm.DB, session 
 	}
 	for len(targets) > 0 {
 		target := targets[0]
+		if err := ensureImportCleanupObjectUnreferenced(db, target); err != nil {
+			return err
+		}
 		if err := cleanupTarget(w.store, target); err != nil {
 			return err
 		}
@@ -687,6 +690,9 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, db *gorm.DB, session 
 		}
 		for len(targets) > 0 {
 			completed := targets[0]
+			if err := ensureImportCleanupObjectUnreferenced(db, completed); err != nil {
+				return err
+			}
 			if err := cleanupTarget(w.store, completed); err != nil {
 				return err
 			}
@@ -707,6 +713,9 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, db *gorm.DB, session 
 			}
 		}
 		if file.SourceKey != "" && file.UploadStatus == AlbumImportFileUploadStatusUploaded {
+			if err := ensureImportCleanupObjectUnreferenced(db, importCleanupTarget{Action: "delete", Key: file.SourceKey}); err != nil {
+				return err
+			}
 			if err := cleanupTarget(w.store, importCleanupTarget{Action: "delete", Key: file.SourceKey}); err != nil {
 				return err
 			}
@@ -724,6 +733,9 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, db *gorm.DB, session 
 			file.SourceKey, file.UploadID = "", ""
 		}
 		if file.PlaybackKey != "" {
+			if err := ensureImportCleanupObjectUnreferenced(db, importCleanupTarget{Action: "delete", Key: file.PlaybackKey}); err != nil {
+				return err
+			}
 			if err := cleanupTarget(w.store, importCleanupTarget{Action: "delete", Key: file.PlaybackKey}); err != nil {
 				return err
 			}
@@ -758,6 +770,23 @@ type importCleanupTarget struct {
 	Action   string `json:"action"`
 	Key      string `json:"key"`
 	UploadID string `json:"upload_id"`
+}
+
+// Keep cleanup pending when a published song still references the object.
+// Object deletion is irreversible, whereas retrying cleanup is safe.
+func ensureImportCleanupObjectUnreferenced(db *gorm.DB, target importCleanupTarget) error {
+	if target.Action != "delete" || strings.TrimSpace(target.Key) == "" {
+		return nil
+	}
+	urls := []string{target.Key, resolveMusicMediaURL(target.Key)}
+	var count int64
+	if err := db.Model(&model.Song{}).Where("audio_url IN ?", urls).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("music import cleanup deferred: audio object %q is still referenced by a song", target.Key)
+	}
+	return nil
 }
 
 func cleanupTarget(store MusicImportObjectStore, target importCleanupTarget) error {
