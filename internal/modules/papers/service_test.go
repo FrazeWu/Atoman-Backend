@@ -2,6 +2,7 @@ package papers
 
 import (
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -89,15 +90,36 @@ func TestPapersPrivateAccessAndRevisionCAS(t *testing.T) {
 }
 
 func TestPapersValidation(t *testing.T) {
-	for _, name := range []string{"", "   "} {
+	for _, name := range []string{"", "   ", "draft\ninvalid", "draft\u202eexe", string([]byte{0xff})} {
 		_, err := validatedName(name)
 		require.Error(t, err)
 	}
-	for _, name := range []string{"main.tex", "chapters/intro.tex", "refs.bib", ".latexmkrc"} {
+	for _, name := range []string{"main.tex", "chapters/intro.tex", "refs.bib", ".latexmkrc", "章节/绪论.tex"} {
 		got, err := validatedPath(name)
 		require.NoError(t, err)
 		require.Equal(t, name, got)
 	}
+	for _, invalidPath := range []string{
+		"line\nfeed.tex", "line\rreturn.tex", "line\ttab.tex",
+		"foo\u202eexe.tex", "a/../escape.tex", string([]byte{0xff}) + ".tex",
+	} {
+		_, err := validatedPath(invalidPath)
+		require.Equal(t, 400, apperr.FromError(err).HTTPStatus, invalidPath)
+	}
 	require.Error(t, validateText(string([]byte{0xff})))
 	require.Error(t, validateText("ok\x00"))
+}
+
+func TestExpiredPapersInvitationIsDenied(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.PaperAccessGrant{})
+	s := NewService(db)
+	user := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
+	expired := time.Now().UTC().Add(-time.Minute)
+	require.NoError(t, db.Create(&model.PaperAccessGrant{UserID: user.ID, Status: "active", ExpiresAt: &expired}).Error)
+	allowed, err := s.AccessAllowed(user)
+	require.NoError(t, err)
+	require.False(t, allowed)
+	_, err = s.CreateProject(user, "Must not create")
+	require.Equal(t, 403, apperr.FromError(err).HTTPStatus)
 }

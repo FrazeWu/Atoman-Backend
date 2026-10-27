@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"atoman/internal/model"
@@ -108,15 +109,19 @@ func (s *Service) RevokeAccess(actor authctx.CurrentUser, target uuid.UUID) erro
 
 func validatedName(name string) (string, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || utf8.RuneCountInString(name) > 100 {
+	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 100 ||
+		strings.IndexFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) >= 0 {
 		return "", apperr.BadRequest("papers.invalid_name", "Project name must be 1-100 characters")
 	}
 	return name, nil
 }
 
 func validatedPath(filename string) (string, error) {
-	if filename == "" || len(filename) > 512 || strings.ContainsAny(filename, "\\\x00:") ||
-		strings.HasPrefix(filename, "/") || filename == "." || path.Clean(filename) != filename || strings.HasPrefix(filename, "../") {
+	if filename == "" || len(filename) > 512 || !utf8.ValidString(filename) ||
+		strings.ContainsAny(filename, "\\\x00:") ||
+		strings.IndexFunc(filename, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) >= 0 ||
+		strings.HasPrefix(filename, "/") || filename == "." || filename == ".." ||
+		path.Clean(filename) != filename || strings.HasPrefix(filename, "../") {
 		return "", apperr.BadRequest("papers.invalid_path", "Invalid project-relative path")
 	}
 	switch strings.ToLower(path.Ext(filename)) {
