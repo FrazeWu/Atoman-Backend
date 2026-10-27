@@ -18,6 +18,7 @@ for scenario in success api worker local public; do
   (
     source "$workspace/functions.sh"
     REPO_DIR="$case_dir/repo"
+    SERVICE_FILE="$case_dir/mock-backend.service"
     STATE_DIR="$case_dir/state"
     ENV_FILE="$REPO_DIR/.env.prod"
     TEMP_BINARY="$case_dir/new-api"

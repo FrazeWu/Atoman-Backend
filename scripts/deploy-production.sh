@@ -361,7 +361,7 @@ rollback_binary() {
 }
 
 activate_backend() {
-  if [[ -f "/etc/systemd/system/${SERVICE_NAME}.service.d/90-managed-runtime.conf" ]]; then
+  if [[ -f "${SERVICE_FILE}.d/90-managed-runtime.conf" ]]; then
     local staged_dir revision
     staged_dir="$(mktemp -d)"
     revision="$(git -C "$REPO_DIR" rev-parse HEAD)"

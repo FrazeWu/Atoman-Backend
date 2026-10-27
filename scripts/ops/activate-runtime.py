@@ -118,6 +118,13 @@ def main():
     for directory in [Path('/var/lib')/user,Path('/var/log')/user,Path('/var/lib')/user/'tmp']:
         directory.mkdir(parents=True,exist_ok=True,mode=0o750)
         os.chown(directory,account.pw_uid,account.pw_gid);os.chmod(directory,0o750)
+    if a.kind == 'backend' and a.environment_file:
+        source = a.environment_file.parent / 'uploads'
+        destination = Path('/var/lib/atoman/uploads')
+        if source.is_dir() and not destination.exists():
+            shutil.copytree(source, destination, symlinks=True)
+            for item in [destination, *destination.rglob('*')]:
+                os.chown(item, account.pw_uid, account.pw_gid, follow_symlinks=False)
     release.mkdir(parents=True,exist_ok=True,mode=0o755)
     for parent in [Path('/opt/atoman'),Path('/opt/atoman')/a.kind,release.parent,release]:
         os.chmod(parent,0o755)
