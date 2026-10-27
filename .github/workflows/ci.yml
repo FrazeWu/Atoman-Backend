@@ -46,6 +46,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: bash scripts/test-isolated_test.sh
+      - run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/ops/test_ops.py
       - run: bash scripts/deploy-production_test.sh
       - run: bash scripts/deploy-rollback_test.sh
       - run: make swagger-check
