@@ -13,11 +13,14 @@ import (
 	"atoman/internal/handlers"
 	"atoman/internal/migrationrunner"
 	"atoman/internal/model"
+	"atoman/internal/modules/books"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // 只由前端 scripts/start-rating-acceptance.sh 显式启动，不进入生产二进制。
@@ -60,10 +63,7 @@ func TestServeRatingAcceptance(t *testing.T) {
 		require.NoError(t, db.Create(&extension).Error)
 		episodes[state] = id
 	}
-	book := model.BookWork{Title: "评分验收图书", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
-	require.NoError(t, db.Create(&book).Error)
-	edition := model.BookEdition{WorkID: book.ID, Title: book.Title, CoverURL: "/api/v1/__rating_acceptance/cover.svg", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
-	require.NoError(t, db.Create(&edition).Error)
+	bookID := createRatingAcceptanceBook(t, db, authctx.CurrentUser{ID: users[0].UUID, Role: users[0].Role})
 
 	// 统一搜索深链接验收：只写入本脚本启动的隔离数据库。
 	source := model.FeedSource{Title: "统一搜索验收来源", SourceType: "external_rss", Hash: "unified-search-acceptance", RssURL: "https://example.test/search.xml"}
@@ -78,7 +78,7 @@ func TestServeRatingAcceptance(t *testing.T) {
 	r.Use(gin.Recovery())
 	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 	r.GET("/__rating_acceptance", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"episodes": episodes, "book_id": book.ID, "username": users[0].Username, "password": "rating-acceptance-only"})
+		c.JSON(http.StatusOK, gin.H{"episodes": episodes, "book_id": bookID, "username": users[0].Username, "password": "rating-acceptance-only"})
 	})
 	r.GET("/api/v1/__rating_acceptance/cover.svg", func(c *gin.Context) {
 		c.Data(http.StatusOK, "image/svg+xml", []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="#304d4b"/><circle cx="160" cy="150" r="64" fill="#f0dcb2"/><text x="160" y="270" fill="white" font-family="sans-serif" font-size="24" text-anchor="middle">ATOMAN</text></svg>`))
@@ -99,4 +99,45 @@ func TestServeRatingAcceptance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, server.Shutdown(ctx))
+}
+
+// Build the fixture through the same wiki services as normal creation, including
+// authors and current revisions. A raw table insert is not a public catalog work.
+func createRatingAcceptanceBook(t *testing.T, db *gorm.DB, user authctx.CurrentUser) uuid.UUID {
+	t.Helper()
+	service := books.NewService(db)
+	work, err := service.CreateBookWork(context.Background(), user, books.CreateBookWorkInput{
+		Title: "Rating acceptance book", Authors: []string{"Acceptance author"}, Language: "en",
+	})
+	require.NoError(t, err)
+	workID := uuid.MustParse(work.ID)
+	_, err = service.CreateBookEdition(context.Background(), user, workID, books.CreateBookEditionInput{
+		Title: work.Title, Language: "en", Publisher: "Acceptance publisher",
+		CoverURL: "/api/v1/__rating_acceptance/cover.svg",
+	})
+	require.NoError(t, err)
+	return workID
+}
+
+func TestRatingAcceptanceBookSupportsPublicRating(t *testing.T) {
+	db := testdb.Open(t)
+	require.NoError(t, migrationrunner.Run(db))
+	user := model.User{Username: "fixture-reader", Email: "fixture-reader@example.test", Password: "not-a-login-credential", IsActive: true, Role: "user"}
+	require.NoError(t, db.Create(&user).Error)
+	actor := authctx.CurrentUser{ID: user.UUID, Role: user.Role}
+	workID := createRatingAcceptanceBook(t, db, actor)
+	service := books.NewService(db)
+	ctx := context.Background()
+	summary, err := service.DeleteBookWorkRating(ctx, actor, workID)
+	require.NoError(t, err)
+	require.Zero(t, summary.RatingCount)
+	summary, err = service.SetBookWorkRating(ctx, actor, workID, 8)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, summary.RatingCount)
+	require.NotNil(t, summary.ViewerRating)
+	require.Equal(t, 8, *summary.ViewerRating)
+	public, err := service.GetBookWorkRating(ctx, workID, nil)
+	require.NoError(t, err)
+	require.Nil(t, public.ViewerRating)
+	require.EqualValues(t, 1, public.RatingCount)
 }
