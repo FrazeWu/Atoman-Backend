@@ -230,6 +230,7 @@ func (r *Repo) ListPlaylistBookmarksFiltered(userID uuid.UUID, page int, pageSiz
 	case BookmarkSortPopular:
 		songCountSubquery := r.db.Table("music_playlist_songs").
 			Select("playlist_id, COUNT(*) AS song_count").
+			Joins("JOIN \"Songs\" AS counted_song ON counted_song.id = music_playlist_songs.song_id AND counted_song.deleted_at IS NULL AND counted_song.lifecycle_status = ?", model.MusicLifecycleActive).
 			Where("music_playlist_songs.deleted_at IS NULL").
 			Group("playlist_id")
 		db = db.
@@ -328,6 +329,8 @@ func (r *Repo) ListPlaylists(userID uuid.UUID, page int, pageSize int, sort stri
 		songCountSubquery := r.db.
 			Table("music_playlist_songs").
 			Select("playlist_id, COUNT(*) AS song_count").
+			Joins("JOIN \"Songs\" AS counted_song ON counted_song.id = music_playlist_songs.song_id AND counted_song.deleted_at IS NULL AND counted_song.lifecycle_status = ?", model.MusicLifecycleActive).
+			Where("music_playlist_songs.deleted_at IS NULL").
 			Group("playlist_id")
 		db = db.
 			Joins("LEFT JOIN (?) AS playlist_song_counts ON playlist_song_counts.playlist_id = music_playlists.id", songCountSubquery).
@@ -449,7 +452,7 @@ func (r *Repo) PlaylistFirstSongCovers(playlistIDs []uuid.UUID) (map[uuid.UUID]s
 		Select("playlist_song.playlist_id, COALESCE(NULLIF(visible_song.cover_url, ''), NULLIF(album.cover_url, '')) AS cover_url").
 		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = playlist_song.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
 		Joins("LEFT JOIN \"Albums\" AS album ON album.id = visible_song.album_id AND album.deleted_at IS NULL").
-		Where("playlist_song.playlist_id IN ?", playlistIDs).
+		Where("playlist_song.playlist_id IN ? AND playlist_song.deleted_at IS NULL", playlistIDs).
 		Order("playlist_song.playlist_id, playlist_song.position ASC, playlist_song.created_at ASC").
 		Scan(&rows).Error; err != nil {
 		return nil, err
