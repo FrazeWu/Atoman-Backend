@@ -477,6 +477,31 @@ func TestImportWorkerCleanupDoesNotDeletePlaybackReferencedBySong(t *testing.T) 
 	}
 }
 
+func TestImportWorkerCleanupProtectsSongSourceAndPlaybackKeys(t *testing.T) {
+	for _, field := range []string{"source_key", "playback_key"} {
+		t.Run(field, func(t *testing.T) {
+			db := newImportWorkerTestDB(t)
+			key := "music/import-tests/unique/track.mp3"
+			song := model.Song{Title: "retained audio", AudioURL: "https://example.test/other.mp3"}
+			if err := db.Create(&song).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&song).Update(field, key).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := ensureImportCleanupObjectUnreferenced(db, importCleanupTarget{Action: "delete", Key: key}); err == nil {
+				t.Fatal("cleanup must not delete a referenced source or playback key")
+			}
+			if err := db.Model(&song).Update(field, "unrelated/object.mp3").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := ensureImportCleanupObjectUnreferenced(db, importCleanupTarget{Action: "delete", Key: key}); err != nil {
+				t.Fatalf("unreferenced object should be eligible for cleanup: %v", err)
+			}
+		})
+	}
+}
+
 func TestImportWorkerCleanupRemovesCanceledFileSourceWithoutRecordedTarget(t *testing.T) {
 	db := newImportWorkerTestDB(t)
 	expires := time.Now().UTC().Add(-time.Minute)

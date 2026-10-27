@@ -780,7 +780,12 @@ func ensureImportCleanupObjectUnreferenced(db *gorm.DB, target importCleanupTarg
 	}
 	urls := []string{target.Key, resolveMusicMediaURL(target.Key)}
 	var count int64
-	if err := db.Model(&model.Song{}).Where("audio_url IN ?", urls).Count(&count).Error; err != nil {
+	// A song can retain the same object under its source or playback key even
+	// after the public audio URL changes. Include archived records as well:
+	// removing an object is irreversible, whereas deferred cleanup is retryable.
+	if err := db.Unscoped().Model(&model.Song{}).
+		Where("audio_url IN ? OR source_key IN ? OR playback_key IN ?", urls, urls, urls).
+		Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
