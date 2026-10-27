@@ -55,6 +55,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/imports/albums/:sessionId/repair", h.repairAlbumImportSession)
 	group.POST("/imports/albums/:sessionId/commit", h.commitAlbumImportSession)
 	group.POST("/entries/:entityType/:entityId/archive", h.archiveMusicEntry)
+	group.POST("/entries/:entityType/:entityId/restore", h.restoreMusicEntry)
+	group.GET("/admin/archived", h.listArchivedMusicEntries)
 	group.POST("/entries/:entityType/:entityId/state-requests", h.createMusicEntryStateRequest)
 	group.POST("/entries/:entityType/:entityId/state/emergency", h.emergencyMusicEntryState)
 	group.GET("/state-requests", h.listMusicEntryStateRequests)
