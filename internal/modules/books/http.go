@@ -14,6 +14,7 @@ import (
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	handler := &Handler{service: service}
 	public := group.Group("")
+	public.Use(middleware.OptionalAuthMiddleware())
 	public.GET("/booklists", handler.searchBookLists)
 	public.GET("/booklists/:listId", handler.getBookList)
 	public.GET("/asset-revisions/:revisionId/passages", handler.listBookDiscussionPassages)
