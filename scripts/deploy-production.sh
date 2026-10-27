@@ -28,6 +28,7 @@ TEMP_BINARY=""
 TEMP_WORKER_BINARY=""
 TEMP_MIGRATE_BINARY=""
 BACKUP_BINARY=""
+BACKUP_WORKER_BINARY=""
 
 log() {
   printf '[deploy] %s\n' "$*"
@@ -350,9 +351,12 @@ show_service_failure() {
 
 rollback_binary() {
   [[ -n "$BACKUP_BINARY" && -f "$BACKUP_BINARY" ]] || return 1
-  log "Restoring previous backend binary"
-  run_root install -m 0755 "$BACKUP_BINARY" "$REPO_DIR/start_server"
-  run_root systemctl restart "$SERVICE_NAME"
+  [[ -n "$BACKUP_WORKER_BINARY" && -f "$BACKUP_WORKER_BINARY" ]] || return 1
+  log "Restoring the previous backend and music worker binaries together"
+  run_root install -m 0755 "$BACKUP_BINARY" "$REPO_DIR/start_server" || return 1
+  run_root install -m 0755 "$BACKUP_WORKER_BINARY" "$REPO_DIR/music_import_worker" || return 1
+  run_root systemctl restart "$SERVICE_NAME" || return 1
+  run_root systemctl restart "$WORKER_SERVICE_NAME" || return 1
   wait_for_url "$LOCAL_HEALTH_URL"
 }
 
@@ -361,6 +365,11 @@ activate_backend() {
   if [[ -f "$REPO_DIR/start_server" ]]; then
     BACKUP_BINARY="$STATE_DIR/start_server.previous"
     run_root install -m 0755 "$REPO_DIR/start_server" "$BACKUP_BINARY"
+  fi
+
+  if [[ -f "$REPO_DIR/music_import_worker" ]]; then
+    BACKUP_WORKER_BINARY="$STATE_DIR/music_import_worker.previous"
+    run_root install -m 0755 "$REPO_DIR/music_import_worker" "$BACKUP_WORKER_BINARY"
   fi
 
   run_root install -m 0755 "$TEMP_BINARY" "$REPO_DIR/start_server"
@@ -372,24 +381,25 @@ activate_backend() {
   log "Restarting $SERVICE_NAME"
   if ! run_root systemctl restart "$SERVICE_NAME"; then
     show_service_failure
-    rollback_binary || true
+    rollback_binary || log "Rollback unavailable or failed; inspect both services before retrying"
     die "service restart failed"
   fi
 
   if ! run_root systemctl restart "$WORKER_SERVICE_NAME"; then
     run_root systemctl status "$WORKER_SERVICE_NAME" --no-pager -l || true
+    rollback_binary || log "Rollback unavailable or failed; inspect both services before retrying"
     die "music import worker restart failed"
   fi
 
   if ! wait_for_url "$LOCAL_HEALTH_URL"; then
     show_service_failure
-    rollback_binary || true
+    rollback_binary || log "Rollback unavailable or failed; inspect both services before retrying"
     die "local health check failed"
   fi
 
   if ! wait_for_url "$PUBLIC_HEALTH_URL"; then
     show_service_failure
-    rollback_binary || true
+    rollback_binary || log "Rollback unavailable or failed; inspect both services before retrying"
     die "public health check failed"
   fi
 }
