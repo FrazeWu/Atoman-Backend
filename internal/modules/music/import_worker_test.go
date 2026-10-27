@@ -12,6 +12,7 @@ import (
 	"atoman/internal/model"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type importWorkerStore struct {
@@ -507,6 +508,60 @@ func TestImportWorkerRunOnceWithoutProcessorStillCleansExpiredSession(t *testing
 	}
 	if stored.Attempts != 0 || stored.StartedAt != nil {
 		t.Fatalf("nil processor claimed job: %#v", stored)
+	}
+}
+
+func TestImportWorkerCompleteWaitsForCancelAndPreservesCanceledState(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	worker := NewImportWorker(db, nil, "worker")
+	claimed, ok, err := worker.Claim(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	lock := db.Begin()
+	if lock.Error != nil {
+		t.Fatal(lock.Error)
+	}
+	defer lock.Rollback()
+	var locked model.AlbumImportSession
+	if err := lock.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", job.ImportID).Error; err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- worker.Complete(context.Background(), claimed.ID, claimed.LeaseToken) }()
+	select {
+	case err := <-result:
+		t.Fatalf("completion returned before cancellation lock released: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := lock.Model(&model.AlbumImportSession{}).Where("id = ?", job.ImportID).Update("status", AlbumImportStatusCanceled).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Model(&model.AlbumImportJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": AlbumImportJobStatusCanceled, "locked_by": "", "lease_token": ""}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("completion revived canceled import")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("completion blocked after cancellation")
+	}
+	var storedJob model.AlbumImportJob
+	var storedSession model.AlbumImportSession
+	if err := db.First(&storedJob, "id = ?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&storedSession, "id = ?", job.ImportID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedJob.Status != AlbumImportJobStatusCanceled || storedSession.Status != AlbumImportStatusCanceled {
+		t.Fatalf("job=%s session=%s", storedJob.Status, storedSession.Status)
 	}
 }
 
