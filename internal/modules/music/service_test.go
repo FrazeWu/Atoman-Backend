@@ -393,6 +393,48 @@ func TestPlaylistBookmarkPopularSortIgnoresSoftDeletedSongs(t *testing.T) {
 	}
 }
 
+func TestPlaylistCoverAndPopularSortIgnoreRemovedSong(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	old := model.Playlist{UserID: user.ID, Name: "Old", Kind: "user"}
+	current := model.Playlist{UserID: user.ID, Name: "Current", Kind: "user"}
+	for _, playlist := range []*model.Playlist{&old, &current} {
+		if err := db.Create(playlist).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	staleSong := model.Song{Title: "Removed", AudioURL: "/removed.mp3", CoverURL: "/removed.jpg", Status: "open", LifecycleStatus: model.MusicLifecycleActive}
+	liveSong := model.Song{Title: "Active", AudioURL: "/active.mp3", CoverURL: "/active.jpg", Status: "open", LifecycleStatus: model.MusicLifecycleActive}
+	for _, song := range []*model.Song{&staleSong, &liveSong} {
+		if err := db.Create(song).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed := model.PlaylistSong{PlaylistID: old.ID, SongID: staleSong.ID}
+	kept := model.PlaylistSong{PlaylistID: current.ID, SongID: liveSong.ID}
+	for _, item := range []*model.PlaylistSong{&removed, &kept} {
+		if err := db.Create(item).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Delete(&removed).Error; err != nil {
+		t.Fatal(err)
+	}
+	covers, err := svc.repo.PlaylistFirstSongCovers([]uuid.UUID{old.ID, current.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if covers[old.ID] != "" || covers[current.ID] != liveSong.CoverURL {
+		t.Fatalf("unexpected covers: %#v", covers)
+	}
+	playlists, _, err := svc.repo.ListPlaylists(user.ID, 1, 20, "popular")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(playlists) != 2 || playlists[0].ID != current.ID {
+		t.Fatalf("unexpected popular order: %#v", playlists)
+	}
+}
+
 func createModerator(t *testing.T, db *gorm.DB) authctx.CurrentUser {
 	t.Helper()
 	moderatorModel := model.User{Username: "mod", Email: "mod@example.com", Password: "hash", Role: authctx.RoleModerator, IsActive: true}
