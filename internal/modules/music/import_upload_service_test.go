@@ -728,6 +728,50 @@ func TestCompleteAlbumImportSessionQueuesMatchingWithoutArtist(t *testing.T) {
 	}
 }
 
+func TestCancelAlbumImportWaitsForConcurrentCommitAndCannotOverwriteIt(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session := model.AlbumImportSession{UserID: &user.ID, Status: AlbumImportStatusReady, Stage: AlbumImportStageReady, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	lock := db.Begin()
+	if err := lock.Error; err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err := loadAlbumImportSessionForUpdate(lock, session.ID, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() { _, err := svc.CancelAlbumImportSession(user, session.ID); result <- err }()
+	select {
+	case err := <-result:
+		t.Fatalf("cancel returned while commit held row lock: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := lock.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("status", AlbumImportStatusCommitted).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("cancel overwrote committed import")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancel blocked after commit")
+	}
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != AlbumImportStatusCommitted {
+		t.Fatalf("status = %s", stored.Status)
+	}
+}
+
 func TestCancelAlbumImportSessionAbortsOnlyUnfinishedFiles(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	store := &fakeAlbumImportMultipartStore{}
