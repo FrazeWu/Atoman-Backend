@@ -390,6 +390,51 @@ func TestImportWorkerCleanupRetriesTargets(t *testing.T) {
 	}
 }
 
+func TestImportWorkerCleanupRetriesPlaybackAfterPartialObjectFailure(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	expires := time.Now().UTC().Add(-time.Minute)
+	session := model.AlbumImportSession{Status: AlbumImportStatusCanceled, ExpiresAt: &expires, PayloadJSON: `{}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	file := model.AlbumImportFile{ImportID: session.ID, FileName: "track.flac", SourceKey: "temp/source.flac", PlaybackKey: "temp/playback.mp3", UploadStatus: AlbumImportFileUploadStatusUploaded, CleanupJSON: "[]"}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &importWorkerStore{deleteErrFor: map[string]error{"temp/playback.mp3": errors.New("transient storage outage")}}
+	worker := NewImportWorker(db, store, "worker")
+	if err := worker.CleanupExpired(context.Background()); err == nil {
+		t.Fatal("expected playback cleanup failure")
+	}
+	var pending model.AlbumImportFile
+	if err := db.First(&pending, "id = ?", file.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if pending.SourceKey != "" || pending.PlaybackKey != file.PlaybackKey {
+		t.Fatalf("partial cleanup not persisted: %#v", pending)
+	}
+	delete(store.deleteErrFor, file.PlaybackKey)
+	if err := worker.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var done model.AlbumImportFile
+	if err := db.First(&done, "id = ?", file.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if done.SourceKey != "" || done.PlaybackKey != "" {
+		t.Fatalf("temporary objects retained: %#v", done)
+	}
+	if len(store.deleted) != 2 || store.deleted[0] != file.SourceKey || store.deleted[1] != file.PlaybackKey {
+		t.Fatalf("unexpected cleanup calls: %v", store.deleted)
+	}
+	if err := worker.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.deleted) != 2 {
+		t.Fatalf("cleanup repeated after success: %v", store.deleted)
+	}
+}
+
 func TestImportWorkerCleanupRemovesCanceledFileSourceWithoutRecordedTarget(t *testing.T) {
 	db := newImportWorkerTestDB(t)
 	expires := time.Now().UTC().Add(-time.Minute)
