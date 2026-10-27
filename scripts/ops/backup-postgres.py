@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess as sp
 import tempfile
 import time
@@ -80,8 +81,8 @@ def verify(image, target, records):
     name = 'atoman-restore-' + uuid.uuid4().hex[:12]
     cid = sp.check_output(['docker','run','--detach','--rm','--name',name,
         '--label','atoman.ops=restore-verification','--network','none',
-        '--cpus','1.5','--memory','1536m','-e','POSTGRES_USER=atoman_restore',
-        '-e','POSTGRES_HOST_AUTH_METHOD=trust','-v',str(target)+':/backup:ro',image], text=True).strip()
+        '--cpus','2','--memory','2g','-e','POSTGRES_USER=atoman_restore',
+        '-e','POSTGRES_HOST_AUTH_METHOD=trust','-v',str(target)+':/backup:ro',image,'-c','maintenance_work_mem=256MB'], text=True).strip()
     try:
         for _ in range(60):
             if sp.run(['docker','exec',cid,'pg_isready','-U','atoman_restore'],stdout=sp.DEVNULL,stderr=sp.DEVNULL).returncode == 0:
@@ -125,6 +126,11 @@ def prune_managed_backups(destination, keep):
         shutil.rmtree(item)
 
 
+def terminate_on_signal(signum, _frame):
+    # Unwind finally blocks so a timed-out restore removes its owned container.
+    raise SystemExit(128 + signum)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--container',default='atoman-dev-postgres-1')
@@ -133,6 +139,8 @@ def main():
     parser.add_argument('--verify',action='store_true')
     parser.add_argument('--retain',type=int,default=0,help='Keep this many successful managed backups; zero disables pruning')
     args=parser.parse_args()
+    signal.signal(signal.SIGTERM, terminate_on_signal)
+    signal.signal(signal.SIGINT, terminate_on_signal)
     if args.retain < 0: parser.error('--retain cannot be negative')
     if os.geteuid()!=0:
         parser.error('Run as root to keep backup files private')

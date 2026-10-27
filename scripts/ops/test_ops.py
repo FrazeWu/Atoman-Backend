@@ -22,6 +22,11 @@ class OperationsContracts(unittest.TestCase):
             for directive in ['User=atoman\n','NoNewPrivileges=true','ProtectHome=true','ProtectSystem=strict','CapabilityBoundingSet=','RUN_MIGRATIONS_ON_START=false','HTTP_HOST=127.0.0.1']:
                 self.assertIn(directive,unit)
             self.assertNotIn('/root/',unit)
+    def test_timeout_unwinds_cleanup_with_failure_status(self):
+        with self.assertRaises(SystemExit) as raised:
+            module('backup-postgres').terminate_on_signal(15, None)
+        self.assertEqual(raised.exception.code,143)
+
     def test_managed_environment_overrides_unsafe_old_paths(self):
         text=module('activate-runtime').managed_backend_environment('LOG_DIR=/root/old\nHTTP_HOST=0.0.0.0\nRUN_MIGRATIONS_ON_START=true')
         env=dict(line.split('=',1) for line in text.splitlines())
