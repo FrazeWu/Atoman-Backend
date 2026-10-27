@@ -441,7 +441,7 @@ func main() {
 		httpx.Error(c, apperr.NotFound("system.not_found", "Not found"))
 	})
 
-	server := newHTTPServer(":"+cfg.Port, r)
+	server := newHTTPServer(configuredListenAddress(cfg.Port), r)
 	log.Printf("Server starting on port %s", cfg.Port)
 	if err := serveUntilShutdown(ctx, server, shutdownTimeout); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)

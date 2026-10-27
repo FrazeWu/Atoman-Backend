@@ -361,6 +361,20 @@ rollback_binary() {
 }
 
 activate_backend() {
+  if [[ -f "/etc/systemd/system/${SERVICE_NAME}.service.d/90-managed-runtime.conf" ]]; then
+    local staged_dir revision
+    staged_dir="$(mktemp -d)"
+    revision="$(git -C "$REPO_DIR" rev-parse HEAD)"
+    install -m 0755 "$TEMP_BINARY" "$staged_dir/start_server"
+    install -m 0755 "$TEMP_WORKER_BINARY" "$staged_dir/music_import_worker"
+    if ! python3 "$REPO_DIR/scripts/ops/activate-runtime.py" --kind backend \
+      --binary-directory "$staged_dir" --revision "$revision" --environment-file "$ENV_FILE"; then
+      rm -rf "$staged_dir"
+      die "managed runtime activation failed; previous service configuration restored"
+    fi
+    rm -rf "$staged_dir"
+    return
+  fi
   run_root mkdir -p "$STATE_DIR"
   if [[ -f "$REPO_DIR/start_server" ]]; then
     BACKUP_BINARY="$STATE_DIR/start_server.previous"
