@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Atoman backup and restore verification
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+RandomizedDelaySec=5m
+Persistent=true
+Unit=atoman-backup.service
+[Install]
+WantedBy=timers.target

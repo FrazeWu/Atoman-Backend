@@ -1,0 +1,14 @@
+[Unit]
+Description=Atoman verified PostgreSQL backup
+After=docker.service
+Requires=docker.service
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+Nice=15
+IOSchedulingClass=idle
+ExecStart=/usr/bin/flock -n /run/lock/atoman-backup.lock /usr/bin/python3 /usr/local/libexec/atoman/backup-postgres.py --database atoman_prod --database atoman_dev --destination /var/backups/atoman/postgres --verify --retain 14
+TimeoutStartSec=3h
+StandardOutput=journal
+StandardError=journal

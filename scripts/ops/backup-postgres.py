@@ -60,9 +60,10 @@ def backup(container, user, database, target):
         start = time.monotonic()
         with output.open('wb') as out:
             run(['docker', 'exec', container, 'pg_dump', '-U', user, '-d', database,
-                 '--format=custom', '--compress=1', '--no-owner', '--no-acl',
+                 '--format=custom', '--compress=1',
                  '--lock-wait-timeout=15000', '--snapshot=' + snapshot], stdout=out)
-        digest = hashlib.file_digest(output.open('rb'), 'sha256').hexdigest()
+        with output.open('rb') as inp:
+            digest = hashlib.file_digest(inp, 'sha256').hexdigest()
         return {'database': database, 'dump': output.name, 'bytes': output.stat().st_size,
                 'sha256': digest, 'public_table_counts': expected,
                 'backup_seconds': round(time.monotonic() - start, 3)}
@@ -105,13 +106,34 @@ def verify(image, target, records):
         sp.run(['docker','rm','-f',cid],stdout=sp.DEVNULL,stderr=sp.DEVNULL)
 
 
+def prune_managed_backups(destination, keep):
+    if keep <= 0:
+        return
+    managed = []
+    for item in destination.iterdir():
+        if item.is_symlink() or not item.is_dir() or not (item/'COMPLETE').is_file():
+            continue
+        try:
+            info=json.loads((item/'manifest.json').read_text())
+        except (OSError, ValueError):
+            continue
+        if info.get('format')=='atoman-postgres-logical-v1' and info.get('complete') is True:
+            managed.append(item)
+    for item in sorted(managed, reverse=True)[keep:]:
+        if item.parent.resolve()!=destination.resolve():
+            raise RuntimeError('Unexpected retention path')
+        shutil.rmtree(item)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--container',default='atoman-dev-postgres-1')
     parser.add_argument('--database',action='append',required=True)
     parser.add_argument('--destination',type=Path,required=True)
     parser.add_argument('--verify',action='store_true')
+    parser.add_argument('--retain',type=int,default=0,help='Keep this many successful managed backups; zero disables pruning')
     args=parser.parse_args()
+    if args.retain < 0: parser.error('--retain cannot be negative')
     if os.geteuid()!=0:
         parser.error('Run as root to keep backup files private')
     os.umask(0o077)
@@ -126,7 +148,7 @@ def main():
     if shutil.disk_usage(args.destination).free < largest*3+(1<<30):
         raise RuntimeError('Not enough disk for backup and isolated recovery')
     target=Path(tempfile.mkdtemp(prefix=dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ-'),dir=args.destination))
-    manifest={'started_at':dt.datetime.now(dt.timezone.utc).isoformat(),'container':args.container,
+    manifest={'format':'atoman-postgres-logical-v1','started_at':dt.datetime.now(dt.timezone.utc).isoformat(),'container':args.container,
               'image_id':metadata['Image'],'backups':[],'complete':False}
     try:
         for database in args.database:
@@ -140,6 +162,8 @@ def main():
         (target/'COMPLETE').touch(mode=0o600)
     finally:
         (target/'manifest.json').write_text(json.dumps(manifest,indent=2))
+    if args.retain:
+        prune_managed_backups(args.destination, args.retain)
     print('BACKUP_DIRECTORY='+str(target),flush=True)
 
 if __name__=='__main__':
