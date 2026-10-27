@@ -829,98 +829,49 @@ func (s *Service) dispatchPublication(event model.ContentPublicationEvent) error
 	if content.Status != "published" || content.Visibility == "private" {
 		return nil
 	}
-	recipients, err := s.publicationRecipients(event.OwnerID, event.ChannelID, content.CollectionIDs)
+
+	hasFollows := s.db.Migrator().HasTable(&model.Follow{})
+	cursor := uuid.Nil
+	for {
+		owned, err := s.renewPublicationLease(event)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return nil // A newer worker reclaimed this event during processing.
+		}
+		recipients, err := s.publicationRecipientBatch(event, content, cursor, hasFollows)
+		if err != nil {
+			return err
+		}
+		if len(recipients) == 0 {
+			break
+		}
+		owned, err = s.writePublicationNotificationBatch(event, content, recipients)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return nil // Old workers may not write after a new lease is acquired.
+		}
+		cursor = recipients[len(recipients)-1]
+		if len(recipients) < publicationNotificationBatchSize {
+			break
+		}
+	}
+
+	// Keep the lease live when the last batch was empty or took a long time.
+	owned, err := s.renewPublicationLease(event)
 	if err != nil {
 		return err
 	}
-	for _, recipientID := range recipients {
-		if recipientID == event.OwnerID {
-			continue
-		}
-		var enabled int64
-		condition := "((source_type = ? AND source_id = ?) OR (source_type = ? AND source_id = ?))"
-		args := []any{"internal_channel", event.ChannelID, "internal_user", event.OwnerID}
-		if len(content.CollectionIDs) > 0 {
-			condition = "(" + condition + " OR (source_type = ? AND source_id IN ?))"
-			args = append(args, "internal_collection", content.CollectionIDs)
-		}
-		preferenceQuery := s.db.Model(&model.ContentNotificationPreference{}).Where(
-			"user_id = ? AND mode = ? AND "+condition,
-			append([]any{recipientID, "all"}, args...)...,
-		)
-		if err := preferenceQuery.Count(&enabled).Error; err != nil {
-			return err
-		}
-		if enabled == 0 {
-			continue
-		}
-		actorID := event.OwnerID
-		notification := model.Notification{
-			RecipientID: recipientID, ActorID: &actorID, Type: "content_published", SourceType: "content_publication", SourceID: event.ContentID,
-			Meta: model.NotificationMeta{"module": event.ContentType, "title": content.Title, "path": content.Path, "channel_id": event.ChannelID.String()},
-		}
-		if err := s.createPublicationNotification(event, notification); err != nil {
-			return err
-		}
+	if !owned {
+		return nil
 	}
 	if content.Visibility == "" || content.Visibility == "public" {
 		indexnow.NotifyPaths(content.Path)
 	}
 	return nil
-}
-
-func (s *Service) createPublicationNotification(event model.ContentPublicationEvent, notification model.Notification) error {
-	if event.ID == uuid.Nil {
-		return s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&notification).Error
-	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var lease model.ContentPublicationEvent
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
-			"id = ? AND status = ? AND lease_version = ?", event.ID, "processing", event.LeaseVersion,
-		).First(&lease).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&notification).Error
-	})
-}
-
-func (s *Service) publicationRecipients(ownerID, channelID uuid.UUID, collectionIDs []uuid.UUID) ([]uuid.UUID, error) {
-	var ids []uuid.UUID
-	var subscriptionIDs []uuid.UUID
-	condition := "((feed_sources.source_type = ? AND feed_sources.source_id = ?) OR (feed_sources.source_type = ? AND feed_sources.source_id = ?))"
-	args := []any{"internal_channel", channelID, "internal_user", ownerID}
-	if len(collectionIDs) > 0 {
-		condition = "(" + condition + " OR (feed_sources.source_type = ? AND feed_sources.source_id IN ?))"
-		args = append(args, "internal_collection", collectionIDs)
-	}
-	query := s.db.Model(&model.Subscription{}).
-		Select("subscriptions.user_id").Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id AND feed_sources.deleted_at IS NULL").
-		Where("subscriptions.deleted_at IS NULL AND "+condition, args...)
-	if err := query.Pluck("subscriptions.user_id", &subscriptionIDs).Error; err != nil {
-		return nil, err
-	}
-	ids = append(ids, subscriptionIDs...)
-	if s.db.Migrator().HasTable(&model.Follow{}) {
-		var followerIDs []uuid.UUID
-		if err := s.db.Model(&model.Follow{}).Where("following_id = ?", ownerID).Pluck("follower_id", &followerIDs).Error; err != nil {
-			return nil, err
-		}
-		ids = append(ids, followerIDs...)
-	}
-	seen := make(map[uuid.UUID]struct{}, len(ids))
-	result := make([]uuid.UUID, 0, len(ids))
-	for _, id := range ids {
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		result = append(result, id)
-	}
-	return result, nil
 }
 
 func (s *Service) resolveContent(module string, id uuid.UUID) (contentSummary, error) {

@@ -584,7 +584,7 @@ func TestDispatchPendingPublicationsDoesNotLetExpiredLeaseOverwriteNewLease(t *t
 	var once sync.Once
 	callback := "test:block_first_publication_dispatch:" + uuid.NewString()
 	if err := fixture.db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
-		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.Subscription{}).TableName() || tx.Statement.SQL.String() == "" {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.ContentNotificationPreference{}).TableName() || tx.Statement.SQL.String() == "" {
 			return
 		}
 		blocked := false
@@ -988,7 +988,7 @@ func TestDispatchPendingPublicationsRetriesRecoverableDispatchError(t *testing.T
 	want := errors.New("subscriptions unavailable")
 	callback := "test:fail_publication_recipients_query"
 	if err := fixture.db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
-		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == (model.Subscription{}).TableName() {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == (model.ContentNotificationPreference{}).TableName() {
 			tx.AddError(want)
 		}
 	}); err != nil {
