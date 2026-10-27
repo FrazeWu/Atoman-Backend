@@ -573,6 +573,11 @@ func mergeSongPlayback(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 	for _, session := range sessions {
 		var songIDs []uuid.UUID
 		if err := json.Unmarshal(session.QueueJSON, &songIDs); err != nil {
+			if session.CurrentSongID != nil && *session.CurrentSongID == sourceID {
+				if err := tx.Model(&session).Update("current_song_id", targetID).Error; err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		changed := false
