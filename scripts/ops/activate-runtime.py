@@ -3,6 +3,7 @@
 Does not migrate databases. The caller must verify backups and schema first.
 """
 import argparse
+import fcntl
 import datetime as dt
 import hashlib
 import json
@@ -32,6 +33,12 @@ def atomic_text(path, text, mode=0o644):
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
+
+
+def managed_backend_environment(original):
+    # EnvironmentFile entries take precedence over unit Environment directives.
+    # Keep operational boundaries explicit in the privately copied file.
+    return original.rstrip() + '\nHTTP_HOST=127.0.0.1\nRUN_MIGRATIONS_ON_START=false\nLOG_DIR=/var/log/atoman\nTMPDIR=/var/lib/atoman/tmp\n'
 
 
 def unit_override(kind, service, release):
@@ -110,6 +117,8 @@ def main():
     if os.geteuid()!=0:
         p.error('Must run as root')
     os.umask(0o077)
+    lock=open('/run/lock/atoman-runtime-'+a.kind+'.lock','a')
+    fcntl.flock(lock,fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
         account=pwd.getpwnam(user)
     except KeyError:
@@ -143,7 +152,7 @@ def main():
     if a.kind=='backend':
         if not a.environment_file or not a.environment_file.is_file():
             p.error('Backend environment file is required')
-        atomic_text(env_path,a.environment_file.read_text(),0o600)
+        atomic_text(env_path,managed_backend_environment(a.environment_file.read_text()),0o600)
     for service in services:
         drop=Path('/etc/systemd/system')/(service+'.service.d')/'90-managed-runtime.conf'
         old[str(drop)]=drop.read_text() if drop.exists() else None
