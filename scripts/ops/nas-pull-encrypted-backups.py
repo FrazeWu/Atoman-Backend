@@ -86,10 +86,18 @@ def list_snapshots(host, identity, known_hosts):
 
 
 def fetch(host, identity, known_hosts, remote, local):
-    if not local.parent.is_dir():
-        raise PullError("Missing destination directory")
+    if not local.parent.is_dir() or local.parent.is_symlink():
+        raise PullError("Missing or unsafe destination directory")
+    if local.is_symlink() or (local.exists() and not local.is_file()):
+        raise PullError("Destination is not a regular file")
+    # TrueNAS-to-VPS SSH links can be interrupted during large transfers.
+    # OpenSSH `reget` resumes ciphertext from its existing partial length;
+    # the receipt SHA256 is checked before any completed snapshot is published.
+    resume = (local.name == "backup.tar.age" and local.is_file()
+              and local.stat().st_size > 0)
+    action = "reget" if resume else "get"
     run_sftp(host, identity, known_hosts,
-             ["get " + quote_sftp(remote) + " " + quote_sftp(str(local))])
+             [action + " " + quote_sftp(remote) + " " + quote_sftp(str(local))])
 
 
 def pull(root, host, identity, known_hosts):

@@ -96,6 +96,31 @@ class NasPullTests(unittest.TestCase):
                 with self.assertRaises(nas.PullError):
                     nas.validate_receipt(candidate)
 
+    def test_ciphertext_fetch_resumes_partial_file(self):
+        partial = self.root / "backup.tar.age"
+        partial.write_bytes(b"incomplete ciphertext")
+        with mock.patch.object(nas, "run_sftp") as sftp:
+            nas.fetch("host", self.key, self.known_hosts,
+                      "/exports/id/backup.tar.age", partial)
+        self.assertTrue(sftp.call_args.args[3][0].startswith("reget "))
+
+    def test_new_ciphertext_fetch_starts_from_zero(self):
+        target = self.root / "backup.tar.age"
+        with mock.patch.object(nas, "run_sftp") as sftp:
+            nas.fetch("host", self.key, self.known_hosts,
+                      "/exports/id/backup.tar.age", target)
+        self.assertTrue(sftp.call_args.args[3][0].startswith("get "))
+
+    def test_existing_symlink_is_rejected_before_fetch(self):
+        outside = self.root / "outside"
+        outside.write_bytes(b"data")
+        path = self.root / "backup.tar.age"
+        path.symlink_to(outside)
+        with mock.patch.object(nas, "run_sftp") as sftp, self.assertRaises(nas.PullError):
+            nas.fetch("host", self.key, self.known_hosts,
+                      "/exports/id/backup.tar.age", path)
+        sftp.assert_not_called()
+
     def test_sftp_uses_batch_mode_pinned_hosts_and_no_shell(self):
         result = mock.Mock(returncode=0, stdout=self.snapshot + "\n", stderr="")
         with mock.patch.object(nas.subprocess, "run", return_value=result) as process:
