@@ -23,7 +23,7 @@ var ErrInvalid = errors.New("papers worker: invalid or untrusted input")
 
 type Config struct {
 	WorkRoot         string // private persistent P0 workspace, not HTTP-supplied
-	Store            *papersassets.Store
+	Store            papersassets.CompileAssetReader
 	ArchivePath      string // trusted operator-pinned Docker export .tar
 	RunscBinary      string
 	ScopeHelper      string
@@ -135,7 +135,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) error {
 	if c.Kind != papersqueue.ClaimRun || !c.Valid() {
 		return ErrInvalid
 	}
-	snapshot, err := e.cfg.Store.LoadSnapshot(c.Job.SnapshotDigest)
+	snapshot, err := e.cfg.Store.LoadCompileSnapshot(ctx, c.Job.SnapshotDigest)
 	if err != nil {
 		return fmt.Errorf("snapshot rejected: %w", err)
 	}
@@ -144,7 +144,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) error {
 		return fmt.Errorf("%w: snapshot belongs to another job", ErrInvalid)
 	}
 	// Hash the approved offline rootfs archive before extracting it.
-	if _, err := e.cfg.Store.VerifyArchive(c.Job.EnvironmentDigest, e.cfg.ArchivePath); err != nil {
+	if _, err := e.cfg.Store.VerifyCompileArchive(ctx, c.Job.EnvironmentDigest, e.cfg.ArchivePath); err != nil {
 		return fmt.Errorf("environment rejected: %w", err)
 	}
 	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)

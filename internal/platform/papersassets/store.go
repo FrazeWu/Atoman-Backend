@@ -235,6 +235,8 @@ func (s *Store) load(kind, digest string) ([]byte, error) {
 	return raw, nil
 }
 func (s *Store) PublishSnapshot(snapshot Snapshot) (string, error) {
+	// Do not mutate the caller's slice (which may be used concurrently).
+	snapshot.Files = append([]SourceFile(nil), snapshot.Files...)
 	sort.Slice(snapshot.Files, func(i, j int) bool { return snapshot.Files[i].Path < snapshot.Files[j].Path })
 	if err := snapshot.Validate(); err != nil {
 		return "", err
