@@ -89,7 +89,15 @@ func main() {
 	// Explicit test-only fallback is never evidence of server-side
 	// write-once enforcement. It lets us test separate non-admin accounts
 	// even when the specific MinIO release rejects s3:if-none-match.
-	if os.Getenv("PAPERS_P0_IAM_UNSAFE_TEST_MODE") == "1" {
+	gatewayMode := os.Getenv("PAPERS_P0_IAM_GATEWAY_MODE") == "1"
+	if gatewayMode {
+		if os.Getenv("PAPERS_P0_IAM_UNSAFE_TEST_MODE") != "" {
+			fatal(errors.New("gateway mode and unsafe test mode are mutually exclusive"))
+		}
+		writerPolicy.Statement = writerPolicy.Statement[:2]
+		writerPolicy.Statement[0]["Action"] = []string{"s3:GetObject"}
+		fmt.Println("P0_GATEWAY_PUBLISHER_S3_PUT_REVOKED")
+	} else if os.Getenv("PAPERS_P0_IAM_UNSAFE_TEST_MODE") == "1" {
 		writerPolicy.Statement = writerPolicy.Statement[:len(writerPolicy.Statement)-1]
 		fmt.Println("P0_IAM_UNSAFE_TEST_ONLY_CONDITIONAL_SERVER_ENFORCEMENT_UNAVAILABLE")
 	}
@@ -120,6 +128,34 @@ func main() {
 	}
 	if err := adm.SetPolicy(ctx, readerName, reader, false); err != nil {
 		fatal(err)
+	}
+	if gatewayMode {
+		gatewayUser := env("PAPERS_P0_GATEWAY_WRITER_USER")
+		gatewaySecret := env("PAPERS_P0_GATEWAY_WRITER_SECRET")
+		if !strings.HasPrefix(gatewayUser, "papersp0gate") || len(gatewaySecret) < 24 || gatewayUser == pub || gatewayUser == reader {
+			fatal(errors.New("invalid isolated gateway writer identity"))
+		}
+		gatewayPolicy := policy{Version: "2012-10-17", Statement: []map[string]any{
+			{"Sid": "GatewayFixedPrefixOnly", "Effect": "Allow",
+				"Action": []string{"s3:PutObject", "s3:GetObject"}, "Resource": []string{resource}},
+			{"Sid": "GatewayBucketSafetyProbe", "Effect": "Allow",
+				"Action": []string{"s3:GetBucketVersioning", "s3:GetBucketObjectLockConfiguration"}, "Resource": []string{bucketARN}},
+		}}
+		gatewayJSON, err := json.Marshal(gatewayPolicy)
+		if err != nil {
+			fatal(err)
+		}
+		const gatewayName = "papersp0-write-gate"
+		if err := adm.AddCannedPolicy(ctx, gatewayName, gatewayJSON); err != nil {
+			fatal(err)
+		}
+		if err := adm.AddUser(ctx, gatewayUser, gatewaySecret); err != nil {
+			fatal(err)
+		}
+		if err := adm.SetPolicy(ctx, gatewayName, gatewayUser, false); err != nil {
+			fatal(err)
+		}
+		fmt.Println("P0_GATEWAY_THREE_SCOPED_IDENTITIES_CREATED")
 	}
 	fmt.Println("P0_IAM_NON_ADMIN_PUBLISHER_READER_POLICIES_CREATED")
 }
