@@ -33,6 +33,8 @@ func fullenvAssets(root string) (papersassets.CompileAssetReader, papersworker.A
 		"PAPERS_P0_FULLENV_PUBLISHER_SECRET",
 		"PAPERS_P0_IAM_ADMIN_SECRET",
 		"PAPERS_P0_IAM_PUBLISHER_SECRET",
+		"PAPERS_P0_GATEWAY_WRITER_SECRET",
+		"PAPERS_P0_FULLENV_PUBLISHER_SECRET",
 		"PAPERS_P0_S3_TEST_SECRET",
 	} {
 		if os.Getenv(key) != "" {

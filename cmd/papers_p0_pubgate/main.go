@@ -27,14 +27,21 @@ import (
 )
 
 func run() error {
-	if os.Getenv("PAPERS_P0_GATEWAY_CONFIRM") != "1" || os.Geteuid() != 65532 || os.Getegid() != 65534 || len(os.Args) != 2 {
+	publisherUID, publisherGID := uint32(65534), 65534
+	udsName := "sockets"
+	if os.Getenv("PAPERS_P0_GATEWAY_SEPARATE_PUBLISHER") == "1" {
+		publisherUID, publisherGID = 65531, 65531
+		udsName = "pub-uds"
+	}
+	if os.Getenv("PAPERS_P0_GATEWAY_CONFIRM") != "1" || os.Geteuid() != 65532 || os.Getegid() != publisherGID || len(os.Args) != 2 {
 		return errors.New("P0 isolated gateway identity/confirmation required")
 	}
 	root, err := filepath.Abs(os.Args[1])
 	if err != nil {
 		return err
 	}
-	if !strings.HasPrefix(root, "/var/tmp/atoman-papers-p0-gate.") || len(root) > 105 {
+	if !(strings.HasPrefix(root, "/var/tmp/atoman-papers-p0-gate.") ||
+		strings.HasPrefix(root, "/var/tmp/atoman-papers-p0-durable.")) || len(root) > 105 {
 		return errors.New("refusing non-disposable workroot")
 	}
 	endpoint := os.Getenv("PAPERS_P0_GATEWAY_ENDPOINT")
@@ -82,11 +89,11 @@ func run() error {
 		return fmt.Errorf("gateway requires COMPLIANCE retention: %v", err)
 	}
 	fmt.Println("P0_GATEWAY_INDEPENDENT_PRIVATE_VERSIONING_CONDITIONAL_COMPLIANCE_PROBE_PASS")
-	gateway, err := paperspubgate.New(transport, bucket, filepath.Join(root, "staging"), 65534)
+	gateway, err := paperspubgate.New(transport, bucket, filepath.Join(root, "staging"), publisherUID)
 	if err != nil {
 		return err
 	}
-	srv, err := paperspubgate.NewUnixServer(gateway, filepath.Join(root, "sockets", "publish.sock"), 65534)
+	srv, err := paperspubgate.NewUnixServer(gateway, filepath.Join(root, udsName, "publish.sock"), publisherGID)
 	if err != nil {
 		return err
 	}
