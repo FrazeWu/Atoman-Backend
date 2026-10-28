@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"atoman/internal/platform/papersassets"
+	"atoman/internal/platform/papersdaemon"
 	"atoman/internal/platform/paperslauncher"
 	"atoman/internal/platform/papersqueue"
 	"atoman/internal/platform/paperssandbox"
@@ -81,7 +82,7 @@ func main() {
 		fatal(errors.New("invalid work root or mode"))
 	}
 	mode := flag.Arg(0)
-	if mode != "server" && mode != "worker" {
+	if mode != "server" && mode != "worker" && mode != "daemon" {
 		fatal(errors.New("unsupported operation"))
 	}
 	db, err := restrictedDB(mode)
@@ -94,7 +95,7 @@ func main() {
 	}
 	ctx := context.Background()
 	socket := filepath.Join(root, "uds", "launcher.sock")
-	if mode == "worker" {
+	if mode == "worker" || mode == "daemon" {
 		if os.Geteuid() != 65534 || os.Getegid() != 65534 {
 			fatal(errors.New("P0 Worker MUST run as unprivileged UID/GID 65534"))
 		}
@@ -106,6 +107,23 @@ func main() {
 			fatal(err)
 		}
 		runner := papersqueue.Runner{Queue: q, Executor: client}
+		if mode == "daemon" {
+			scoped, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+			daemon, err := papersdaemon.New(&runner, papersdaemon.Config{
+				WorkerID: workerName, PollInterval: 500 * time.Millisecond,
+				ErrorBackoff: time.Second, MaxBackoff: 15 * time.Second,
+			})
+			if err != nil {
+				fatal(err)
+			}
+			fmt.Printf("P0_WORKER_DAEMON_STARTED uid=%d\n", os.Geteuid())
+			if err := daemon.Run(scoped); err != nil {
+				fatal(err)
+			}
+			fmt.Println("P0_WORKER_DAEMON_EXITED")
+			return
+		}
 		worked, err := runner.Step(ctx, workerName)
 		if err != nil {
 			fatal(err)
