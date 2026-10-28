@@ -11,7 +11,7 @@ import (
 
 // validateOCISpec is a deliberately narrow P0 profile, NOT a general-purpose
 // OCI policy language. Future TeX engines require explicit policy updates.
-func validateOCISpec(raw []byte, jobID string, limits Limits, outputDir string) error {
+func validateOCISpec(raw []byte, jobID string, limits Limits, outputDir string, allowP0PIDProbe ...bool) error {
 	type caps struct {
 		Bounding    []string
 		Effective   []string
@@ -110,13 +110,13 @@ func validateOCISpec(raw []byte, jobID string, limits Limits, outputDir string) 
 		spec.Linux.Resources.CPU.Period != limits.CPUPeriodMicros {
 		return fmt.Errorf("%w: OCI resource limits differ from approved spec", ErrInvalidJob)
 	}
-	allowed := map[string]bool{"pdflatex": true, "xelatex": true, "lualatex": true}
 	args := spec.Process.Args
-	if len(args) != 6 || !allowed[args[0]] ||
-		args[1] != "-no-shell-escape" ||
-		args[2] != "-interaction=nonstopmode" ||
-		args[3] != "-halt-on-error" ||
-		args[4] != "-output-directory=/output" ||
+	if len(args) == 2 && args[0] == "/inputs/p0-sandbox-probe" && args[1] == "pids" &&
+		len(allowP0PIDProbe) > 0 && allowP0PIDProbe[0] {
+		// Explicitly controlled diagnostic only, not available to Papers API.
+	} else if len(args) != 6 || args[0] != "pdflatex" ||
+		args[1] != "-no-shell-escape" || args[2] != "-interaction=nonstopmode" ||
+		args[3] != "-halt-on-error" || args[4] != "-output-directory=/output" ||
 		args[5] != "main.tex" {
 		return fmt.Errorf("%w: executable, args, or shell policy not approved", ErrInvalidJob)
 	}

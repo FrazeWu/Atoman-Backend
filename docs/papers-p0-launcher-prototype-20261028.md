@@ -67,3 +67,7 @@ go build ./...
 7. 完成 MinIO 网络暴露、现有服务权限与资源熔断等 P0 安全阻断项。
 
 **P0 发布结论：No-Go。** 完成了可信事件归因与受限执行原型的代码和模拟验证，尚不具备真实用户上传 LaTeX 后安全在线编译的生产条件。
+
+## 2026-10-28 后续实机验证
+
+已使用新增的 Go `ScopeBackend` + `Supervisor` 完成固定环境下的 **真实 PID 超限 → cgroup 事件归因 → 清理 → 后续真实 LaTeX 编译成功**，不再仅限模拟命令层。测试中 PID 任务 `runsc exit=2`，`pids.events.max=1`，归因为 `resource_exhausted_pids`；随后的 PDFLaTeX 任务 `completed`，两个任务的清理均获验证。详见 [真实 Launcher 恢复验收](papers-p0-live-gvisor-recovery-20261028.md)。生产级队列、独立权限与综合安全验收仍缺失，总体 **No-Go**。

@@ -36,6 +36,9 @@ type ScopeBackendOptions struct {
 	WrapperCPUQuota  string
 	WrapperTasksMax  int
 	ExecuteCommand   CommandExecutor
+	// AllowP0PIDProbe is available only to the standalone trusted P0 CLI.
+	// Never expose it via public API or enable it for ordinary compile jobs.
+	AllowP0PIDProbe bool
 }
 
 type ScopeBackend struct {
@@ -218,7 +221,7 @@ func (b *ScopeBackend) verifyBundle(jobID string) error {
 	}
 	// The P0 helper validates the live Sentry cgroup. This independent
 	// preflight strictly validates the sealed OCI file before privilege use.
-	return validateOCISpec(raw, jobID, b.cfg.Limits, filepath.Dir(b.cfg.PDFPath))
+	return validateOCISpec(raw, jobID, b.cfg.Limits, filepath.Dir(b.cfg.PDFPath), b.cfg.AllowP0PIDProbe)
 }
 
 // Cleanup MUST be called regardless of Execute's result. Never use a wildcard
