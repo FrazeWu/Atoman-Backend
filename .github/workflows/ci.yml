@@ -46,7 +46,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: bash scripts/test-isolated_test.sh
-      - run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/ops/test_ops.py
+      - name: Install backup encryption verification tool
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends age
+      - run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/ops -p 'test_*.py'
       - run: bash scripts/deploy-production_test.sh
       - run: bash scripts/deploy-rollback_test.sh
       - run: make swagger-check
