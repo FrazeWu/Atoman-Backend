@@ -1,0 +1,48 @@
+# REFERENCE ONLY — NEVER INSTALL OR ENABLE AS-IS.
+# Separate dedicated static identity, no host sandbox privileges.
+[Unit]
+Description=Atoman Papers compile-queue Worker (REFERENCE: NO-GO)
+After=network-online.target atoman-papers-launcher.service
+Wants=network-online.target
+Requires=atoman-papers-launcher.service
+ConditionPathExists=/etc/atoman/papers/SECURITY_REVIEW_APPROVED
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=atoman-papers-worker
+Group=atoman-papers-worker
+UMask=0077
+ExecStart=/usr/bin/false
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=1024
+SystemCallArchitectures=native
+IPAddressDeny=any
+IPAddressAllow=localhost
+# Persistent Worker polling, DB credential transport, etc., still unbuilt.
+# The final DB route and exact syscall restrictions need real E2E review.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,50 @@
+# REFERENCE ONLY — NEVER INSTALL OR ENABLE AS-IS.
+# A production Launcher binary and verified systemd privilege profile do not
+# exist yet. The double safety gate and /usr/bin/false are intentional.
+[Unit]
+Description=Atoman Papers privileged sandbox launcher (REFERENCE: NO-GO)
+Documentation=man:systemd.exec(5)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/atoman/papers/SECURITY_REVIEW_APPROVED
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=root
+Group=root
+UMask=0077
+ExecStartPre=/usr/bin/install -d -m 0710 -o root -g atoman-papers-worker /run/atoman-papers/uds
+ExecStart=/usr/bin/false
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=50
+RuntimeDirectory=atoman-papers
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=restart
+StateDirectory=atoman-papers
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/atoman-papers
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/atoman-papers /var/lib/atoman-papers
+PrivateTmp=true
+NoNewPrivileges=true
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=false
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=1536M
+TasksMax=384
+LimitNOFILE=4096
+# CapabilityBoundingSet intentionally pending live gVisor/namespace review.
+# Do not interpret this example as a validated root capability reduction.
+
+[Install]
+WantedBy=multi-user.target

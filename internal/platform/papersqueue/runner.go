@@ -18,6 +18,12 @@ type SandboxExecutor interface {
 	Reap(context.Context, Claim) error
 }
 
+// ErrExecutionUncertain means the privileged Launcher connection disappeared
+// before it could positively attest cleanup. Never claim success, failure,
+// or verified teardown: leave the fenced task active until its DB lease
+// expires and a fresh Launcher reaps the exact old SandboxID.
+var ErrExecutionUncertain = errors.New("papers queue: launcher execution outcome unknown")
+
 type Runner struct {
 	Queue    *Queue
 	Executor SandboxExecutor
@@ -90,9 +96,15 @@ func (r *Runner) Step(ctx context.Context, workerID string) (bool, error) {
 		close(done)
 		<-stopped
 		confirmCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-		commitErr := r.Queue.FinishRecovery(confirmCtx, claim, cleanupErr == nil)
-		stop()
-		operationErr = errors.Join(operationErr, commitErr)
+		if errors.Is(cleanupErr, ErrExecutionUncertain) {
+			stop()
+			// No privileged recovery attestation was received. Keep recovering
+			// until lease timeout; a new worker must try reaping again.
+		} else {
+			commitErr := r.Queue.FinishRecovery(confirmCtx, claim, cleanupErr == nil)
+			stop()
+			operationErr = errors.Join(operationErr, commitErr)
+		}
 	} else {
 		result, runErr := r.Executor.Run(runningCtx, claim)
 		if runErr != nil {
@@ -101,9 +113,15 @@ func (r *Runner) Step(ctx context.Context, workerID string) (bool, error) {
 		close(done)
 		<-stopped
 		confirmCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
-		commitErr := r.Queue.Complete(confirmCtx, claim, result)
-		stop()
-		operationErr = errors.Join(operationErr, commitErr)
+		if errors.Is(runErr, ErrExecutionUncertain) {
+			stop()
+			// An IPC disconnect does NOT demonstrate that the sandbox was
+			// cleaned. Do not persist a synthetic CleanupFailed result.
+		} else {
+			commitErr := r.Queue.Complete(confirmCtx, claim, result)
+			stop()
+			operationErr = errors.Join(operationErr, commitErr)
+		}
 	}
 	cancel()
 	guard.Lock()

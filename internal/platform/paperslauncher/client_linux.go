@@ -5,7 +5,6 @@ package paperslauncher
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -25,6 +24,13 @@ func NewClient(socket string) (*Client, error) {
 	return &Client{Socket: socket}, nil
 }
 
+// transportUnknown is never an attestation of privileged cleanup. Every
+// disconnect, timeout, malformed reply, or pre-execution rejection leaves the
+// original DB job fenced for recovery rather than pretending cleanup failed.
+func transportUnknown(err error) error {
+	return fmt.Errorf("%w: %v", papersqueue.ErrExecutionUncertain, err)
+}
+
 func (c *Client) call(ctx context.Context, op string, claim papersqueue.Claim) (response, error) {
 	var res response
 	if c == nil || (op != "run" && op != "reap") || !claim.Valid() {
@@ -40,19 +46,19 @@ func (c *Client) call(ctx context.Context, op string, claim papersqueue.Claim) (
 	dialer := net.Dialer{Timeout: 5 * time.Second}
 	conn, err := dialer.DialContext(ctx, "unix", c.Socket)
 	if err != nil {
-		return res, err
+		return res, transportUnknown(err)
 	}
 	defer conn.Close()
 	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
-		return res, ErrAuth
+		return res, transportUnknown(ErrAuth)
 	}
 	peerUID, _, err := credentials(unixConn)
 	if err != nil {
-		return res, err
+		return res, transportUnknown(err)
 	}
 	if peerUID != 0 {
-		return res, ErrAuth
+		return res, transportUnknown(ErrAuth)
 	}
 	done := make(chan struct{})
 	go func() {
@@ -64,27 +70,30 @@ func (c *Client) call(ctx context.Context, op string, claim papersqueue.Claim) (
 	}()
 	defer close(done)
 	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		return res, err
+		return res, transportUnknown(err)
 	}
 	requestRaw = append(requestRaw, '\n')
 	if _, err = conn.Write(requestRaw); err != nil {
-		return res, err
+		return res, transportUnknown(err)
 	}
 	_ = conn.SetWriteDeadline(time.Time{})
-	// The sandbox has a separate bounded internal timeout. 6m covers fixed
-	// P0 staging, compilation, cleanup, and guards against hung launchers.
 	if err = conn.SetReadDeadline(time.Now().Add(6 * time.Minute)); err != nil {
-		return res, err
+		return res, transportUnknown(err)
 	}
 	limit := json.NewDecoder(&readLimited{conn: conn, max: 4096})
 	if err = limit.Decode(&res); err != nil {
-		return res, fmt.Errorf("launcher disconnected or malformed: %w", err)
+		return response{}, transportUnknown(fmt.Errorf("launcher response unavailable: %w", err))
 	}
 	if res.Error != "" {
-		return res, errors.New("privileged launcher: " + res.Error)
+		if res.Error == "sandbox_operation_failed" {
+			// The Launcher returned a structured execution result. The queue will
+			// independently require CleanupVerified before updating any job state.
+			return res, fmt.Errorf("privileged launcher: %s", res.Error)
+		}
+		return response{}, transportUnknown(fmt.Errorf("launcher rejected request: %s", res.Error))
 	}
 	if !res.Verified {
-		return res, ErrRejected
+		return res, transportUnknown(ErrRejected)
 	}
 	return res, nil
 }
@@ -110,7 +119,7 @@ func (r *readLimited) Read(p []byte) (int, error) {
 func (c *Client) Run(ctx context.Context, claim papersqueue.Claim) (paperssandbox.Result, error) {
 	reply, err := c.call(ctx, "run", claim)
 	if reply.Result.JobID != "" && reply.Result.JobID != claim.SandboxID {
-		return paperssandbox.Result{}, ErrRejected
+		return paperssandbox.Result{}, papersqueue.ErrExecutionUncertain
 	}
 	if reply.Result.JobID == "" {
 		reply.Result.JobID = claim.SandboxID

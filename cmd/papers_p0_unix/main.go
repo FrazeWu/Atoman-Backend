@@ -164,7 +164,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	listener, err := paperslauncher.Listen(socket, 65534)
+	listener, err := paperslauncher.ListenRecoverStale(socket, 65534)
 	if err != nil {
 		fatal(err)
 	}
