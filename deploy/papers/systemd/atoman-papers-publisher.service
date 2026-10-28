@@ -1,0 +1,40 @@
+# REFERENCE ONLY — NEVER INSTALL OR ENABLE AS-IS.
+# Publishing is an operator-approved, isolated, one-shot release action.
+# There is no production signing-key or executable credential contract yet.
+[Unit]
+Description=Atoman Papers approved offline environment release (REFERENCE: NO-GO)
+After=atoman-papers-pubgate.service
+Requires=atoman-papers-pubgate.service
+ConditionPathExists=/etc/atoman/papers/SECURITY_REVIEW_APPROVED
+
+[Service]
+Type=oneshot
+User=atoman-papers-publisher
+Group=atoman-papers-publish
+UMask=0077
+ExecStart=/usr/bin/false
+TimeoutStartSec=15min
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+# Only a private Unix socket; NEVER direct S3 PutObject credentials.
+MemoryMax=384M
+TasksMax=48
+LimitNOFILE=1024
+
+# No boot-install section: a release must never auto-publish.

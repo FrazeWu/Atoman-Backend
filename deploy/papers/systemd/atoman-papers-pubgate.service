@@ -1,0 +1,52 @@
+# REFERENCE ONLY — NEVER INSTALL OR ENABLE AS-IS.
+# P0-tested binaries hardcode ephemeral MinIO and UID paths. A separate,
+# approved production binary + credential provisioning plan is REQUIRED.
+[Unit]
+Description=Atoman Papers immutable object publication gateway (REFERENCE: NO-GO)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/atoman/papers/SECURITY_REVIEW_APPROVED
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=atoman-papers-gateway
+Group=atoman-papers-publish
+UMask=0077
+ExecStart=/usr/bin/false
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+RuntimeDirectory=atoman-papers-pubgate
+RuntimeDirectoryMode=0750
+StateDirectory=atoman-papers-pubgate
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/atoman-papers-pubgate
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+# NO IPAddressAllow until production MinIO address/TLS is audited.
+# The publisher must be the only peer permitted by SO_PEERCRED + socket ACL.
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

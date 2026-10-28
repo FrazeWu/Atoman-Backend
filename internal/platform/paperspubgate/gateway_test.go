@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -182,4 +183,98 @@ func TestGatewayRejectsUnsafeLocalPaths(t *testing.T) {
 	require.NoError(t, os.Chmod(socketRoot, 0770))
 	_, err = NewUnixServer(gateway, filepath.Join(socketRoot, "publisher.sock"), os.Getgid())
 	require.Error(t, err, "a publisher-writable socket directory allows endpoint substitution")
+}
+
+func TestStagingHeadroomRequiresTwoGiBReserve(t *testing.T) {
+	require.False(t, hasStagingHeadroom(stagingReserveBytes, 1))
+	require.False(t, hasStagingHeadroom(stagingReserveBytes+31, 32))
+	require.True(t, hasStagingHeadroom(stagingReserveBytes+32, 32))
+	require.False(t, hasStagingHeadroom(^uint64(0), 0))
+	available, err := stagingAvailableBytes(t.TempDir())
+	require.NoError(t, err)
+	require.Greater(t, available, uint64(0))
+}
+
+type blockedPublicationBackend struct {
+	*memoryBackend
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockedPublicationBackend) PutIfAbsent(ctx context.Context, bucket, key string, raw []byte, contentType string) error {
+	select {
+	case b.entered <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return b.memoryBackend.PutIfAbsent(ctx, bucket, key, raw, contentType)
+}
+
+func TestGatewayConcurrentPublishIsBoundedWithoutExtraStaging(t *testing.T) {
+	root := t.TempDir()
+	staging := filepath.Join(root, "stage")
+	require.NoError(t, os.Mkdir(staging, 0700))
+	b := &blockedPublicationBackend{
+		memoryBackend: &memoryBackend{objects: map[string][]byte{}},
+		entered:       make(chan struct{}, 1),
+		release:       make(chan struct{}),
+	}
+	gw, err := New(b, "papers-private-p0-unit", staging, uint32(os.Getuid()))
+	require.NoError(t, err)
+	firstData := []byte(`{"id":"first"}`)
+	first := httptest.NewRequest(http.MethodPut, "/v1/objects/"+shaKey("snapshots", firstData, ".json"), bytes.NewReader(firstData))
+	first.Header.Set("If-None-Match", "*")
+	first = first.WithContext(gatewayContext(first.Context(), uint32(os.Getuid())))
+	firstRecorder := httptest.NewRecorder()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		gw.ServeHTTP(firstRecorder, first)
+	}()
+	var once sync.Once
+	release := func() { once.Do(func() { close(b.release) }) }
+	defer release()
+	select {
+	case <-b.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first publication did not enter the backend")
+	}
+	secondData := []byte(`{"id":"second"}`)
+	second := httptest.NewRequest(http.MethodPut, "/v1/objects/"+shaKey("snapshots", secondData, ".json"), bytes.NewReader(secondData))
+	second.Header.Set("If-None-Match", "*")
+	second = second.WithContext(gatewayContext(second.Context(), uint32(os.Getuid())))
+	secondRecorder := httptest.NewRecorder()
+	gw.ServeHTTP(secondRecorder, second)
+	require.Equal(t, http.StatusTooManyRequests, secondRecorder.Code)
+	entries, err := os.ReadDir(staging)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "a busy gateway must not stage a second upload")
+	release()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("gateway failed to complete an accepted upload")
+	}
+	require.Equal(t, http.StatusCreated, firstRecorder.Code)
+	entries, err = os.ReadDir(staging)
+	require.NoError(t, err)
+	require.Empty(t, entries, "accepted uploads must release staging after completion")
+}
+
+func TestGatewayFailsClosedOnUnavailableStagingCapacity(t *testing.T) {
+	gw, backend, client := testSocket(t, uint32(os.Getuid()))
+	data := []byte(`{"too":"full"}`)
+	key := shaKey("snapshots", data, ".json")
+	gw.available = func(string) (uint64, error) { return stagingReserveBytes + uint64(len(data)) - 1, nil }
+	require.Equal(t, http.StatusInsufficientStorage, gatewayPut(t, client, key, data, true))
+	gw.available = func(string) (uint64, error) { return 0, errors.New("statfs failed") }
+	require.Equal(t, http.StatusServiceUnavailable, gatewayPut(t, client, key, data, true))
+	backend.mu.Lock()
+	require.Empty(t, backend.objects, "no object may be published when staging cannot be reserved")
+	backend.mu.Unlock()
 }

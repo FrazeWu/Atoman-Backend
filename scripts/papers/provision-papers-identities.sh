@@ -1,29 +1,48 @@
 #!/usr/bin/env bash
-# Safe account provisioner. Default is PLAN only. An explicit --apply is
-# intentionally not provided until production runtime is independently
-# reviewed; accidental use from P0 worktrees must not mutate /etc/passwd.
+# Read-only plan, not a production provisioning program. There is intentionally
+# no --apply option; this must never change NSS, systemd or filesystem state.
 set -Eeuo pipefail
 if [[ "$#" != 1 || "$1" != "--plan" ]];then
- echo "Read-only only: provision-papers-identities.sh --plan" >&2
- exit 2
+  echo 'Usage: provision-papers-identities.sh --plan (READ ONLY)' >&2
+  exit 2
 fi
 for tool in getent id;do command -v "$tool" >/dev/null || exit 2;done
-account=atoman-papers-worker
-echo 'P0 system account provisioning plan (NO MODIFICATIONS):'
-if getent passwd "$account" >/dev/null;then
- echo "Existing account must be audited: $account"
- getent passwd "$account"
+echo 'PAPERS_IDENTITY_PLAN_ONLY: no user/group installation or restart'
+echo 'Proposed service accounts (all system users, no login, no sudo/docker):'
+for account in atoman-papers-worker atoman-papers-gateway atoman-papers-publisher;do
+  if getent passwd "$account" >/dev/null;then
+    record="$(getent passwd "$account")"
+    IFS=: read -r _ _ uid gid _ home shell <<< "$record"
+    printf 'EXISTS_REVIEW_REQUIRED account=%s uid=%s gid=%s home=%s shell=%s\n' \
+      "$account" "$uid" "$gid" "$home" "$shell"
+    if [[ "$shell" != /usr/sbin/nologin && "$shell" != /bin/false ]];then
+      echo "REFUSE: $account has an interactive shell" >&2
+      exit 1
+    fi
+    groups=" $(id -nG "$account") "
+    for privileged in docker sudo wheel;do
+      if [[ "$groups" == *" $privileged "* ]];then
+        echo "REFUSE: $account is in $privileged" >&2
+        exit 1
+      fi
+    done
+  else
+    printf 'CREATE_LATER account=%s shell=/usr/sbin/nologin home=/nonexistent system=yes\n' "$account"
+  fi
+done
+group=atoman-papers-publish
+if getent group "$group" >/dev/null;then
+  printf 'EXISTS_REVIEW_REQUIRED group=%s\n' "$group"
 else
- echo 'User: atoman-papers-worker (system UID, shell /usr/sbin/nologin)'
- echo 'Primary group: atoman-papers-worker (system group)'
- echo 'Home: /nonexistent; no login, no Docker group, no sudo privileges'
+  printf 'CREATE_LATER group=%s (only publisher and gateway may join)\n' "$group"
 fi
-if getent group docker | grep -qw "$account";then
- echo 'REFUSE: account is in the Docker group' >&2
- exit 1
-fi
-echo 'Root Launcher: existing root identity, separate read-only PostgreSQL role'
-echo 'Socket: /run/atoman-papers/uds/launcher.sock root:atoman-papers-worker mode 0660'
-echo 'Worker: only socket and its own queue database credential'
-echo 'Launcher: no writable queue DB credential; rootfs in private published registry'
-echo 'No user/group creation, unit installation, daemon reload or restart performed.'
+echo 'Gateway: atoman-papers-gateway, primary group atoman-papers-publish'
+echo 'Publisher: atoman-papers-publisher, primary group atoman-papers-publish'
+echo 'Worker: atoman-papers-worker, separate primary group; NO publish group'
+echo 'Launcher: root only after gVisor-specific capability/namespace security review'
+echo 'Publisher socket: parent gateway:atoman-papers-publish mode 0750; socket 0660'
+echo 'Launcher socket: parent root:atoman-papers-worker mode 0710; socket 0660'
+echo 'S3: Publisher/Worker do not possess write credentials; gateway scoped Put-only'
+echo 'DB: Root Launcher read-only, nonroot Worker lease-write role (audited separately)'
+echo 'Do not share signing secrets, S3 admin credentials or Unix socket group.'
+echo 'NO_CHANGES: no account/group creation, unit install, reload or restart.'

@@ -19,9 +19,36 @@ import (
 	"syscall"
 
 	"atoman/internal/platform/papersassets"
+	"golang.org/x/sys/unix"
 )
 
 const prefix = "papers/immutable/v1/"
+
+// Never use the last 2 GiB of a staging volume for untrusted publications.
+// Each gateway accepts only one in-flight object, so its reservation cannot
+// race with a second upload on the same gateway process.
+const stagingReserveBytes uint64 = 2 << 30
+
+func hasStagingHeadroom(available uint64, contentLength int64) bool {
+	return contentLength > 0 && available >= uint64(contentLength)+stagingReserveBytes
+}
+
+func stagingAvailableBytes(path string) (uint64, error) {
+	var info unix.Statfs_t
+	if err := unix.Statfs(path, &info); err != nil {
+		return 0, err
+	}
+	// Saturating multiplication means enormous filesystems are never marked
+	// out of space through unsigned arithmetic wraparound.
+	if info.Bsize <= 0 {
+		return 0, errors.New("invalid staging filesystem block size")
+	}
+	blockSize := uint64(info.Bsize)
+	if info.Bavail > ^uint64(0)/blockSize {
+		return ^uint64(0), nil
+	}
+	return info.Bavail * blockSize, nil
+}
 
 var keyRE = regexp.MustCompile("^(snapshots|environments|trusted-releases)/([0-9a-f]{64})\\.json$|^trusted-archives/([0-9a-f]{64})\\.tar$|^_probes/([0-9a-f]{32})$")
 
@@ -36,6 +63,7 @@ type Gateway struct {
 	backend       Backend
 	bucket        string
 	tmp           string
+	available     func(string) (uint64, error)
 	authorizedUID uint32
 	slots         chan struct{}
 }
@@ -58,7 +86,7 @@ func New(backend Backend, bucket, tmp string, authorizedUID uint32) (*Gateway, e
 		!ok || owner.Uid != uint32(os.Geteuid()) {
 		return nil, errors.New("gateway staging must be private and owned by its process")
 	}
-	return &Gateway{backend: backend, bucket: bucket, tmp: tmp, authorizedUID: authorizedUID, slots: make(chan struct{}, 1)}, nil
+	return &Gateway{backend: backend, bucket: bucket, tmp: tmp, available: stagingAvailableBytes, authorizedUID: authorizedUID, slots: make(chan struct{}, 1)}, nil
 }
 func classify(key string) (kind, digest string, maxBytes int64, err error) {
 	if !strings.HasPrefix(key, prefix) {
@@ -122,6 +150,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
 		return
 	}
+	available, err := g.available(g.tmp)
+	if err != nil {
+		http.Error(w, "staging capacity unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !hasStagingHeadroom(available, r.ContentLength) {
+		http.Error(w, "staging capacity would exhaust reserved disk", http.StatusInsufficientStorage)
+		return
+	}
 	f, err := os.CreateTemp(g.tmp, "pending-*.part")
 	if err != nil {
 		http.Error(w, "staging unavailable", http.StatusServiceUnavailable)
@@ -130,6 +167,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() { f.Close(); os.Remove(f.Name()) }()
 	hash := sha256.New()
 	count, err := io.CopyN(io.MultiWriter(f, hash), r.Body, r.ContentLength)
+	if errors.Is(err, syscall.ENOSPC) {
+		http.Error(w, "staging volume ran out of space", http.StatusInsufficientStorage)
+		return
+	}
 	if err != nil || count != r.ContentLength {
 		http.Error(w, "incomplete request", http.StatusBadRequest)
 		return
@@ -157,7 +198,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "content digest mismatch", http.StatusUnprocessableEntity)
 		return
 	}
-	if err := f.Sync(); err != nil {
+	if err := f.Sync(); errors.Is(err, syscall.ENOSPC) {
+		http.Error(w, "staging fsync exhausted reserved space", http.StatusInsufficientStorage)
+		return
+	} else if err != nil {
 		http.Error(w, "staging sync failure", 502)
 		return
 	}

@@ -59,7 +59,13 @@ func NewUnixServer(g *Gateway, socketPath string, publisherGID int) (*UnixServer
 	if err = os.Chmod(socketPath, 0660); err != nil {
 		return fail(err)
 	}
-	srv := &http.Server{Handler: g, ReadHeaderTimeout: 10 * time.Second,
+	srv := &http.Server{
+		Handler:           g,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       6 * time.Minute, // Includes the bounded 4 GiB request body.
+		WriteTimeout:      8 * time.Minute, // Includes S3 verification/readback.
+		IdleTimeout:       10 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			uc, ok := c.(*net.UnixConn)
 			if !ok {
