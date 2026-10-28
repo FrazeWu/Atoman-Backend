@@ -21,10 +21,18 @@ import (
 
 var ErrInvalid = errors.New("papers worker: invalid or untrusted input")
 
+// ArchiveFetcher is implemented by the pinned signed-release cache, not by
+// untrusted user inputs. The only identifier passed is the authoritative
+// PostgreSQL job's EnvironmentDigest after lease verification.
+type ArchiveFetcher interface {
+	FetchArchive(context.Context, string) (string, error)
+}
+
 type Config struct {
 	WorkRoot         string // private persistent P0 workspace, not HTTP-supplied
 	Store            papersassets.CompileAssetReader
-	ArchivePath      string // trusted operator-pinned Docker export .tar
+	ArchivePath      string         // trusted operator-pinned Docker export .tar
+	ArchiveFetcher   ArchiveFetcher // optional P0 signed-release cache
 	RunscBinary      string
 	ScopeHelper      string
 	SystemdRunBinary string
@@ -143,8 +151,21 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) error {
 		c.Job.MainFile != "main.tex" {
 		return fmt.Errorf("%w: snapshot belongs to another job", ErrInvalid)
 	}
-	// Hash the approved offline rootfs archive before extracting it.
-	if _, err := e.cfg.Store.VerifyCompileArchive(ctx, c.Job.EnvironmentDigest, e.cfg.ArchivePath); err != nil {
+	// The signed S3 archive cache is optional in P0; it is provided only
+	// through privileged Launcher configuration. Never fall back to the
+	// operator-pinned local archive if download or signature verification
+	// failed, or the job's environment identity could silently change.
+	archivePath := e.cfg.ArchivePath
+	if e.cfg.ArchiveFetcher != nil {
+		archivePath, err = e.cfg.ArchiveFetcher.FetchArchive(ctx, c.Job.EnvironmentDigest)
+		if err != nil {
+			return fmt.Errorf("trusted archive fetch rejected: %w", err)
+		}
+		if !filepath.IsAbs(archivePath) {
+			return ErrInvalid
+		}
+	}
+	if _, err := e.cfg.Store.VerifyCompileArchive(ctx, c.Job.EnvironmentDigest, archivePath); err != nil {
 		return fmt.Errorf("environment rejected: %w", err)
 	}
 	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)
@@ -167,7 +188,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) error {
 	// The tar is sourced ONLY from a pre-approved pinned image; the archive was
 	// verified byte-for-byte immediately above. Do not generalize this P0
 	// extraction path to uploads or arbitrary project ZIP files.
-	cmd := exec.CommandContext(ctx, e.cfg.TarBinary, "--no-same-owner", "-xf", e.cfg.ArchivePath, "-C", rootfs)
+	cmd := exec.CommandContext(ctx, e.cfg.TarBinary, "--no-same-owner", "-xf", archivePath, "-C", rootfs)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if len(output) > 1024 {
