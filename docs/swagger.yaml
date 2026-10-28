@@ -25428,6 +25428,56 @@ paths:
       summary: 更新论文项目名称
       tags:
       - papers
+  /api/v1/papers/projects/{id}/compile-capability:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Check whether the isolated LaTeX compile service is available
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/compiles:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List ten most recent compilation jobs owned by the project owner
+      tags:
+      - papers
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Enqueue compilation of one consistent project revision
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/compiles/{jobId}:
+    delete:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Request cancellation; never directly kills a sandbox
+      tags:
+      - papers
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Read sanitized compilation status for a job owned by the caller
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/compiles/{jobId}/pdf:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Download a previously verified, durable, owner-scoped compile PDF
+      tags:
+      - papers
   /api/v1/papers/projects/{id}/files:
     get:
       parameters:

@@ -51,6 +51,14 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.POST("/projects/:id/files", h.createFile)
 	private.GET("/projects/:id/files/:fileId", h.file)
 	private.PUT("/projects/:id/files/:fileId", h.saveFile)
+	// These routes are deliberately fail-closed in production: NewService(db)
+	// does NOT provide the trusted publisher, signed environment or queue.
+	private.GET("/projects/:id/compile-capability", h.compileCapability)
+	private.POST("/projects/:id/compiles", h.submitCompile)
+	private.GET("/projects/:id/compiles", h.compileHistory)
+	private.GET("/projects/:id/compiles/:jobId", h.compileStatus)
+	private.DELETE("/projects/:id/compiles/:jobId", h.cancelCompile)
+	private.GET("/projects/:id/compiles/:jobId/pdf", h.compilePDF)
 }
 
 func current(c *gin.Context) (authctx.CurrentUser, bool) {

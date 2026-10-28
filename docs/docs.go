@@ -23148,6 +23148,92 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/projects/{id}/compile-capability": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Check whether the isolated LaTeX compile service is available",
+                "responses": {}
+            }
+        },
+        "/api/v1/papers/projects/{id}/compiles": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "List ten most recent compilation jobs owned by the project owner",
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Enqueue compilation of one consistent project revision",
+                "responses": {}
+            }
+        },
+        "/api/v1/papers/projects/{id}/compiles/{jobId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Read sanitized compilation status for a job owned by the caller",
+                "responses": {}
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Request cancellation; never directly kills a sandbox",
+                "responses": {}
+            }
+        },
+        "/api/v1/papers/projects/{id}/compiles/{jobId}/pdf": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Download a previously verified, durable, owner-scoped compile PDF",
+                "responses": {}
+            }
+        },
         "/api/v1/papers/projects/{id}/files": {
             "get": {
                 "security": [
