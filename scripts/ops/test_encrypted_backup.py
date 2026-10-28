@@ -46,6 +46,12 @@ class EncryptedBackupTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             module.validate_snapshot(self.source)
 
+    def test_accepts_restore_verified_legacy_manifest_without_format_marker(self):
+        del self.manifest['format']
+        self.write_manifest()
+        self.assertEqual([name for name, _ in module.validate_snapshot(self.source)],
+                         ['COMPLETE', 'example.dump', 'manifest.json', 'roles.sql'])
+
     def test_rejects_unverified_restore(self):
         self.manifest['backups'][0]['restore_verified'] = False
         self.write_manifest()

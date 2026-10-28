@@ -46,7 +46,9 @@ def validate_snapshot(source):
     if manifest_file.stat().st_size > 4 * 1024 * 1024:
         raise BackupError('Manifest too large')
     manifest = json.loads(manifest_file.read_text())
-    if manifest.get('format') != 'atoman-postgres-logical-v1' or manifest.get('complete') is not True:
+    # Snapshots predating the format marker remain valid only when all individual
+    # dump records are restore-verified and their bytes match their checksums.
+    if manifest.get('format') not in (None, 'atoman-postgres-logical-v1') or manifest.get('complete') is not True:
         raise BackupError('Backup is incomplete or has an unsupported format')
     records = manifest.get('backups')
     if not isinstance(records, list) or not records:
