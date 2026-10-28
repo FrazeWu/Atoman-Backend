@@ -155,14 +155,21 @@ func main() {
 	}
 	// Server has fixed privileged tool paths from startup flags, NOT values
 	// supplied by the request over the socket.
-	store, err := papersassets.OpenStore(filepath.Join(root, "assets"))
+	var store papersassets.CompileAssetReader
+	var fetcher papersworker.ArchiveFetcher
+	if os.Getenv("PAPERS_P0_FULLENV_CONFIRM") == "1" {
+		store, fetcher, err = fullenvAssets(root)
+	} else {
+		store, err = papersassets.OpenStore(filepath.Join(root, "assets"))
+	}
 	if err != nil {
 		fatal(err)
 	}
 	executor, err := papersworker.New(papersworker.Config{
 		WorkRoot: filepath.Join(root, "runs"), Store: store,
-		ArchivePath: filepath.Join(root, "rootfs.tar"),
-		RunscBinary: runsc, ScopeHelper: helper,
+		ArchivePath:    filepath.Join(root, "rootfs.tar"),
+		ArchiveFetcher: fetcher,
+		RunscBinary:    runsc, ScopeHelper: helper,
 		SystemdRunBinary: lookup("systemd-run"), SystemctlBinary: lookup("systemctl"),
 		MountpointBinary: lookup("mountpoint"), FindmntBinary: lookup("findmnt"),
 		UmountBinary: lookup("umount"), TarBinary: lookup("tar"),
