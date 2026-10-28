@@ -93,6 +93,7 @@ func TestPersistentCompileQueueIdempotencyPriorityAndAuth(t *testing.T) {
 	manual := submit(t, q, input(owner, project, "manual-1", PriorityManual, 2))
 	first := claim(t, q, "worker-1", ClaimRun)
 	require.Equal(t, manual.ID, first.Job.ID)
+	require.Regexp(t, `^pc-[a-f0-9]{24}$`, first.SandboxID)
 	require.EqualValues(t, 1, first.Job.Attempts)
 	q2, err := New(db, 15*time.Second)
 	require.NoError(t, err)

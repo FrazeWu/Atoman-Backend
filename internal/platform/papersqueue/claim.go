@@ -3,6 +3,7 @@ package papersqueue
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -102,7 +103,9 @@ func (q *Queue) ClaimNext(ctx context.Context, workerID string) (Claim, bool, er
 						"finished_at": now, "updated_at": now,
 					}).Error
 			}
-			sandboxID := "pc-" + uuid.NewString()[:24]
+			// Stable, systemd-safe ASCII identity: never truncate a formatted
+			// UUID in the middle of a hyphen-delimited group.
+			sandboxID := "pc-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:24]
 			if err := tx.Model(&model.PaperCompileJob{}).Where("id = ? AND status = ?", next.ID, StatusQueued).
 				Updates(map[string]any{
 					"status": StatusRunning, "attempts": next.Attempts + 1, "started_at": now,
