@@ -48,7 +48,7 @@ func (h *Handler) listArchivedMusicEntries(c *gin.Context) {
 		return
 	}
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.ListArchivedMusicEntries(user, page, pageSize)
+	items, total, err := h.service.ListArchivedMusicEntries(user, page, pageSize, c.DefaultQuery("entity_type", "all"))
 	if err != nil {
 		httpx.Error(c, err)
 		return

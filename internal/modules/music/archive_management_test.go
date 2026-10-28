@@ -58,6 +58,22 @@ func TestArchiveManagementRestoresOnlySongsArchivedWithAlbum(t *testing.T) {
 		t.Fatal("archived album missing from admin list")
 	}
 
+	for _, tc := range []struct {
+		kind  string
+		total int64
+	}{{"album", 1}, {"song", 2}} {
+		filtered, count, err := svc.ListArchivedMusicEntries(user, 1, 1, tc.kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count != tc.total || len(filtered) != 1 || filtered[0].EntityType != tc.kind {
+			t.Fatalf("type %s returned count=%d items=%+v", tc.kind, count, filtered)
+		}
+	}
+	if _, _, err := svc.ListArchivedMusicEntries(user, 1, 20, "artist"); err == nil {
+		t.Fatal("unknown archive filter allowed")
+	}
+
 	if err := svc.RestoreArchivedMusicEntry(user, "song", songB.ID, "too early"); err == nil {
 		t.Fatal("must not restore song while album is retired")
 	}

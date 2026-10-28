@@ -114,7 +114,7 @@ func (s *Service) ArchiveMusicEntry(user authctx.CurrentUser, entityType string,
 
 // ListArchivedMusicEntries is an admin-only view, deliberately separate from
 // public discovery/search. It never returns media object keys or full lyrics.
-func (s *Service) ListArchivedMusicEntries(user authctx.CurrentUser, page, pageSize int) ([]MusicArchivedEntry, int64, error) {
+func (s *Service) ListArchivedMusicEntries(user authctx.CurrentUser, page, pageSize int, entityTypes ...string) ([]MusicArchivedEntry, int64, error) {
 	if err := requireMusicArchiveAdmin(user); err != nil {
 		return nil, 0, err
 	}
@@ -124,18 +124,40 @@ func (s *Service) ListArchivedMusicEntries(user authctx.CurrentUser, page, pageS
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 20
 	}
-	var total int64
-	if err := s.db.Raw(`SELECT (SELECT COUNT(*) FROM "Albums" WHERE lifecycle_status = ? AND deleted_at IS NULL) +
-                               (SELECT COUNT(*) FROM "Songs" WHERE lifecycle_status = ? AND deleted_at IS NULL)`,
-		model.MusicLifecycleRetired, model.MusicLifecycleRetired).Scan(&total).Error; err != nil {
-		return nil, 0, err
+	filter := "all"
+	if len(entityTypes) != 0 {
+		filter = entityTypes[0]
 	}
+	if filter != "all" && filter != "album" && filter != "song" {
+		return nil, 0, apperr.BadRequest("validation.invalid_request", "invalid archive type")
+	}
+	var total int64
 	entries := []MusicArchivedEntry{}
-	if err := s.db.Raw(`SELECT id, 'album' AS entity_type, title, updated_at AS archived_at FROM "Albums" WHERE lifecycle_status = ? AND deleted_at IS NULL
+	if filter == "album" || filter == "song" {
+		table, entityType := `"Albums"`, "album"
+		if filter == "song" {
+			table, entityType = `"Songs"`, "song"
+		}
+		if err := s.db.Table(table).Where("lifecycle_status = ? AND deleted_at IS NULL", model.MusicLifecycleRetired).Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		if err := s.db.Raw(`SELECT id, ? AS entity_type, title, updated_at AS archived_at FROM `+table+`
+			WHERE lifecycle_status = ? AND deleted_at IS NULL ORDER BY archived_at DESC, id DESC LIMIT ? OFFSET ?`,
+			entityType, model.MusicLifecycleRetired, pageSize, (page-1)*pageSize).Scan(&entries).Error; err != nil {
+			return nil, 0, err
+		}
+	} else {
+		if err := s.db.Raw(`SELECT (SELECT COUNT(*) FROM "Albums" WHERE lifecycle_status = ? AND deleted_at IS NULL) +
+                               (SELECT COUNT(*) FROM "Songs" WHERE lifecycle_status = ? AND deleted_at IS NULL)`,
+			model.MusicLifecycleRetired, model.MusicLifecycleRetired).Scan(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		if err := s.db.Raw(`SELECT id, 'album' AS entity_type, title, updated_at AS archived_at FROM "Albums" WHERE lifecycle_status = ? AND deleted_at IS NULL
         UNION ALL SELECT id, 'song' AS entity_type, title, updated_at AS archived_at FROM "Songs" WHERE lifecycle_status = ? AND deleted_at IS NULL
         ORDER BY archived_at DESC, id DESC LIMIT ? OFFSET ?`,
-		model.MusicLifecycleRetired, model.MusicLifecycleRetired, pageSize, (page-1)*pageSize).Scan(&entries).Error; err != nil {
-		return nil, 0, err
+			model.MusicLifecycleRetired, model.MusicLifecycleRetired, pageSize, (page-1)*pageSize).Scan(&entries).Error; err != nil {
+			return nil, 0, err
+		}
 	}
 	for i := range entries {
 		var log model.AuditLog
