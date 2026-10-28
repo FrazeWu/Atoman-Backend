@@ -3,9 +3,11 @@ package papersassets
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -289,4 +292,160 @@ func TestP0RealMinIOProbeRejectsUnversionedBucket(t *testing.T) {
 	require.NoError(t, err)
 	require.ErrorIs(t, reg.Probe(ctx), ErrConditionalUnsupported)
 	fmt.Println("P0_S3_UNVERSIONED_BUCKET_REJECTED")
+}
+
+func TestP0RealMinIOTrustedSignedArchiveAndComplianceLock(t *testing.T) {
+	cli, _ := p0S3Client(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+	bucket := "papers-private-p0-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:14]
+	_, err := cli.CreateBucketWithContext(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket), ObjectLockEnabledForBucket: aws.Bool(true),
+	})
+	require.NoError(t, err)
+	_, err = cli.PutObjectLockConfigurationWithContext(ctx, &s3.PutObjectLockConfigurationInput{
+		Bucket: aws.String(bucket),
+		ObjectLockConfiguration: &s3.ObjectLockConfiguration{
+			ObjectLockEnabled: aws.String("Enabled"),
+			Rule: &s3.ObjectLockRule{DefaultRetention: &s3.DefaultRetention{
+				Mode: aws.String("COMPLIANCE"), Days: aws.Int64(1),
+			}},
+		},
+	})
+	require.NoError(t, err)
+	provider, err := NewS3ConditionalAPI(cli)
+	require.NoError(t, err)
+	base, err := NewPrivateS3Registry(provider, bucket, "atoman-shared-public")
+	require.NoError(t, err)
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	trusted, err := NewTrustedArchiveRegistry(base, map[string]ed25519.PublicKey{"p0-tex-publisher": public}, 1)
+	require.NoError(t, err)
+	require.NoError(t, trusted.ProbePublisher(ctx))
+	// >4 MiB is intentionally larger than the JSON manifest limit:
+	// the binary transport MUST stream rather than using PutIfAbsent([]byte).
+	archive, env := makeLargeTrustedTarFixture(t)
+	envDigest, err := trusted.PublishTrustedArchive(ctx, env, archive, "p0-tex-publisher", private)
+	require.NoError(t, err)
+	release, err := trusted.LoadRelease(ctx, envDigest)
+	require.NoError(t, err)
+	require.Equal(t, env, release.Claim.Environment)
+	require.Greater(t, release.Claim.ArchiveBytes, int64(MaxSnapshotBytes))
+	archiveKey, err := trustedArchiveKey(env.ArchiveDigest)
+	require.NoError(t, err)
+	duplicate, err := os.Open(archive)
+	require.NoError(t, err)
+	err = provider.PutFileIfAbsent(ctx, bucket, archiveKey, duplicate, release.Claim.ArchiveBytes)
+	duplicate.Close()
+	require.ErrorIs(t, err, ErrAlreadyExists)
+	cacheDir := t.TempDir()
+	require.NoError(t, os.Chmod(cacheDir, 0700))
+	cache, err := NewTrustedArchiveCache(trusted, cacheDir)
+	require.NoError(t, err)
+	fetched, err := cache.FetchArchive(ctx, envDigest)
+	require.NoError(t, err)
+	require.Equal(t, env.ArchiveDigest, func() string { hash, err := HashFile(fetched); require.NoError(t, err); return hash }())
+	gate := &TrustedCompileAssetReader{Sources: base, Releases: trusted}
+	verified, err := gate.VerifyCompileArchive(ctx, envDigest, fetched)
+	require.NoError(t, err)
+	require.Equal(t, env, verified)
+	versions, err := cli.ListObjectVersionsWithContext(ctx, &s3.ListObjectVersionsInput{
+		Bucket: aws.String(bucket), Prefix: aws.String(archiveKey),
+	})
+	require.NoError(t, err)
+	var versionID string
+	for _, v := range versions.Versions {
+		if aws.StringValue(v.Key) == archiveKey {
+			versionID = aws.StringValue(v.VersionId)
+			break
+		}
+	}
+	require.NotEmpty(t, versionID)
+	lock, err := cli.GetObjectRetentionWithContext(ctx, &s3.GetObjectRetentionInput{
+		Bucket: aws.String(bucket), Key: aws.String(archiveKey), VersionId: aws.String(versionID),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "COMPLIANCE", aws.StringValue(lock.Retention.Mode))
+	require.True(t, lock.Retention.RetainUntilDate.After(time.Now()))
+	// Compliance prohibits permanent deletion of this protected version.
+	_, err = cli.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket), Key: aws.String(archiveKey), VersionId: aws.String(versionID),
+	})
+	require.Error(t, err)
+	var rf awserr.RequestFailure
+	require.True(t, errors.As(err, &rf))
+	t.Logf("MinIO Object Lock denied protected-version removal: status=%d code=%s", rf.StatusCode(), rf.Code())
+	// AWS S3 and S3-compatible vendors may choose different 4xx codes.
+	// The invariant is that a protected version cannot be removed.
+	require.GreaterOrEqual(t, rf.StatusCode(), 400)
+	require.Less(t, rf.StatusCode(), 500)
+	stillThere, err := cli.GetObjectWithContext(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket), Key: aws.String(archiveKey), VersionId: aws.String(versionID),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, stillThere.Body)
+	require.NoError(t, stillThere.Body.Close())
+	fmt.Println("P0_TRUSTED_ARCHIVE_SIGNED_S3_COMPLIANCE_RETENTION_CACHE_VERIFIED")
+}
+
+func TestP0RealMinIORejectsGovernanceOnlyArchiveBucket(t *testing.T) {
+	cli, _ := p0S3Client(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	bucket := "papers-private-p0-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:14]
+	_, err := cli.CreateBucketWithContext(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(bucket), ObjectLockEnabledForBucket: aws.Bool(true),
+	})
+	require.NoError(t, err)
+	_, err = cli.PutObjectLockConfigurationWithContext(ctx, &s3.PutObjectLockConfigurationInput{
+		Bucket: aws.String(bucket),
+		ObjectLockConfiguration: &s3.ObjectLockConfiguration{
+			ObjectLockEnabled: aws.String("Enabled"),
+			Rule: &s3.ObjectLockRule{DefaultRetention: &s3.DefaultRetention{
+				Mode: aws.String("GOVERNANCE"), Days: aws.Int64(7),
+			}},
+		},
+	})
+	require.NoError(t, err)
+	provider, err := NewS3ConditionalAPI(cli)
+	require.NoError(t, err)
+	base, err := NewPrivateS3Registry(provider, bucket, "atoman-shared-public")
+	require.NoError(t, err)
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	trusted, err := NewTrustedArchiveRegistry(base, map[string]ed25519.PublicKey{"p0-tex-publisher": pub}, 1)
+	require.NoError(t, err)
+	require.ErrorIs(t, trusted.ProbePublisher(ctx), ErrConditionalUnsupported)
+	fmt.Println("P0_TRUSTED_ARCHIVE_GOVERNANCE_NOT_COMPLIANCE_REJECTED")
+}
+
+// This control proves the same SDK can delete a specific unprotected object
+// version in disposable MinIO. Therefore the protected-version rejection
+// in the signed archive test is not explained by an invalid SDK Delete API.
+func TestP0RealMinIOUnprotectedVersionDeleteControl(t *testing.T) {
+	cli, _ := p0S3Client(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	bucket := "papers-private-p0-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:14]
+	_, err := cli.CreateBucketWithContext(ctx, &s3.CreateBucketInput{Bucket: aws.String(bucket)})
+	require.NoError(t, err)
+	_, err = cli.PutBucketVersioningWithContext(ctx, &s3.PutBucketVersioningInput{
+		Bucket: aws.String(bucket), VersioningConfiguration: &s3.VersioningConfiguration{Status: aws.String("Enabled")},
+	})
+	require.NoError(t, err)
+	inserted, err := cli.PutObjectWithContext(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(bucket), Key: aws.String("unprotected-control"),
+		Body: bytes.NewReader([]byte("temporary control only")),
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, aws.StringValue(inserted.VersionId))
+	_, err = cli.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket), Key: aws.String("unprotected-control"), VersionId: inserted.VersionId,
+	})
+	require.NoError(t, err, "normal version-specific DELETE must work on an unprotected test object")
+	_, err = cli.GetObjectWithContext(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket), Key: aws.String("unprotected-control"), VersionId: inserted.VersionId,
+	})
+	require.Error(t, err)
+	fmt.Println("P0_S3_VERSIONED_UNPROTECTED_DELETE_CONTROL_PASS")
 }
