@@ -25,16 +25,20 @@
   pull program. Its complete 753,950,616-byte ciphertext matches the original
   SHA256 `817e47fda32f180d8a3b3eed2574247ed81e59d6871187d558e609e5c7c06a43`.
   It has a NAS-local completion marker. **This is a confirmed offsite copy.**
-- Actual independent age decryption from the NAS copy is a distinct check:
-  a long direct stream was interrupted by a remote SSH disconnect; subsequent
-  verification may use resumable transfer of the *encrypted* file to Mac.
-  Never equate a truncated stream with a corrupted stored ciphertext.
-- A TrueNAS middleware cron entry has been created as job ID `2`,
-  **currently disabled**, under `fa`, configured for 02:30 local
-  TrueNAS time (`America/Los_Angeles`), and using `flock`.
-  It does not delete backups. Do not mark recurring backup as complete until
-  the VPS automatic publisher has been installed and an end-to-end scheduled
-  cycle passes.
+- Independent decryption from the actual NAS copy succeeded on Mac, with
+  matching ciphertext SHA256 and all five plaintext member checksums. The
+  recovered `atoman_dev.dump` restored into a network-isolated, tmpfs-backed
+  PostgreSQL 16 container; all 231 table row counts agreed with the source
+  manifest. The temporary container was removed after verification. The full
+  production dump was cryptographically verified but was not restored on Mac.
+- TrueNAS middleware cron job ID `2` is **enabled** under `fa` and configured
+  for every hour at minute 30 in `America/Los_Angeles`. It uses `flock` to
+  prevent overlapping runs, never deletes NAS snapshots, and resumes partial
+  downloads when the connection is interrupted.
+- The newest published snapshot can take longer to download on the currently
+  unstable WAN link. The script prefers newer snapshots so the latest possible
+  recovery point is protected first; it fails closed if the newest local
+  completed snapshot becomes older than 48 hours.
 
 ## Encryption and recovery identity
 
@@ -68,16 +72,14 @@ SFTP chroot. It retains at most 10 **local VPS ciphertext cache entries**
 after a successful new publication. It **never deletes NAS snapshots**
 and never touches PostgreSQL data or its backup snapshots.
 
-The source is kept on the isolated task branch. A reviewed one-time installer
-is at `/root/Atoman/tasks/install-atoman-nas-offsite.sh`. It installs the
-publisher and adds a systemd `ExecStartPost` drop-in for the existing
-PostgreSQL backup service. The installer's planned execution was not completed
-via remote tooling; it must not be described as already installed.
-
-After verified publisher installation, the NAS cron entry `2` may be
-enabled through TrueNAS middleware and validated by an on-demand pull.
-A successful NAS pull verifies the ciphertext and leaves the recovered
-content inaccessible without the separately protected age identity.
+The publisher is **installed** and configured via the existing systemd
+`atoman-backup.service` `ExecStartPost` drop-in. The installer was executed by
+an authorized administrator, its tests passed, and the encrypted snapshot
+`20261028T033423Z-ou85era0` was published. The regular timer is enabled.
+Observe the next complete scheduled backup cycle to confirm that a newly
+verified source dump is also published automatically. A successful NAS pull
+verifies ciphertext size and SHA256 and leaves the contents inaccessible
+without the separately protected age identity.
 
 For changes to the NAS cron, prefer the TrueNAS middleware API
 (`midclt call cronjob.query`, `cronjob.update`) over editing
@@ -94,10 +96,14 @@ a different source snapshot does not substitute for recovery of a copy
 actually fetched from NAS.
 
 The NAS pull utility is at
-`AtomanBackups/bin/nas-pull-encrypted-backups.py` and only writes inside
-the owner-only dataset. Failures must remain visible through the private
-`pull.log` and system task status; do not assume that an enabled schedule
-alone proves successful offsite copies.
+`AtomanBackups/bin/nas-pull-encrypted-backups.py` and writes only within the
+owner-only dataset. It atomically writes `AtomanBackups/pull-status.json`
+with `state`, UTC timestamp and newest completed snapshot age, or an explicit
+error if the pull fails or the latest complete snapshot is older than 48 hours.
+The private `pull.log` preserves transfer history. Neither a schedule being
+enabled nor an old `already-verified` result proves the latest backup is fresh.
+The status file is a local monitoring aid, not an externally delivered alert:
+verify notification configuration separately.
 
 The SFTP read-only account is not an administrator. Its authorized key
 is stored outside the chroot at

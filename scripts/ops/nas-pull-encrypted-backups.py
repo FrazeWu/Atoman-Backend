@@ -112,7 +112,12 @@ def pull(root, host, identity, known_hosts):
         path.mkdir(mode=0o700, exist_ok=True)
         private_directory(path)
     copies = []
-    for name in list_snapshots(host, identity, known_hosts):
+    remote_names = list_snapshots(host, identity, known_hosts)
+    if not remote_names:
+        raise PullError("No completed snapshots available on the remote SFTP server")
+    # Prefer the newest snapshot to minimize the disaster-recovery age if
+    # network congestion prevents the entire historical queue from completing.
+    for name in reversed(remote_names):
         target = complete / name
         if target.exists():
             if target.is_symlink() or not (target / "LOCAL_COMPLETE.json").is_file():
@@ -160,18 +165,78 @@ def pull(root, host, identity, known_hosts):
     return copies
 
 
+def verify_freshness(root, max_age_hours=48, now=None):
+    if not 1 <= max_age_hours <= 30 * 24:
+        raise PullError("Freshness threshold out of range")
+    complete = root / "snapshots"
+    if complete.is_symlink() or not complete.is_dir():
+        raise PullError("Completed snapshot directory missing or unsafe")
+    names = sorted(
+        (p.name for p in complete.iterdir()
+         if p.is_dir() and not p.is_symlink() and SNAPSHOT.fullmatch(p.name)
+         and (p / "LOCAL_COMPLETE.json").is_file()),
+        reverse=True,
+    )
+    if not names:
+        raise PullError("No independently completed offsite backup is available")
+    newest = names[0]
+    recorded = json.loads((complete / newest / "LOCAL_COMPLETE.json").read_text())
+    if recorded.get("format") != "atoman-nas-copy-v1" or recorded.get("source") != newest:
+        raise PullError("Latest offsite completion marker is invalid")
+    timestamp = dt.datetime.strptime(newest[:16], "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc)
+    present = now if now is not None else dt.datetime.now(dt.timezone.utc)
+    age_hours = (present - timestamp).total_seconds() / 3600
+    if age_hours < -1:
+        raise PullError("Latest backup timestamp is unexpectedly in the future")
+    if age_hours > max_age_hours:
+        raise PullError(f"Latest completed offsite snapshot is stale ({age_hours:.1f} hours)")
+    return {"latest_snapshot": newest, "age_hours": round(age_hours, 2)}
+
+
+def write_status(root, state, details):
+    private_directory(root)
+    status_file = root / "pull-status.json"
+    if status_file.is_symlink():
+        raise PullError("Refusing to overwrite a symlinked status file")
+    value = {"format": "atoman-nas-pull-status-v1", "state": state,
+             "checked_at": dt.datetime.now(dt.timezone.utc).isoformat(), **details}
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", prefix=".pull-status-", dir=root, delete=False) as f:
+            path = Path(f.name)
+            os.chmod(path, 0o600)
+            json.dump(value, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(path, status_file)
+    finally:
+        if path is not None:
+            path.unlink(missing_ok=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--host", required=True, help="backupread@VPS_ADDRESS")
     parser.add_argument("--identity", type=Path, required=True)
     parser.add_argument("--known-hosts", type=Path, required=True)
+    parser.add_argument("--max-age-hours", type=int, default=48)
     args = parser.parse_args()
     os.umask(0o077)
     if os.geteuid() == 0:
         parser.error("Run as the NAS dataset owner, not root")
-    copies = pull(args.root, args.host, args.identity, args.known_hosts)
-    print(json.dumps({"copies": copies, "recovery_verified": False}))
+    try:
+        copies = pull(args.root, args.host, args.identity, args.known_hosts)
+        freshness = verify_freshness(args.root, args.max_age_hours)
+    except Exception as error:
+        try:
+            write_status(args.root, "error", {"error_type": type(error).__name__,
+                                              "message": str(error)[:240]})
+        except (OSError, PullError):
+            pass
+        raise
+    write_status(args.root, "ok", {"copies": copies, **freshness})
+    print(json.dumps({"copies": copies, **freshness, "recovery_verified": False}))
 
 
 if __name__ == "__main__":

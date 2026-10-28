@@ -1,4 +1,5 @@
 import hashlib
+import datetime as dt
 import importlib.util
 import json
 from pathlib import Path
@@ -95,6 +96,40 @@ class NasPullTests(unittest.TestCase):
                 candidate = {**self.receipt, **defect}
                 with self.assertRaises(nas.PullError):
                     nas.validate_receipt(candidate)
+
+    def test_newest_snapshot_is_pulled_first(self):
+        older = "20261027T033423Z-abcdef"
+        newest = self.snapshot
+        with mock.patch.object(nas, "list_snapshots", return_value=[older, newest]):
+            with mock.patch.object(nas, "fetch", side_effect=self.download):
+                copies = nas.pull(self.root, "backupread@vps.example", self.key, self.known_hosts)
+        self.assertEqual([name for name, _ in copies], [newest, older])
+
+    def test_missing_remote_snapshots_fail_loudly(self):
+        with mock.patch.object(nas, "list_snapshots", return_value=[]):
+            with self.assertRaises(nas.PullError):
+                nas.pull(self.root, "backupread@vps.example", self.key, self.known_hosts)
+
+    def test_latest_snapshot_freshness_and_stale_failure(self):
+        self.pull()
+        now = dt.datetime(2026, 10, 28, 4, tzinfo=dt.timezone.utc)
+        result = nas.verify_freshness(self.root, max_age_hours=48, now=now)
+        self.assertEqual(result["latest_snapshot"], self.snapshot)
+        self.assertGreater(result["age_hours"], 0)
+        with self.assertRaisesRegex(nas.PullError, "stale"):
+            nas.verify_freshness(self.root, max_age_hours=48,
+                                  now=now + dt.timedelta(days=3))
+
+    def test_status_write_private_atomic_and_symlink_rejected(self):
+        nas.write_status(self.root, "ok", {"latest_snapshot": self.snapshot})
+        status = self.root / "pull-status.json"
+        self.assertEqual(status.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads(status.read_text())["state"], "ok")
+        status.unlink()
+        status.symlink_to(self.key)
+        with self.assertRaises(nas.PullError):
+            nas.write_status(self.root, "error", {"message": "refusing symlink"})
+        self.assertEqual(self.key.read_text(), "only synthetic test fixture")
 
     def test_ciphertext_fetch_resumes_partial_file(self):
         partial = self.root / "backup.tar.age"
