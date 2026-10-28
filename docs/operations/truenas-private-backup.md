@@ -1,107 +1,104 @@
-# Atoman offsite backup to the private TrueNAS dataset
+# TrueNAS private encrypted offsite backup
 
-## Scope and state
+## Verified deployment state (2026-10-28)
 
-Destination: TrueNAS `172.16.10.201`, POSIX dataset
-`/mnt/basic_pool/AtomanBackups`, owned by `fa`, permissions 0700,
-no SMB share and no access for group/others. Dataset creation and permissions
-were reported by the operator but remain **unverified via SSH**.
+- TrueNAS: `172.16.10.201`, user/group `fa:fa`, destination
+  `/mnt/basic_pool/AtomanBackups`, effective owner-only mode `0700`,
+  approximately 38 TB available at initial verification.
+- Dedicated NAS pull SSH identity is stored under
+  `AtomanBackups/.ssh/vps_readonly_ed25519` (0600); it is separate from
+  the Mac administration identity and separate from the age recovery key.
+- VPS has a dedicated non-root `atoman_backupread` identity (nologin)
+  chrooted to `/srv/atoman-backup-sftp`, with
+  `ForceCommand internal-sftp -R -d /exports`; passwords, PTY, port
+  forwarding, agent forwarding and writes are prohibited.
+- SSH config passed `sshd -t`, root effective configuration remained
+  unchanged, and NAS authenticated and listed the SFTP exports successfully.
+  A real attempted upload from NAS was rejected.
+- The private NAS identity pins the VPS's existing trusted ED25519 SSH host
+  key. The NAS→VPS path requires
+  `KexAlgorithms=curve25519-sha256` because the default large hybrid KEX
+  stalled on the current network route. This is a modern, secure key exchange
+  and is scoped to this connection only.
+- The first ciphertext snapshot was transferred to
+  `AtomanBackups/snapshots/20261028T033917Z-cuixo7o9` by the NAS-owned
+  pull program. Its complete 753,950,616-byte ciphertext matches the original
+  SHA256 `817e47fda32f180d8a3b3eed2574247ed81e59d6871187d558e609e5c7c06a43`.
+  It has a NAS-local completion marker. **This is a confirmed offsite copy.**
+- Actual independent age decryption from the NAS copy is a distinct check:
+  a long direct stream was interrupted by a remote SSH disconnect; subsequent
+  verification may use resumable transfer of the *encrypted* file to Mac.
+  Never equate a truncated stream with a corrupted stored ciphertext.
+- A TrueNAS middleware cron entry has been created as job ID `2`,
+  **currently disabled**, under `fa`, configured for 02:30 local
+  TrueNAS time (`America/Los_Angeles`), and using `flock`.
+  It does not delete backups. Do not mark recurring backup as complete until
+  the VPS automatic publisher has been installed and an end-to-end scheduled
+  cycle passes.
 
-At the initial connection test, SSH from FAMBP.local to TrueNAS was reachable,
-but both default SSH keys and the new dedicated setup key were rejected for
-`fa`. The VPS cannot route directly to this private address. **Do not install
-a periodic pull task until authorized NAS access and the real directory ACL
-have been verified.**
+## Encryption and recovery identity
 
-### One-time NAS setup authorization
-
-In TrueNAS, append the following **public** SSH key to user `fa` using
-Credentials → Users → fa → Edit → Public SSH Key; preserve existing keys:
-
-```text
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF2G2Fi5KJRp+vbK2aQ2VIFEpPaz1pnpcPUnJWCp6eRZ atoman-nas-setup-20261028
-```
-
-The matching setup private key is on FAMBP.local at
-`/Users/fafa/.ssh/atoman_nas_setup_20261028`, mode 0600. Do not copy it to
-the VPS or put it into Git. After authorization, independently confirm
-`id -un`, the real dataset's owner/group/permissions and free space.
-Avoid any recursive ownership or ACL operation on other datasets.
-
-## Backup encryption
-
-An age recovery identity was generated on FAMBP.local, *not* the VPS:
-
-```text
-/Users/fafa/.config/atoman-backup/age-recovery-identity.txt
-```
-
-The corresponding public age recipient is:
+Only the public age recipient is sent to VPS:
 
 ```text
 age1rfgu75985jpk7aml06uvdzm0ewa4p7j9ua7l8vut3ek5eueddgfs542fe8
 ```
 
-Only the public recipient is needed on VPS. This key's decryption ability
-has not yet been independently verified on Mac through a real cross-host
-restore. The Mac had FileVault disabled when checked; **do not regard the
-single mode-0600 file as an adequate independent recovery-key archive**.
-The owner must keep a second protected offline copy and should enable
-FileVault or move the identity to a protected key store. Never send the
-private identity through chat.
+The private age recovery identity remains on the Mac at
+`/Users/fafa/.config/atoman-backup/age-recovery-identity.txt`.
+Never send its contents through chat or to the VPS/NAS pull account.
+At the time of initial setup, Mac FileVault was disabled: arrange a second
+physically separated, protected offline recovery-key copy and consider
+enabling full-disk encryption.
 
-A restored-and-verified October 27 PostgreSQL snapshot has been encrypted on
-VPS under `/var/backups/atoman/encrypted-export-staging/`. The result has
-an age ciphertext and SHA256 receipt; it is currently **not offsite**.
-The October 28 scheduled database backup was concurrently performing
-its isolated restore check during setup.
+The export contains verified PostgreSQL snapshots, role backup, and member
+checksums. It does not automatically include Cloudflare R2 objects, external
+media files, runtime secrets or other independent databases.
 
-### Transfer model
+## Scheduling and remaining activation
 
-The secure intended model is **NAS-initiated pull**, without depending on
-Mac uptime:
+Existing VPS `atoman-backup.timer` runs around 03:30 UTC (randomized 0–5
+minutes), validates completed PostgreSQL dumps by isolated restoration, and
+retains 14 local snapshots.
 
-1. A VPS systemd task encrypts only `COMPLETE` + independently
-   restore-verified PostgreSQL snapshots, using the public age recipient.
-2. A dedicated non-root SSH user on VPS exposes only a **read-only SFTP**
-   area containing ciphertext and nonsecret receipts. No shell, password
-   authentication, write, port forwarding, agent forwarding or PTY.
-3. TrueNAS `fa` runs `nas-pull-encrypted-backups.py` from a private
-   directory, with an independent SSH key restricted to the read-only VPS
-   SFTP user and pinned SSH host key.
-4. Every fetched ciphertext must match the source receipt's exact size
-   and SHA256 before an atomic local completion marker is installed.
-5. The NAS stores ciphertext; the age private recovery key remains off
-   VPS and outside the normal NAS pull workflow.
+The new vetted `publish-offsite-backups.py` selects the newest completed,
+restore-verified snapshot, encrypts it with the public age key, verifies the
+ciphertext checksum and publishes only root-owned read-only files under the
+SFTP chroot. It retains at most 10 **local VPS ciphertext cache entries**
+after a successful new publication. It **never deletes NAS snapshots**
+and never touches PostgreSQL data or its backup snapshots.
 
-Never use the general root SSH key for the recurring pull. The setup SSH key
-and the age recovery key serve different purposes.
+The source is kept on the isolated task branch. A reviewed one-time installer
+is at `/root/Atoman/tasks/install-atoman-nas-offsite.sh`. It installs the
+publisher and adds a systemd `ExecStartPost` drop-in for the existing
+PostgreSQL backup service. The installer's planned execution was not completed
+via remote tooling; it must not be described as already installed.
 
-### Activation requirements and verification
+After verified publisher installation, the NAS cron entry `2` may be
+enabled through TrueNAS middleware and validated by an on-demand pull.
+A successful NAS pull verifies the ciphertext and leaves the recovered
+content inaccessible without the separately protected age identity.
 
-Before claiming the backup operational, complete all of:
+For changes to the NAS cron, prefer the TrueNAS middleware API
+(`midclt call cronjob.query`, `cronjob.update`) over editing
+`/var/spool/cron` directly. The scheduler is configured in the NAS's local
+America/Los_Angeles time zone, not the VPS time zone.
 
-- TrueNAS user `fa` has verified SSH access and effective 0700 dataset mode.
-- The restricted VPS SFTP account and NAS pull SSH identity are installed;
-  their scope is checked against arbitrary read/write and shell attempts.
-- A full production ciphertext is transferred and matches SHA256 on NAS.
-- A second independent machine decrypts a fetched copy with the offline
-  recovery identity and verifies the archive and database restoration.
-- A TrueNAS scheduler runs the pull as `fa`, checks exit status and notifies
-  on failures. A second run is idempotent; connection failure leaves the
-  existing verified NAS snapshots unchanged.
-- Separate retention policies are explicitly approved; the current
-  nas-pull script **never deletes snapshots**.
+## Restoring and monitoring
 
-The pull script rejects unexpected snapshot names, invalid receipt names,
-untrusted SSH host keys, weak directory permissions and mismatched
-transferred data. The `recovery_verified` field always remains false
-until a separate actual restoration has succeeded.
+For recovery, independently download the **ciphertext**, compare its SHA256
+to both the VPS receipt and NAS completion marker, decrypt with the offline
+age identity on a trusted machine, verify the plaintext tar member hashes and
+restore dumps into an isolated PostgreSQL instance. A local restore of
+a different source snapshot does not substitute for recovery of a copy
+actually fetched from NAS.
 
-## Scope not yet covered
+The NAS pull utility is at
+`AtomanBackups/bin/nas-pull-encrypted-backups.py` and only writes inside
+the owner-only dataset. Failures must remain visible through the private
+`pull.log` and system task status; do not assume that an enabled schedule
+alone proves successful offsite copies.
 
-PostgreSQL logical dumps and globals are included. Production R2 objects,
-external media files and application secrets are *not* covered by the
-PostgreSQL tar alone and need their own explicitly scoped offsite policy.
-The absence of a remote copy or an unrecoverable key must produce an alert,
-not a success message.
+The SFTP read-only account is not an administrator. Its authorized key
+is stored outside the chroot at
+`/etc/ssh/authorized_keys/atoman_backupread`.

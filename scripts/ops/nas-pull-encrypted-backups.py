@@ -55,6 +55,7 @@ def run_sftp(host, identity, known_hosts, instructions, timeout=3600):
     cmd = [
         "sftp", "-q", "-b", "-", "-i", str(identity),
         "-oBatchMode=yes", "-oIdentitiesOnly=yes", "-oStrictHostKeyChecking=yes",
+        "-oKexAlgorithms=curve25519-sha256", "-oHostKeyAlgorithms=ssh-ed25519",
         "-oUserKnownHostsFile=" + str(known_hosts), "-oConnectTimeout=15",
         "-oServerAliveInterval=30", "-oServerAliveCountMax=3", host,
     ]
@@ -73,7 +74,15 @@ def quote_sftp(value):
 
 def list_snapshots(host, identity, known_hosts):
     output = run_sftp(host, identity, known_hosts, ["ls -1 /exports"], timeout=90)
-    return sorted({row.strip() for row in output.splitlines() if SNAPSHOT.fullmatch(row.strip())})
+    found = set()
+    for line in output.splitlines():
+        item = line.strip()
+        # OpenSSH sftp may return absolute paths for `ls -1 /exports`.
+        if item.startswith('/exports/'):
+            item = item[len('/exports/'):]
+        if SNAPSHOT.fullmatch(item):
+            found.add(item)
+    return sorted(found)
 
 
 def fetch(host, identity, known_hosts, remote, local):

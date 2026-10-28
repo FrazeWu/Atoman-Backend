@@ -68,7 +68,7 @@ class NasPullTests(unittest.TestCase):
             self.pull()
 
     def test_unexpected_remote_names_are_ignored(self):
-        fake = "20261028T033423Z-ou85era0\n../../etc/passwd\n20261028T033423Z-bad;rm\n"
+        fake = "/exports/20261028T033423Z-ou85era0\n../../etc/passwd\n20261028T033423Z-bad;rm\n"
         with mock.patch.object(nas, "run_sftp", return_value=fake):
             self.assertEqual(nas.list_snapshots("host", self.key, self.known_hosts), [self.snapshot])
 
