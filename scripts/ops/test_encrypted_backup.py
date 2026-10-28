@@ -20,13 +20,13 @@ class EncryptedBackupTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.source = self.root / 'snapshot'
+        self.source = self.root / '20261028T000000Z-abcdef'
         self.source.mkdir(mode=0o700)
         data = b'fixture-only database bytes; not production data'
         (self.source / 'example.dump').write_bytes(data)
         (self.source / 'roles.sql').write_text('-- fixture roles only\n')
         (self.source / 'COMPLETE').touch()
-        self.manifest = {'format': 'atoman-postgres-logical-v1', 'complete': True, 'backups': [{'dump': 'example.dump', 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'restore_verified': True}]}
+        self.manifest = {'format': 'atoman-postgres-logical-v1', 'complete': True, 'completed_at': '2026-10-28T00:15:00+00:00', 'backups': [{'dump': 'example.dump', 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'restore_verified': True}]}
         self.write_manifest()
 
     def write_manifest(self):
@@ -51,6 +51,14 @@ class EncryptedBackupTest(unittest.TestCase):
         self.write_manifest()
         self.assertEqual([name for name, _ in module.validate_snapshot(self.source)],
                          ['COMPLETE', 'example.dump', 'manifest.json', 'roles.sql'])
+
+    def test_rejects_missing_or_naive_source_timestamp(self):
+        for completed in (None, '2026-10-28T00:15:00', 'not-a-timestamp'):
+            with self.subTest(completed=completed):
+                self.manifest['completed_at'] = completed
+                self.write_manifest()
+                with self.assertRaises(module.BackupError):
+                    module.source_provenance(self.source)
 
     def test_rejects_unverified_restore(self):
         self.manifest['backups'][0]['restore_verified'] = False
@@ -87,6 +95,8 @@ class EncryptedBackupTest(unittest.TestCase):
         output, receipt = module.prepare(self.source, self.root / 'exports', [recipient])
         ciphertext = output / receipt['ciphertext']
         self.assertFalse(receipt['offsite_verified'])
+        self.assertEqual(receipt['source_snapshot_id'], self.source.name)
+        self.assertEqual(receipt['source_completed_at'], '2026-10-28T00:15:00+00:00')
         self.assertEqual(receipt['sha256'], module.digest(ciphertext))
         self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(ciphertext.stat().st_mode), 0o600)
@@ -96,6 +106,8 @@ class EncryptedBackupTest(unittest.TestCase):
             self.assertEqual(archive.extractfile('example.dump').read(), (self.source / 'example.dump').read_bytes())
             inside = json.load(archive.extractfile('payload-manifest.json'))
             self.assertEqual(inside['files']['roles.sql']['sha256'], module.digest(self.source / 'roles.sql'))
+            self.assertEqual(inside['source_snapshot_id'], self.source.name)
+            self.assertEqual(inside['source_completed_at'], receipt['source_completed_at'])
         other, _ = self.keypair('other-identity')
         wrong = sp.run(['age', '--decrypt', '--identity', str(other), str(ciphertext)], stdout=sp.DEVNULL, stderr=sp.DEVNULL)
         self.assertNotEqual(wrong.returncode, 0)

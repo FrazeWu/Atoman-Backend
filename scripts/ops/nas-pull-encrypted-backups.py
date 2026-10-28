@@ -48,7 +48,30 @@ def validate_receipt(data):
         raise PullError("Invalid ciphertext checksum")
     if data.get("offsite_verified") is not False:
         raise PullError("Unexpected source verification flag")
+    has_id = "source_snapshot_id" in data
+    has_time = "source_completed_at" in data
+    if has_id != has_time:
+        raise PullError("Incomplete database source provenance in receipt")
+    if has_id:
+        if not SNAPSHOT.fullmatch(str(data["source_snapshot_id"])):
+            raise PullError("Invalid database source snapshot identity")
+        parse_completed_at(data["source_completed_at"])
     return data
+
+
+def parse_completed_at(value):
+    if not isinstance(value, str):
+        raise PullError("Database completion time is missing")
+    try:
+        timestamp = dt.datetime.fromisoformat(value)
+    except ValueError as error:
+        raise PullError("Database completion time is malformed") from error
+    if timestamp.tzinfo is None:
+        raise PullError("Database completion time lacks a timezone")
+    timestamp = timestamp.astimezone(dt.timezone.utc)
+    if timestamp > dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1):
+        raise PullError("Database completion time is unexpectedly in the future")
+    return timestamp
 
 
 def run_sftp(host, identity, known_hosts, instructions, timeout=3600):
@@ -155,6 +178,9 @@ def pull(root, host, identity, known_hosts):
             "ciphertext_transferred": True,
             "recovery_verified": False,
         }
+        if "source_snapshot_id" in receipt:
+            local["source_snapshot_id"] = receipt["source_snapshot_id"]
+            local["source_completed_at"] = receipt["source_completed_at"]
         marker = tmp / "LOCAL_COMPLETE.json"
         with marker.open("x") as stream:
             json.dump(local, stream, indent=2)
@@ -171,26 +197,35 @@ def verify_freshness(root, max_age_hours=48, now=None):
     complete = root / "snapshots"
     if complete.is_symlink() or not complete.is_dir():
         raise PullError("Completed snapshot directory missing or unsafe")
-    names = sorted(
-        (p.name for p in complete.iterdir()
-         if p.is_dir() and not p.is_symlink() and SNAPSHOT.fullmatch(p.name)
-         and (p / "LOCAL_COMPLETE.json").is_file()),
-        reverse=True,
-    )
-    if not names:
-        raise PullError("No independently completed offsite backup is available")
-    newest = names[0]
-    recorded = json.loads((complete / newest / "LOCAL_COMPLETE.json").read_text())
-    if recorded.get("format") != "atoman-nas-copy-v1" or recorded.get("source") != newest:
-        raise PullError("Latest offsite completion marker is invalid")
-    timestamp = dt.datetime.strptime(newest[:16], "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc)
+    candidates = []
+    for path in complete.iterdir():
+        if path.is_symlink() or not path.is_dir() or not SNAPSHOT.fullmatch(path.name):
+            continue
+        marker_file = path / "LOCAL_COMPLETE.json"
+        if not marker_file.is_file() or marker_file.is_symlink():
+            continue
+        recorded = json.loads(marker_file.read_text())
+        if recorded.get("format") != "atoman-nas-copy-v1" or recorded.get("source") != path.name:
+            raise PullError("Offsite snapshot completion marker is invalid")
+        # The encrypted export directory's timestamp is NOT necessarily the
+        # time when the source database snapshot completed (legacy manual
+        # exports are a real example). Never use the export name as the RPO.
+        source_id = recorded.get("source_snapshot_id")
+        if not SNAPSHOT.fullmatch(str(source_id)):
+            raise PullError("Verified offsite snapshot lacks source identity")
+        timestamp = parse_completed_at(recorded.get("source_completed_at"))
+        candidates.append((timestamp, path.name, source_id))
+    if not candidates:
+        raise PullError("No source-attributed completed offsite backup is available")
+    timestamp, newest, source_id = max(candidates)
     present = now if now is not None else dt.datetime.now(dt.timezone.utc)
     age_hours = (present - timestamp).total_seconds() / 3600
     if age_hours < -1:
         raise PullError("Latest backup timestamp is unexpectedly in the future")
     if age_hours > max_age_hours:
         raise PullError(f"Latest completed offsite snapshot is stale ({age_hours:.1f} hours)")
-    return {"latest_snapshot": newest, "age_hours": round(age_hours, 2)}
+    return {"latest_snapshot": newest, "source_snapshot_id": source_id,
+            "source_completed_at": timestamp.isoformat(), "age_hours": round(age_hours, 2)}
 
 
 def write_status(root, state, details):

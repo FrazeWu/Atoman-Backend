@@ -36,9 +36,15 @@
   prevent overlapping runs, never deletes NAS snapshots, and resumes partial
   downloads when the connection is interrupted.
 - The newest published snapshot can take longer to download on the currently
-  unstable WAN link. The script prefers newer snapshots so the latest possible
-  recovery point is protected first; it fails closed if the newest local
-  completed snapshot becomes older than 48 hours.
+  unstable WAN link. The script prefers newer published snapshots and fails
+  closed if the newest independently verified **database source completion time**
+  becomes older than 48 hours. Encryption/export-directory creation time is
+  not an acceptable proxy for database recovery-point age.
+- The encrypted payload manifest and its transfer receipt now include
+  `source_snapshot_id` and the UTC `source_completed_at` from the completed,
+  restore-verified PostgreSQL backup manifest. NAS completion markers carry
+  this same provenance. Earlier exports require a separately verified
+  one-time provenance annotation before being included in freshness reports.
 
 ## Encryption and recovery identity
 

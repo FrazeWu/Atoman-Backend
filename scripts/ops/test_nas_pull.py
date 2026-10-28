@@ -32,6 +32,8 @@ class NasPullTests(unittest.TestCase):
             "format": "atoman-encrypted-export-v1",
             "ciphertext": "backup.tar.age", "bytes": len(self.payload),
             "sha256": self.sha, "offsite_verified": False,
+            "source_snapshot_id": self.snapshot,
+            "source_completed_at": "2026-10-28T03:49:00+00:00",
         }
 
     def download(self, host, identity, known_hosts, remote, local):
@@ -54,6 +56,8 @@ class NasPullTests(unittest.TestCase):
         marker = json.loads((complete / "LOCAL_COMPLETE.json").read_text())
         self.assertTrue(marker["ciphertext_transferred"])
         self.assertFalse(marker["recovery_verified"])
+        self.assertEqual(marker["source_snapshot_id"], self.snapshot)
+        self.assertEqual(marker["source_completed_at"], self.receipt["source_completed_at"])
         self.assertEqual(self.pull(), [(self.snapshot, "already-verified")])
 
     def test_hash_mismatch_does_not_publish(self):
@@ -72,6 +76,21 @@ class NasPullTests(unittest.TestCase):
         fake = "/exports/20261028T033423Z-ou85era0\n../../etc/passwd\n20261028T033423Z-bad;rm\n"
         with mock.patch.object(nas, "run_sftp", return_value=fake):
             self.assertEqual(nas.list_snapshots("host", self.key, self.known_hosts), [self.snapshot])
+
+    def test_source_provenance_receipt_fail_closed(self):
+        for change in [
+            {"source_completed_at": "2026-10-28T03:49:00"},
+            {"source_completed_at": "not a date"},
+            {"source_snapshot_id": "../../etc/passwd"},
+        ]:
+            with self.subTest(change=change):
+                record = {**self.receipt, **change}
+                with self.assertRaises(nas.PullError):
+                    nas.validate_receipt(record)
+        incomplete = dict(self.receipt)
+        incomplete.pop("source_completed_at")
+        with self.assertRaises(nas.PullError):
+            nas.validate_receipt(incomplete)
 
     def test_world_readable_backup_directory_rejected(self):
         self.root.chmod(0o755)
@@ -115,10 +134,37 @@ class NasPullTests(unittest.TestCase):
         now = dt.datetime(2026, 10, 28, 4, tzinfo=dt.timezone.utc)
         result = nas.verify_freshness(self.root, max_age_hours=48, now=now)
         self.assertEqual(result["latest_snapshot"], self.snapshot)
+        self.assertEqual(result["source_completed_at"], self.receipt["source_completed_at"])
         self.assertGreater(result["age_hours"], 0)
         with self.assertRaisesRegex(nas.PullError, "stale"):
             nas.verify_freshness(self.root, max_age_hours=48,
                                   now=now + dt.timedelta(days=3))
+
+    def test_source_completion_time_not_export_directory_name_controls_rpo(self):
+        self.pull()
+        complete = self.root / "snapshots"
+        legacy_export = "20261028T040000Z-abcdef"
+        legacy = complete / legacy_export
+        legacy.mkdir(mode=0o700)
+        marker = {
+            "format": "atoman-nas-copy-v1", "source": legacy_export,
+            "source_snapshot_id": "20261027T150000Z-abcdef",
+            "source_completed_at": "2026-10-27T15:58:53+00:00",
+        }
+        (legacy / "LOCAL_COMPLETE.json").write_text(json.dumps(marker))
+        present = dt.datetime(2026, 10, 28, 5, tzinfo=dt.timezone.utc)
+        actual = nas.verify_freshness(self.root, max_age_hours=48, now=present)
+        self.assertEqual(actual["latest_snapshot"], self.snapshot)
+        self.assertLess(actual["age_hours"], 2)
+
+    def test_missing_source_provenance_cannot_be_declared_fresh(self):
+        self.pull()
+        marker_file = self.root / "snapshots" / self.snapshot / "LOCAL_COMPLETE.json"
+        marker = json.loads(marker_file.read_text())
+        del marker["source_completed_at"]
+        marker_file.write_text(json.dumps(marker))
+        with self.assertRaises(nas.PullError):
+            nas.verify_freshness(self.root, 48)
 
     def test_status_write_private_atomic_and_symlink_rejected(self):
         nas.write_status(self.root, "ok", {"latest_snapshot": self.snapshot})

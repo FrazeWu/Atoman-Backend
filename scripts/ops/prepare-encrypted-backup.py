@@ -24,6 +24,29 @@ class BackupError(ValueError):
     pass
 
 
+SNAPSHOT_ID = re.compile(r'^[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6,20}$')
+
+
+def source_provenance(source):
+    if not SNAPSHOT_ID.fullmatch(source.name):
+        raise BackupError('Backup source directory does not have a snapshot identity')
+    manifest = json.loads(regular_file(source, 'manifest.json').read_text())
+    raw = manifest.get('completed_at')
+    if not isinstance(raw, str):
+        raise BackupError('Snapshot completion time is missing')
+    try:
+        timestamp = dt.datetime.fromisoformat(raw)
+    except ValueError as error:
+        raise BackupError('Snapshot completion time is invalid') from error
+    if timestamp.tzinfo is None:
+        raise BackupError('Snapshot completion time must include a timezone')
+    completed = timestamp.astimezone(dt.timezone.utc)
+    if completed > dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1):
+        raise BackupError('Snapshot completion time is unexpectedly in the future')
+    return {'source_snapshot_id': source.name,
+            'source_completed_at': completed.isoformat()}
+
+
 def digest(file):
     with file.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -78,6 +101,7 @@ def validate_recipients(recipients):
 def prepare(source, output_root, recipients):
     validate_recipients(recipients)
     members = validate_snapshot(source)
+    provenance = source_provenance(source)
     if shutil.which('age') is None:
         raise BackupError('The age encryption tool is required')
     if output_root.is_symlink():
@@ -100,7 +124,7 @@ def prepare(source, output_root, recipients):
             process = sp.Popen(command, stdin=sp.PIPE, stdout=destination, stderr=errors)
             try:
                 with tarfile.open(fileobj=process.stdin, mode='w|', format=tarfile.PAX_FORMAT) as archive:
-                    inner = {'format': 'atoman-encrypted-payload-v1', 'files': {name: {'sha256': digest(file), 'bytes': file.stat().st_size} for name, file in members}}
+                    inner = {'format': 'atoman-encrypted-payload-v1', **provenance, 'files': {name: {'sha256': digest(file), 'bytes': file.stat().st_size} for name, file in members}}
                     data = json.dumps(inner, sort_keys=True).encode()
                     info = tarfile.TarInfo('payload-manifest.json')
                     info.size, info.mode = len(data), 0o600
@@ -121,7 +145,7 @@ def prepare(source, output_root, recipients):
             os.fsync(destination.fileno())
         ciphertext = output / 'backup.tar.age'
         partial.rename(ciphertext)
-        receipt = {'format': 'atoman-encrypted-export-v1', 'created_at': dt.datetime.now(dt.timezone.utc).isoformat(), 'ciphertext': ciphertext.name, 'bytes': ciphertext.stat().st_size, 'sha256': digest(ciphertext), 'recipient_fingerprints': [hashlib.sha256(r.encode()).hexdigest() for r in recipients], 'offsite_verified': False}
+        receipt = {'format': 'atoman-encrypted-export-v1', 'created_at': dt.datetime.now(dt.timezone.utc).isoformat(), **provenance, 'ciphertext': ciphertext.name, 'bytes': ciphertext.stat().st_size, 'sha256': digest(ciphertext), 'recipient_fingerprints': [hashlib.sha256(r.encode()).hexdigest() for r in recipients], 'offsite_verified': False}
         receipt_file = output / 'receipt.json'
         receipt_file.write_text(json.dumps(receipt, indent=2) + '\n')
         os.chmod(receipt_file, 0o600)
