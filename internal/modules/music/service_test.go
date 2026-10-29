@@ -528,6 +528,42 @@ func TestUpsertPlaylistSongLocksPlaylistBeforeAssigningPosition(t *testing.T) {
 	}
 }
 
+func TestPlaylistNewSongAppearsFirstAndKeepsManualOrder(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	playlist := model.Playlist{UserID: user.ID, Name: "Newest first"}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]uuid.UUID, 3)
+	for i := range ids {
+		song := model.Song{Title: fmt.Sprintf("Song %d", i), AudioURL: fmt.Sprintf("/audio/%d.mp3", i), Status: "open"}
+		if err := db.Create(&song).Error; err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = song.ID
+	}
+	for _, id := range ids[:2] {
+		if _, err := svc.repo.UpsertPlaylistSong(playlist.ID, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := svc.repo.ReorderPlaylistSongs(playlist.ID, []uuid.UUID{ids[0], ids[1]}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.repo.UpsertPlaylistSong(playlist.ID, ids[2]); err != nil {
+		t.Fatal(err)
+	}
+	for page, expected := range []uuid.UUID{ids[2], ids[0], ids[1]} {
+		items, total, err := svc.repo.ListPlaylistSongs(playlist.ID, page+1, 1, &user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 3 || len(items) != 1 || items[0].SongID != expected {
+			t.Fatalf("page %d: total=%d items=%+v", page+1, total, items)
+		}
+	}
+}
+
 func TestRecommendAlbumsLatestUsesSubsecondCreatedAtBeforeStableID(t *testing.T) {
 	svc, db, _ := newMusicTestService(t)
 	second := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)

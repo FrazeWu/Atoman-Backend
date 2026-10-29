@@ -513,12 +513,13 @@ func (r *Repo) UpsertPlaylistSong(playlistID uuid.UUID, songID uuid.UUID) (model
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		var maxPosition int
+		// New additions appear first without disturbing the playlist's manual order.
+		var minPosition int
 		if err := tx.Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlistID).
-			Select("COALESCE(MAX(position), 0)").Scan(&maxPosition).Error; err != nil {
+			Select("COALESCE(MIN(position), 1)").Scan(&minPosition).Error; err != nil {
 			return err
 		}
-		playlistSong = model.PlaylistSong{PlaylistID: playlistID, SongID: songID, Position: maxPosition + 1}
+		playlistSong = model.PlaylistSong{PlaylistID: playlistID, SongID: songID, Position: minPosition - 1}
 		return tx.Create(&playlistSong).Error
 	})
 	return playlistSong, err
