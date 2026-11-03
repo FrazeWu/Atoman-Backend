@@ -18,13 +18,14 @@ import (
 
 // Creating metadata never depends on an upload or on file distribution rights.
 type CreateBookWorkInput struct {
-	Title         string      `json:"title" validate:"required"`
-	Subtitle      string      `json:"subtitle"`
-	OriginalTitle string      `json:"original_title"`
-	Description   string      `json:"description"`
-	Language      string      `json:"language"`
-	AuthorIDs     []uuid.UUID `json:"author_ids"`
-	Authors       []string    `json:"authors"`
+	Title          string      `json:"title" validate:"required"`
+	Subtitle       string      `json:"subtitle"`
+	OriginalTitle  string      `json:"original_title"`
+	Description    string      `json:"description"`
+	Language       string      `json:"language"`
+	AuthorIDs      []uuid.UUID `json:"author_ids"`
+	Authors        []string    `json:"authors"`
+	NewAuthorNames []string    `json:"new_author_names,omitempty"` // Explicitly create a homonymous person.
 }
 
 type BookWorkDetail struct {
@@ -38,20 +39,21 @@ type CreateBookPersonInput struct {
 }
 
 type CreateBookEditionInput struct {
-	Title            string      `json:"title"`
-	Subtitle         string      `json:"subtitle"`
-	EditionStatement string      `json:"edition_statement"`
-	Translators      []string    `json:"translators"`
-	TranslatorIDs    []uuid.UUID `json:"translator_ids"`
-	Publisher        string      `json:"publisher"`
-	Producer         string      `json:"producer"`
-	ISBN10           string      `json:"isbn10"`
-	ISBN13           string      `json:"isbn13"`
-	Language         string      `json:"language"`
-	PublishedDate    string      `json:"published_date"`
-	PageCount        int         `json:"page_count"`
-	Binding          string      `json:"binding"`
-	CoverURL         string      `json:"cover_url"`
+	Title              string      `json:"title"`
+	Subtitle           string      `json:"subtitle"`
+	EditionStatement   string      `json:"edition_statement"`
+	Translators        []string    `json:"translators"`
+	TranslatorIDs      []uuid.UUID `json:"translator_ids"`
+	NewTranslatorNames []string    `json:"new_translator_names,omitempty"`
+	Publisher          string      `json:"publisher"`
+	Producer           string      `json:"producer"`
+	ISBN10             string      `json:"isbn10"`
+	ISBN13             string      `json:"isbn13"`
+	Language           string      `json:"language"`
+	PublishedDate      string      `json:"published_date"`
+	PageCount          int         `json:"page_count"`
+	Binding            string      `json:"binding"`
+	CoverURL           string      `json:"cover_url"`
 }
 
 type bookWorkSnapshot struct {
@@ -95,8 +97,21 @@ func appendBookWikiRevision(tx *gorm.DB, entityType string, entityID, editorID u
 }
 
 func resolveBookAuthors(tx *gorm.DB, userID uuid.UUID, ids []uuid.UUID, names []string) ([]uuid.UUID, error) {
+	return resolveBookAuthorsWithNewNames(tx, userID, ids, names, nil)
+}
+
+// A matching name is not proof of identity. The caller must either pass an
+// existing person ID or explicitly confirm a new person with the same name.
+func resolveBookAuthorsWithNewNames(tx *gorm.DB, userID uuid.UUID, ids []uuid.UUID, names, newNames []string) ([]uuid.UUID, error) {
 	result := make([]uuid.UUID, 0, len(ids)+len(names))
 	seen := map[uuid.UUID]bool{}
+	selectedNames := map[string]bool{}
+	explicitlyNew := map[string]bool{}
+	for _, name := range newNames {
+		if normalized := normalizeBookPersonName(name); normalized != "" {
+			explicitlyNew[normalized] = true
+		}
+	}
 	for _, id := range ids {
 		visited := map[uuid.UUID]bool{}
 		for {
@@ -124,15 +139,28 @@ func resolveBookAuthors(tx *gorm.DB, userID uuid.UUID, ids []uuid.UUID, names []
 			return nil, err
 		}
 		seen[id] = true
+		selectedNames[normalizeBookPersonName(person.Name)] = true
 		result = append(result, id)
 	}
 	seenNames := map[string]bool{}
 	for _, raw := range names {
 		name := strings.TrimSpace(raw)
-		if name == "" || seenNames[name] {
+		key := normalizeBookPersonName(name)
+		if key == "" || seenNames[key] || selectedNames[key] {
 			continue
 		}
-		seenNames[name] = true
+		seenNames[key] = true
+		if !explicitlyNew[key] {
+			var existing int64
+			if err := tx.Model(&model.BookPerson{}).
+				Where("LOWER(BTRIM(name)) = ? AND lifecycle_status = ?", key, model.BookLifecycleStatusActive).
+				Count(&existing).Error; err != nil {
+				return nil, err
+			}
+			if existing > 0 {
+				return nil, apperr.Conflict("books.author_name_exists", "An author with this name already exists; select their ID or explicitly confirm a different person: "+name)
+			}
+		}
 		person, err := createBookWikiPerson(tx, userID, CreateBookPersonInput{Name: name})
 		if err != nil {
 			return nil, err
@@ -143,6 +171,10 @@ func resolveBookAuthors(tx *gorm.DB, userID uuid.UUID, ids []uuid.UUID, names []
 		return nil, apperr.BadRequest("books.author_required", "At least one author is required")
 	}
 	return result, nil
+}
+
+func normalizeBookPersonName(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func createBookWikiPerson(tx *gorm.DB, userID uuid.UUID, input CreateBookPersonInput) (model.BookPerson, error) {
@@ -171,6 +203,10 @@ func (s *Service) CreateBookPerson(ctx context.Context, user authctx.CurrentUser
 }
 
 func (s *Service) CreateBookWork(ctx context.Context, user authctx.CurrentUser, input CreateBookWorkInput) (BookWorkDetail, error) {
+	return s.CreateBookWorkIdempotent(ctx, user, input, uuid.Nil)
+}
+
+func (s *Service) CreateBookWorkIdempotent(ctx context.Context, user authctx.CurrentUser, input CreateBookWorkInput, requestID uuid.UUID) (BookWorkDetail, error) {
 	if user.ID == uuid.Nil {
 		return BookWorkDetail{}, apperr.Unauthorized("Login required")
 	}
@@ -178,8 +214,18 @@ func (s *Service) CreateBookWork(ctx context.Context, user authctx.CurrentUser, 
 		return BookWorkDetail{}, apperr.BadRequest("books.title_required", "Book title is required")
 	}
 	work := model.BookWork{Title: strings.TrimSpace(input.Title), Subtitle: strings.TrimSpace(input.Subtitle), OriginalTitle: strings.TrimSpace(input.OriginalTitle), Description: strings.TrimSpace(input.Description), Language: strings.TrimSpace(input.Language), LifecycleStatus: model.BookLifecycleStatusActive, CreatedBy: &user.ID}
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		authors, err := resolveBookAuthors(tx, user.ID, input.AuthorIDs, input.Authors)
+	hash, err := catalogCreateHash("work", uuid.Nil, input)
+	if err != nil {
+		return BookWorkDetail{}, err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if replayID, replay, err := catalogCreateReplay(tx, user.ID, requestID, "work", hash); err != nil {
+			return err
+		} else if replay {
+			work.ID = replayID
+			return nil
+		}
+		authors, err := resolveBookAuthorsWithNewNames(tx, user.ID, input.AuthorIDs, input.Authors, input.NewAuthorNames)
 		if err != nil {
 			return err
 		}
@@ -195,8 +241,10 @@ func (s *Service) CreateBookWork(ctx context.Context, user authctx.CurrentUser, 
 		if err != nil {
 			return err
 		}
-		_, err = appendBookWikiRevision(tx, "work", work.ID, user.ID, "创建作品", "creation", snapshot)
-		return err
+		if _, err = appendBookWikiRevision(tx, "work", work.ID, user.ID, "创建作品", "creation", snapshot); err != nil {
+			return err
+		}
+		return saveCatalogCreateReceipt(tx, user.ID, requestID, "work", hash, work.ID)
 	})
 	if err != nil {
 		return BookWorkDetail{}, err
@@ -246,8 +294,15 @@ func (s *Service) GetBookWork(ctx context.Context, workID uuid.UUID) (BookWorkDe
 }
 
 func (s *Service) CreateBookEdition(ctx context.Context, user authctx.CurrentUser, workID uuid.UUID, input CreateBookEditionInput) (BookPublicEditionDTO, error) {
+	return s.CreateBookEditionIdempotent(ctx, user, workID, input, uuid.Nil)
+}
+
+func (s *Service) CreateBookEditionIdempotent(ctx context.Context, user authctx.CurrentUser, workID uuid.UUID, input CreateBookEditionInput, requestID uuid.UUID) (BookPublicEditionDTO, error) {
 	if user.ID == uuid.Nil {
 		return BookPublicEditionDTO{}, apperr.Unauthorized("Login required")
+	}
+	if err := validateCatalogEditionCreate(&input); err != nil {
+		return BookPublicEditionDTO{}, err
 	}
 	if input.PageCount < 0 {
 		return BookPublicEditionDTO{}, apperr.BadRequest("validation.invalid_request", "page_count cannot be negative")
@@ -263,7 +318,17 @@ func (s *Service) CreateBookEdition(ctx context.Context, user authctx.CurrentUse
 	edition := model.BookEdition{WorkID: workID, Title: strings.TrimSpace(input.Title), Publisher: strings.TrimSpace(input.Publisher), Producer: strings.TrimSpace(input.Producer), ISBN10: strings.TrimSpace(input.ISBN10), ISBN13: strings.TrimSpace(input.ISBN13), Language: strings.TrimSpace(input.Language), PublishedDate: publishedDate, PageCount: input.PageCount, Binding: strings.TrimSpace(input.Binding), CoverURL: strings.TrimSpace(input.CoverURL), LifecycleStatus: model.BookLifecycleStatusActive, CreatedBy: &user.ID}
 	edition.Subtitle = strings.TrimSpace(input.Subtitle)
 	edition.EditionStatement = strings.TrimSpace(input.EditionStatement)
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	hash, err := catalogCreateHash("edition", workID, input)
+	if err != nil {
+		return BookPublicEditionDTO{}, err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if replayID, replay, err := catalogCreateReplay(tx, user.ID, requestID, "edition", hash); err != nil {
+			return err
+		} else if replay {
+			edition.ID = replayID
+			return nil
+		}
 		var work model.BookWork
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND lifecycle_status = ? AND edit_status <> ?", workID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&work).Error; err != nil {
 			return publicBookNotFound(err)
@@ -284,7 +349,7 @@ func (s *Service) CreateBookEdition(ctx context.Context, user authctx.CurrentUse
 			return err
 		}
 		if len(input.Translators) > 0 || len(input.TranslatorIDs) > 0 {
-			ids, err := resolveBookAuthors(tx, user.ID, input.TranslatorIDs, input.Translators)
+			ids, err := resolveBookAuthorsWithNewNames(tx, user.ID, input.TranslatorIDs, input.Translators, input.NewTranslatorNames)
 			if err != nil {
 				return err
 			}
@@ -296,8 +361,10 @@ func (s *Service) CreateBookEdition(ctx context.Context, user authctx.CurrentUse
 		if err != nil {
 			return err
 		}
-		_, err = appendBookWikiRevision(tx, "edition", edition.ID, user.ID, "添加出版版本", "creation", snapshot)
-		return err
+		if _, err = appendBookWikiRevision(tx, "edition", edition.ID, user.ID, "添加出版版本", "creation", snapshot); err != nil {
+			return err
+		}
+		return saveCatalogCreateReceipt(tx, user.ID, requestID, "edition", hash, edition.ID)
 	})
 	if err != nil {
 		return BookPublicEditionDTO{}, err

@@ -54,7 +54,11 @@ func (h *Handler) createBookWork(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid work metadata"))
 		return
 	}
-	work, err := h.service.CreateBookWork(c.Request.Context(), user, input)
+	requestID, ok := catalogIdempotencyRequestID(c)
+	if !ok {
+		return
+	}
+	work, err := h.service.CreateBookWorkIdempotent(c.Request.Context(), user, input, requestID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -170,7 +174,11 @@ func (h *Handler) createBookEdition(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid edition metadata"))
 		return
 	}
-	edition, err := h.service.CreateBookEdition(c.Request.Context(), user, id, input)
+	requestID, ok := catalogIdempotencyRequestID(c)
+	if !ok {
+		return
+	}
+	edition, err := h.service.CreateBookEditionIdempotent(c.Request.Context(), user, id, input, requestID)
 	if err != nil {
 		httpx.Error(c, err)
 		return

@@ -70,6 +70,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	protected.GET("/me/reading-marks", handler.listBookPrivateHighlights)
 	protected.PUT("/me/reading-marks/:revisionId/:markId", handler.saveBookRevisionMark)
 	protected.DELETE("/me/reading-marks/:revisionId/:markId", handler.deleteBookRevisionMark)
+	protected.POST("/works/duplicate-check", handler.checkBookWorkDuplicates)
+	protected.POST("/works/:workId/editions/duplicate-check", handler.checkBookEditionDuplicates)
 	protected.POST("/works", handler.createBookWork)
 	protected.POST("/works/:workId/editions", handler.createBookEdition)
 	protected.POST("/people", handler.createBookPerson)
