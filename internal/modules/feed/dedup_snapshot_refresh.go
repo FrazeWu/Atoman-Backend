@@ -16,6 +16,10 @@ import (
 // continue to reject stale generations rather than return incomplete data.
 type PublicDedupRefreshPolicy struct {
 	QuietPeriod time.Duration
+	// MinFullRebuildInterval limits expensive full generations, but never
+	// blocks safe incremental updates. Zero disables it for direct test calls;
+	// the supervised worker supplies a nonzero default.
+	MinFullRebuildInterval time.Duration
 }
 
 type PublicDedupRefreshResult string
@@ -26,6 +30,7 @@ const (
 	PublicDedupRefreshBusy        PublicDedupRefreshResult = "busy"
 	PublicDedupRefreshRebuilt     PublicDedupRefreshResult = "rebuilt"
 	PublicDedupRefreshIncremental PublicDedupRefreshResult = "incremental"
+	PublicDedupRefreshConflict    PublicDedupRefreshResult = "conflict"
 )
 
 // These advisory keys only serialize competing rebuild workers. RSS writers
@@ -63,8 +68,8 @@ func (r *Repo) currentPublicRecentDedupRefreshState(ctx context.Context, policy 
 // concurrent full rebuilds. It first attempts provably safe newest-prefix or
 // oldest-tail updates and falls back to a full rebuild for all other changes.
 func (r *Repo) refreshPublicRecentDedupIfQuiet(ctx context.Context, policy PublicDedupRefreshPolicy) (PublicDedupRefreshResult, error) {
-	if policy.QuietPeriod < 0 {
-		return "", fmt.Errorf("negative dedup refresh quiet period")
+	if policy.QuietPeriod < 0 || policy.MinFullRebuildInterval < 0 {
+		return "", fmt.Errorf("negative dedup refresh policy duration")
 	}
 	_, state, err := r.currentPublicRecentDedupRefreshState(ctx, policy)
 	if err != nil || state != "" {
@@ -111,31 +116,30 @@ func (r *Repo) refreshPublicRecentDedupIfQuiet(ctx context.Context, policy Publi
 	if applied {
 		return PublicDedupRefreshIncremental, nil
 	}
+	// Keep the existing snapshot stale (so future readers must use their
+	// legacy fallback) instead of rebuilding repeatedly during RSS bursts.
+	if policy.MinFullRebuildInterval > 0 {
+		var head feedDedupSnapshotHead
+		err := r.db.WithContext(ctx).Where("scope = ?", publicRecentDedupScope).Take(&head).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", err
+		}
+		if err == nil && time.Since(head.BuiltAt) < policy.MinFullRebuildInterval {
+			return PublicDedupRefreshDeferred, nil
+		}
+	}
 	if _, err := r.publishPublicRecentDedupSnapshotTracked(ctx); err != nil {
 		return "", err
 	}
 	return PublicDedupRefreshRebuilt, nil
 }
 
-// RunPublicRecentDedupRefreshLoop can be invoked by a future standalone worker
-// after migration and observability gates pass. It is never called at startup
-// in this branch. Errors are returned to the supervisor; refresh is never run
-// from an HTTP request.
+// RunPublicRecentDedupRefreshLoop remains the compatibility entry point for
+// an opt-in, standalone worker. It is NOT registered by the HTTP server.
+// The supervised implementation retries recoverable failures and enforces a
+// minimum full-rebuild interval even when the caller leaves it unset.
 func (r *Repo) RunPublicRecentDedupRefreshLoop(ctx context.Context, pollInterval time.Duration, policy PublicDedupRefreshPolicy) error {
-	if pollInterval < time.Second {
-		return fmt.Errorf("dedup refresh poll interval must be >= 1s")
-	}
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		_, err := r.refreshPublicRecentDedupIfQuiet(ctx, policy)
-		if err != nil && !errors.Is(err, ErrDedupSnapshotStale) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
+	return r.RunPublicRecentDedupRefreshWorker(ctx, PublicDedupRefreshWorkerOptions{
+		PollInterval: pollInterval, RefreshPolicy: policy,
+	})
 }
