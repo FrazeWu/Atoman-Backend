@@ -22,6 +22,9 @@ func OpenWithConfig(t *testing.T, config *gorm.Config) *gorm.DB {
 	if dsn == "" {
 		t.Fatal("TEST_POSTGRES_DSN is not configured; set it or create .env.dev from .env.example")
 	}
+	if err := validateTestDatabaseDSN(dsn); err != nil {
+		t.Fatal(err)
+	}
 	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{DisableAutomaticPing: true})
 	if err != nil {
 		t.Fatalf("open PostgreSQL: %v", err)

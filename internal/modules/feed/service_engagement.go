@@ -434,6 +434,25 @@ func (s *Service) RecordSourceReadEvent(sourceType string, sourceID string, even
 }
 
 func (s *Service) readMap(userID uuid.UUID, items []model.FeedItem) (map[uuid.UUID]bool, error) {
+	if len(items) > 1024 {
+		// A giant IN clause can exhaust PostgreSQL bind-parameter limits.
+		// Read the viewer's compact ID set once and intersect it with the scan.
+		allReads, err := s.repo.ListReadFeedItemIDs(userID)
+		if err != nil {
+			return nil, err
+		}
+		readIDs := make(map[uuid.UUID]bool, len(allReads))
+		for _, id := range allReads {
+			readIDs[id] = true
+		}
+		result := make(map[uuid.UUID]bool)
+		for _, item := range items {
+			if readIDs[item.ID] {
+				result[item.ID] = true
+			}
+		}
+		return result, nil
+	}
 	ids := make([]uuid.UUID, 0, len(items))
 	for _, item := range items {
 		ids = append(ids, item.ID)

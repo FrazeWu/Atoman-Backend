@@ -55,6 +55,15 @@ TEST_DATABASE_URL=postgres://legacy.example/test EXPECTED_TEST_DSN=postgres://le
 ! grep -q '^docker ' "$AUDIT_TEST_LOG"
 
 : > "$AUDIT_TEST_LOG"
+if TEST_POSTGRES_DSN='postgres://tester:secret@localhost/atoman_prod' \
+  "$ROOT_DIR/scripts/test-isolated.sh" ./internal/testdb >/dev/null 2>&1; then exit 96; fi
+[[ ! -s "$AUDIT_TEST_LOG" ]]
+: > "$AUDIT_TEST_LOG"
+if TEST_DATABASE_URL='host=localhost dbname=atoman_prod user=postgres' \
+  "$ROOT_DIR/scripts/test-isolated.sh" ./internal/testdb >/dev/null 2>&1; then exit 97; fi
+[[ ! -s "$AUDIT_TEST_LOG" ]]
+
+: > "$AUDIT_TEST_LOG"
 if MOCK_RUN_FAIL=1 "$ROOT_DIR/scripts/test-isolated.sh" >/dev/null 2>&1; then exit 93; fi
 ! grep -q '^docker rm' "$AUDIT_TEST_LOG"
 ! grep -q '^go ' "$AUDIT_TEST_LOG"

@@ -34,6 +34,7 @@ func AnnotateDuplicateFeedItems(items []model.FeedItem) {
 	}
 
 	groups := make([]*duplicateGroup, 0, len(items))
+	var index *duplicateGroupIndex
 
 	for i := range items {
 		items[i].IsDuplicate = false
@@ -46,15 +47,27 @@ func AnnotateDuplicateFeedItems(items []model.FeedItem) {
 		normalizedTitle := NormalizeFeedItemTitle(items[i].Title)
 
 		matched := -1
-		for groupIndex := range groups {
-			if groups[groupIndex].matches(normalizedURL, normalizedTitle, items[i].PublishedAt) {
-				matched = groupIndex
-				break
+		if len(groups) < duplicateIndexThreshold {
+			// Small feeds are cheaper with the original linear scan: no index
+			// allocation and an early exit on the first matching group.
+			for groupID, group := range groups {
+				if group.matches(normalizedURL, normalizedTitle, items[i].PublishedAt) {
+					matched = groupID
+					break
+				}
 			}
+		} else {
+			if index == nil {
+				index = newDuplicateGroupIndex()
+				for groupID, group := range groups {
+					index.add(group, groupID)
+				}
+			}
+			matched = index.firstMatch(groups, normalizedURL, normalizedTitle, items[i].PublishedAt)
 		}
 
 		if matched == -1 {
-			groups = append(groups, &duplicateGroup{
+			group := &duplicateGroup{
 				indices:         []int{i},
 				normalizedURL:   normalizedURL,
 				normalizedTitle: normalizedTitle,
@@ -62,7 +75,11 @@ func AnnotateDuplicateFeedItems(items []model.FeedItem) {
 				sources: map[string]struct{}{
 					duplicateSourceTitle(items[i]): {},
 				},
-			})
+			}
+			groups = append(groups, group)
+			if index != nil {
+				index.add(group, len(groups)-1)
+			}
 			continue
 		}
 

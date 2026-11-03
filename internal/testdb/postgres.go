@@ -17,6 +17,9 @@ func OpenPostgres(t *testing.T, schemaPrefix string) *gorm.DB {
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured; set it or create .env.dev from .env.example")
 	}
+	if err := validateTestDatabaseDSN(dsn); err != nil {
+		t.Fatal(err)
+	}
 	if templateName := os.Getenv("TEST_POSTGRES_TEMPLATE_DATABASE"); templateName != "" {
 		return openTemplateDatabase(t, dsn, schemaPrefix, templateName)
 	}

@@ -146,7 +146,13 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	}
 	videos = dedupeVideos(videos)
 
-	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs, feedSourceVisibleAfter)
+	metadataOnly := query.HideDuplicates && strings.TrimSpace(query.Search) == ""
+	var feedItems []model.FeedItem
+	if metadataOnly {
+		feedItems, err = s.repo.ListFeedItemsBySourceIDsForDuplicateScan(feedSourceIDs, feedSourceVisibleAfter)
+	} else {
+		feedItems, err = s.repo.ListFeedItemsBySourceIDs(feedSourceIDs, feedSourceVisibleAfter)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
@@ -162,6 +168,11 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	items := buildSubscribedTimelineItems(posts, videos, feedItems, shortNotes, shortNoteRead, engagementByPostID, episodeByPostID, readMap)
 
 	paged, total := finalizeSubscribedTimeline(items, query, priorityInboxMode, sourcePriorities)
+	if metadataOnly {
+		if err := s.hydrateTimelineFeedItems(paged); err != nil {
+			return nil, 0, err
+		}
+	}
 	return paged, total, nil
 }
 
@@ -417,7 +428,13 @@ func (s *Service) getPublicFeedWithDuplicateFilter(query FeedQuery, page int, li
 	for _, source := range sources {
 		feedSourceIDs = append(feedSourceIDs, source.ID)
 	}
-	feedItems, err := s.repo.ListFeedItemsBySourceIDs(dedupeUUIDs(feedSourceIDs))
+	metadataOnly := strings.TrimSpace(query.Search) == ""
+	var feedItems []model.FeedItem
+	if metadataOnly {
+		feedItems, err = s.repo.ListFeedItemsBySourceIDsForDuplicateScan(dedupeUUIDs(feedSourceIDs))
+	} else {
+		feedItems, err = s.repo.ListFeedItemsBySourceIDs(dedupeUUIDs(feedSourceIDs))
+	}
 	if err != nil {
 		return nil, 0, err
 	}
@@ -434,6 +451,11 @@ func (s *Service) getPublicFeedWithDuplicateFilter(query FeedQuery, page int, li
 	items = filterTimeline(items, query)
 	sortTimeline(items)
 	paged, total := paginateTimeline(items, page, limit)
+	if metadataOnly {
+		if err := s.hydrateTimelineFeedItems(paged); err != nil {
+			return nil, 0, err
+		}
+	}
 	return paged, total, nil
 }
 
@@ -497,7 +519,13 @@ func (s *Service) getExploreFeedWithDuplicateFilter(user authctx.CurrentUser, qu
 	if err != nil {
 		return nil, 0, err
 	}
-	feedItems, err := s.repo.ListExploreFeedItemsAll(sortMode, duplicateQuery)
+	metadataOnly := strings.TrimSpace(query.Search) == "" && sortMode != "popular"
+	var feedItems []model.FeedItem
+	if metadataOnly {
+		feedItems, err = s.repo.ListExploreFeedItemsForDuplicateScan(sortMode, duplicateQuery)
+	} else {
+		feedItems, err = s.repo.ListExploreFeedItemsAll(sortMode, duplicateQuery)
+	}
 	if err != nil {
 		return nil, 0, err
 	}
@@ -525,6 +553,11 @@ func (s *Service) getExploreFeedWithDuplicateFilter(user authctx.CurrentUser, qu
 	sortTimeline(items)
 	items = filterTimeline(items, query)
 	paged, total := paginateTimeline(items, page, limit)
+	if metadataOnly {
+		if err := s.hydrateTimelineFeedItems(paged); err != nil {
+			return nil, 0, err
+		}
+	}
 	return paged, total, nil
 }
 

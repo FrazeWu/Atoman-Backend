@@ -454,6 +454,41 @@ func (r *Repo) ListFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID, visibleAfter 
 	return items, err
 }
 
+// A deduplicated timeline needs metadata from all eligible items to preserve
+// the existing cluster totals, but must not load their potentially massive
+// reader_html and full_text_html fields before pagination.
+const feedDuplicateScanColumns = "feed_items.id, feed_items.feed_source_id, feed_items.title, feed_items.link, feed_items.published_at, feed_items.author, feed_items.enclosure_type, feed_items.language_code"
+
+func (r *Repo) ListFeedItemsBySourceIDsForDuplicateScan(feedSourceIDs []uuid.UUID, visibleAfter ...map[uuid.UUID]time.Time) ([]model.FeedItem, error) {
+	if len(feedSourceIDs) == 0 {
+		return []model.FeedItem{}, nil
+	}
+	var items []model.FeedItem
+	db := r.db.Model(&model.FeedItem{}).Select(feedDuplicateScanColumns).Preload("FeedSource").
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false)
+	if len(visibleAfter) > 0 {
+		db = applyFeedSourceVisibleAfter(db, visibleAfter[0])
+	}
+	err := db.Order("feed_items.published_at DESC, feed_items.id DESC").Find(&items).Error
+	return items, err
+}
+
+func (r *Repo) LoadFeedItemsForTimelinePage(ids []uuid.UUID) (map[uuid.UUID]model.FeedItem, error) {
+	result := make(map[uuid.UUID]model.FeedItem, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	var items []model.FeedItem
+	if err := r.db.Preload("FeedSource").Where("id IN ?", ids).Find(&items).Error; err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		result[item.ID] = item
+	}
+	return result, nil
+}
+
 func (r *Repo) ListFeedItemsBySourceIDsPaged(feedSourceIDs []uuid.UUID, limit int, offset int, visibleAfter ...map[uuid.UUID]time.Time) ([]model.FeedItem, error) {
 	if len(feedSourceIDs) == 0 {
 		return []model.FeedItem{}, nil
@@ -573,6 +608,13 @@ func (r *Repo) CountFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID, visibleAfter
 	var count int64
 	err := db.Count(&count).Error
 	return count, err
+}
+
+func (r *Repo) ListReadFeedItemIDs(userID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := r.db.Model(&model.FeedItemRead{}).Where("user_id = ?", userID).
+		Pluck("feed_item_id", &ids).Error
+	return ids, err
 }
 
 func (r *Repo) ListReadItems(userID uuid.UUID, feedItemIDs []uuid.UUID) ([]model.FeedItemRead, error) {
@@ -1077,6 +1119,18 @@ func (r *Repo) ListExploreFeedItemsPage(sort string, query FeedQuery, limit int,
 	}
 	db = applyExploreFeedSort(db, sort)
 	return items, db.Find(&items).Error
+}
+
+func (r *Repo) ListExploreFeedItemsForDuplicateScan(sort string, query FeedQuery) ([]model.FeedItem, error) {
+	// The popular ranking changes the projection in applyExploreFeedSort; it
+	// remains on the legacy path until its query is separated from hydration.
+	if normalizeExploreSort(sort) == "popular" || strings.TrimSpace(query.Search) != "" {
+		return r.ListExploreFeedItemsAll(sort, query)
+	}
+	var items []model.FeedItem
+	db := r.buildExploreFeedItemsQuery(query).Select(feedDuplicateScanColumns).
+		Preload("FeedSource")
+	return items, applyExploreFeedSort(db, sort).Find(&items).Error
 }
 
 func (r *Repo) ListExploreFeedItemsAll(sort string, query FeedQuery) ([]model.FeedItem, error) {

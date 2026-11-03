@@ -51,6 +51,31 @@ if [[ -z "$dsn" ]]; then
   dsn="postgres://atoman_test:atoman_test@127.0.0.1:${port}/atoman_test?sslmode=disable"
   echo "Isolated PostgreSQL ready on loopback port $port"
 else
+  # The explicit DSN may name a production database even when its variable is
+  # prefixed TEST_. Reject it before running any tests or creating schemas.
+  TEST_GUARD_DSN="$dsn" python3 - <<'PYGUARD'
+import os
+import shlex
+import sys
+from urllib.parse import parse_qs, unquote, urlparse
+
+raw = os.environ['TEST_GUARD_DSN']
+if raw.startswith(('postgres://', 'postgresql://')):
+    parsed = urlparse(raw)
+    database = unquote(parsed.path.lstrip('/'))
+    override = parse_qs(parsed.query).get('dbname', [])
+    if override:
+        database = override[-1]
+else:
+    fields = dict(part.split('=', 1) for part in shlex.split(raw) if '=' in part)
+    database = fields.get('dbname', fields.get('database', ''))
+name = database.strip().lower()
+allowed = (name == 'test' or name.startswith('test_')
+           or name.endswith('_test') or '_test_' in name)
+if not allowed:
+    print('Refusing to run tests: the explicit DSN must target a dedicated *_test database (got %r)' % name, file=sys.stderr)
+    sys.exit(2)
+PYGUARD
   echo 'Using explicit PostgreSQL test configuration (not owned by this run)'
 fi
 
