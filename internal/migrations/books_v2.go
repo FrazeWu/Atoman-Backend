@@ -31,6 +31,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private
 `).Error; err != nil {
 			return err
 		}
+		// Older schemas required furthest >= current, so a forward TOC jump could
+		// not be saved without falsely claiming it had been read. Remove just
+		// that obsolete check; preserve previously recorded reading data.
+		if err := tx.Exec(`DO $$ BEGIN
+          IF EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conrelid = 'book_reading_states'::regclass
+               AND conname = 'chk_book_reading_furthest'
+               AND pg_get_constraintdef(oid) LIKE '%current_percent%'
+          ) THEN
+            ALTER TABLE book_reading_states DROP CONSTRAINT chk_book_reading_furthest;
+            ALTER TABLE book_reading_states ADD CONSTRAINT chk_book_reading_furthest
+              CHECK (furthest_percent >= 0 AND furthest_percent <= 1);
+          END IF;
+        END $$;`).Error; err != nil {
+			return fmt.Errorf("update book reading furthest constraint: %w", err)
+		}
 		constraints := []struct{ table, name, definition string }{
 			{"book_lists", "fk_book_list_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
 			{"book_list_bookmarks", "fk_book_list_bookmark_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},

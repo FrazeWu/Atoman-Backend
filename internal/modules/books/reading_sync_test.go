@@ -296,3 +296,40 @@ func TestBookReadingRecommendationsKeepExplicitRevision(t *testing.T) {
 	_, err = service.SetBookReadingSelection(ctx, user, workID, SetBookReadingSelectionInput{AssetID: en.ID, RevisionID: newRevision.ID})
 	require.Equal(t, "books.selection_revision_mismatch", apperr.FromError(err).Code)
 }
+
+func TestBookCloudReadingNavigationDoesNotAdvanceFurthest(t *testing.T) {
+	service, user, work, _ := newBookResourceTestService(t)
+	ctx := context.Background()
+	_, revision := readyBookReadingFile(t, service, user, uuid.MustParse(work.ID), "zh", "txt")
+	session := newBookCloudTestSession(t, service, user, revision.ID, "reader-navigation")
+	falseValue, trueValue := false, true
+	write := func(sequence, version int64, position, furthest float64, advance bool) BookReadingWriteResult {
+		t.Helper()
+		result, err := service.SaveBookCloudReadingState(ctx, user, revision.ID, SaveBookCloudReadingStateInput{
+			SessionID: session.Session.ID, RequestID: uuid.New(), Sequence: sequence, BaseVersion: version,
+			TXTOffset: int64(position * 100), CurrentPercent: position, FurthestPercent: &furthest,
+			AdvanceFurthest: &advance,
+		})
+		require.NoError(t, err)
+		return result
+	}
+	// First open: go straight to a later chapter without claiming 90% completion.
+	jump := write(1, 0, .9, 0, falseValue)
+	require.Equal(t, .9, jump.State.CurrentPercent)
+	require.Zero(t, jump.State.FurthestPercent)
+	// Scrolling naturally there advances only the actually observed point.
+	read := write(2, 1, .92, 0, trueValue)
+	require.Equal(t, .92, read.State.FurthestPercent)
+	back := write(3, 2, .2, .92, falseValue)
+	require.Equal(t, .2, back.State.CurrentPercent)
+	require.Equal(t, .92, back.State.FurthestPercent)
+	// A stale jump must not promote the oldest high position either.
+	stale := SaveBookCloudReadingStateInput{SessionID: session.Session.ID, RequestID: uuid.New(), Sequence: 1, BaseVersion: 0, TXTOffset: 99, CurrentPercent: .99, AdvanceFurthest: &falseValue}
+	result, err := service.SaveBookCloudReadingState(ctx, user, revision.ID, stale)
+	require.NoError(t, err)
+	require.Equal(t, "out_of_order", result.IgnoredReason)
+	require.Equal(t, .2, result.State.CurrentPercent)
+	require.Equal(t, .92, result.State.FurthestPercent)
+	// Navigating with a false flag and an old furthest below current is valid.
+	require.NoError(t, validateBookCloudPosition(SaveBookCloudReadingStateInput{CurrentPercent: .99, FurthestPercent: &back.State.FurthestPercent, AdvanceFurthest: &falseValue}, "txt"))
+}

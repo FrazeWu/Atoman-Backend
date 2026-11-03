@@ -39,6 +39,7 @@ type SaveBookCloudReadingStateInput struct {
 	TXTOffset       int64     `json:"txt_offset"`
 	CurrentPercent  float64   `json:"current_percent"`
 	FurthestPercent *float64  `json:"furthest_percent,omitempty"`
+	AdvanceFurthest *bool     `json:"advance_furthest,omitempty"` // false = navigation, true or omitted = active reading
 }
 
 type BookReadingWriteResult struct {
@@ -113,7 +114,7 @@ func validateBookCloudPosition(input SaveBookCloudReadingStateInput, format stri
 	validPercent := func(value float64) bool {
 		return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1
 	}
-	if !validPercent(input.CurrentPercent) || (input.FurthestPercent != nil && (!validPercent(*input.FurthestPercent) || *input.FurthestPercent < input.CurrentPercent)) {
+	if !validPercent(input.CurrentPercent) || (input.FurthestPercent != nil && !validPercent(*input.FurthestPercent)) {
 		return apperr.BadRequest("books.invalid_reading_percent", "Reading percentages must be within 0 and 1")
 	}
 	if input.PDFPage < 0 || input.PDFPage > bookReadingMaxPDFPage || input.TXTOffset < 0 || input.TXTOffset > bookReadingMaxTXTOffset || len(input.EPUBCFI) > bookReadingCFIMaxLength {
@@ -196,7 +197,13 @@ func (s *Service) SaveBookCloudReadingState(ctx context.Context, user authctx.Cu
 		if err := validateBookCloudPosition(input, asset.Format); err != nil {
 			return err
 		}
-		furthest := math.Max(state.FurthestPercent, input.CurrentPercent)
+		// Deliberate TOC/bookmark/search jumps update the resume position only.
+		// A client must explicitly mark those navigations with advance_furthest=false.
+		// Omitted values retain the older API's natural-reading semantics.
+		furthest := state.FurthestPercent
+		if input.AdvanceFurthest == nil || *input.AdvanceFurthest {
+			furthest = math.Max(furthest, input.CurrentPercent)
+		}
 		if input.FurthestPercent != nil {
 			furthest = math.Max(furthest, *input.FurthestPercent)
 		}

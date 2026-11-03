@@ -77,7 +77,7 @@ type BookReadingState struct {
 	PDFPage         int       `json:"pdf_page" gorm:"not null;default:0;check:chk_book_reading_page,pdf_page >= 0"`
 	TXTOffset       int64     `json:"txt_offset" gorm:"not null;default:0;check:chk_book_reading_offset,txt_offset >= 0"`
 	CurrentPercent  float64   `json:"current_percent" gorm:"not null;default:0;check:chk_book_reading_current,current_percent >= 0 AND current_percent <= 1"`
-	FurthestPercent float64   `json:"furthest_percent" gorm:"not null;default:0;check:chk_book_reading_furthest,furthest_percent >= current_percent AND furthest_percent <= 1"`
+	FurthestPercent float64   `json:"furthest_percent" gorm:"not null;default:0;check:chk_book_reading_furthest,furthest_percent >= 0 AND furthest_percent <= 1"`
 	Version         int64     `json:"version" gorm:"not null;default:0"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
