@@ -169,9 +169,7 @@ func TestBookResourceUploadOwnershipAndPartValidation(t *testing.T) {
 	asset, err := service.CreateBookResource(ctx, user, uuid.MustParse(work.ID), CreateBookResourceInput{Format: "txt"})
 	require.NoError(t, err)
 	input := CreateBookResourceUploadInput{FileName: "book.txt", ContentType: "text/plain", Size: 12}
-	_, err = service.CreateBookResourceUpload(ctx, user, asset.ID, input)
-	require.Equal(t, "books.public_distribution_confirmation_required", apperr.FromError(err).Code)
-	input.PublicDistributionConfirmed = true
+	// Private uploads do not require public-distribution consent.
 	session, err := service.CreateBookResourceUpload(ctx, user, asset.ID, input)
 	require.NoError(t, err)
 	other := authctx.CurrentUser{ID: uuid.New()}

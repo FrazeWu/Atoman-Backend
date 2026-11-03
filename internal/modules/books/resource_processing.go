@@ -149,8 +149,49 @@ func (s *Service) publishBookResourceUpload(ctx context.Context, session model.B
 		if err := tx.Create(&revision).Error; err != nil {
 			return err
 		}
+		// Uploading a file is not permission to publish its content.
+		if err := tx.Create(&model.BookFileVisibility{RevisionID: revision.ID, Public: session.PublicDistributionConfirmed, UpdatedBy: session.UserID, UpdatedAt: time.Now().UTC()}).Error; err != nil {
+			return err
+		}
 		if err := tx.Model(&asset).Update("current_revision_id", revision.ID).Error; err != nil {
 			return err
+		}
+		// The first verified file is the default. Later uploads never
+		// silently change a reader's or an edition's chosen file.
+		if asset.EditionID != nil {
+			best := model.BookEditionBestFile{EditionID: *asset.EditionID, AssetID: asset.ID, RevisionID: revision.ID, UpdatedBy: session.UserID, UpdatedAt: time.Now().UTC()}
+			inserted := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "edition_id"}}, DoNothing: true}).Create(&best)
+			if inserted.Error != nil {
+				return inserted.Error
+			}
+			if inserted.RowsAffected > 0 {
+				if err := tx.Create(&model.BookBestFileEvent{EditionID: *asset.EditionID, ToRevisionID: revision.ID, ChangedBy: session.UserID}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		// A book edition is only published once it has a safe, ready file.
+		if asset.EditionID != nil {
+			var edition model.BookEdition
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", *asset.EditionID).First(&edition).Error; err != nil {
+				return err
+			}
+			if edition.LifecycleStatus == model.BookLifecycleStatusDraft {
+				if edition.CreatedBy == nil || *edition.CreatedBy != session.UserID {
+					return apperr.Forbidden("books.edition_upload_owner_required", "Only the draft's creator can finish the initial upload")
+				}
+				edition.LifecycleStatus = model.BookLifecycleStatusActive
+				if err := tx.Model(&edition).Update("lifecycle_status", model.BookLifecycleStatusActive).Error; err != nil {
+					return err
+				}
+				snapshot, err := loadBookEditionSnapshot(tx, edition)
+				if err != nil {
+					return err
+				}
+				if _, err := appendBookWikiRevision(tx, "edition", edition.ID, session.UserID, "电子书安全检查通过，出版版本正式创建", "publish", snapshot); err != nil {
+					return err
+				}
+			}
 		}
 		return tx.Model(&locked).Updates(map[string]any{"status": "ready", "scan_lease_token": "", "revision_id": revision.ID, "error_message": ""}).Error
 	})

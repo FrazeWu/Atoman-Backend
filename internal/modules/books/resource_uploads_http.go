@@ -31,6 +31,10 @@ func (h *Handler) createBookResource(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid ebook metadata"))
 		return
 	}
+	if input.EditionID == nil {
+		httpx.Error(c, apperr.BadRequest("books.edition_required", "Files must belong to a concrete book edition"))
+		return
+	}
 	asset, err := h.service.CreateBookResource(c.Request.Context(), user, id, input)
 	if err != nil {
 		httpx.Error(c, err)

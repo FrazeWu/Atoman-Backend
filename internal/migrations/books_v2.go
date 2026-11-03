@@ -13,7 +13,7 @@ import (
 func RunBooksV2Migration(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(&model.BookEdition{}, &model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
-			&model.BookDefaultAsset{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{},
+			&model.BookDefaultAsset{}, &model.BookEditionCover{}, &model.BookFileVisibility{}, &model.BookEditionBestFile{}, &model.BookBestFileEvent{}, &model.BookFileShelf{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{},
 			&model.BookReadingSession{}, &model.BookReadingWrite{}, &model.BookReadingMark{},
 			&model.BookLibraryEntry{}, &model.BookPrivateNote{}, &model.BookNoteImportReceipt{},
 			&model.BookReaderClock{}, &model.BookReadingDaily{}, &model.BookNotePublication{},
@@ -22,6 +22,7 @@ func RunBooksV2Migration(db *gorm.DB) error {
 		}
 		if err := tx.Exec(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_work_language ON book_assets (id, work_id, language);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_edition ON book_assets (id, edition_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_assets_work ON book_assets (id, work_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_editions_work ON book_editions (id, work_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_book_revisions_asset ON book_asset_revisions (id, asset_id);
@@ -44,6 +45,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private
 			{"book_asset_revisions", "fk_book_revisions_asset", "FOREIGN KEY (asset_id) REFERENCES book_assets(id)"},
 			{"book_asset_revisions", "fk_book_revisions_media", "FOREIGN KEY (media_asset_id) REFERENCES media_assets(id)"},
 			{"book_default_assets", "fk_book_default_asset", "FOREIGN KEY (asset_id, work_id, language) REFERENCES book_assets(id, work_id, language)"},
+			{"book_edition_best_files", "fk_book_best_edition", "FOREIGN KEY (edition_id) REFERENCES book_editions(id)"},
+			{"book_edition_best_files", "fk_book_best_asset_edition", "FOREIGN KEY (asset_id, edition_id) REFERENCES book_assets(id, edition_id) DEFERRABLE INITIALLY DEFERRED"},
+			{"book_edition_best_files", "fk_book_best_revision_asset", "FOREIGN KEY (revision_id, asset_id) REFERENCES book_asset_revisions(id, asset_id)"},
+			{"book_edition_best_files", "fk_book_best_editor", "FOREIGN KEY (updated_by) REFERENCES \"Users\"(uuid)"},
+			{"book_file_shelves", "fk_book_file_shelf_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
+			{"book_file_shelves", "fk_book_file_shelf_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_best_file_events", "fk_book_best_event_edition", "FOREIGN KEY (edition_id) REFERENCES book_editions(id)"},
+			{"book_best_file_events", "fk_book_best_event_revision", "FOREIGN KEY (to_revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_best_file_events", "fk_book_best_event_user", "FOREIGN KEY (changed_by) REFERENCES \"Users\"(uuid)"},
+			{"book_edition_covers", "fk_book_edition_cover", "FOREIGN KEY (edition_id) REFERENCES book_editions(id)"},
+			{"book_edition_covers", "fk_book_edition_cover_user", "FOREIGN KEY (updated_by) REFERENCES \"Users\"(uuid)"},
+			{"book_file_visibilities", "fk_book_file_visibility_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_file_visibilities", "fk_book_file_visibility_user", "FOREIGN KEY (updated_by) REFERENCES \"Users\"(uuid)"},
 			{"book_reading_selections", "fk_book_selection_asset", "FOREIGN KEY (asset_id, work_id) REFERENCES book_assets(id, work_id)"},
 			{"book_reading_selections", "fk_book_selection_revision", "FOREIGN KEY (revision_id, asset_id) REFERENCES book_asset_revisions(id, asset_id)"},
 			{"book_reading_selections", "fk_book_selection_user", "FOREIGN KEY (user_id) REFERENCES \"Users\"(uuid)"},
@@ -85,6 +99,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private
 		// asset ownership and dependent defaults/selections have been updated.
 		if err := tx.Exec(`
 ALTER TABLE book_assets ALTER CONSTRAINT fk_book_assets_work DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE book_edition_best_files ALTER CONSTRAINT fk_book_best_asset_edition DEFERRABLE INITIALLY DEFERRED;
 ALTER TABLE book_asset_revisions ALTER CONSTRAINT fk_book_revisions_asset DEFERRABLE INITIALLY IMMEDIATE;
 ALTER TABLE book_default_assets ALTER CONSTRAINT fk_book_default_asset DEFERRABLE INITIALLY IMMEDIATE;
 ALTER TABLE book_reading_selections ALTER CONSTRAINT fk_book_selection_asset DEFERRABLE INITIALLY IMMEDIATE;`).Error; err != nil {

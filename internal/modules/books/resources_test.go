@@ -31,6 +31,10 @@ func TestBookRevisionContentChecksAllLifecycleLayers(t *testing.T) {
 	require.NoError(t, db.Create(&media).Error)
 	revision := model.BookAssetRevision{AssetID: asset.ID, Number: 1, MediaAssetID: media.ID, SHA256: strings.Repeat("a", 64), Status: model.BookRevisionStatusReady, OriginalFilename: "book.txt", CreatedBy: asset.CreatedBy}
 	require.NoError(t, db.Create(&revision).Error)
+	// File sharing is now explicitly opt-in. This fixture tests the public
+	// content endpoint only after publication is enabled.
+	require.NoError(t, db.Create(&model.User{UUID: asset.CreatedBy, Username: "public-file-uploader", Email: "public-file-uploader@example.test", Password: "hash", IsActive: true}).Error)
+	require.NoError(t, db.Create(&model.BookFileVisibility{RevisionID: revision.ID, Public: true, UpdatedBy: asset.CreatedBy}).Error)
 	store := &fakeBookUploadStore{objects: map[string][]byte{media.Key: []byte("book")}}
 	service := NewService(db).WithBookResourceStore(store)
 	content, err := service.OpenBookRevision(context.Background(), revision.ID)
@@ -50,7 +54,7 @@ func TestBookRevisionContentChecksAllLifecycleLayers(t *testing.T) {
 	url := "/api/v1/books/asset-revisions/" + revision.ID.String() + "/content"
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, url, nil))
-	require.Equal(t, http.StatusOK, response.Code)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.Equal(t, "private, no-store", response.Header().Get("Cache-Control"))
 
 	for _, status := range []string{model.BookRevisionStatusScanning, model.BookRevisionStatusQuarantined, model.BookRevisionStatusRemoved} {

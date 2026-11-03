@@ -24,7 +24,7 @@ func metadataMergeTables(kind string) ([]bookMergeTable, error) {
 	}
 	tables := []bookMergeTable{{table, "id IN ?"}, {"book_contributions", column + " IN ?"}, {"book_sources", "target_type IN ('" + kind + "','book_" + kind + "') AND target_id IN ?"}}
 	if kind == "edition" {
-		tables = append(tables, bookMergeTable{"book_assets", "edition_id IN ?"})
+		tables = append(tables, bookMergeTable{"book_assets", "edition_id IN ?"}, bookMergeTable{"book_edition_best_files", "edition_id IN ?"})
 	}
 	return tables, nil
 }
@@ -179,6 +179,22 @@ func (s *Service) mergeBookMetadata(ctx context.Context, user authctx.CurrentUse
 			return err
 		}
 		if input.EntityType == "edition" {
+			if tx.Migrator().HasTable(&model.BookEditionBestFile{}) {
+				// Preserve the target edition's current recommendation. If it
+				// has no recommendation, take the source's; record both sides
+				// in the merge snapshot so a revert restores them exactly.
+				var targetBest int64
+				if err := tx.Model(&model.BookEditionBestFile{}).Where("edition_id = ?", input.TargetID).Count(&targetBest).Error; err != nil {
+					return err
+				}
+				if targetBest > 0 {
+					if err := tx.Where("edition_id = ?", input.SourceID).Delete(&model.BookEditionBestFile{}).Error; err != nil {
+						return err
+					}
+				} else if err := tx.Model(&model.BookEditionBestFile{}).Where("edition_id = ?", input.SourceID).Update("edition_id", input.TargetID).Error; err != nil {
+					return err
+				}
+			}
 			if err := tx.Model(&model.BookAsset{}).Where("edition_id = ?", input.SourceID).Update("edition_id", input.TargetID).Error; err != nil {
 				return err
 			}

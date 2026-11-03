@@ -178,7 +178,7 @@ func (h *Handler) createBookEdition(c *gin.Context) {
 	if !ok {
 		return
 	}
-	edition, err := h.service.CreateBookEditionIdempotent(c.Request.Context(), user, id, input, requestID)
+	edition, err := h.service.CreateBookEditionDraftIdempotent(c.Request.Context(), user, id, input, requestID)
 	if err != nil {
 		httpx.Error(c, err)
 		return

@@ -298,6 +298,16 @@ func (s *Service) CreateBookEdition(ctx context.Context, user authctx.CurrentUse
 }
 
 func (s *Service) CreateBookEditionIdempotent(ctx context.Context, user authctx.CurrentUser, workID uuid.UUID, input CreateBookEditionInput, requestID uuid.UUID) (BookPublicEditionDTO, error) {
+	return s.createBookEditionWithLifecycle(ctx, user, workID, input, requestID, model.BookLifecycleStatusActive)
+}
+
+// The public creation route uses a private draft: it only becomes an Edition
+// visible to readers once its first book file has passed the safety checks.
+func (s *Service) CreateBookEditionDraftIdempotent(ctx context.Context, user authctx.CurrentUser, workID uuid.UUID, input CreateBookEditionInput, requestID uuid.UUID) (BookPublicEditionDTO, error) {
+	return s.createBookEditionWithLifecycle(ctx, user, workID, input, requestID, model.BookLifecycleStatusDraft)
+}
+
+func (s *Service) createBookEditionWithLifecycle(ctx context.Context, user authctx.CurrentUser, workID uuid.UUID, input CreateBookEditionInput, requestID uuid.UUID, lifecycle string) (BookPublicEditionDTO, error) {
 	if user.ID == uuid.Nil {
 		return BookPublicEditionDTO{}, apperr.Unauthorized("Login required")
 	}
@@ -315,10 +325,10 @@ func (s *Service) CreateBookEditionIdempotent(ctx context.Context, user authctx.
 		}
 		publishedDate = &parsed
 	}
-	edition := model.BookEdition{WorkID: workID, Title: strings.TrimSpace(input.Title), Publisher: strings.TrimSpace(input.Publisher), Producer: strings.TrimSpace(input.Producer), ISBN10: strings.TrimSpace(input.ISBN10), ISBN13: strings.TrimSpace(input.ISBN13), Language: strings.TrimSpace(input.Language), PublishedDate: publishedDate, PageCount: input.PageCount, Binding: strings.TrimSpace(input.Binding), CoverURL: strings.TrimSpace(input.CoverURL), LifecycleStatus: model.BookLifecycleStatusActive, CreatedBy: &user.ID}
+	edition := model.BookEdition{WorkID: workID, Title: strings.TrimSpace(input.Title), Publisher: strings.TrimSpace(input.Publisher), Producer: strings.TrimSpace(input.Producer), ISBN10: strings.TrimSpace(input.ISBN10), ISBN13: strings.TrimSpace(input.ISBN13), Language: strings.TrimSpace(input.Language), PublishedDate: publishedDate, PageCount: input.PageCount, Binding: strings.TrimSpace(input.Binding), CoverURL: strings.TrimSpace(input.CoverURL), LifecycleStatus: lifecycle, CreatedBy: &user.ID}
 	edition.Subtitle = strings.TrimSpace(input.Subtitle)
 	edition.EditionStatement = strings.TrimSpace(input.EditionStatement)
-	hash, err := catalogCreateHash("edition", workID, input)
+	hash, err := catalogCreateHash("edition:"+lifecycle, workID, input)
 	if err != nil {
 		return BookPublicEditionDTO{}, err
 	}
@@ -370,6 +380,9 @@ func (s *Service) CreateBookEditionIdempotent(ctx context.Context, user authctx.
 		return BookPublicEditionDTO{}, err
 	}
 	s.InvalidateCatalog()
+	if lifecycle == model.BookLifecycleStatusDraft {
+		return BookPublicEditionDTO{ID: edition.ID.String(), WorkID: workID.String(), Title: edition.Title, Language: edition.Language, Publisher: edition.Publisher, CoverURL: edition.CoverURL}, nil
+	}
 	work, err := s.GetBookWork(ctx, workID)
 	if err != nil {
 		return BookPublicEditionDTO{}, err
