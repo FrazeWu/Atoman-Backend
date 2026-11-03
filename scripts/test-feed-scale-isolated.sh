@@ -51,13 +51,16 @@ export TEST_DATABASE_URL="$TEST_POSTGRES_DSN"
 export REFERENCE_TEST_POSTGRES_DSN="$TEST_POSTGRES_DSN"
 export FORUM_TEST_POSTGRES_DSN="$TEST_POSTGRES_DSN"
 export MUSIC_POSTGRES_TEST_DSN="$TEST_POSTGRES_DSN"
-export FEED_SCALE_COUNT="$1" FEED_SCALE_ISOLATED=yes GOMAXPROCS=2 GOGC=75 GOMEMLIMIT=1250MiB
+profile="${FEED_SCALE_PROFILE:-baseline}"
+if [[ "$profile" != 'baseline' && "$profile" != 'prodshape' && "$profile" != 'adversarial' ]]; then echo 'Invalid test profile' >&2; exit 2; fi
+if [[ "$profile" == 'adversarial' && "$1" != 10000 ]]; then echo 'Adversarial title stress is limited to 10000 articles' >&2;exit 2;fi
+export FEED_SCALE_PROFILE="$profile" FEED_SCALE_COUNT="$1" FEED_SCALE_ISOLATED=yes GOMAXPROCS=2 GOGC=75 GOMEMLIMIT=1250MiB
 printf 'ISOLATED_SCALE count=%s postgres_container=%s port=%s\n' "$1" "$container_name" "$port"
 # systemd-run is blocking in scope mode; timeout also bounds the wall-clock run.
 systemd-run --quiet --scope -p MemoryMax=2200M -p MemorySwapMax=0 -p CPUQuota=150% \
   /usr/bin/timeout --signal=TERM --kill-after=15s 14m \
   /usr/bin/env TEST_POSTGRES_DSN="$TEST_POSTGRES_DSN" TEST_DATABASE_URL="$TEST_DATABASE_URL" \
-  FEED_SCALE_COUNT="$FEED_SCALE_COUNT" FEED_SCALE_ISOLATED=yes GOMAXPROCS=2 GOGC=75 GOMEMLIMIT=1250MiB \
+  FEED_SCALE_PROFILE="$FEED_SCALE_PROFILE" FEED_SCALE_COUNT="$FEED_SCALE_COUNT" FEED_SCALE_ISOLATED=yes GOMAXPROCS=2 GOGC=75 GOMEMLIMIT=1250MiB \
   go test -buildvcs=false -p 1 -count=1 -timeout 13m -v -run '^TestDedupIsolatedProductionScale$' ./internal/modules/feed
 printf 'POSTGRES_MEM %s\n' "$(docker stats --no-stream --format '{{.MemUsage}}' "$container_id")"
 printf 'TEST_PASSED scale=%s\n' "$1"
