@@ -2,6 +2,7 @@ package books
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -15,19 +16,20 @@ import (
 )
 
 type EditionFileDTO struct {
-	AssetID    uuid.UUID `json:"asset_id"`
-	RevisionID uuid.UUID `json:"revision_id"`
-	EditionID  uuid.UUID `json:"edition_id"`
-	WorkID     uuid.UUID `json:"work_id"`
-	Title      string    `json:"title"`
-	Format     string    `json:"format"`
-	Language   string    `json:"language"`
-	FileName   string    `json:"file_name"`
-	IsPublic   bool      `json:"is_public"`
-	CanManage  bool      `json:"can_manage"`
-	CreatedBy  uuid.UUID `json:"-"`
-	IsBest     bool      `json:"is_best"`
-	CreatedAt  time.Time `json:"created_at"`
+	AssetID    uuid.UUID              `json:"asset_id"`
+	RevisionID uuid.UUID              `json:"revision_id"`
+	EditionID  uuid.UUID              `json:"edition_id"`
+	WorkID     uuid.UUID              `json:"work_id"`
+	Title      string                 `json:"title"`
+	Format     string                 `json:"format"`
+	Language   string                 `json:"language"`
+	FileName   string                 `json:"file_name"`
+	IsPublic   bool                   `json:"is_public"`
+	CanManage  bool                   `json:"can_manage"`
+	CreatedBy  uuid.UUID              `json:"-"`
+	IsBest     bool                   `json:"is_best"`
+	Quality    *BookFileQualityReport `json:"quality,omitempty" gorm:"-"`
+	CreatedAt  time.Time              `json:"created_at"`
 }
 
 func (s *Service) ListBookEditionFiles(ctx context.Context, editionID uuid.UUID) ([]EditionFileDTO, error) {
@@ -46,10 +48,36 @@ func (s *Service) ListBookEditionFiles(ctx context.Context, editionID uuid.UUID)
 		Joins("LEFT JOIN book_file_visibilities AS vis ON vis.revision_id = rev.id").
 		Where("asset.edition_id = ? AND asset.status = ? AND rev.status = ? AND rev.deleted_at IS NULL", editionID, model.BookResourceStatusActive, model.BookRevisionStatusReady).
 		Order("is_best DESC, rev.created_at DESC, rev.id DESC").Scan(&files).Error
+	if err != nil {
+		return nil, err
+	}
 	if files == nil {
 		files = []EditionFileDTO{}
 	}
-	return files, err
+	if len(files) != 0 {
+		revisionIDs := make([]uuid.UUID, 0, len(files))
+		for _, item := range files {
+			revisionIDs = append(revisionIDs, item.RevisionID)
+		}
+		var qualities []model.BookFileQuality
+		if err := s.db.WithContext(ctx).Where("revision_id IN ?", revisionIDs).Find(&qualities).Error; err != nil {
+			return nil, err
+		}
+		byRevision := make(map[uuid.UUID]BookFileQualityReport, len(qualities))
+		for _, row := range qualities {
+			var report BookFileQualityReport
+			if json.Unmarshal([]byte(row.ReportJSON), &report) == nil && report.Version == 1 {
+				byRevision[row.RevisionID] = report
+			}
+		}
+		for i := range files {
+			if report, ok := byRevision[files[i].RevisionID]; ok {
+				copyReport := report
+				files[i].Quality = &copyReport
+			}
+		}
+	}
+	return files, nil
 }
 
 // Best-file selection changes only the edition recommendation, not readers'

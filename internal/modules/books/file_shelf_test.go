@@ -56,6 +56,11 @@ func TestEditionBestFilePreservesShelfAndHistory(t *testing.T) {
 	require.Len(t, files, 2)
 	require.Equal(t, *newFile.RevisionID, files[0].RevisionID)
 	require.True(t, files[0].IsBest)
+	require.NotNil(t, files[0].Quality, "verified uploads should expose inspection evidence")
+	require.Equal(t, "txt", files[0].Quality.Format)
+	require.NotNil(t, files[0].Quality.TXTValidUTF8)
+	require.True(t, *files[0].Quality.TXTValidUTF8)
+	require.NotNil(t, files[1].Quality, "an old file keeps its quality evidence")
 
 	archived := true
 	_, err = s.SaveBookFileShelf(ctx, user, *oldFile.RevisionID, SaveBookFileShelfInput{Status: model.BookFileShelfPaused, Archived: &archived})

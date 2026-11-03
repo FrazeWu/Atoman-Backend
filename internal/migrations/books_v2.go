@@ -13,7 +13,7 @@ import (
 func RunBooksV2Migration(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(&model.BookEdition{}, &model.MediaAsset{}, &model.BookAsset{}, &model.BookAssetRevision{},
-			&model.BookDefaultAsset{}, &model.BookEditionCover{}, &model.BookFileVisibility{}, &model.BookEditionBestFile{}, &model.BookBestFileEvent{}, &model.BookFileShelf{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{},
+			&model.BookDefaultAsset{}, &model.BookEditionCover{}, &model.BookFileVisibility{}, &model.BookFileQuality{}, &model.BookEditionBestFile{}, &model.BookBestFileEvent{}, &model.BookFileShelf{}, &model.BookReadingSelection{}, &model.BookReadingState{}, &model.BookWikiMerge{}, &model.BookUploadSession{},
 			&model.BookReadingSession{}, &model.BookReadingWrite{}, &model.BookReadingMark{},
 			&model.BookLibraryEntry{}, &model.BookPrivateNote{}, &model.BookNoteImportReceipt{},
 			&model.BookReaderClock{}, &model.BookReadingDaily{}, &model.BookNotePublication{},
@@ -57,6 +57,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_book_private_note_identity ON book_private
 			{"book_edition_covers", "fk_book_edition_cover", "FOREIGN KEY (edition_id) REFERENCES book_editions(id)"},
 			{"book_edition_covers", "fk_book_edition_cover_user", "FOREIGN KEY (updated_by) REFERENCES \"Users\"(uuid)"},
 			{"book_file_visibilities", "fk_book_file_visibility_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id)"},
+			{"book_file_qualities", "fk_book_file_quality_revision", "FOREIGN KEY (revision_id) REFERENCES book_asset_revisions(id) ON DELETE CASCADE"},
 			{"book_file_visibilities", "fk_book_file_visibility_user", "FOREIGN KEY (updated_by) REFERENCES \"Users\"(uuid)"},
 			{"book_reading_selections", "fk_book_selection_asset", "FOREIGN KEY (asset_id, work_id) REFERENCES book_assets(id, work_id)"},
 			{"book_reading_selections", "fk_book_selection_revision", "FOREIGN KEY (revision_id, asset_id) REFERENCES book_asset_revisions(id, asset_id)"},

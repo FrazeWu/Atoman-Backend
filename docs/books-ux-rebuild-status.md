@@ -26,7 +26,7 @@
 
 ## Remaining before release
 
-- Explainable file quality analysis/comparison, not only manual selection.
+- Bounded, evidence-based file-quality report and manual comparison UI are implemented (see `books-file-quality-evidence-20261103.md`); deeper page/text/OCR/visual checks remain open.
 - External ISBN lookup and stronger OCR extraction.
 - Reader verification across formats, jump-safe actual furthest progress.
 - Cross-file notes, work-level note collections and exact source deep links.

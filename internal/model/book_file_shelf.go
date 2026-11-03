@@ -71,3 +71,13 @@ type BookFileVisibility struct {
 }
 
 func (BookFileVisibility) TableName() string { return "book_file_visibilities" }
+
+// BookFileQuality stores bounded, factual inspection signals for a single immutable
+// revision. No format ranking or unverified OCR/completeness claim is persisted.
+type BookFileQuality struct {
+	RevisionID uuid.UUID `json:"revision_id" gorm:"type:uuid;primaryKey"`
+	ReportJSON string    `json:"-" gorm:"type:jsonb;not null"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (BookFileQuality) TableName() string { return "book_file_qualities" }
