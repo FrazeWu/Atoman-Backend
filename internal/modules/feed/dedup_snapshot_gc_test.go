@@ -43,6 +43,13 @@ func TestDedupSnapshotPrunesOnlyInactiveOldGenerations(t *testing.T) {
 	if oldCount != 0 {
 		t.Fatalf("old generation rows remain: %d", oldCount)
 	}
+	var memberCount int64
+	if err := db.Model(&feedDedupSnapshotMember{}).Where("generation_id = ?", oldHead.GenerationID).Count(&memberCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if memberCount != 0 {
+		t.Fatalf("old generation member metadata remain: %d", memberCount)
+	}
 	current, count, err := repo.readPublicRecentDedupSnapshotPage(ctx, "gc-revision-current", 1, 10)
 	if err != nil || count != 1 || len(current) != 1 || current[0].ID != item.ID {
 		t.Fatalf("active projection removed: rows=%+v count=%d err=%v", current, count, err)

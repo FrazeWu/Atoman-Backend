@@ -18,7 +18,7 @@ import (
 func prepareDedupSnapshotTest(t *testing.T) (*Repo, *gorm.DB, model.FeedSource) {
 	t.Helper()
 	service, db, _ := newFeedTestService(t)
-	if err := db.AutoMigrate(&feedDedupSnapshotHead{}, &feedDedupSnapshotGeneration{}, &feedDedupSnapshotRow{}); err != nil {
+	if err := db.AutoMigrate(&feedDedupSnapshotHead{}, &feedDedupSnapshotGeneration{}, &feedDedupSnapshotRow{}, &feedDedupSnapshotMember{}); err != nil {
 		t.Fatalf("migrate isolated projection schema: %v", err)
 	}
 	if err := db.Exec("DELETE FROM feed_item_reads").Error; err != nil {

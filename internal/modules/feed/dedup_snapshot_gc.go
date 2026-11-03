@@ -28,6 +28,9 @@ func (r *Repo) pruneInactiveDedupSnapshotGenerations(ctx context.Context, grace 
 			return err
 		}
 		for _, generation := range obsolete {
+			if err := tx.Where("generation_id = ?", generation.GenerationID).Delete(&feedDedupSnapshotMember{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("generation_id = ?", generation.GenerationID).Delete(&feedDedupSnapshotRow{}).Error; err != nil {
 				return err
 			}

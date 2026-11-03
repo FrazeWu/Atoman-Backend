@@ -60,8 +60,8 @@ func (r *Repo) currentPublicRecentDedupRefreshState(ctx context.Context, policy 
 
 // refreshPublicRecentDedupIfQuiet checks the revision before and after taking
 // a session advisory lock. It coalesces short bursts of ingestion and avoids
-// concurrent full rebuilds. This is a guarded full rebuild, NOT an incremental
-// diff algorithm. The future incremental path must preserve greedy grouping.
+// concurrent full rebuilds. It first attempts provably safe newest-prefix or
+// oldest-tail updates and falls back to a full rebuild for all other changes.
 func (r *Repo) refreshPublicRecentDedupIfQuiet(ctx context.Context, policy PublicDedupRefreshPolicy) (PublicDedupRefreshResult, error) {
 	if policy.QuietPeriod < 0 {
 		return "", fmt.Errorf("negative dedup refresh quiet period")
@@ -97,7 +97,14 @@ func (r *Repo) refreshPublicRecentDedupIfQuiet(ctx context.Context, policy Publi
 	if err != nil || state != "" {
 		return state, err
 	}
-	applied, err := r.tryAppendOldestDedupItem(ctx)
+	applied, err := r.tryPrependIsolatedRecentBatch(ctx)
+	if err != nil {
+		return "", err
+	}
+	if applied {
+		return PublicDedupRefreshIncremental, nil
+	}
+	applied, err = r.tryAppendOldestDedupItem(ctx)
 	if err != nil {
 		return "", err
 	}

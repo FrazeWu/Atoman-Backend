@@ -54,12 +54,19 @@ func TestDedupRefreshDefersBatchesAndPublishesAtomicGeneration(t *testing.T) {
 		t.Fatalf("new data must invalidate old generation: %v", err)
 	}
 	result, err = repo.refreshPublicRecentDedupIfQuiet(ctx, PublicDedupRefreshPolicy{})
-	if err != nil || result != PublicDedupRefreshRebuilt {
-		t.Fatalf("expected rebuild after insert: state=%q err=%v", result, err)
+	if err != nil || result != PublicDedupRefreshIncremental {
+		t.Fatalf("expected safe newest prefix insert: state=%q err=%v", result, err)
+	}
+	var refreshed feedDedupSnapshotHead
+	if err := db.Where("scope = ?", publicRecentDedupScope).Take(&refreshed).Error; err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.GenerationID != firstHead.GenerationID || refreshed.PositionBase != firstHead.PositionBase-1 {
+		t.Fatalf("safe independent newest insert must preserve generation and move position base: before=%+v after=%+v", firstHead, refreshed)
 	}
 	rows, total, err := repo.readPublicRecentDedupSnapshotPageTracked(ctx, 1, 20)
 	if err != nil || total != 2 || len(rows) != 2 {
-		t.Fatalf("rebuild did not include new content: total=%d rows=%+v err=%v", total, rows, err)
+		t.Fatalf("safe refresh did not include new content: total=%d rows=%+v err=%v", total, rows, err)
 	}
 }
 

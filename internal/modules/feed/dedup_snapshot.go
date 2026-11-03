@@ -27,14 +27,18 @@ const publicRecentDedupScope = "public_recent_v1"
 var ErrDedupSnapshotStale = errors.New("feed deduplication snapshot unavailable or stale")
 
 type feedDedupSnapshotHead struct {
-	Scope           string          `gorm:"primaryKey;size:96"`
-	GenerationID    uuid.UUID       `gorm:"type:uuid;not null"`
-	Revision        string          `gorm:"not null;size:180"`
-	Total           int64           `gorm:"not null"`
-	BuiltAt         time.Time       `gorm:"not null"`
-	SourceVersions  json.RawMessage `gorm:"type:jsonb;not null"`
-	TailPublishedAt *time.Time
-	TailFeedItemID  uuid.UUID `gorm:"type:uuid;not null"`
+	Scope            string          `gorm:"primaryKey;size:96"`
+	GenerationID     uuid.UUID       `gorm:"type:uuid;not null"`
+	Revision         string          `gorm:"not null;size:180"`
+	Total            int64           `gorm:"not null"`
+	BuiltAt          time.Time       `gorm:"not null"`
+	SourceVersions   json.RawMessage `gorm:"type:jsonb;not null"`
+	TailPublishedAt  *time.Time
+	TailFeedItemID   uuid.UUID `gorm:"type:uuid;not null"`
+	FirstPublishedAt *time.Time
+	FirstFeedItemID  uuid.UUID `gorm:"type:uuid;not null"`
+	PositionBase     int64     `gorm:"not null;default:0"`
+	RawItemCount     int64     `gorm:"not null;default:0"`
 }
 
 func (feedDedupSnapshotHead) TableName() string { return "feed_dedup_snapshot_heads" }
@@ -64,11 +68,25 @@ type feedDedupSnapshotRow struct {
 
 func (feedDedupSnapshotRow) TableName() string { return "feed_dedup_snapshot_rows" }
 
+// Every visible item, including hidden cluster members, is indexed. A new
+// representative can change prior grouping if it matches any old member.
+// Checking only old group representatives is therefore NOT sufficient.
+type feedDedupSnapshotMember struct {
+	GenerationID      uuid.UUID `gorm:"type:uuid;primaryKey;index:idx_feed_dedup_member_date,priority:1;index:idx_feed_dedup_member_url,priority:1"`
+	FeedItemID        uuid.UUID `gorm:"type:uuid;primaryKey"`
+	PublishedAt       time.Time `gorm:"not null;index:idx_feed_dedup_member_date,priority:2"`
+	NormalizedURL     string    `gorm:"type:text;not null"`
+	NormalizedURLHash string    `gorm:"size:64;not null;index:idx_feed_dedup_member_url,priority:2"`
+	NormalizedTitle   string    `gorm:"type:text;not null"`
+}
+
+func (feedDedupSnapshotMember) TableName() string { return "feed_dedup_snapshot_members" }
+
 // publishPublicRecentDedupSnapshot rebuilds the exact greedy clusters from
 // the same narrow, newest-first rows as the legacy public feed path. The row
 // inserts and the live-generation pointer are committed atomically. Old
 // generations are retained for readers that raced a generation swap.
-// This currently rebuilds from scratch; incremental maintenance is pending.
+// Full rebuilds remain the safe fallback when incremental guards fail.
 func (r *Repo) publishPublicRecentDedupSnapshot(ctx context.Context, revision string) (int64, error) {
 	return r.publishPublicRecentDedupSnapshotWithCheckpoints(ctx, revision, nil)
 }
@@ -92,6 +110,13 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 		return 0, err
 	}
 
+	var firstPublishedAt *time.Time
+	var firstID uuid.UUID
+	if len(items) > 0 {
+		newest := items[0]
+		firstPublishedAt = &newest.PublishedAt
+		firstID = newest.ID
+	}
 	var tailPublishedAt *time.Time
 	var tailID uuid.UUID
 	if len(items) > 0 {
@@ -109,7 +134,14 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 	legacyfeed.AnnotateDuplicateFeedItems(items)
 	generationID := uuid.New()
 	rows := make([]feedDedupSnapshotRow, 0, len(items))
+	members := make([]feedDedupSnapshotMember, 0, len(items))
 	for _, item := range items {
+		members = append(members, feedDedupSnapshotMember{
+			GenerationID: generationID, FeedItemID: item.ID, PublishedAt: item.PublishedAt,
+			NormalizedURL:     legacyfeed.NormalizeFeedItemURL(item.Link),
+			NormalizedURLHash: feedDedupURLHash(legacyfeed.NormalizeFeedItemURL(item.Link)),
+			NormalizedTitle:   legacyfeed.NormalizeFeedItemTitle(item.Title),
+		})
 		if item.IsDuplicate {
 			continue
 		}
@@ -146,14 +178,25 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 				return err
 			}
 		}
+		for start := 0; start < len(members); start += 300 {
+			end := start + 300
+			if end > len(members) {
+				end = len(members)
+			}
+			if err := tx.Create(members[start:end]).Error; err != nil {
+				return err
+			}
+		}
 		head := feedDedupSnapshotHead{
 			Scope: publicRecentDedupScope, GenerationID: generationID,
 			Revision: revision, Total: total, BuiltAt: time.Now().UTC(),
 			SourceVersions: encodedVersions, TailPublishedAt: tailPublishedAt, TailFeedItemID: tailID,
+			FirstPublishedAt: firstPublishedAt, FirstFeedItemID: firstID, PositionBase: 0,
+			RawItemCount: int64(len(members)),
 		}
 		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "scope"}},
-			DoUpdates: clause.AssignmentColumns([]string{"generation_id", "revision", "total", "built_at", "source_versions", "tail_published_at", "tail_feed_item_id"}),
+			DoUpdates: clause.AssignmentColumns([]string{"generation_id", "revision", "total", "built_at", "source_versions", "tail_published_at", "tail_feed_item_id", "first_published_at", "first_feed_item_id", "position_base", "raw_item_count"}),
 		}).Create(&head).Error
 	})
 	return total, err
@@ -189,7 +232,11 @@ func (r *Repo) readPublicRecentDedupSnapshotPage(ctx context.Context, revision s
 	}
 
 	var projectionRows []feedDedupSnapshotRow
-	if err := r.db.WithContext(ctx).Where("generation_id = ? AND position >= ?", head.GenerationID, start).
+	if head.PositionBase > math.MaxInt64-start || head.PositionBase < math.MinInt64+start {
+		return nil, 0, ErrDedupSnapshotStale
+	}
+	absoluteStart := head.PositionBase + start
+	if err := r.db.WithContext(ctx).Where("generation_id = ? AND position >= ?", head.GenerationID, absoluteStart).
 		Order("position ASC").Limit(pageSize).Find(&projectionRows).Error; err != nil {
 		return nil, 0, err
 	}

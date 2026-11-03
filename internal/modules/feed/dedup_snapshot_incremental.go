@@ -129,7 +129,7 @@ func (r *Repo) tryAppendOldestDedupItem(ctx context.Context) (bool, error) {
 			}
 			sources := json.RawMessage("null")
 			row := feedDedupSnapshotRow{
-				GenerationID: head.GenerationID, Position: head.Total, FeedItemID: item.ID,
+				GenerationID: head.GenerationID, Position: head.PositionBase + head.Total, FeedItemID: item.ID,
 				PublishedAt: item.PublishedAt, NormalizedURL: normalizedURL,
 				NormalizedTitle: legacyfeed.NormalizeFeedItemTitle(item.Title),
 				DuplicateCount:  1, DuplicateMemberIDs: ids, DuplicateSources: sources,
@@ -188,17 +188,31 @@ func (r *Repo) tryAppendOldestDedupItem(ctx context.Context) (bool, error) {
 				return err
 			}
 		}
+		if err := tx.Create(&feedDedupSnapshotMember{
+			GenerationID: head.GenerationID, FeedItemID: item.ID, PublishedAt: item.PublishedAt,
+			NormalizedURL:     normalizedURL,
+			NormalizedURLHash: feedDedupURLHash(normalizedURL),
+			NormalizedTitle:   legacyfeed.NormalizeFeedItemTitle(item.Title),
+		}).Error; err != nil {
+			return err
+		}
 		encodedVersions, err := json.Marshal(current)
 		if err != nil {
 			return err
 		}
+		updates := map[string]any{
+			"revision": currentTotal, "source_versions": encodedVersions,
+			"tail_published_at": item.PublishedAt,
+			"tail_feed_item_id": item.ID,
+			"total":             newTotal,
+			"raw_item_count":    head.RawItemCount + 1,
+		}
+		if head.RawItemCount == 0 {
+			updates["first_published_at"] = item.PublishedAt
+			updates["first_feed_item_id"] = item.ID
+		}
 		if err := tx.Model(&feedDedupSnapshotHead{}).Where("scope = ?", publicRecentDedupScope).
-			Updates(map[string]any{
-				"revision": currentTotal, "source_versions": encodedVersions,
-				"tail_published_at": item.PublishedAt,
-				"tail_feed_item_id": item.ID,
-				"total":             newTotal,
-			}).Error; err != nil {
+			Updates(updates).Error; err != nil {
 			return err
 		}
 		appliedRevision = currentTotal
@@ -211,8 +225,6 @@ func (r *Repo) tryAppendOldestDedupItem(ctx context.Context) (bool, error) {
 	if !applied {
 		return false, nil
 	}
-	// A racing RSS write might have committed just after the transaction.
-	// A fresh reader will reject the old revision; signal stale to the worker.
 	latest, err := r.dedupSourceRevision(ctx)
 	if err != nil {
 		return false, err
@@ -246,6 +258,14 @@ func oneAdvancedSource(before, after map[string]int64) (string, int64, bool) {
 }
 
 func dedupItemAfterTail(head feedDedupSnapshotHead, item model.FeedItem) bool {
+	// PostgreSQL sorts NULL timestamps FIRST in DESC order. A zero Go
+	// timestamp can represent a NULL database date, not an oldest item.
+	if item.PublishedAt.IsZero() {
+		return false
+	}
+	if head.TailPublishedAt != nil && head.TailPublishedAt.IsZero() {
+		return false
+	}
 	if head.TailPublishedAt == nil {
 		return head.Total == 0
 	}

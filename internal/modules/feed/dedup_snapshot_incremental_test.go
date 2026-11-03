@@ -138,8 +138,8 @@ func TestIncrementalUnsupportedChangesFallBackToFullRebuild(t *testing.T) {
 		name   string
 		action func(t *testing.T, db *gorm.DB, source model.FeedSource, first, oldest model.FeedItem)
 	}{
-		{"newest insert", func(t *testing.T, db *gorm.DB, source model.FeedSource, first, oldest model.FeedItem) {
-			item := model.FeedItem{FeedSourceID: source.ID, GUID: "newest-insert", Title: "First thing in the latest feed", Link: "https://example.org/newest", PublishedAt: first.PublishedAt.Add(time.Hour)}
+		{"newest insert matching old", func(t *testing.T, db *gorm.DB, source model.FeedSource, first, oldest model.FeedItem) {
+			item := model.FeedItem{FeedSourceID: source.ID, GUID: "newest-insert", Title: first.Title, Link: first.Link, PublishedAt: first.PublishedAt.Add(time.Hour)}
 			if err := db.Create(&item).Error; err != nil {
 				t.Fatal(err)
 			}

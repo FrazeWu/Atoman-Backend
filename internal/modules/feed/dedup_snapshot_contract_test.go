@@ -23,7 +23,7 @@ func TestPublicRecentDedupProjectionMatchesLegacyRSSOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	clearFeedCanonicalBlogContent(t, db)
-	if err := db.AutoMigrate(&feedDedupSnapshotHead{}, &feedDedupSnapshotGeneration{}, &feedDedupSnapshotRow{}); err != nil {
+	if err := db.AutoMigrate(&feedDedupSnapshotHead{}, &feedDedupSnapshotGeneration{}, &feedDedupSnapshotRow{}, &feedDedupSnapshotMember{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := installDedupRevisionTracking(db); err != nil {

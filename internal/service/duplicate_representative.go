@@ -23,3 +23,15 @@ func FeedItemMatchesDuplicateRepresentative(normalizedURL, normalizedTitle strin
 func FeedItemDuplicateSourceTitle(item model.FeedItem) string {
 	return duplicateSourceTitle(item)
 }
+
+// FeedNormalizedItemsMatch uses already-normalized metadata. Calling the
+// normalizers again could change edge-case encoded URLs, so prefix proofs use
+// the original comparison on exactly the normalized fields in the snapshot.
+func FeedNormalizedItemsMatch(representativeURL, representativeTitle string, representativeDate time.Time, candidateURL, candidateTitle string, candidateDate time.Time) bool {
+	group := duplicateGroup{
+		normalizedURL:   representativeURL,
+		normalizedTitle: representativeTitle,
+		publishedAt:     representativeDate,
+	}
+	return group.matches(candidateURL, candidateTitle, candidateDate)
+}
