@@ -1,6 +1,8 @@
 package service
 
 import (
+	"math"
+	"math/bits"
 	"sort"
 	"time"
 )
@@ -18,6 +20,8 @@ type duplicateGroupIndex struct {
 	hotFuzzyAnchors  map[string]map[int64][]int
 	hotSubAnchors    map[string]map[int64][]int
 	groupDays        []int64
+	groupDayCounts   map[int64]int
+	hotFingerprints  map[int]duplicateTitleFingerprint
 }
 
 func newDuplicateGroupIndex() *duplicateGroupIndex {
@@ -28,6 +32,7 @@ func newDuplicateGroupIndex() *duplicateGroupIndex {
 		substringAnchors: make(map[string][]int),
 		hotFuzzyAnchors:  make(map[string]map[int64][]int),
 		hotSubAnchors:    make(map[string]map[int64][]int),
+		groupDayCounts:   make(map[int64]int),
 	}
 }
 
@@ -37,6 +42,11 @@ const duplicateFuzzyAnchorSize = 6
 const duplicateSubstringAnchorSize = 8
 const duplicateSubstringAnchorStride = 11
 const duplicateHotAnchorThreshold = 96
+
+// A guard only pays off for dense title collisions. Sparse shared wording
+// may generate hundreds of candidates, but those are cheaper to check with
+// the old bounded Levenshtein path than to build fingerprints and a cache.
+const duplicateBigramGuardThreshold = 128
 const duplicateUndatedBucket int64 = -1 << 63
 
 // floor Unix seconds to UTC days; negative timestamps must round down.
@@ -81,7 +91,10 @@ func (index *duplicateGroupIndex) addTitlePosting(cold map[string][]int,
 func (index *duplicateGroupIndex) add(group *duplicateGroup, groupID int) {
 	// add() is called in increasing groupID order, including when the
 	// index is first constructed at the 128-group threshold.
-	index.groupDays = append(index.groupDays, duplicateDateBucket(group.publishedAt))
+	day := duplicateDateBucket(group.publishedAt)
+	index.groupDays = append(index.groupDays, day)
+	index.groupDayCounts[day]++
+
 	if group.normalizedURL != "" {
 		index.urls[group.normalizedURL] = append(index.urls[group.normalizedURL], groupID)
 	}
@@ -185,10 +198,120 @@ func (index *duplicateGroupIndex) firstMatch(groups []*duplicateGroup, url, titl
 		ordered = append(ordered, groupID)
 	}
 	sort.Ints(ordered)
+	// Ordinary feeds have few candidates. Computing signatures for all
+	// representatives (or for every small query) costs more than it saves.
+	// Only high-collision title queries use this guard, with lazy per-group
+	// fingerprints cached for the lifetime of this one annotation scan.
+	useFingerprint := index.shouldUseBigramGuard(len(candidates), publishedAt)
+	var fingerprint duplicateTitleFingerprint
+	if useFingerprint {
+		fingerprint = fingerprintDuplicateTitle(title)
+		if index.hotFingerprints == nil {
+			index.hotFingerprints = make(map[int]duplicateTitleFingerprint)
+		}
+	}
 	for _, groupID := range ordered {
-		if groups[groupID].matches(url, title, publishedAt) {
+		group := groups[groupID]
+		// URL equality is date-independent and bypasses title prefilter.
+		// A conservative bigram lower bound only rejects groups that cannot
+		// satisfy EITHER the edit-distance OR exact substring title rule.
+		if useFingerprint && !(url != "" && group.normalizedURL != "" && url == group.normalizedURL) {
+			groupFingerprint, ok := index.hotFingerprints[groupID]
+			if !ok {
+				groupFingerprint = fingerprintDuplicateTitle(group.normalizedTitle)
+				index.hotFingerprints[groupID] = groupFingerprint
+			}
+			if !duplicateTitleFingerprintsMayMatch(fingerprint, groupFingerprint) {
+				continue
+			}
+		}
+		if group.matches(url, title, publishedAt) {
 			return groupID
 		}
 	}
 	return -1
+}
+
+// A compact two-rune feature set supplies an admissible lower bound on edit
+// distance, not an alternative duplicate rule. A single Levenshtein edit can
+// remove at most two adjacent bigrams from either string; a true distance
+// <=k therefore cannot have >2k distinct left-only bigrams. Hash collisions
+// only create false positives, never false negatives. Exact substring matches
+// preserve every bigram of the shorter string inside the longer string.
+// Date filtering and URL equality are deliberately handled separately.
+type duplicateTitleFingerprint struct {
+	features  [4]uint64
+	runeCount int
+}
+
+func fingerprintDuplicateTitle(title string) duplicateTitleFingerprint {
+	result := duplicateTitleFingerprint{}
+	var previous rune
+	for _, current := range title {
+		if result.runeCount > 0 {
+			// Fixed unsigned mixing is deterministic and affects only which
+			// different bigrams collide (which cannot yield a false negative).
+			hash := uint32(previous)*0x9e3779b1 ^ uint32(current)*0x85ebca77
+			hash ^= hash >> 16
+			index := hash & 255
+			result.features[index/64] |= uint64(1) << (index % 64)
+		}
+		previous = current
+		result.runeCount++
+	}
+	return result
+}
+
+func duplicateTitleFingerprintsMayMatch(a, b duplicateTitleFingerprint) bool {
+	if a.runeCount == 0 || b.runeCount == 0 {
+		return false
+	}
+	longer, shorter := a, b
+	if a.runeCount < b.runeCount {
+		longer, shorter = b, a
+	}
+	// Containment is an independent legacy rule: any exact substring with
+	// >=18 runes can match even when edit distance is too high.
+	if shorter.runeCount >= 18 {
+		contained := true
+		for word := range shorter.features {
+			if shorter.features[word]&^longer.features[word] != 0 {
+				contained = false
+				break
+			}
+		}
+		if contained {
+			return true
+		}
+	}
+	maxEdits := int(math.Ceil((1 - duplicateTitleSimilarityThreshold) * float64(longer.runeCount)))
+	if longer.runeCount-shorter.runeCount > maxEdits {
+		return false
+	}
+	var missingLeft, missingRight int
+	for word := range a.features {
+		missingLeft += bits.OnesCount64(a.features[word] &^ b.features[word])
+		missingRight += bits.OnesCount64(b.features[word] &^ a.features[word])
+	}
+	return missingLeft <= 2*maxEdits && missingRight <= 2*maxEdits
+}
+
+// Candidate density is measured against the current 72h title window,
+// not the ever-growing global number of groups. A dense local hotspot should
+// be optimized even if years of unrelated feed history exist. URL equality
+// is still checked first and never depends on this heuristic.
+func (index *duplicateGroupIndex) shouldUseBigramGuard(candidateCount int, date time.Time) bool {
+	if candidateCount < duplicateBigramGuardThreshold {
+		return false
+	}
+	if date.IsZero() {
+		// The legacy zero-time title rule considers every old group.
+		return candidateCount*2 >= len(index.groupDays)
+	}
+	nearby := index.groupDayCounts[duplicateUndatedBucket]
+	first, last := duplicateDateBucket(date.Add(-duplicateTitleWindow)), duplicateDateBucket(date.Add(duplicateTitleWindow))
+	for day := first; day <= last; day++ {
+		nearby += index.groupDayCounts[day]
+	}
+	return nearby > 0 && candidateCount*2 >= nearby
 }
