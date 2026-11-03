@@ -36,6 +36,16 @@ func TestDedupIsolatedProductionScale(t *testing.T) {
 	if err != nil || (count != 10000 && count != 100000 && count != 360000) {
 		t.Fatalf("unsupported isolated scale count: %q", raw)
 	}
+	profile := os.Getenv("FEED_SCALE_PROFILE")
+	if profile == "" {
+		profile = "baseline"
+	}
+	if profile != "baseline" && profile != "prodshape" && profile != "adversarial" {
+		t.Fatalf("unsupported scale profile %q", profile)
+	}
+	if profile == "adversarial" && count != 10000 {
+		t.Fatal("adversarial shared-title benchmark is deliberately limited to 10k")
+	}
 	repo, db, firstSource := prepareDedupSnapshotTest(t)
 	db.Logger = logger.Default.LogMode(logger.Silent)
 	sqlDB, err := db.DB()
@@ -48,14 +58,20 @@ func TestDedupIsolatedProductionScale(t *testing.T) {
 	if count == 10000 {
 		sourceCount = 40
 	}
-	t.Logf("SCALE_PROFILE count=%d sources=%d duplicate_every=12 interval=24s fulltext_every=20", count, sourceCount)
+	if profile == "prodshape" || profile == "adversarial" {
+		sourceCount = 961
+	}
+	t.Logf("SCALE_PROFILE profile=%s count=%d sources=%d duplicate_every=12 interval=24s long_body=20pct long_reader=56pct", profile, count, sourceCount)
 	sourceIDs := []string{firstSource.ID.String()}
-	for i := 1; i < sourceCount; i++ {
-		source := model.FeedSource{SourceType: "external_rss", Title: fmt.Sprintf("Synthetic publisher %d", i),
-			Hash: fmt.Sprintf("scale-20261103-%d", i), RssURL: fmt.Sprintf("https://scale.invalid/feed/%d", i)}
-		if err := db.Create(&source).Error; err != nil {
-			t.Fatal(err)
-		}
+	sources := make([]model.FeedSource, sourceCount-1)
+	for i := range sources {
+		sources[i] = model.FeedSource{SourceType: "external_rss", Title: fmt.Sprintf("Synthetic publisher %d", i+1),
+			Hash: fmt.Sprintf("scale-prodshape-20261103-%d", i+1), RssURL: fmt.Sprintf("https://scale.invalid/feed/%d", i+1)}
+	}
+	if err := db.CreateInBatches(&sources, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range sources {
 		sourceIDs = append(sourceIDs, source.ID.String())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Minute)
@@ -76,14 +92,52 @@ func TestDedupIsolatedProductionScale(t *testing.T) {
                CASE WHEN g % 20 = 0 THEN repeat('Independent article body. ', 48) ELSE '' END
         FROM generate_series(CAST(? AS bigint), CAST(? AS bigint)) AS seq(g)
         CROSS JOIN (SELECT CAST(? AS uuid[]) AS ids) AS publisher`
+	// Production-shaped fixture uses aggregate-only production observations:
+	// 961 publishers, a 7.7% dominant source, a dozen medium sources,
+	// long-tail publishers, longer titles, and much more reader/fulltext HTML.
+	// No text, links, IDs, or personal content are copied from production.
+	const prodShapeSQL = `INSERT INTO feed_items
+        (id, feed_source_id, guid, title, link, published_at, created_at, updated_at, full_text_html, reader_html)
+        SELECT gen_random_uuid(), publisher.ids[(CASE
+                 WHEN g % 13 = 0 THEN 1
+                 WHEN g % 4 = 0 THEN (g % 12) + 2
+                 ELSE ((g * 7919) % (? - 13)) + 14 END)],
+               'prodshape-' || g::text,
+               (md5((CASE WHEN g > 0 AND g % 12=0 THEN g-1 ELSE g END)::text)
+               || ' ' || (CASE WHEN g % ? = 0 THEN 'Synthetic research digest'
+                                ELSE left(md5((g*97)::text), 20) END)) ||
+               (CASE WHEN g % 20=0 THEN ' Follow-up scientific developments in resilient infrastructure and climate' ELSE '' END),
+               'https://synthetic.invalid/story/' || (CASE WHEN g>0 AND g%12=0 THEN g-1 ELSE g END)::text,
+               CASE WHEN g % 20=0
+                 THEN TIMESTAMPTZ '2012-01-26 00:00:00+00' + ((g % 5000) * interval '1 day')
+                 ELSE TIMESTAMPTZ '2026-11-03 00:00:00+00' - (g * interval '24 seconds') END,
+               now(), now(),
+               CASE WHEN g % 5=0 THEN repeat('Long synthetic full-text content. ', 40) ELSE '' END,
+               CASE WHEN g % 25 < 14 THEN repeat('Synthetic reader text content. ', 52) ELSE '' END
+        FROM generate_series(CAST(? AS bigint), CAST(? AS bigint)) AS seq(g)
+        CROSS JOIN (SELECT CAST(? AS uuid[]) AS ids) AS publisher`
+	statement := seedSQL
+	if profile == "prodshape" || profile == "adversarial" {
+		statement = prodShapeSQL
+	}
 	const seedBatch = 5000
 	for start := 0; start < count; start += seedBatch {
 		end := start + seedBatch - 1
 		if end >= count {
 			end = count - 1
 		}
-		if err := db.WithContext(ctx).Exec(seedSQL, sourceCount, start, end, pq.Array(sourceIDs)).Error; err != nil {
-			t.Fatalf("seed batch %d-%d: %v", start, end, err)
+		var seedErr error
+		if profile == "baseline" {
+			seedErr = db.WithContext(ctx).Exec(statement, sourceCount, start, end, pq.Array(sourceIDs)).Error
+		} else {
+			sharedEvery := 20 // 5% of titles use shared boilerplate instead of 100%.
+			if profile == "adversarial" {
+				sharedEvery = 1
+			}
+			seedErr = db.WithContext(ctx).Exec(statement, sourceCount, sharedEvery, start, end, pq.Array(sourceIDs)).Error
+		}
+		if seedErr != nil {
+			t.Fatalf("seed batch %d-%d: %v", start, end, seedErr)
 		}
 		// A recurring database size guard stops the synthetic fixture before
 		// it consumes unexpected disk space. The disposable container is also
@@ -105,7 +159,10 @@ func TestDedupIsolatedProductionScale(t *testing.T) {
 	total, err := repo.publishPublicRecentDedupSnapshotTracked(ctx)
 	runtime.ReadMemStats(&memAfter)
 	expected := int64(count - (count-1)/12)
-	if err != nil || total != expected {
+	if profile == "prodshape" || profile == "adversarial" {
+		expected = total
+	}
+	if err != nil || total != expected || total < int64(count/2) || total >= int64(count) {
 		t.Fatalf("full projection expected=%d got=%d err=%v", expected, total, err)
 	}
 	t.Logf("SCALE_BUILD count=%d groups=%d elapsed=%s alloc_mib=%.1f heap_mib=%.1f heap_sys_mib=%.1f rss_hwm_kib=%d",
@@ -250,6 +307,10 @@ func TestDedupIsolatedProductionScale(t *testing.T) {
 	}
 	t.Logf("SCALE_FINAL revision_events=%d stale_read_rejected=true rebuild_deferred=true db_bytes=%d rss_hwm_kib=%d",
 		journalCount, scaleDatabaseBytes(t, db), scaleRssPeakKiB())
+	if profile == "prodshape" || profile == "adversarial" {
+		scaleSameSourceContention(t, ctx, db, sourceIDs[0])
+		scaleHistoricalGenerationPrune(t, ctx, repo, db, head.GenerationID)
+	}
 }
 
 func scaleDatabaseBytes(t *testing.T, db *gorm.DB) int64 {
