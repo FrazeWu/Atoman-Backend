@@ -127,7 +127,7 @@ func (group *duplicateGroup) matches(normalizedURL, normalizedTitle string, publ
 		return false
 	}
 
-	if titleSimilarity(normalizedTitle, group.normalizedTitle) >= duplicateTitleSimilarityThreshold {
+	if titlesSimilarAboveThreshold(normalizedTitle, group.normalizedTitle, duplicateTitleSimilarityThreshold) {
 		return true
 	}
 

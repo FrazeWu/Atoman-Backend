@@ -5,63 +5,70 @@ import (
 	"time"
 )
 
-// duplicateGroupIndex narrows matching candidates without changing the
-// first-matching-group rule in AnnotateDuplicateFeedItems. Only representative
-// titles and URLs are indexed, because matches compare those same fields.
-//
-// A 90% Levenshtein match can change at most floor(len(groupTitle)/9)
-// runes. One more disjoint 4-rune anchor must therefore survive any allowed
-// edit sequence. Substring matches require at least 18 runes; an anchor every
-// 15 positions ensures that every such substring contains a stored anchor.
-// The original group.matches method remains the final authority.
+// duplicateGroupIndex is a lossless candidate filter: final acceptance and
+// the first matching representative are still determined by group.matches.
+// For 90% similarity, at most about one character in ten may change. At
+// least one of the disjoint 6-rune anchors in a >=12-rune title survives all
+// accepted edit sequences; shorter titles use 4-rune anchors instead.
+// An exact substring match requires >=18 runes, so 8-rune anchors every 11
+// positions ensure every qualifying substring includes one whole anchor.
 type duplicateGroupIndex struct {
-	urls        map[string][]int
-	shortTitles map[string][]int
-	anchors     map[string][]int
+	urls             map[string][]int
+	shortTitles      map[string][]int
+	fuzzyAnchors     map[string][]int
+	substringAnchors map[string][]int
 }
 
 func newDuplicateGroupIndex() *duplicateGroupIndex {
 	return &duplicateGroupIndex{
-		urls:        make(map[string][]int),
-		shortTitles: make(map[string][]int),
-		anchors:     make(map[string][]int),
+		urls:             make(map[string][]int),
+		shortTitles:      make(map[string][]int),
+		fuzzyAnchors:     make(map[string][]int),
+		substringAnchors: make(map[string][]int),
 	}
 }
 
-// Below this size the linear first-match scan is cheaper than building a map.
-const duplicateIndexThreshold = 1024
-
-const duplicateAnchorSize = 4
-const duplicateSubstringAnchorStride = 15
+// Linear first-match scans are faster for small sets of representatives.
+const duplicateIndexThreshold = 128
+const duplicateShortAnchorSize = 4
+const duplicateFuzzyAnchorSize = 6
+const duplicateSubstringAnchorSize = 8
+const duplicateSubstringAnchorStride = 11
 
 func (index *duplicateGroupIndex) add(group *duplicateGroup, groupID int) {
 	if group.normalizedURL != "" {
 		index.urls[group.normalizedURL] = append(index.urls[group.normalizedURL], groupID)
 	}
 	runes := []rune(group.normalizedTitle)
-	if len(runes) < duplicateAnchorSize {
+	if len(runes) < duplicateShortAnchorSize {
 		if group.normalizedTitle != "" {
 			index.shortTitles[group.normalizedTitle] = append(index.shortTitles[group.normalizedTitle], groupID)
 		}
 		return
 	}
+	q := duplicateShortAnchorSize
+	if len(runes) >= 12 {
+		q = duplicateFuzzyAnchorSize
+	}
 	seen := make(map[string]bool)
-	addAnchor := func(start int) {
-		if start+duplicateAnchorSize > len(runes) {
-			return
-		}
-		key := string(runes[start : start+duplicateAnchorSize])
+	for start := 0; start+q <= len(runes); start += q {
+		key := string(runes[start : start+q])
 		if seen[key] {
-			return
+			continue
 		}
 		seen[key] = true
-		index.anchors[key] = append(index.anchors[key], groupID)
+		index.fuzzyAnchors[key] = append(index.fuzzyAnchors[key], groupID)
 	}
-	for i := 0; i <= len(runes)/9; i++ {
-		addAnchor(i * duplicateAnchorSize)
-	}
-	for start := 0; start+duplicateAnchorSize <= len(runes); start += duplicateSubstringAnchorStride {
-		addAnchor(start)
+	if len(runes) >= 18 {
+		clear(seen)
+		for start := 0; start+duplicateSubstringAnchorSize <= len(runes); start += duplicateSubstringAnchorStride {
+			key := string(runes[start : start+duplicateSubstringAnchorSize])
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			index.substringAnchors[key] = append(index.substringAnchors[key], groupID)
+		}
 	}
 }
 
@@ -73,19 +80,27 @@ func (index *duplicateGroupIndex) firstMatch(groups []*duplicateGroup, url, titl
 		}
 	}
 	runes := []rune(title)
-	if len(runes) < duplicateAnchorSize {
+	if len(runes) < duplicateShortAnchorSize {
 		for _, groupID := range index.shortTitles[title] {
 			candidates[groupID] = struct{}{}
 		}
 	} else {
 		seen := make(map[string]bool)
-		for pos := 0; pos+duplicateAnchorSize <= len(runes); pos++ {
-			key := string(runes[pos : pos+duplicateAnchorSize])
-			if seen[key] {
-				continue
+		for _, width := range [...]int{duplicateShortAnchorSize, duplicateFuzzyAnchorSize} {
+			for pos := 0; pos+width <= len(runes); pos++ {
+				key := string(runes[pos : pos+width])
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				for _, groupID := range index.fuzzyAnchors[key] {
+					candidates[groupID] = struct{}{}
+				}
 			}
-			seen[key] = true
-			for _, groupID := range index.anchors[key] {
+		}
+		for pos := 0; pos+duplicateSubstringAnchorSize <= len(runes); pos++ {
+			key := string(runes[pos : pos+duplicateSubstringAnchorSize])
+			for _, groupID := range index.substringAnchors[key] {
 				candidates[groupID] = struct{}{}
 			}
 		}

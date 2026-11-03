@@ -192,3 +192,29 @@ func BenchmarkDuplicateReferenceManyTitles(b *testing.B) {
 		annotateDuplicatesReference(copyItems)
 	}
 }
+
+func TestDedupIndexDisjointAnchorEdits(t *testing.T) {
+	base := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	source := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJ")
+	edited := append([]rune(nil), source...)
+	for _, pos := range []int{5, 14, 23} {
+		edited[pos] = 'Z'
+	}
+	entries := []model.FeedItem{
+		{Base: model.Base{ID: uuid.New()}, Title: string(source), PublishedAt: base},
+		{Base: model.Base{ID: uuid.New()}, Title: string(edited), PublishedAt: base.Add(time.Minute)},
+	}
+	// Force the index threshold to be crossed with distinct preceding groups.
+	for i := 0; i < duplicateIndexThreshold+10; i++ {
+		entries = append(entries, model.FeedItem{Base: model.Base{ID: uuid.New()}, Title: uuid.NewString(), PublishedAt: base})
+	}
+	entries = append(entries, entries[1])
+	entries[len(entries)-1].ID = uuid.New()
+	expected := append([]model.FeedItem(nil), entries...)
+	actual := append([]model.FeedItem(nil), entries...)
+	annotateDuplicatesReference(expected)
+	AnnotateDuplicateFeedItems(actual)
+	if !reflect.DeepEqual(expected, actual) {
+		t.Fatalf("disjoint edited titles not matched consistently")
+	}
+}
