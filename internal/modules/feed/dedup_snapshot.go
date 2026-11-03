@@ -27,11 +27,14 @@ const publicRecentDedupScope = "public_recent_v1"
 var ErrDedupSnapshotStale = errors.New("feed deduplication snapshot unavailable or stale")
 
 type feedDedupSnapshotHead struct {
-	Scope        string    `gorm:"primaryKey;size:96"`
-	GenerationID uuid.UUID `gorm:"type:uuid;not null"`
-	Revision     string    `gorm:"not null;size:180"`
-	Total        int64     `gorm:"not null"`
-	BuiltAt      time.Time `gorm:"not null"`
+	Scope           string          `gorm:"primaryKey;size:96"`
+	GenerationID    uuid.UUID       `gorm:"type:uuid;not null"`
+	Revision        string          `gorm:"not null;size:180"`
+	Total           int64           `gorm:"not null"`
+	BuiltAt         time.Time       `gorm:"not null"`
+	SourceVersions  json.RawMessage `gorm:"type:jsonb;not null"`
+	TailPublishedAt *time.Time
+	TailFeedItemID  uuid.UUID `gorm:"type:uuid;not null"`
 }
 
 func (feedDedupSnapshotHead) TableName() string { return "feed_dedup_snapshot_heads" }
@@ -52,6 +55,8 @@ type feedDedupSnapshotRow struct {
 	Position           int64           `gorm:"primaryKey"`
 	FeedItemID         uuid.UUID       `gorm:"type:uuid;not null"`
 	PublishedAt        time.Time       `gorm:"not null"`
+	NormalizedURL      string          `gorm:"type:text;not null"`
+	NormalizedTitle    string          `gorm:"type:text;not null"`
 	DuplicateCount     int             `gorm:"not null"`
 	DuplicateMemberIDs json.RawMessage `gorm:"type:jsonb;not null"`
 	DuplicateSources   json.RawMessage `gorm:"type:jsonb;not null"`
@@ -65,6 +70,10 @@ func (feedDedupSnapshotRow) TableName() string { return "feed_dedup_snapshot_row
 // generations are retained for readers that raced a generation swap.
 // This currently rebuilds from scratch; incremental maintenance is pending.
 func (r *Repo) publishPublicRecentDedupSnapshot(ctx context.Context, revision string) (int64, error) {
+	return r.publishPublicRecentDedupSnapshotWithCheckpoints(ctx, revision, nil)
+}
+
+func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Context, revision string, versions map[string]int64) (int64, error) {
 	if strings.TrimSpace(revision) == "" {
 		return 0, fmt.Errorf("feed dedup snapshot requires an upstream revision")
 	}
@@ -83,6 +92,20 @@ func (r *Repo) publishPublicRecentDedupSnapshot(ctx context.Context, revision st
 		return 0, err
 	}
 
+	var tailPublishedAt *time.Time
+	var tailID uuid.UUID
+	if len(items) > 0 {
+		oldest := items[len(items)-1]
+		tailPublishedAt = &oldest.PublishedAt
+		tailID = oldest.ID
+	}
+	if versions == nil {
+		versions = map[string]int64{}
+	}
+	encodedVersions, err := json.Marshal(versions)
+	if err != nil {
+		return 0, err
+	}
 	legacyfeed.AnnotateDuplicateFeedItems(items)
 	generationID := uuid.New()
 	rows := make([]feedDedupSnapshotRow, 0, len(items))
@@ -100,7 +123,10 @@ func (r *Repo) publishPublicRecentDedupSnapshot(ctx context.Context, revision st
 		}
 		rows = append(rows, feedDedupSnapshotRow{
 			GenerationID: generationID, Position: int64(len(rows)), FeedItemID: item.ID,
-			PublishedAt: item.PublishedAt, DuplicateCount: item.DuplicateCount,
+			PublishedAt:        item.PublishedAt,
+			NormalizedURL:      legacyfeed.NormalizeFeedItemURL(item.Link),
+			NormalizedTitle:    legacyfeed.NormalizeFeedItemTitle(item.Title),
+			DuplicateCount:     item.DuplicateCount,
 			DuplicateMemberIDs: memberIDs, DuplicateSources: sources,
 		})
 	}
@@ -123,10 +149,11 @@ func (r *Repo) publishPublicRecentDedupSnapshot(ctx context.Context, revision st
 		head := feedDedupSnapshotHead{
 			Scope: publicRecentDedupScope, GenerationID: generationID,
 			Revision: revision, Total: total, BuiltAt: time.Now().UTC(),
+			SourceVersions: encodedVersions, TailPublishedAt: tailPublishedAt, TailFeedItemID: tailID,
 		}
 		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "scope"}},
-			DoUpdates: clause.AssignmentColumns([]string{"generation_id", "revision", "total", "built_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"generation_id", "revision", "total", "built_at", "source_versions", "tail_published_at", "tail_feed_item_id"}),
 		}).Create(&head).Error
 	})
 	return total, err

@@ -21,10 +21,11 @@ type PublicDedupRefreshPolicy struct {
 type PublicDedupRefreshResult string
 
 const (
-	PublicDedupRefreshCurrent  PublicDedupRefreshResult = "current"
-	PublicDedupRefreshDeferred PublicDedupRefreshResult = "deferred"
-	PublicDedupRefreshBusy     PublicDedupRefreshResult = "busy"
-	PublicDedupRefreshRebuilt  PublicDedupRefreshResult = "rebuilt"
+	PublicDedupRefreshCurrent     PublicDedupRefreshResult = "current"
+	PublicDedupRefreshDeferred    PublicDedupRefreshResult = "deferred"
+	PublicDedupRefreshBusy        PublicDedupRefreshResult = "busy"
+	PublicDedupRefreshRebuilt     PublicDedupRefreshResult = "rebuilt"
+	PublicDedupRefreshIncremental PublicDedupRefreshResult = "incremental"
 )
 
 // These advisory keys only serialize competing rebuild workers. RSS writers
@@ -95,6 +96,13 @@ func (r *Repo) refreshPublicRecentDedupIfQuiet(ctx context.Context, policy Publi
 	_, state, err = r.currentPublicRecentDedupRefreshState(ctx, policy)
 	if err != nil || state != "" {
 		return state, err
+	}
+	applied, err := r.tryAppendOldestDedupItem(ctx)
+	if err != nil {
+		return "", err
+	}
+	if applied {
+		return PublicDedupRefreshIncremental, nil
 	}
 	if _, err := r.publishPublicRecentDedupSnapshotTracked(ctx); err != nil {
 		return "", err

@@ -167,11 +167,11 @@ func (r *Repo) dedupSourceRevision(ctx context.Context) (string, error) {
 // The rebuild is not yet scheduled in production. The read path verifies the
 // source aggregate in a repeatable-read transaction to fail closed on changes.
 func (r *Repo) publishPublicRecentDedupSnapshotTracked(ctx context.Context) (int64, error) {
-	before, err := r.dedupSourceRevision(ctx)
+	beforeVersions, before, err := r.dedupSourceCheckpoint(ctx)
 	if err != nil {
 		return 0, err
 	}
-	total, err := r.publishPublicRecentDedupSnapshot(ctx, before)
+	total, err := r.publishPublicRecentDedupSnapshotWithCheckpoints(ctx, before, beforeVersions)
 	if err != nil {
 		return 0, err
 	}
