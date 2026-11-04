@@ -5658,7 +5658,14 @@ definitions:
     type: object
   mail.ReserveInput:
     properties:
+      local_part:
+        type: string
       token:
+        type: string
+    type: object
+  mail.ReserveSelfInput:
+    properties:
+      local_part:
         type: string
     type: object
   model.Album:
@@ -21983,7 +21990,7 @@ paths:
       consumes:
       - application/json
       parameters:
-      - description: Single-use invite token
+      - description: Single-use invite and chosen mailbox local part
         in: body
         name: input
         required: true
@@ -22015,7 +22022,7 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: Redeem invitation, reserve address only (does not provision mail)
+      summary: Redeem invitation using a custom mail address (reservation only)
       tags:
       - mail
   /api/v1/mail/admin/invites:
@@ -22023,7 +22030,7 @@ paths:
       consumes:
       - application/json
       parameters:
-      - description: Target Atoman user and proposed mail local part
+      - description: Target Atoman user; optional preselected mail local part
         in: body
         name: input
         required: true
@@ -22055,7 +22062,46 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: Admin creates a user-bound, one-time mail address invitation
+      summary: Admin issues a single-use mail invite; target chooses their address
+      tags:
+      - mail
+  /api/v1/mail/admin/reserve-self:
+    post:
+      consumes:
+      - application/json
+      description: Only reserves the address. Does not create or activate a Stalwart
+        mailbox.
+      parameters:
+      - description: Chosen mailbox local part
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/mail.ReserveSelfInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/mail.AccountInfo'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Administrator reserves their own chosen mailbox address without an
+        invitation
       tags:
       - mail
   /api/v1/mail/folders:

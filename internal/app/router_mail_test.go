@@ -27,6 +27,7 @@ func TestRegisterV1RoutesMountsAtomanMailUnderAuthentication(t *testing.T) {
 		"GET /api/v1/mail/messages",
 		"POST /api/v1/mail/activate",
 		"POST /api/v1/mail/admin/invites",
+		"POST /api/v1/mail/admin/reserve-self",
 	} {
 		require.True(t, paths[path], path)
 	}

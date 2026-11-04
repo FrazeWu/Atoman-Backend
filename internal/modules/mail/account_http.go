@@ -51,6 +51,7 @@ func RegisterAccountRoutesWithServices(group *gin.RouterGroup, service *AccountS
 	group.GET("/messages", h.messages)
 	group.POST("/activate", h.activate)
 	group.POST("/admin/invites", h.issueInvite)
+	group.POST("/admin/reserve-self", h.reserveSelf)
 }
 
 // me godoc
@@ -77,11 +78,11 @@ func (h *AccountHandler) me(c *gin.Context) {
 }
 
 // activate godoc
-// @Summary Redeem invitation, reserve address only (does not provision mail)
+// @Summary Redeem invitation using a custom mail address (reservation only)
 // @Tags mail
 // @Accept json
 // @Produce json
-// @Param input body ReserveInput true "Single-use invite token"
+// @Param input body ReserveInput true "Single-use invite and chosen mailbox local part"
 // @Success 201 {object} AccountInfo
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
@@ -100,7 +101,7 @@ func (h *AccountHandler) activate(c *gin.Context) {
 	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
-	info, err := h.service.RedeemInvite(user, input.Token)
+	info, err := h.service.RedeemInviteWithLocalPart(user, input.Token, input.LocalPart)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -109,11 +110,11 @@ func (h *AccountHandler) activate(c *gin.Context) {
 }
 
 // issueInvite godoc
-// @Summary Admin creates a user-bound, one-time mail address invitation
+// @Summary Admin issues a single-use mail invite; target chooses their address
 // @Tags mail
 // @Accept json
 // @Produce json
-// @Param input body IssueInviteInput true "Target Atoman user and proposed mail local part"
+// @Param input body IssueInviteInput true "Target Atoman user; optional preselected mail local part"
 // @Success 201 {object} IssuedInvite
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 403 {object} handlers.ErrorResponse
@@ -208,4 +209,36 @@ func (h *AccountHandler) messages(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, messages)
+}
+
+// reserveSelf godoc
+// @Summary Administrator reserves their own chosen mailbox address without an invitation
+// @Description Only reserves the address. Does not create or activate a Stalwart mailbox.
+// @Tags mail
+// @Accept json
+// @Produce json
+// @Param input body ReserveSelfInput true "Chosen mailbox local part"
+// @Success 201 {object} AccountInfo
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 409 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/mail/admin/reserve-self [post]
+func (h *AccountHandler) reserveSelf(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var input ReserveSelfInput
+	if !httpx.BindRequiredJSON(c, &input) {
+		return
+	}
+	result, err := h.service.ReserveSelf(user, input.LocalPart)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, result)
 }

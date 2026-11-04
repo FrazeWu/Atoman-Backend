@@ -17574,10 +17574,10 @@ const docTemplate = `{
                 "tags": [
                     "mail"
                 ],
-                "summary": "Redeem invitation, reserve address only (does not provision mail)",
+                "summary": "Redeem invitation using a custom mail address (reservation only)",
                 "parameters": [
                     {
-                        "description": "Single-use invite token",
+                        "description": "Single-use invite and chosen mailbox local part",
                         "name": "input",
                         "in": "body",
                         "required": true,
@@ -17639,10 +17639,10 @@ const docTemplate = `{
                 "tags": [
                     "mail"
                 ],
-                "summary": "Admin creates a user-bound, one-time mail address invitation",
+                "summary": "Admin issues a single-use mail invite; target chooses their address",
                 "parameters": [
                     {
-                        "description": "Target Atoman user and proposed mail local part",
+                        "description": "Target Atoman user; optional preselected mail local part",
                         "name": "input",
                         "in": "body",
                         "required": true,
@@ -17678,6 +17678,66 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/mail/admin/reserve-self": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Only reserves the address. Does not create or activate a Stalwart mailbox.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mail"
+                ],
+                "summary": "Administrator reserves their own chosen mailbox address without an invitation",
+                "parameters": [
+                    {
+                        "description": "Chosen mailbox local part",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mail.ReserveSelfInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/mail.AccountInfo"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -40754,7 +40814,18 @@ const docTemplate = `{
         "mail.ReserveInput": {
             "type": "object",
             "properties": {
+                "local_part": {
+                    "type": "string"
+                },
                 "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "mail.ReserveSelfInput": {
+            "type": "object",
+            "properties": {
+                "local_part": {
                     "type": "string"
                 }
             }

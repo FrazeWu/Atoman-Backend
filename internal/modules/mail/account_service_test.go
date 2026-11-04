@@ -194,3 +194,84 @@ func TestMailInviteConcurrentRedeemCreatesExactlyOneReservation(t *testing.T) {
 	require.NoError(t, db.Model(&model.MailAccount{}).Where("user_id = ?", alice.ID).Count(&accounts).Error)
 	require.EqualValues(t, 1, accounts)
 }
+
+// Invitations are bound to an Atoman account, but the recipient chooses the
+// immutable local part during redemption instead of inheriting a username.
+func TestMailInviteLetsTargetChooseCustomLocalPart(t *testing.T) {
+	db, svc, admin, alice, bob := mailTestSetup(t)
+	issued, err := svc.IssueInvite(admin, IssueInviteInput{TargetUserID: alice.ID})
+	require.NoError(t, err)
+	require.Empty(t, issued.Address)
+	require.Len(t, issued.Token, 43)
+	_, err = svc.RedeemInvite(alice, issued.Token)
+	assertAppCode(t, err, "mail.address_required")
+	_, err = svc.RedeemInviteWithLocalPart(bob, issued.Token, "otheruser")
+	assertAppCode(t, err, "mail.invite_owner_required")
+	for _, name := range []string{"postmaster", "a..b", "invalid@address", "中 文"} {
+		_, err = svc.RedeemInviteWithLocalPart(alice, issued.Token, name)
+		require.Error(t, err)
+	}
+	info, err := svc.RedeemInviteWithLocalPart(alice, issued.Token, "My.Custom-Mail")
+	require.NoError(t, err)
+	require.Equal(t, "my.custom-mail@atoman.org", info.Address)
+	require.Equal(t, "reserved", info.Status)
+	require.False(t, info.Available)
+	_, err = svc.RedeemInviteWithLocalPart(alice, issued.Token, "another-name")
+	assertAppCode(t, err, "mail.invite_unavailable")
+	var account model.MailAccount
+	require.NoError(t, db.Where("user_id = ?", alice.ID).First(&account).Error)
+	require.Equal(t, "my.custom-mail", account.LocalPart)
+	require.Nil(t, account.StalwartAccountID)
+	require.NoError(t, db.Model(&model.User{}).Where("uuid = ?", alice.ID).Update("username", "new-username").Error)
+	current, err := svc.Me(alice)
+	require.NoError(t, err)
+	require.Equal(t, info.Address, current.Address)
+}
+
+func TestMailAdminReservesChosenAddressWithoutInviteButNeverActivates(t *testing.T) {
+	db, svc, admin, alice, _ := mailTestSetup(t)
+	svc.invitesEnabled = false
+	_, err := svc.ReserveSelf(alice, "alice-mail")
+	assertAppCode(t, err, "mail.admin_required")
+	_, err = svc.ReserveSelf(authctx.CurrentUser{}, "someone")
+	assertAppCode(t, err, "mail.admin_required")
+	for _, name := range []string{"admin", "postmaster", "a..b", "非法", "a@b"} {
+		_, err = svc.ReserveSelf(admin, name)
+		require.Error(t, err)
+	}
+	info, err := svc.ReserveSelf(admin, "Custom.Admin")
+	require.NoError(t, err)
+	require.Equal(t, "custom.admin@atoman.org", info.Address)
+	require.Equal(t, "reserved", info.Status)
+	require.False(t, info.Available)
+	_, err = svc.ReserveSelf(admin, "different-name")
+	assertAppCode(t, err, "mail.address_unavailable")
+	var account model.MailAccount
+	require.NoError(t, db.Where("user_id = ?", admin.ID).First(&account).Error)
+	require.Equal(t, "reserved", account.Status)
+	require.Nil(t, account.StalwartAccountID)
+	var issued, keys int64
+	require.NoError(t, db.Model(&model.MailInvite{}).Count(&issued).Error)
+	require.NoError(t, db.Model(&model.MailAccessCredential{}).Count(&keys).Error)
+	require.Zero(t, issued)
+	require.Zero(t, keys)
+}
+
+func TestMailCustomLocalPartRejectsExistingAdminAddressAndPendingInvite(t *testing.T) {
+	_, svc, admin, alice, bob := mailTestSetup(t)
+	_, err := svc.ReserveSelf(admin, "preferred-mail")
+	require.NoError(t, err)
+	first, err := svc.IssueInvite(admin, IssueInviteInput{TargetUserID: alice.ID})
+	require.NoError(t, err)
+	_, err = svc.RedeemInviteWithLocalPart(alice, first.Token, "preferred-mail")
+	assertAppCode(t, err, "mail.address_unavailable")
+	reserved, err := svc.IssueInvite(admin, IssueInviteInput{TargetUserID: bob.ID, LocalPart: "held-name"})
+	require.NoError(t, err)
+	_, err = svc.RedeemInviteWithLocalPart(alice, first.Token, "held-name")
+	assertAppCode(t, err, "mail.invite_pending")
+	bobInfo, err := svc.RedeemInviteWithLocalPart(bob, reserved.Token, "different-bob")
+	require.NoError(t, err)
+	require.Equal(t, "different-bob@atoman.org", bobInfo.Address)
+	_, err = svc.RedeemInviteWithLocalPart(alice, first.Token, "held-name")
+	require.NoError(t, err) // the previous named invite has now been used
+}
