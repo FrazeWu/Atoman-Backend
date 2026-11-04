@@ -1,0 +1,38 @@
+package model
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// MailAccount is the durable Atoman-user-to-address reservation. The actual
+// mailbox, MIME messages, folders and IMAP credentials belong to Stalwart.
+// No MailAccount can be marked active by the invitation feature.
+type MailAccount struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mail_accounts_user" json:"user_id"`
+	LocalPart string    `gorm:"type:varchar(32);not null;uniqueIndex:idx_mail_accounts_local" json:"local_part"`
+	Address   string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_mail_accounts_address" json:"address"`
+	Status    string    `gorm:"type:varchar(24);not null;default:'reserved'" json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (MailAccount) TableName() string { return "mail_accounts" }
+
+// MailInvite stores only a SHA-256 hash of a high-entropy bearer token.
+// Redeeming a token only reserves an address; it never activates a mailbox.
+type MailInvite struct {
+	ID           uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	TokenHash    string     `gorm:"type:char(64);not null;uniqueIndex:idx_mail_invites_token_hash" json:"-"`
+	TargetUserID uuid.UUID  `gorm:"type:uuid;not null;index:idx_mail_invites_target" json:"target_user_id"`
+	CreatedBy    uuid.UUID  `gorm:"type:uuid;not null" json:"created_by"`
+	LocalPart    string     `gorm:"type:varchar(32);not null" json:"local_part"`
+	ExpiresAt    time.Time  `gorm:"not null" json:"expires_at"`
+	UsedAt       *time.Time `json:"used_at,omitempty"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+func (MailInvite) TableName() string { return "mail_invites" }

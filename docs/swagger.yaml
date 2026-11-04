@@ -5598,6 +5598,39 @@ definitions:
       timezone:
         type: string
     type: object
+  mail.AccountInfo:
+    properties:
+      address:
+        type: string
+      available:
+        type: boolean
+      status:
+        type: string
+    type: object
+  mail.IssueInviteInput:
+    properties:
+      local_part:
+        type: string
+      target_user_id:
+        type: string
+    type: object
+  mail.IssuedInvite:
+    properties:
+      address:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      token:
+        description: only returned once to authorized admin
+        type: string
+    type: object
+  mail.ReserveInput:
+    properties:
+      token:
+        type: string
+    type: object
   model.Album:
     properties:
       album_type:
@@ -21915,6 +21948,105 @@ paths:
       summary: 重试失败的定时发布
       tags:
       - lifecycle
+  /api/v1/mail/activate:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Single-use invite token
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/mail.ReserveInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/mail.AccountInfo'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Redeem invitation, reserve address only (does not provision mail)
+      tags:
+      - mail
+  /api/v1/mail/admin/invites:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Target Atoman user and proposed mail local part
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/mail.IssueInviteInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/mail.IssuedInvite'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Admin creates a user-bound, one-time mail address invitation
+      tags:
+      - mail
+  /api/v1/mail/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mail.AccountInfo'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Current Atoman mail reservation (not mail service readiness)
+      tags:
+      - mail
   /api/v1/music/albums:
     get:
       parameters:

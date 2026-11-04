@@ -109,6 +109,7 @@ func Run(db *gorm.DB) error {
 		{"music contribution evidence backfill", runMusicContributionEvidenceBackfill},
 		{"short note media attachment migration", migrations.RunShortNoteMediaAttachmentMigration},
 		{"user themes migration", migrations.RunUserThemesMigration},
+		{"mail accounts and invites migration", migrations.RunMailAccountsMigration},
 	}
 	for _, step := range postSchemaSteps {
 		if err := step.run(db); err != nil {

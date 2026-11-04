@@ -20,6 +20,7 @@ import (
 	"atoman/internal/modules/forum_engagement"
 	"atoman/internal/modules/forum_moderation"
 	"atoman/internal/modules/lifecycle"
+	"atoman/internal/modules/mail"
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
 	"atoman/internal/modules/podcast"
@@ -80,6 +81,7 @@ func RegisterV1Routes(
 	blogService := blog.NewService(db).WithExportAssetReader(blog.NewS3ExportAssetReader(s3Client))
 	blog.RegisterRoutes(group.Group("/blog"), blogService)
 	books.RegisterRoutes(group.Group("/books"), bookService)
+	mail.RegisterAccountRoutes(group.Group("/mail"), db)
 	shortnote.RegisterRoutes(group.Group("/short-notes"), shortnote.NewService(db, refService))
 	feed.RegisterRoutes(group.Group("/feed"), feedService)
 	feed.RegisterPublicRSSRoutes(group.Group("/rss"), db)
