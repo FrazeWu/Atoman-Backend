@@ -4654,6 +4654,9 @@ definitions:
       cover_url:
         example: https://cdn.example.com/cover.jpg
         type: string
+      duration_sec:
+        example: 185
+        type: integer
       id:
         example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
         format: uuid

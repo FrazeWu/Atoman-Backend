@@ -1841,40 +1841,79 @@ type audioProbeMetadata struct {
 	channels    int
 }
 
+func parseProbeInt(v any) int {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case string:
+		n, _ := strconv.Atoi(strings.TrimSpace(val))
+		return n
+	default:
+		return 0
+	}
+}
+
+func parseProbeFloat(v any) float64 {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int:
+		return float64(val)
+	case string:
+		f, _ := strconv.ParseFloat(strings.TrimSpace(val), 64)
+		return f
+	default:
+		return 0
+	}
+}
+
 func parseAudioProbe(raw []byte) audioProbeMetadata {
+	start := bytes.IndexByte(raw, '{')
+	end := bytes.LastIndexByte(raw, '}')
+	if start >= 0 && end > start {
+		raw = raw[start : end+1]
+	}
 	var probe struct {
 		Format struct {
-			Duration   string            `json:"duration"`
+			Duration   any               `json:"duration"`
 			FormatName string            `json:"format_name"`
-			BitRate    string            `json:"bit_rate"`
+			BitRate    any               `json:"bit_rate"`
 			Tags       map[string]string `json:"tags"`
 		} `json:"format"`
 		Streams []struct {
 			CodecName        string `json:"codec_name"`
-			SampleRate       string `json:"sample_rate"`
-			BitsPerRawSample string `json:"bits_per_raw_sample"`
-			BitsPerSample    string `json:"bits_per_sample"`
+			SampleRate       any    `json:"sample_rate"`
+			BitsPerRawSample any    `json:"bits_per_raw_sample"`
+			BitsPerSample    any    `json:"bits_per_sample"`
 			Channels         int    `json:"channels"`
-			BitRate          string `json:"bit_rate"`
+			BitRate          any    `json:"bit_rate"`
 		} `json:"streams"`
 	}
 	if json.Unmarshal(raw, &probe) != nil {
 		return audioProbeMetadata{}
 	}
-	duration, _ := strconv.ParseFloat(probe.Format.Duration, 64)
+	duration := parseProbeFloat(probe.Format.Duration)
 	metadata := audioProbeMetadata{duration: duration, container: strings.TrimSpace(probe.Format.FormatName)}
-	metadata.bitRate, _ = strconv.Atoi(probe.Format.BitRate)
+	metadata.bitRate = parseProbeInt(probe.Format.BitRate)
 	if len(probe.Streams) > 0 {
 		stream := probe.Streams[0]
 		metadata.codec = strings.TrimSpace(stream.CodecName)
-		metadata.sampleRate, _ = strconv.Atoi(stream.SampleRate)
-		metadata.bitDepth, _ = strconv.Atoi(stream.BitsPerRawSample)
+		metadata.sampleRate = parseProbeInt(stream.SampleRate)
+		metadata.bitDepth = parseProbeInt(stream.BitsPerRawSample)
 		if metadata.bitDepth == 0 {
-			metadata.bitDepth, _ = strconv.Atoi(stream.BitsPerSample)
+			metadata.bitDepth = parseProbeInt(stream.BitsPerSample)
 		}
 		metadata.channels = stream.Channels
 		if metadata.bitRate == 0 {
-			metadata.bitRate, _ = strconv.Atoi(stream.BitRate)
+			metadata.bitRate = parseProbeInt(stream.BitRate)
 		}
 	}
 	for key, value := range probe.Format.Tags {

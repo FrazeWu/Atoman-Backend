@@ -38969,6 +38969,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "https://cdn.example.com/cover.jpg"
                 },
+                "duration_sec": {
+                    "type": "integer",
+                    "example": 185
+                },
                 "id": {
                     "type": "string",
                     "format": "uuid",

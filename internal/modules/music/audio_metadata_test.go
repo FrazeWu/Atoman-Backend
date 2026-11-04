@@ -51,6 +51,21 @@ func TestParseAudioProbeReadsTechnicalSpecification(t *testing.T) {
 	}
 }
 
+func TestParseAudioProbeHandlesNumericStreamsAndStderrPrefix(t *testing.T) {
+	raw := []byte(`[mp3 @ 0x123] Estimating duration from bitrate
+{
+	"format":{"duration":156.96,"format_name":"mp3","bit_rate":320144,"tags":{"title":"Reliable Source"}},
+	"streams":[{"codec_name":"mp3","sample_rate":44100,"bits_per_sample":0,"channels":2,"bit_rate":320000}]
+}`)
+	metadata := parseAudioProbe(raw)
+	if metadata.duration < 156.9 || metadata.duration > 157.0 || metadata.title != "Reliable Source" {
+		t.Fatalf("unexpected parsed title/duration: %#v", metadata)
+	}
+	if metadata.container != "mp3" || metadata.codec != "mp3" || metadata.bitRate != 320144 || metadata.sampleRate != 44100 || metadata.channels != 2 {
+		t.Fatalf("unexpected parsed stream: %#v", metadata)
+	}
+}
+
 func TestCommitAlbumImportSessionCopiesAudioMetadataToSong(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	session := model.AlbumImportSession{UserID: &user.ID, Status: AlbumImportStatusReady}

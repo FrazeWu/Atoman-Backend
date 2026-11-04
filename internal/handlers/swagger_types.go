@@ -535,6 +535,7 @@ type SongPublicItem struct {
 	ReleaseDate   string `json:"release_date" example:"2026-05-25"`
 	Lyrics        string `json:"lyrics" example:"Hello world"`
 	AudioURL      string `json:"audio_url" example:"https://cdn.example.com/song.mp3"`
+	DurationSec   int    `json:"duration_sec" example:"185"`
 	WaveformPeaks []int  `json:"waveform_peaks"`
 	CoverURL      string `json:"cover_url" example:"https://cdn.example.com/cover.jpg"`
 	Status        string `json:"status" example:"open"`
