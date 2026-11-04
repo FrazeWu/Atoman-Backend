@@ -13,7 +13,6 @@ import (
 	"atoman/internal/collab"
 	"atoman/internal/middleware"
 	"atoman/internal/model"
-	"atoman/internal/modules/user_theme"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/authsession"
 	"atoman/internal/testdb"
@@ -28,7 +27,6 @@ func TestRegisterProductionRoutesWithUserTheme(t *testing.T) {
 	db := testdb.Open(t)
 	r := gin.New()
 	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
-	user_theme.RegisterRoutes(r.Group("/api/v1"), user_theme.NewHandler(user_theme.NewService(db)))
 	for _, route := range r.Routes() {
 		if route.Method == http.MethodGet && route.Path == "/api/v1/users/:id/theme" {
 			return
