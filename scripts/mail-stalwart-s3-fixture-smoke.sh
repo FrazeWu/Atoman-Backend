@@ -214,3 +214,14 @@ except Exception as e:
  print('STAGING_IMAP_READ_FAILED',type(e).__name__,str(e)[:200]);sys.exit(1)
 PYIMAP
 printf '%s\n' 'STALWART_PG_S3_RESTART_RECOVERY_VALIDATED'
+
+# Opt-in stage 5: verify the real JMAP domain/user/API-key/mail read flow
+# against this same disposable fixture. No production credentials are read.
+if [ "${ATOMAN_MAIL_STAGE5_JMAP:-}" = "1" ]; then
+  ATOMAN_MAIL_STAGING_ADMIN_USERNAME=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["username"])' "$work/staging-admin.json")
+  ATOMAN_MAIL_STAGING_ADMIN_PASSWORD=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["secret"])' "$work/staging-admin.json")
+  export ATOMAN_MAIL_STAGING_ADMIN_USERNAME ATOMAN_MAIL_STAGING_ADMIN_PASSWORD
+  ATOMAN_MAIL_STAGING_JMAP=1 ATOMAN_MAIL_STAGING_JMAP_URL="http://127.0.0.1:$admin_port" \
+    GOMAXPROCS=2 go test ./internal/modules/mail -run '^TestStalwartJMAPRealFixture$' -count=1 -v
+  unset ATOMAN_MAIL_STAGING_ADMIN_USERNAME ATOMAN_MAIL_STAGING_ADMIN_PASSWORD
+fi

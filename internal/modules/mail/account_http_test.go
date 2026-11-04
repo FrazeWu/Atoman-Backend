@@ -93,6 +93,10 @@ func TestMailAccountHTTPUsesAtomanSessionsAndCSRF(t *testing.T) {
 	require.Equal(t, "reserved", reserved.Data.Status)
 	require.False(t, reserved.Data.Available)
 
+	readBeforeActivation := req(http.MethodGet, "/api/v1/mail/folders", "", apiAlice.Token)
+	require.Equal(t, http.StatusServiceUnavailable, readBeforeActivation.Code)
+	require.Contains(t, readBeforeActivation.Body.String(), "mail.read_not_ready")
+
 	me := req(http.MethodGet, "/api/v1/mail/me", "", apiAlice.Token)
 	require.Equal(t, http.StatusOK, me.Code)
 	require.Contains(t, me.Header().Get("Cache-Control"), "no-store")

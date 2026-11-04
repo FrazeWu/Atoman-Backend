@@ -23,6 +23,8 @@ func TestRegisterV1RoutesMountsAtomanMailUnderAuthentication(t *testing.T) {
 	}
 	for _, path := range []string{
 		"GET /api/v1/mail/me",
+		"GET /api/v1/mail/folders",
+		"GET /api/v1/mail/messages",
 		"POST /api/v1/mail/activate",
 		"POST /api/v1/mail/admin/invites",
 	} {
