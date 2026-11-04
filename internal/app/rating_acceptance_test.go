@@ -112,7 +112,7 @@ func createRatingAcceptanceBook(t *testing.T, db *gorm.DB, user authctx.CurrentU
 	require.NoError(t, err)
 	workID := uuid.MustParse(work.ID)
 	_, err = service.CreateBookEdition(context.Background(), user, workID, books.CreateBookEditionInput{
-		Title: work.Title, Language: "en", Publisher: "Acceptance publisher",
+		Title: work.Title, Language: "en", Publisher: "Acceptance publisher", EditionStatement: "First edition",
 		CoverURL: "/api/v1/__rating_acceptance/cover.svg",
 	})
 	require.NoError(t, err)

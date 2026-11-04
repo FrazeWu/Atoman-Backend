@@ -167,6 +167,23 @@ func (s *Service) PatchBookMetadata(ctx context.Context, user authctx.CurrentUse
 				return apperr.BadRequest("books.invalid_metadata", "Invalid edition fields; date must be an ISO timestamp or null")
 			}
 			edition := editionSnapshot.BookEdition
+			// All entry points must preserve public edition identity, including
+			// wiki edits that replace or remove a previously identifying field.
+			var publishedDate string
+			if edition.PublishedDate != nil {
+				publishedDate = edition.PublishedDate.Format("2006-01-02")
+			}
+			checked := CreateBookEditionInput{
+				Title: edition.Title, EditionStatement: edition.EditionStatement,
+				Publisher: edition.Publisher, Producer: edition.Producer,
+				ISBN10: edition.ISBN10, ISBN13: edition.ISBN13,
+				Language: edition.Language, PublishedDate: publishedDate,
+				TranslatorIDs: editionSnapshot.TranslatorIDs,
+			}
+			if err := validateCatalogEditionCreate(&checked); err != nil {
+				return err
+			}
+			edition.ISBN10, edition.ISBN13, edition.Language = checked.ISBN10, checked.ISBN13, checked.Language
 			if edition.PageCount < 0 {
 				return apperr.BadRequest("books.invalid_metadata", "page_count cannot be negative")
 			}

@@ -133,6 +133,9 @@ func TestCORSPreflightAllowsCSRFHeader(t *testing.T) {
 	if !strings.Contains(recorder.Header().Get("Access-Control-Allow-Headers"), "X-CSRF-Token") {
 		t.Fatalf("expected X-CSRF-Token in allowed headers, got %q", recorder.Header().Get("Access-Control-Allow-Headers"))
 	}
+	if !strings.Contains(recorder.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Key") {
+		t.Fatalf("expected Idempotency-Key in allowed headers, got %q", recorder.Header().Get("Access-Control-Allow-Headers"))
+	}
 	if got := recorder.Header().Get("Access-Control-Max-Age"); got != "600" {
 		t.Fatalf("expected preflight max age 600, got %q", got)
 	}

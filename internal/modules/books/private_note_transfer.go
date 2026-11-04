@@ -17,12 +17,13 @@ import (
 )
 
 type BookNoteTransferItem struct {
-	ID               uuid.UUID  `json:"id"`
-	WorkID           uuid.UUID  `json:"work_id"`
-	SourceRevisionID *uuid.UUID `json:"source_revision_id,omitempty"`
-	Title            string     `json:"title"`
-	Body             string     `json:"body"`
-	Tags             []string   `json:"tags"`
+	ID               uuid.UUID          `json:"id"`
+	WorkID           uuid.UUID          `json:"work_id"`
+	SourceRevisionID *uuid.UUID         `json:"source_revision_id,omitempty"`
+	ChapterAnchor    *BookChapterAnchor `json:"chapter_anchor,omitempty"`
+	Title            string             `json:"title"`
+	Body             string             `json:"body"`
+	Tags             []string           `json:"tags"`
 }
 
 type BookNoteExport struct {
@@ -61,7 +62,7 @@ func (s *Service) ExportBookPrivateNotes(ctx context.Context, user authctx.Curre
 		if err != nil {
 			return result, err
 		}
-		result.Notes = append(result.Notes, BookNoteTransferItem{ID: note.ID, WorkID: note.WorkID, SourceRevisionID: note.SourceRevisionID, Title: note.Title, Body: note.Body, Tags: dto.Tags})
+		result.Notes = append(result.Notes, BookNoteTransferItem{ID: note.ID, WorkID: note.WorkID, SourceRevisionID: note.SourceRevisionID, ChapterAnchor: dto.ChapterAnchor, Title: note.Title, Body: note.Body, Tags: dto.Tags})
 	}
 	return result, nil
 }
@@ -109,7 +110,7 @@ func (s *Service) ImportBookPrivateNotes(ctx context.Context, user authctx.Curre
 				return apperr.BadRequest("books.invalid_note_import", "Every imported note needs a distinct source UUID")
 			}
 			seen[item.ID] = true
-			value, err := normalizeBookPrivateNote(SaveBookPrivateNoteInput{WorkID: item.WorkID, SourceRevisionID: item.SourceRevisionID, Title: item.Title, Body: item.Body, Tags: item.Tags})
+			value, err := normalizeBookPrivateNote(SaveBookPrivateNoteInput{WorkID: item.WorkID, SourceRevisionID: item.SourceRevisionID, ChapterAnchor: item.ChapterAnchor, Title: item.Title, Body: item.Body, Tags: item.Tags})
 			if err != nil {
 				return err
 			}
@@ -130,7 +131,8 @@ func (s *Service) ImportBookPrivateNotes(ctx context.Context, user authctx.Curre
 				newTags, _ := json.Marshal(value.Tags)
 				// Same exported origin and content is a no-op. Changed or trashed
 				// notes are conflicts, never an implicit overwrite or restoration.
-				if !stored.DeletedAt.Valid && stored.WorkID == item.WorkID && stored.Title == value.Title && stored.Body == value.Body && sameOptionalBookID(stored.SourceRevisionID, value.SourceRevisionID) && string(oldTags) == string(newTags) {
+				sameAnchor := (existing.ChapterAnchor == nil && value.ChapterAnchor == nil) || (existing.ChapterAnchor != nil && value.ChapterAnchor != nil && *existing.ChapterAnchor == *value.ChapterAnchor)
+				if !stored.DeletedAt.Valid && stored.WorkID == item.WorkID && stored.Title == value.Title && stored.Body == value.Body && sameOptionalBookID(stored.SourceRevisionID, value.SourceRevisionID) && sameAnchor && string(oldTags) == string(newTags) {
 					result.Skipped = append(result.Skipped, item.ID)
 				} else {
 					result.Conflicts = append(result.Conflicts, item.ID)

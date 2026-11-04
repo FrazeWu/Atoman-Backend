@@ -52,7 +52,7 @@ func TestCreateBookWorkNeedsOnlyTitleAndAuthor(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, selected.Authors, 1)
 	require.Equal(t, person.ID.String(), selected.Authors[0].ID)
-	_, err = service.CreateBookEdition(ctx, user, uuid.MustParse(work.ID), CreateBookEditionInput{Title: "第一版", Publisher: "出版社", PublishedDate: "2026-10-15"})
+	_, err = service.CreateBookEdition(ctx, user, uuid.MustParse(work.ID), CreateBookEditionInput{Title: "第一版", Publisher: "出版社", PublishedDate: "2026-10-15", Language: "zh"})
 	require.NoError(t, err)
 	updated, err := service.GetBookWork(ctx, uuid.MustParse(work.ID))
 	require.NoError(t, err)

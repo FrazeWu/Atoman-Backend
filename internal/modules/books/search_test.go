@@ -25,7 +25,7 @@ func TestAdvancedWorkSearchFiltersRankingAndDeduplication(t *testing.T) {
 	id := uuid.MustParse(work.ID)
 	require.NoError(t, s.db.Model(&model.BookWork{}).Where("id = ?", id).Updates(map[string]any{"language": "zh", "original_title": "Original Star", "subtitle": "宇宙副标题"}).Error)
 	for _, date := range []string{"1999-12-31", "2000-01-01", "2026-12-31"} {
-		_, err := s.CreateBookEdition(ctx, user, id, CreateBookEditionInput{PublishedDate: date, Language: "en"})
+		_, err := s.CreateBookEdition(ctx, user, id, CreateBookEditionInput{PublishedDate: date, Language: "en", Publisher: "测试出版社"})
 		require.NoError(t, err)
 	}
 	_, err = s.CreateBookWork(ctx, user, CreateBookWorkInput{Title: "星际续集", AuthorIDs: []uuid.UUID{author.ID}})

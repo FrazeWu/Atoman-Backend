@@ -109,7 +109,16 @@ func (h *Handler) deleteBookRevisionMark(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "base_version must be a positive integer"))
 		return
 	}
-	result, err := h.service.DeleteBookReadingMark(c.Request.Context(), user, revisionID, markID, version)
+	keep := false
+	if value := c.Query("keep_shared"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "keep_shared must be true or false"))
+			return
+		}
+		keep = parsed
+	}
+	result, err := h.service.DeleteBookReadingMarkWithShares(c.Request.Context(), user, revisionID, markID, version, keep)
 	if err != nil {
 		httpx.Error(c, err)
 		return

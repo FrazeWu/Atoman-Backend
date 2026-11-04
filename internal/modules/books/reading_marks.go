@@ -135,7 +135,7 @@ func (s *Service) SaveBookReadingMark(ctx context.Context, user authctx.CurrentU
 			if input.BaseVersion != 0 {
 				return apperr.NotFound("books.reading_mark_not_found", "Reading mark not found")
 			}
-			if _, err := service.readableBookRevision(ctx, revisionID); err != nil {
+			if err := service.CanReadBookRevision(ctx, user.ID, revisionID); err != nil {
 				return err
 			}
 		}
@@ -204,6 +204,9 @@ func privateBookReadingMarkError(err error) error {
 }
 
 func (s *Service) DeleteBookReadingMark(ctx context.Context, user authctx.CurrentUser, revisionID, markID uuid.UUID, baseVersion int64) (BookReadingMarkTombstone, error) {
+	return s.DeleteBookReadingMarkWithShares(ctx, user, revisionID, markID, baseVersion, false)
+}
+func (s *Service) DeleteBookReadingMarkWithShares(ctx context.Context, user authctx.CurrentUser, revisionID, markID uuid.UUID, baseVersion int64, keepShared bool) (BookReadingMarkTombstone, error) {
 	if user.ID == uuid.Nil {
 		return BookReadingMarkTombstone{}, apperr.Unauthorized("Login required")
 	}
@@ -224,6 +227,11 @@ func (s *Service) DeleteBookReadingMark(ctx context.Context, user authctx.Curren
 			if mark.Version != baseVersion {
 				return bookReadingMarkConflict(mark)
 			}
+			if !keepShared && mark.Kind == "highlight" {
+				if err := revokeNoteSharesForSource(tx, user.ID, BookNoteReference{Kind: "highlight", ID: markID}); err != nil {
+					return err
+				}
+			}
 			mark.Version++
 			mark.DeletedAt = gorm.DeletedAt{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true}
 			if err := tx.Unscoped().Model(&mark).Select("version", "deleted_at", "updated_at").Updates(&mark).Error; err != nil {
@@ -240,6 +248,9 @@ func (s *Service) ListBookReadingMarks(ctx context.Context, user authctx.Current
 	result := BookReadingMarksResult{Items: []BookReadingMarkDTO{}, HighlightGroups: []BookHighlightGroup{}, Deleted: []BookReadingMarkTombstone{}}
 	if user.ID == uuid.Nil {
 		return result, apperr.Unauthorized("Login required")
+	}
+	if err := s.purgeBookReadingMarks(ctx, &user.ID, time.Now().UTC()); err != nil {
+		return result, err
 	}
 	var marks []model.BookReadingMark
 	if err := s.db.WithContext(ctx).Unscoped().Where("user_id = ? AND revision_id = ?", user.ID, revisionID).Order("created_at ASC, id ASC").Find(&marks).Error; err != nil {

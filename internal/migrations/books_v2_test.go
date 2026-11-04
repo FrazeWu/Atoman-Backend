@@ -63,6 +63,9 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	require.Error(t, db.Create(&model.BookReadingSelection{UserID: user.UUID, WorkID: otherWork.ID, AssetID: asset.ID, RevisionID: revision.ID}).Error)
 	state := model.BookReadingState{UserID: user.UUID, RevisionID: revision.ID, CurrentPercent: .2, FurthestPercent: .8}
 	require.NoError(t, db.Create(&state).Error)
+	require.Error(t, db.Model(&state).Update("pdf_offset", -0.01).Error)
+	require.Error(t, db.Model(&state).Update("pdf_offset", 1.01).Error)
+	require.NoError(t, db.Model(&state).Update("pdf_offset", .45).Error)
 	require.Error(t, db.Create(&state).Error)
 	session := model.BookReadingSession{UserID: user.UUID, ClientSessionID: uuid.New(), RevisionID: revision.ID, DeviceID: "web"}
 	require.NoError(t, db.Create(&session).Error)
@@ -102,7 +105,10 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	publication.RequestID = uuid.New()
 	publication.ContentID = uuid.New()
 	require.Error(t, db.Create(&publication).Error, "publication metadata must belong to the source note owner")
-	require.Error(t, db.Model(&state).Update("current_percent", .9).Error)
+	// Navigating ahead can move the resume position without inventing reading.
+	require.NoError(t, db.Model(&state).Update("current_percent", .9).Error)
+	require.Error(t, db.Model(&state).Update("current_percent", 1.1).Error)
+	require.Error(t, db.Model(&state).Update("furthest_percent", -0.1).Error)
 	require.Error(t, db.Model(&revision).Update("sha256", strings.Repeat("b", 64)).Error)
 	require.Error(t, db.Model(&revision).Update("asset_id", otherAsset.ID).Error)
 	require.Error(t, db.Model(&media).Update("key", "a-different-file").Error)
@@ -125,4 +131,5 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	var storedState model.BookReadingState
 	require.NoError(t, db.First(&storedState, "user_id = ? AND revision_id = ?", user.UUID, revision.ID).Error)
 	require.Equal(t, .8, storedState.FurthestPercent)
+	require.Equal(t, .9, storedState.CurrentPercent)
 }

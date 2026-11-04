@@ -78,7 +78,7 @@ func (s *Service) CreateBookResource(ctx context.Context, user authctx.CurrentUs
 		}
 		if input.EditionID != nil {
 			var edition model.BookEdition
-			if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ? AND work_id = ? AND lifecycle_status = ? AND edit_status <> ?", *input.EditionID, workID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&edition).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ? AND work_id = ? AND edit_status <> ? AND (lifecycle_status = ? OR (lifecycle_status = ? AND created_by = ?))", *input.EditionID, workID, model.BookEditStatusClosed, model.BookLifecycleStatusActive, model.BookLifecycleStatusDraft, user.ID).First(&edition).Error; err != nil {
 				return publicBookNotFound(err)
 			}
 			if _, err := currentBookWikiRevision(tx, "edition", edition.ID); err != nil {
@@ -123,9 +123,6 @@ func (s *Service) CreateBookResourceUpload(ctx context.Context, user authctx.Cur
 	if user.ID == uuid.Nil {
 		return BookResourceUploadDTO{}, apperr.Unauthorized("Login required")
 	}
-	if !input.PublicDistributionConfirmed {
-		return BookResourceUploadDTO{}, apperr.BadRequest("books.public_distribution_confirmation_required", "Confirm permission to share this file publicly")
-	}
 	format, err := validateBookUploadMetadata(input.FileName, input.ContentType, input.Size)
 	if err != nil {
 		return BookResourceUploadDTO{}, err
@@ -153,7 +150,7 @@ func (s *Service) CreateBookResourceUpload(ctx context.Context, user authctx.Cur
 	if err != nil {
 		return BookResourceUploadDTO{}, apperr.Wrap(http.StatusServiceUnavailable, "storage.unavailable", "Book storage is unavailable", err)
 	}
-	session := model.BookUploadSession{Base: model.Base{ID: id}, UserID: user.ID, AssetID: assetID, OriginalFilename: strings.TrimSpace(input.FileName), Format: format, ContentType: input.ContentType, SizeBytes: input.Size, ObjectKey: key, UploadID: uploadID, PartSize: bookUploadPartSize, CompletedPartsJSON: "[]", ExpiresAt: time.Now().UTC().Add(bookUploadLifetime), Status: "uploading", PublicDistributionConfirmed: true}
+	session := model.BookUploadSession{Base: model.Base{ID: id}, UserID: user.ID, AssetID: assetID, OriginalFilename: strings.TrimSpace(input.FileName), Format: format, ContentType: input.ContentType, SizeBytes: input.Size, ObjectKey: key, UploadID: uploadID, PartSize: bookUploadPartSize, CompletedPartsJSON: "[]", ExpiresAt: time.Now().UTC().Add(bookUploadLifetime), Status: "uploading", PublicDistributionConfirmed: input.PublicDistributionConfirmed}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var work model.BookWork
 		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ? AND lifecycle_status = ? AND edit_status <> ?", asset.WorkID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&work).Error; err != nil {

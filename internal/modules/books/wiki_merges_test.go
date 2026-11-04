@@ -61,7 +61,7 @@ func TestBookWorkMergeRestoresRelationsWithoutDuplicatingRatings(t *testing.T) {
 	for _, workID := range []uuid.UUID{sourceID, targetID} {
 		require.NoError(t, service.db.Create(&model.BookPostLink{WorkID: workID, PostID: postID}).Error)
 	}
-	_, err := service.CreateBookEdition(ctx, user, sourceID, CreateBookEditionInput{Title: "独立出版版本"})
+	_, err := service.CreateBookEdition(ctx, user, sourceID, CreateBookEditionInput{Title: "独立出版版本", Language: "zh", Publisher: "出版社", EditionStatement: "初版"})
 	require.NoError(t, err)
 	var assetIDs, revisionIDs []uuid.UUID
 	for i, workID := range []uuid.UUID{sourceID, targetID} {

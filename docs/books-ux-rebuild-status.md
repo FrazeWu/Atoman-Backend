@@ -1,0 +1,36 @@
+# Books UX rebuild: isolated branch (2026-11-03)
+
+## Confirmed contract
+
+- Work: public searchable metadata, title and author required, automatically generated cover independent of editions; no book file required.
+- Edition: new public API creates a private draft; only a file that passes safety scanning activates the Edition.
+- Concrete ebook file: stable revision identity. Each Edition recommends exactly one verified file. Older files remain addressable and readable subject to access policy.
+- Bookshelf: binds a particular file revision, not Work/Edition. Status and archive are personal flags. Changing the Edition best-file pointer never changes an existing shelf record.
+- Files: uploads default to owner-only; public sharing is opt-in with explicit rights confirmation. A public catalog entry is not a permission to download ebook bytes.
+
+## Implemented in backend worktree
+
+- New best-file table, audit events, concrete-file shelf, edition cover object metadata, per-revision visibility, plus migration constraints.
+- Draft Edition creation and activation on verified upload.
+- Edition file listing, explicit selection, history, shelf and visibility HTTP routes.
+- Bounded JPEG/PNG cover endpoint, revision-content access authorization.
+- Targeted tests for draft activation, preserved historical files, bookshelf, visibility and revocation.
+
+## Frontend worktree implementation
+
+- Individual cards for concrete files, independent status/progress/archive and direct reader links.
+- Edition page showing one recommended file and expandable historic file list.
+- Work creation is independent; Edition creation requires choosing an ebook file and cover candidate.
+- PDF first five pages, EPUB embedded cover / early images, CBZ/CBR first five images, manual cover upload; book metadata prefills only untouched fields.
+- Optional, explicit ebook file sharing. Work cards never inherit edition covers.
+
+## Remaining before release
+
+- Bounded, evidence-based file-quality report and manual comparison UI are implemented (see `books-file-quality-evidence-20261103.md`); deeper page/text/OCR/visual checks remain open.
+- External ISBN lookup and stronger OCR extraction.
+- Fixed-revision reader modes, jump-safe furthest, within-PDF-page resume and real Chrome PDF/EPUB tests implemented (see `books-reader-modes-and-jump-progress-20261103.md` and `books-pdf-exact-resume-real-browser-20261104.md`); staging object storage and legacy private reader parity remain open.
+- Work-level private cross-file notes, exact standalone chapter-note anchors, editable curated collections, and immutable private/link/public snapshot sharing with stable links and revocation are implemented (see `books-work-notes-aggregation-20261104.md`, `books-chapter-note-anchor-20261104.md`, and `books-note-collection-sharing-20261104.md`).
+- Share preview (including a source-content digest), owner-only immutable snapshot history and 30-day highlight trash/restore/permanent scrub are implemented in isolation (see `books-note-preview-history-trash-20261104.md`). Remaining: staging browser + live server/object storage integration, broader Markdown/JSON/PDF import/export format parity, and eventual production rollout approval.
+- Multi-client integration and security tests against real object storage and a fresh database.
+
+No production reset, deploy, or push has been performed. Old books-module data may be discarded at rollout, but production PostgreSQL is shared with other modules: never execute a blanket destructive schema reset. Keep the rollback/backup plan scoped to books.

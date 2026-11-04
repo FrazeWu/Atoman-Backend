@@ -249,7 +249,16 @@ func (h *Handler) deleteBookPrivateNote(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := h.service.DeleteBookPrivateNote(c.Request.Context(), user, id, version)
+	keep := false
+	if value := c.Query("keep_shared"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "keep_shared must be true or false"))
+			return
+		}
+		keep = parsed
+	}
+	result, err := h.service.DeleteBookPrivateNoteWithShares(c.Request.Context(), user, id, version, keep)
 	if err != nil {
 		httpx.Error(c, err)
 		return

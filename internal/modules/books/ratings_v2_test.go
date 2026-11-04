@@ -21,7 +21,15 @@ import (
 
 func newBookRatingTestWork(t *testing.T, service *Service, user authctx.CurrentUser, title string) uuid.UUID {
 	t.Helper()
-	work, err := service.CreateBookWork(context.Background(), user, CreateBookWorkInput{Title: title, Authors: []string{"作者"}})
+	var people []model.BookPerson
+	require.NoError(t, service.db.Where("name = ? AND lifecycle_status = 'active'", "作者").Limit(1).Find(&people).Error)
+	input := CreateBookWorkInput{Title: title}
+	if len(people) > 0 {
+		input.AuthorIDs = []uuid.UUID{people[0].ID}
+	} else {
+		input.Authors = []string{"作者"}
+	}
+	work, err := service.CreateBookWork(context.Background(), user, input)
 	require.NoError(t, err)
 	return uuid.MustParse(work.ID)
 }
