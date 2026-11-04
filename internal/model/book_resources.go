@@ -75,6 +75,7 @@ type BookReadingState struct {
 	RevisionID      uuid.UUID `json:"revision_id" gorm:"type:uuid;primaryKey"`
 	EPUBCFI         string    `json:"epub_cfi" gorm:"type:text;not null;default:''"`
 	PDFPage         int       `json:"pdf_page" gorm:"not null;default:0;check:chk_book_reading_page,pdf_page >= 0"`
+	PDFOffset       float64   `json:"pdf_offset" gorm:"not null;default:0;check:chk_book_reading_pdf_offset,pdf_offset >= 0 AND pdf_offset <= 1"`
 	TXTOffset       int64     `json:"txt_offset" gorm:"not null;default:0;check:chk_book_reading_offset,txt_offset >= 0"`
 	CurrentPercent  float64   `json:"current_percent" gorm:"not null;default:0;check:chk_book_reading_current,current_percent >= 0 AND current_percent <= 1"`
 	FurthestPercent float64   `json:"furthest_percent" gorm:"not null;default:0;check:chk_book_reading_furthest,furthest_percent >= 0 AND furthest_percent <= 1"`

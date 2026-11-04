@@ -36,6 +36,7 @@ type SaveBookCloudReadingStateInput struct {
 	BaseVersion     int64     `json:"base_version"`
 	EPUBCFI         string    `json:"epub_cfi"`
 	PDFPage         int       `json:"pdf_page"`
+	PDFOffset       float64   `json:"pdf_offset"` // vertical fraction of the displayed PDF page, independent of zoom
 	TXTOffset       int64     `json:"txt_offset"`
 	CurrentPercent  float64   `json:"current_percent"`
 	FurthestPercent *float64  `json:"furthest_percent,omitempty"`
@@ -114,7 +115,7 @@ func validateBookCloudPosition(input SaveBookCloudReadingStateInput, format stri
 	validPercent := func(value float64) bool {
 		return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1
 	}
-	if !validPercent(input.CurrentPercent) || (input.FurthestPercent != nil && !validPercent(*input.FurthestPercent)) {
+	if !validPercent(input.CurrentPercent) || !validPercent(input.PDFOffset) || (input.FurthestPercent != nil && !validPercent(*input.FurthestPercent)) {
 		return apperr.BadRequest("books.invalid_reading_percent", "Reading percentages must be within 0 and 1")
 	}
 	if input.PDFPage < 0 || input.PDFPage > bookReadingMaxPDFPage || input.TXTOffset < 0 || input.TXTOffset > bookReadingMaxTXTOffset || len(input.EPUBCFI) > bookReadingCFIMaxLength {
@@ -123,15 +124,19 @@ func validateBookCloudPosition(input SaveBookCloudReadingStateInput, format stri
 	switch format {
 	case "epub":
 		_, cfiErr := parseBookPointCFI(input.EPUBCFI)
-		if input.PDFPage != 0 || input.TXTOffset != 0 || cfiErr != nil {
+		if input.PDFPage != 0 || input.PDFOffset != 0 || input.TXTOffset != 0 || cfiErr != nil {
 			return apperr.BadRequest("books.invalid_reading_position", "An EPUB CFI is required for this revision")
 		}
-	case "pdf", "cbz", "cbr":
+	case "pdf":
 		if input.PDFPage < 1 || input.EPUBCFI != "" || input.TXTOffset != 0 {
-			return apperr.BadRequest("books.invalid_reading_position", "A page number is required for this revision")
+			return apperr.BadRequest("books.invalid_reading_position", "A PDF page number is required for this revision")
+		}
+	case "cbz", "cbr":
+		if input.PDFPage < 1 || input.PDFOffset != 0 || input.EPUBCFI != "" || input.TXTOffset != 0 {
+			return apperr.BadRequest("books.invalid_reading_position", "A comic page number is required for this revision")
 		}
 	case "txt":
-		if input.PDFPage != 0 || input.EPUBCFI != "" {
+		if input.PDFPage != 0 || input.PDFOffset != 0 || input.EPUBCFI != "" {
 			return apperr.BadRequest("books.invalid_reading_position", "Use a text offset for this revision")
 		}
 	default:
@@ -226,11 +231,12 @@ func (s *Service) SaveBookCloudReadingState(ctx context.Context, user authctx.Cu
 			}
 			state.EPUBCFI = input.EPUBCFI
 			state.PDFPage = input.PDFPage
+			state.PDFOffset = input.PDFOffset
 			state.TXTOffset = input.TXTOffset
 			state.CurrentPercent = input.CurrentPercent
 			state.FurthestPercent = furthest
 			state.Version++
-			if err := tx.Model(&state).Select("epub_cfi", "pdf_page", "txt_offset", "current_percent", "furthest_percent", "version", "updated_at").Updates(&state).Error; err != nil {
+			if err := tx.Model(&state).Select("epub_cfi", "pdf_page", "pdf_offset", "txt_offset", "current_percent", "furthest_percent", "version", "updated_at").Updates(&state).Error; err != nil {
 				return err
 			}
 			if err := tx.Model(&locked).Update("last_sequence", input.Sequence).Error; err != nil {

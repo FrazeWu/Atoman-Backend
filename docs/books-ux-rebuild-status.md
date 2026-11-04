@@ -28,7 +28,7 @@
 
 - Bounded, evidence-based file-quality report and manual comparison UI are implemented (see `books-file-quality-evidence-20261103.md`); deeper page/text/OCR/visual checks remain open.
 - External ISBN lookup and stronger OCR extraction.
-- Fixed-revision reader mode switching and jump-safe furthest progress implemented with tests (see `books-reader-modes-and-jump-progress-20261103.md`); real-browser, within-PDF-page offset and old private-book reader verification remain open.
+- Fixed-revision reader modes, jump-safe furthest, within-PDF-page resume and real Chrome PDF/EPUB tests implemented (see `books-reader-modes-and-jump-progress-20261103.md` and `books-pdf-exact-resume-real-browser-20261104.md`); staging object storage and legacy private reader parity remain open.
 - Cross-file notes, work-level note collections and exact source deep links.
 - Publication snapshots with private/link/public modes and associated revocation, import/export, 30-day trash.
 - Multi-client integration and security tests against real object storage and a fresh database.

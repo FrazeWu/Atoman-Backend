@@ -63,6 +63,9 @@ func TestBooksV2ResourceGraphConstraints(t *testing.T) {
 	require.Error(t, db.Create(&model.BookReadingSelection{UserID: user.UUID, WorkID: otherWork.ID, AssetID: asset.ID, RevisionID: revision.ID}).Error)
 	state := model.BookReadingState{UserID: user.UUID, RevisionID: revision.ID, CurrentPercent: .2, FurthestPercent: .8}
 	require.NoError(t, db.Create(&state).Error)
+	require.Error(t, db.Model(&state).Update("pdf_offset", -0.01).Error)
+	require.Error(t, db.Model(&state).Update("pdf_offset", 1.01).Error)
+	require.NoError(t, db.Model(&state).Update("pdf_offset", .45).Error)
 	require.Error(t, db.Create(&state).Error)
 	session := model.BookReadingSession{UserID: user.UUID, ClientSessionID: uuid.New(), RevisionID: revision.ID, DeviceID: "web"}
 	require.NoError(t, db.Create(&session).Error)
