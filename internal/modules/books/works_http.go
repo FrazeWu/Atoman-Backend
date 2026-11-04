@@ -151,6 +151,31 @@ func (h *Handler) searchBookPeople(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"items": items, "total": total})
 }
 
+// searchBookPublishers returns selectable canonical publisher entities.
+// A publisher is created only when a new edition is saved, never by searching.
+func (h *Handler) searchBookPublishers(c *gin.Context) {
+	limit, offset, ok := catalogPaginationParams(c)
+	if !ok {
+		return
+	}
+	items := make([]model.BookPublisher, 0)
+	query := h.service.db.WithContext(c.Request.Context()).Model(&model.BookPublisher{}).
+		Where("lifecycle_status = ?", model.BookLifecycleStatusActive)
+	if q := strings.TrimSpace(c.Query("q")); q != "" {
+		query = query.Where("name ILIKE ?", "%"+escapeBookCatalogQuery(q)+"%")
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := query.Order("name ASC, id ASC").Offset(offset).Limit(limit).Find(&items).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"items": items, "total": total})
+}
+
 // createBookEdition godoc
 // @Summary 为已有作品独立添加出版版本
 // @Tags books-catalog

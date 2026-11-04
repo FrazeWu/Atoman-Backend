@@ -29,6 +29,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	public.GET("/works", handler.searchBookWorks)
 	public.GET("/works/:workId", handler.getBookWork)
 	public.GET("/people", handler.searchBookPeople)
+	public.GET("/publishers", handler.searchBookPublishers)
 	public.GET("/works/:workId/assets", handler.listBookResources)
 	public.GET("/editions/:editionId/files", handler.listEditionFiles)
 	public.GET("/editions/:editionId/cover", handler.getEditionCover)
