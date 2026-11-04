@@ -29,6 +29,7 @@ import (
 	"atoman/internal/modules/shortnote"
 	"atoman/internal/modules/studio"
 	"atoman/internal/modules/timeline"
+	"atoman/internal/modules/user_theme"
 	"atoman/internal/modules/video"
 	"atoman/internal/service"
 
@@ -134,6 +135,7 @@ func RegisterV1Routes(
 	portal.RegisterRoutes(group.Group("/portal"), portalService)
 	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
 	lifecycle.RegisterRoutes(group.Group("/content"), lifecycle.NewService(db))
+	user_theme.RegisterRoutes(group, user_theme.NewHandler(user_theme.NewService(db)))
 	timeline.RegisterRoutes(r, db)
 	video.RegisterRoutes(r, db, s3Client)
 	podcast.RegisterRoutes(r, db, s3Client)
