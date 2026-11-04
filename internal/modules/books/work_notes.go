@@ -23,17 +23,18 @@ type WorkNoteSource struct {
 	CanOpen      bool       `json:"can_open"`
 }
 type WorkNoteItem struct {
-	ID        uuid.UUID              `json:"id"`
-	Type      string                 `json:"type"`
-	Title     string                 `json:"title"`
-	Quote     string                 `json:"quote"`
-	Note      string                 `json:"note"`
-	Color     string                 `json:"color,omitempty"`
-	Style     string                 `json:"style,omitempty"`
-	Anchor    *BookReadingMarkAnchor `json:"anchor,omitempty"`
-	Source    *WorkNoteSource        `json:"source,omitempty"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
+	ID            uuid.UUID              `json:"id"`
+	Type          string                 `json:"type"`
+	Title         string                 `json:"title"`
+	Quote         string                 `json:"quote"`
+	Note          string                 `json:"note"`
+	Color         string                 `json:"color,omitempty"`
+	Style         string                 `json:"style,omitempty"`
+	Anchor        *BookReadingMarkAnchor `json:"anchor,omitempty"`
+	ChapterAnchor *BookChapterAnchor     `json:"chapter_anchor,omitempty"`
+	Source        *WorkNoteSource        `json:"source,omitempty"`
+	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at"`
 }
 type WorkNotesResult struct {
 	WorkID uuid.UUID      `json:"work_id"`
@@ -48,17 +49,18 @@ type WorkNotesFilter struct {
 	Limit, Offset int
 }
 type workNoteRow struct {
-	ID         uuid.UUID  `gorm:"column:id"`
-	Type       string     `gorm:"column:type"`
-	RevisionID *uuid.UUID `gorm:"column:revision_id"`
-	AnchorJSON string     `gorm:"column:anchor_json"`
-	Title      string     `gorm:"column:title"`
-	Quote      string     `gorm:"column:quote"`
-	Note       string     `gorm:"column:note"`
-	Color      string     `gorm:"column:color"`
-	Style      string     `gorm:"column:style"`
-	CreatedAt  time.Time  `gorm:"column:created_at"`
-	UpdatedAt  time.Time  `gorm:"column:updated_at"`
+	ID                uuid.UUID  `gorm:"column:id"`
+	Type              string     `gorm:"column:type"`
+	RevisionID        *uuid.UUID `gorm:"column:revision_id"`
+	AnchorJSON        string     `gorm:"column:anchor_json"`
+	ChapterAnchorJSON string     `gorm:"column:chapter_anchor_json"`
+	Title             string     `gorm:"column:title"`
+	Quote             string     `gorm:"column:quote"`
+	Note              string     `gorm:"column:note"`
+	Color             string     `gorm:"column:color"`
+	Style             string     `gorm:"column:style"`
+	CreatedAt         time.Time  `gorm:"column:created_at"`
+	UpdatedAt         time.Time  `gorm:"column:updated_at"`
 }
 type workNoteSourceRow struct {
 	RevisionID     uuid.UUID  `gorm:"column:revision_id"`
@@ -115,8 +117,8 @@ func (s *Service) ListWorkNotes(ctx context.Context, user authctx.CurrentUser, w
 	if len(aliases) == 0 {
 		return out, nil
 	}
-	markSQL := `SELECT m.id, 'highlight'::text AS type, m.revision_id, m.anchor_json::text AS anchor_json, m.label AS title, m.quote, m.note, m.color, m.style, m.created_at, m.updated_at FROM book_reading_marks m JOIN book_asset_revisions r ON r.id = m.revision_id JOIN book_assets a ON a.id = r.asset_id WHERE m.deleted_at IS NULL AND m.kind = 'highlight' AND m.user_id = ? AND a.work_id IN ? AND ? = true`
-	privateSQL := `SELECT n.id, 'chapter_note'::text AS type, n.source_revision_id AS revision_id, '{}'::text AS anchor_json, n.title, ''::text AS quote, n.body AS note, ''::text AS color, ''::text AS style, n.created_at, n.updated_at FROM book_private_notes n WHERE n.deleted_at IS NULL AND n.purged_at IS NULL AND n.user_id = ? AND n.work_id IN ? AND ? = true`
+	markSQL := `SELECT m.id, 'highlight'::text AS type, m.revision_id, m.anchor_json::text AS anchor_json, '{}'::text AS chapter_anchor_json, m.label AS title, m.quote, m.note, m.color, m.style, m.created_at, m.updated_at FROM book_reading_marks m JOIN book_asset_revisions r ON r.id = m.revision_id JOIN book_assets a ON a.id = r.asset_id WHERE m.deleted_at IS NULL AND m.kind = 'highlight' AND m.user_id = ? AND a.work_id IN ? AND ? = true`
+	privateSQL := `SELECT n.id, 'chapter_note'::text AS type, n.source_revision_id AS revision_id, '{}'::text AS anchor_json, COALESCE(n.chapter_anchor_json, '{}'::jsonb)::text AS chapter_anchor_json, n.title, ''::text AS quote, n.body AS note, ''::text AS color, ''::text AS style, n.created_at, n.updated_at FROM book_private_notes n WHERE n.deleted_at IS NULL AND n.purged_at IS NULL AND n.user_id = ? AND n.work_id IN ? AND ? = true`
 	markArgs := []any{user.ID, aliases, filter.Kind != "chapter_note"}
 	privateArgs := []any{user.ID, aliases, filter.Kind != "highlight"}
 	if filter.RevisionID != uuid.Nil {
@@ -166,6 +168,13 @@ func (s *Service) ListWorkNotes(ctx context.Context, user authctx.CurrentUser, w
 				return out, err
 			}
 			item.Anchor = &anchor
+		}
+		if record.Type == "chapter_note" && record.ChapterAnchorJSON != "" && record.ChapterAnchorJSON != "{}" {
+			var parsed BookChapterAnchor
+			if err := json.Unmarshal([]byte(record.ChapterAnchorJSON), &parsed); err != nil {
+				return out, err
+			}
+			item.ChapterAnchor = &parsed
 		}
 		if record.RevisionID != nil {
 			if source, ok := sources[*record.RevisionID]; ok {

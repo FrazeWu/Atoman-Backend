@@ -22,14 +22,15 @@ func (BookLibraryEntry) TableName() string { return "book_library_entries" }
 // Canonical work filters resolve redirects; private edits therefore survive undo.
 type BookPrivateNote struct {
 	Base
-	UserID           uuid.UUID  `json:"-" gorm:"type:uuid;not null;index:idx_book_private_note_reader_work,priority:1"`
-	WorkID           uuid.UUID  `json:"work_id" gorm:"type:uuid;not null;index:idx_book_private_note_reader_work,priority:2"`
-	SourceRevisionID *uuid.UUID `json:"source_revision_id,omitempty" gorm:"type:uuid"`
-	Title            string     `json:"title" gorm:"not null;default:''"`
-	Body             string     `json:"body" gorm:"type:text;not null;default:''"`
-	TagsJSON         string     `json:"-" gorm:"type:jsonb;not null;default:'[]'"`
-	Version          int64      `json:"version" gorm:"not null;check:chk_book_private_note_version,version > 0"`
-	PurgedAt         *time.Time `json:"-"`
+	UserID            uuid.UUID  `json:"-" gorm:"type:uuid;not null;index:idx_book_private_note_reader_work,priority:1"`
+	WorkID            uuid.UUID  `json:"work_id" gorm:"type:uuid;not null;index:idx_book_private_note_reader_work,priority:2"`
+	SourceRevisionID  *uuid.UUID `json:"source_revision_id,omitempty" gorm:"type:uuid"`
+	ChapterAnchorJSON string     `json:"-" gorm:"type:jsonb;not null;default:'{}'"`
+	Title             string     `json:"title" gorm:"not null;default:''"`
+	Body              string     `json:"body" gorm:"type:text;not null;default:''"`
+	TagsJSON          string     `json:"-" gorm:"type:jsonb;not null;default:'[]'"`
+	Version           int64      `json:"version" gorm:"not null;check:chk_book_private_note_version,version > 0"`
+	PurgedAt          *time.Time `json:"-"`
 }
 
 func (BookPrivateNote) TableName() string { return "book_private_notes" }
