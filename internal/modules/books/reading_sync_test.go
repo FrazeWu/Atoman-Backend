@@ -151,6 +151,14 @@ func TestBookCloudReadingPositionFormats(t *testing.T) {
 		{"epub", SaveBookCloudReadingStateInput{PDFPage: 1}, false},
 		{"epub", SaveBookCloudReadingStateInput{EPUBCFI: "epubcfi(not-a-position)"}, false},
 		{"pdf", SaveBookCloudReadingStateInput{PDFPage: 1}, true},
+		{"pdf", SaveBookCloudReadingStateInput{PDFPage: 5, PDFOffset: .65}, true},
+		{"pdf", SaveBookCloudReadingStateInput{PDFPage: 2, PDFOffset: -0.1}, false},
+		{"pdf", SaveBookCloudReadingStateInput{PDFPage: 2, PDFOffset: 1.1}, false},
+		{"pdf", SaveBookCloudReadingStateInput{PDFPage: 2, PDFOffset: math.NaN()}, false},
+		{"pdf", SaveBookCloudReadingStateInput{PDFPage: 2, PDFOffset: math.Inf(1)}, false},
+		{"cbz", SaveBookCloudReadingStateInput{PDFPage: 3, PDFOffset: .2}, false},
+		{"epub", SaveBookCloudReadingStateInput{EPUBCFI: "epubcfi(/6/2!/4/1:5)", PDFOffset: .2}, false},
+		{"txt", SaveBookCloudReadingStateInput{PDFOffset: .2}, false},
 		{"pdf", SaveBookCloudReadingStateInput{}, false},
 		{"txt", SaveBookCloudReadingStateInput{TXTOffset: 0}, true},
 		{"txt", SaveBookCloudReadingStateInput{PDFPage: 1}, false},
@@ -295,4 +303,73 @@ func TestBookReadingRecommendationsKeepExplicitRevision(t *testing.T) {
 	require.Equal(t, old.ID, *recommendation.RevisionID)
 	_, err = service.SetBookReadingSelection(ctx, user, workID, SetBookReadingSelectionInput{AssetID: en.ID, RevisionID: newRevision.ID})
 	require.Equal(t, "books.selection_revision_mismatch", apperr.FromError(err).Code)
+}
+
+func TestBookCloudReadingNavigationDoesNotAdvanceFurthest(t *testing.T) {
+	service, user, work, _ := newBookResourceTestService(t)
+	ctx := context.Background()
+	_, revision := readyBookReadingFile(t, service, user, uuid.MustParse(work.ID), "zh", "txt")
+	session := newBookCloudTestSession(t, service, user, revision.ID, "reader-navigation")
+	falseValue, trueValue := false, true
+	write := func(sequence, version int64, position, furthest float64, advance bool) BookReadingWriteResult {
+		t.Helper()
+		result, err := service.SaveBookCloudReadingState(ctx, user, revision.ID, SaveBookCloudReadingStateInput{
+			SessionID: session.Session.ID, RequestID: uuid.New(), Sequence: sequence, BaseVersion: version,
+			TXTOffset: int64(position * 100), CurrentPercent: position, FurthestPercent: &furthest,
+			AdvanceFurthest: &advance,
+		})
+		require.NoError(t, err)
+		return result
+	}
+	// First open: go straight to a later chapter without claiming 90% completion.
+	jump := write(1, 0, .9, 0, falseValue)
+	require.Equal(t, .9, jump.State.CurrentPercent)
+	require.Zero(t, jump.State.FurthestPercent)
+	// Scrolling naturally there advances only the actually observed point.
+	read := write(2, 1, .92, 0, trueValue)
+	require.Equal(t, .92, read.State.FurthestPercent)
+	back := write(3, 2, .2, .92, falseValue)
+	require.Equal(t, .2, back.State.CurrentPercent)
+	require.Equal(t, .92, back.State.FurthestPercent)
+	// A stale jump must not promote the oldest high position either.
+	stale := SaveBookCloudReadingStateInput{SessionID: session.Session.ID, RequestID: uuid.New(), Sequence: 1, BaseVersion: 0, TXTOffset: 99, CurrentPercent: .99, AdvanceFurthest: &falseValue}
+	result, err := service.SaveBookCloudReadingState(ctx, user, revision.ID, stale)
+	require.NoError(t, err)
+	require.Equal(t, "out_of_order", result.IgnoredReason)
+	require.Equal(t, .2, result.State.CurrentPercent)
+	require.Equal(t, .92, result.State.FurthestPercent)
+	// Navigating with a false flag and an old furthest below current is valid.
+	require.NoError(t, validateBookCloudPosition(SaveBookCloudReadingStateInput{CurrentPercent: .99, FurthestPercent: &back.State.FurthestPercent, AdvanceFurthest: &falseValue}, "txt"))
+}
+
+func TestBookPDFExactPageFractionPersistsAndIsolatedByRevision(t *testing.T) {
+	service, user, work, _ := newBookResourceTestService(t)
+	ctx := context.Background()
+	_, rev := readyBookReadingFile(t, service, user, uuid.MustParse(work.ID), "zh", "pdf")
+	session := newBookCloudTestSession(t, service, user, rev.ID, "pdf-reader")
+	noAdvance := false
+	saved, err := service.SaveBookCloudReadingState(ctx, user, rev.ID, SaveBookCloudReadingStateInput{
+		SessionID: session.Session.ID, RequestID: uuid.New(), Sequence: 1, BaseVersion: 0,
+		PDFPage: 4, PDFOffset: .725, CurrentPercent: .4, AdvanceFurthest: &noAdvance,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, saved.State.PDFPage)
+	require.InDelta(t, .725, saved.State.PDFOffset, .000001)
+	require.Equal(t, float64(0), saved.State.FurthestPercent)
+	next, err := service.SaveBookCloudReadingState(ctx, user, rev.ID, SaveBookCloudReadingStateInput{
+		SessionID: session.Session.ID, RequestID: uuid.New(), Sequence: 2, BaseVersion: 1,
+		PDFPage: 4, PDFOffset: .86, CurrentPercent: .41,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, next.State.PDFPage)
+	require.InDelta(t, .86, next.State.PDFOffset, .000001)
+	require.Equal(t, .41, next.State.FurthestPercent)
+	reopened, err := service.GetBookCloudReadingState(ctx, user, rev.ID)
+	require.NoError(t, err)
+	require.InDelta(t, .86, reopened.PDFOffset, .000001)
+	_, other := readyBookReadingFile(t, service, user, uuid.MustParse(work.ID), "zh", "pdf")
+	otherState, err := service.GetBookCloudReadingState(ctx, user, other.ID)
+	require.NoError(t, err)
+	require.Zero(t, otherState.PDFPage)
+	require.Zero(t, otherState.PDFOffset)
 }

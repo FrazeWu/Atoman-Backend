@@ -15,7 +15,7 @@ func TestBookMetadataEditConflictAndRevert(t *testing.T) {
 	ctx := context.Background()
 	work, err := service.CreateBookWork(ctx, user, CreateBookWorkInput{Title: "测试", Authors: []string{"作者"}})
 	require.NoError(t, err)
-	edition, err := service.CreateBookEdition(ctx, user, uuid.MustParse(work.ID), CreateBookEditionInput{Publisher: "初版社"})
+	edition, err := service.CreateBookEdition(ctx, user, uuid.MustParse(work.ID), CreateBookEditionInput{Publisher: "初版社", Language: "zh", EditionStatement: "初版"})
 	require.NoError(t, err)
 	for _, test := range []struct {
 		kind          string
@@ -57,9 +57,9 @@ func TestBookMetadataMergeDeduplicatesAndUndoRestores(t *testing.T) {
 	for _, id := range []uuid.UUID{first.ID, second.ID} {
 		require.NoError(t, service.db.Create(&model.BookContribution{WorkID: &workID, PersonID: id, Role: "author", Position: 1}).Error)
 	}
-	sourceEdition, err := service.CreateBookEdition(ctx, user, workID, CreateBookEditionInput{Title: "重复版"})
+	sourceEdition, err := service.CreateBookEdition(ctx, user, workID, CreateBookEditionInput{Title: "重复版", Language: "zh", Publisher: "测试出版社", EditionStatement: "重复版"})
 	require.NoError(t, err)
-	targetEdition, err := service.CreateBookEdition(ctx, user, workID, CreateBookEditionInput{Title: "规范版"})
+	targetEdition, err := service.CreateBookEdition(ctx, user, workID, CreateBookEditionInput{Title: "规范版", Language: "zh", Publisher: "测试出版社", EditionStatement: "规范版"})
 	require.NoError(t, err)
 	for _, test := range []struct {
 		kind           string
@@ -89,9 +89,9 @@ func TestBookMetadataMergeRefusesStalePreviewAndUndo(t *testing.T) {
 	service, user, work, _ := newBookMergeTestService(t)
 	ctx := context.Background()
 	workID := uuid.MustParse(work.ID)
-	a, err := service.CreateBookEdition(ctx, user, workID, CreateBookEditionInput{Title: "A"})
+	a, err := service.CreateBookEdition(ctx, user, workID, CreateBookEditionInput{Title: "A", Language: "zh", Publisher: "测试出版社", EditionStatement: "A 版"})
 	require.NoError(t, err)
-	b, err := service.CreateBookEdition(ctx, user, workID, CreateBookEditionInput{Title: "B"})
+	b, err := service.CreateBookEdition(ctx, user, workID, CreateBookEditionInput{Title: "B", Language: "zh", Publisher: "测试出版社", EditionStatement: "B 版"})
 	require.NoError(t, err)
 	ids := PreviewBookWorkMergeInput{EntityType: "edition", SourceID: uuid.MustParse(a.ID), TargetID: uuid.MustParse(b.ID)}
 	preview, err := service.PreviewBookWorkMerge(ctx, user, ids)

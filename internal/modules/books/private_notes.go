@@ -20,18 +20,21 @@ import (
 const bookPrivateNoteTrashRetention = 30 * 24 * time.Hour
 
 type SaveBookPrivateNoteInput struct {
-	BaseVersion      int64      `json:"base_version"`
-	WorkID           uuid.UUID  `json:"work_id"`
-	SourceRevisionID *uuid.UUID `json:"source_revision_id,omitempty"`
-	Title            string     `json:"title"`
-	Body             string     `json:"body"`
-	Tags             []string   `json:"tags"`
+	BaseVersion        int64              `json:"base_version"`
+	WorkID             uuid.UUID          `json:"work_id"`
+	SourceRevisionID   *uuid.UUID         `json:"source_revision_id,omitempty"`
+	ChapterAnchor      *BookChapterAnchor `json:"chapter_anchor,omitempty"`
+	ClearChapterAnchor bool               `json:"clear_chapter_anchor,omitempty"`
+	Title              string             `json:"title"`
+	Body               string             `json:"body"`
+	Tags               []string           `json:"tags"`
 }
 
 type BookPrivateNoteDTO struct {
 	model.BookPrivateNote
-	Tags      []string   `json:"tags"`
-	TrashedAt *time.Time `json:"trashed_at,omitempty"`
+	Tags          []string           `json:"tags"`
+	ChapterAnchor *BookChapterAnchor `json:"chapter_anchor,omitempty"`
+	TrashedAt     *time.Time         `json:"trashed_at,omitempty"`
 }
 
 type BookPrivateNoteFilter struct {
@@ -54,7 +57,17 @@ func bookPrivateNoteDTO(note model.BookPrivateNote) (BookPrivateNoteDTO, error) 
 		result.TrashedAt = &value
 	}
 	err := json.Unmarshal([]byte(note.TagsJSON), &result.Tags)
-	return result, err
+	if err != nil {
+		return result, err
+	}
+	if note.ChapterAnchorJSON != "" && note.ChapterAnchorJSON != "{}" {
+		var anchor BookChapterAnchor
+		if err := json.Unmarshal([]byte(note.ChapterAnchorJSON), &anchor); err != nil {
+			return result, err
+		}
+		result.ChapterAnchor = &anchor
+	}
+	return result, nil
 }
 
 func normalizeBookPrivateNote(input SaveBookPrivateNoteInput) (SaveBookPrivateNoteInput, error) {
@@ -64,6 +77,12 @@ func normalizeBookPrivateNote(input SaveBookPrivateNoteInput) (SaveBookPrivateNo
 	}
 	if input.SourceRevisionID != nil && *input.SourceRevisionID == uuid.Nil {
 		return input, apperr.BadRequest("books.invalid_private_note", "source_revision_id must be a UUID or null")
+	}
+	if input.ChapterAnchor != nil && input.ClearChapterAnchor {
+		return input, apperr.BadRequest("books.invalid_chapter_anchor", "Cannot set and clear chapter anchor together")
+	}
+	if input.ChapterAnchor != nil && input.SourceRevisionID == nil {
+		return input, apperr.BadRequest("books.invalid_chapter_anchor", "Chapter anchor requires a source revision")
 	}
 	tags, err := normalizeBookPrivateTags(input.Tags)
 	input.Tags = tags
@@ -136,6 +155,9 @@ func (s *Service) SaveBookPrivateNote(ctx context.Context, user authctx.CurrentU
 			return apperr.NotFound("books.private_note_not_found", "Private note not found")
 		}
 		if input.SourceRevisionID != nil && (isNew || !sameOptionalBookID(input.SourceRevisionID, stored.SourceRevisionID)) {
+			if err := service.CanReadBookRevision(ctx, user.ID, *input.SourceRevisionID); err != nil {
+				return err
+			}
 			revision, err := service.readableBookRevision(ctx, *input.SourceRevisionID)
 			if err != nil {
 				return err
@@ -145,8 +167,32 @@ func (s *Service) SaveBookPrivateNote(ctx context.Context, user authctx.CurrentU
 				return apperr.BadRequest("books.note_revision_mismatch", "Source revision must belong to this work")
 			}
 		}
+		// Preserve existing anchors when older editors omit the optional field.
+		// Switching source files without an explicit anchor must clear the old one.
+		anchorJSON := "{}"
+		if !isNew && !input.ClearChapterAnchor && sameOptionalBookID(input.SourceRevisionID, stored.SourceRevisionID) && stored.ChapterAnchorJSON != "" {
+			anchorJSON = stored.ChapterAnchorJSON
+		}
+		if input.ChapterAnchor != nil {
+			if err := service.CanReadBookRevision(ctx, user.ID, *input.SourceRevisionID); err != nil {
+				return err
+			}
+			format, err := service.bookReadingMarkFormat(ctx, *input.SourceRevisionID)
+			if err != nil {
+				return err
+			}
+			anchor, err := normalizeBookChapterAnchor(*input.ChapterAnchor, format)
+			if err != nil {
+				return err
+			}
+			encoded, err := json.Marshal(anchor)
+			if err != nil {
+				return err
+			}
+			anchorJSON = string(encoded)
+		}
 		tags, _ := json.Marshal(input.Tags)
-		candidate := model.BookPrivateNote{Base: model.Base{ID: noteID}, UserID: user.ID, WorkID: input.WorkID, SourceRevisionID: input.SourceRevisionID, Title: input.Title, Body: input.Body, TagsJSON: string(tags), Version: 1}
+		candidate := model.BookPrivateNote{Base: model.Base{ID: noteID}, UserID: user.ID, WorkID: input.WorkID, SourceRevisionID: input.SourceRevisionID, ChapterAnchorJSON: anchorJSON, Title: input.Title, Body: input.Body, TagsJSON: string(tags), Version: 1}
 		if isNew {
 			inserted := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&candidate)
 			if inserted.Error != nil {
@@ -172,7 +218,19 @@ func (s *Service) SaveBookPrivateNote(ctx context.Context, user authctx.CurrentU
 			return err
 		}
 		oldTags, _ := json.Marshal(old.Tags)
-		identical := stored.Title == input.Title && stored.Body == input.Body && string(oldTags) == string(tags) && sameOptionalBookID(stored.SourceRevisionID, input.SourceRevisionID)
+		// PostgreSQL jsonb reorders keys; compare normalized values instead of byte strings.
+		var oldAnchor, newAnchor BookChapterAnchor
+		if stored.ChapterAnchorJSON != "" && stored.ChapterAnchorJSON != "{}" {
+			if err := json.Unmarshal([]byte(stored.ChapterAnchorJSON), &oldAnchor); err != nil {
+				return err
+			}
+		}
+		if anchorJSON != "" && anchorJSON != "{}" {
+			if err := json.Unmarshal([]byte(anchorJSON), &newAnchor); err != nil {
+				return err
+			}
+		}
+		identical := stored.Title == input.Title && stored.Body == input.Body && string(oldTags) == string(tags) && sameOptionalBookID(stored.SourceRevisionID, input.SourceRevisionID) && oldAnchor == newAnchor
 		if identical && (input.BaseVersion == stored.Version || input.BaseVersion == stored.Version-1) {
 			result = old
 			return nil
@@ -182,7 +240,7 @@ func (s *Service) SaveBookPrivateNote(ctx context.Context, user authctx.CurrentU
 		}
 		candidate.Version = stored.Version + 1
 		// WorkID is deliberately absent: a merge/undo never relocates private notes.
-		if err := tx.Model(&stored).Select("source_revision_id", "title", "body", "tags_json", "version", "updated_at").Updates(&candidate).Error; err != nil {
+		if err := tx.Model(&stored).Select("source_revision_id", "chapter_anchor_json", "title", "body", "tags_json", "version", "updated_at").Updates(&candidate).Error; err != nil {
 			return err
 		}
 		if err = load(); err != nil {
@@ -276,6 +334,9 @@ func escapeBookPrivateSearch(value string) string {
 }
 
 func (s *Service) DeleteBookPrivateNote(ctx context.Context, user authctx.CurrentUser, noteID uuid.UUID, baseVersion int64) (BookReadingMarkTombstone, error) {
+	return s.DeleteBookPrivateNoteWithShares(ctx, user, noteID, baseVersion, false)
+}
+func (s *Service) DeleteBookPrivateNoteWithShares(ctx context.Context, user authctx.CurrentUser, noteID uuid.UUID, baseVersion int64, keepShared bool) (BookReadingMarkTombstone, error) {
 	if user.ID == uuid.Nil {
 		return BookReadingMarkTombstone{}, apperr.Unauthorized("Login required")
 	}
@@ -295,6 +356,11 @@ func (s *Service) DeleteBookPrivateNote(ctx context.Context, user authctx.Curren
 		} else {
 			if note.Version != baseVersion {
 				return bookPrivateVersionConflict("books.private_note_conflict", note.Version, false)
+			}
+			if !keepShared {
+				if err := revokeNoteSharesForSource(tx, user.ID, BookNoteReference{Kind: "chapter_note", ID: noteID}); err != nil {
+					return err
+				}
 			}
 			note.Version++
 			note.DeletedAt = privateBookDeletedAt()
@@ -355,5 +421,5 @@ func (s *Service) purgeBookPrivateNotes(ctx context.Context, userID *uuid.UUID, 
 	if userID != nil {
 		query = query.Where("user_id = ?", *userID)
 	}
-	return query.Updates(map[string]any{"title": "", "body": "", "tags_json": "[]", "source_revision_id": nil, "purged_at": now, "version": gorm.Expr("version + 1")}).Error
+	return query.Updates(map[string]any{"title": "", "body": "", "tags_json": "[]", "source_revision_id": nil, "chapter_anchor_json": "{}", "purged_at": now, "version": gorm.Expr("version + 1")}).Error
 }

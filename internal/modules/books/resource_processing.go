@@ -2,6 +2,7 @@ package books
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -52,7 +53,7 @@ func (s *Service) ProcessBookResourceUploads(ctx context.Context) (int, error) {
 		}
 		processed++
 		scanCtx, cancel := context.WithTimeout(ctx, bookProcessingTimeout)
-		hash, err := s.inspectBookResourceUpload(scanCtx, session)
+		hash, quality, err := s.inspectBookResourceUpload(scanCtx, session)
 		cancel()
 		if err != nil {
 			status := "failed"
@@ -65,7 +66,7 @@ func (s *Service) ProcessBookResourceUploads(ctx context.Context) (int, error) {
 			failures = errors.Join(failures, err, markErr)
 			continue
 		}
-		if err := s.publishBookResourceUpload(ctx, session, hash, token); err != nil {
+		if err := s.publishBookResourceUpload(ctx, session, hash, token, quality); err != nil {
 			// A concurrent catalog merge or transient database error can be retried
 			// safely. No existing revision or current file has been overwritten.
 			resetErr := s.db.WithContext(ctx).Model(&model.BookUploadSession{}).
@@ -77,46 +78,50 @@ func (s *Service) ProcessBookResourceUploads(ctx context.Context) (int, error) {
 	return processed, failures
 }
 
-func (s *Service) inspectBookResourceUpload(ctx context.Context, session model.BookUploadSession) (string, error) {
+func (s *Service) inspectBookResourceUpload(ctx context.Context, session model.BookUploadSession) (string, BookFileQualityReport, error) {
 	body, err := s.bookResources.OpenObject(session.ObjectKey)
 	if err != nil {
-		return "", err
+		return "", BookFileQualityReport{}, err
 	}
 	defer body.Close()
 	file, err := os.CreateTemp("", "atoman-book-v2-*."+session.Format)
 	if err != nil {
-		return "", err
+		return "", BookFileQualityReport{}, err
 	}
 	defer os.Remove(file.Name())
 	defer file.Close()
 	hash, err := inspectBookObject(io.TeeReader(io.LimitReader(body, session.SizeBytes+1), file), session.Format, session.SizeBytes)
 	if err != nil {
-		return "", err
+		return "", BookFileQualityReport{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return "", BookFileQualityReport{}, err
 	}
+	var metadata map[string]any
 	switch session.Format {
 	case "epub":
-		_, err = validateBookEPUB(file, session.SizeBytes)
+		metadata, err = validateBookEPUB(file, session.SizeBytes)
 	case "cbz":
-		_, err = validateBookCBZ(file, session.SizeBytes)
+		metadata, err = validateBookCBZ(file, session.SizeBytes)
 	case "cbr":
-		_, err = validateBookCBR(file.Name())
+		metadata, err = validateBookCBR(file.Name())
 	}
 	if err != nil {
-		return "", err
+		return "", BookFileQualityReport{}, err
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return "", err
+		return "", BookFileQualityReport{}, err
 	}
 	if err := s.virusScanner.Scan(ctx, file); err != nil {
-		return "", err
+		return "", BookFileQualityReport{}, err
 	}
-	return hash, ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return "", BookFileQualityReport{}, err
+	}
+	return hash, inspectBookFileQuality(file, session.Format, session.SizeBytes, metadata), nil
 }
 
-func (s *Service) publishBookResourceUpload(ctx context.Context, session model.BookUploadSession, hash, token string) error {
+func (s *Service) publishBookResourceUpload(ctx context.Context, session model.BookUploadSession, hash, token string, quality BookFileQualityReport) error {
 	var initialAsset model.BookAsset
 	if err := s.db.WithContext(ctx).First(&initialAsset, "id = ?", session.AssetID).Error; err != nil {
 		return err
@@ -149,8 +154,60 @@ func (s *Service) publishBookResourceUpload(ctx context.Context, session model.B
 		if err := tx.Create(&revision).Error; err != nil {
 			return err
 		}
+		// The report is immutable evidence for this exact revision and is not a ranking.
+		if quality.Version == 0 {
+			quality = BookFileQualityReport{Version: 1, Format: asset.Format, Bytes: session.SizeBytes, Limitations: []string{"未执行内容质量探测"}}
+		}
+		encodedQuality, err := json.Marshal(quality)
+		if err != nil {
+			return err
+		}
+		if err := tx.Create(&model.BookFileQuality{RevisionID: revision.ID, ReportJSON: string(encodedQuality)}).Error; err != nil {
+			return err
+		}
+		// Uploading a file is not permission to publish its content.
+		if err := tx.Create(&model.BookFileVisibility{RevisionID: revision.ID, Public: session.PublicDistributionConfirmed, UpdatedBy: session.UserID, UpdatedAt: time.Now().UTC()}).Error; err != nil {
+			return err
+		}
 		if err := tx.Model(&asset).Update("current_revision_id", revision.ID).Error; err != nil {
 			return err
+		}
+		// The first verified file is the default. Later uploads never
+		// silently change a reader's or an edition's chosen file.
+		if asset.EditionID != nil {
+			best := model.BookEditionBestFile{EditionID: *asset.EditionID, AssetID: asset.ID, RevisionID: revision.ID, UpdatedBy: session.UserID, UpdatedAt: time.Now().UTC()}
+			inserted := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "edition_id"}}, DoNothing: true}).Create(&best)
+			if inserted.Error != nil {
+				return inserted.Error
+			}
+			if inserted.RowsAffected > 0 {
+				if err := tx.Create(&model.BookBestFileEvent{EditionID: *asset.EditionID, ToRevisionID: revision.ID, ChangedBy: session.UserID}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		// A book edition is only published once it has a safe, ready file.
+		if asset.EditionID != nil {
+			var edition model.BookEdition
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", *asset.EditionID).First(&edition).Error; err != nil {
+				return err
+			}
+			if edition.LifecycleStatus == model.BookLifecycleStatusDraft {
+				if edition.CreatedBy == nil || *edition.CreatedBy != session.UserID {
+					return apperr.Forbidden("books.edition_upload_owner_required", "Only the draft's creator can finish the initial upload")
+				}
+				edition.LifecycleStatus = model.BookLifecycleStatusActive
+				if err := tx.Model(&edition).Update("lifecycle_status", model.BookLifecycleStatusActive).Error; err != nil {
+					return err
+				}
+				snapshot, err := loadBookEditionSnapshot(tx, edition)
+				if err != nil {
+					return err
+				}
+				if _, err := appendBookWikiRevision(tx, "edition", edition.ID, session.UserID, "电子书安全检查通过，出版版本正式创建", "publish", snapshot); err != nil {
+					return err
+				}
+			}
 		}
 		return tx.Model(&locked).Updates(map[string]any{"status": "ready", "scan_lease_token": "", "revision_id": revision.ID, "error_message": ""}).Error
 	})

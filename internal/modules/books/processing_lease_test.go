@@ -24,7 +24,7 @@ func TestPublicBookScanOldLeaseCannotCreateRevision(t *testing.T) {
 	require.NoError(t, service.publishBookResourceUpload(ctx, model.BookUploadSession{
 		Base: model.Base{ID: session.ID}, AssetID: asset.ID, UserID: user.ID,
 		ObjectKey: store.lastKey, OriginalFilename: "lease.txt",
-	}, "0123456789abcdef", "old-lease"))
+	}, "0123456789abcdef", "old-lease", BookFileQualityReport{}))
 	var count int64
 	require.NoError(t, service.db.Model(&model.BookAssetRevision{}).Where("asset_id = ?", asset.ID).Count(&count).Error)
 	require.Zero(t, count)

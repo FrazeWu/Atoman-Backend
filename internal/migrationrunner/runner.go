@@ -85,6 +85,7 @@ func Run(db *gorm.DB) error {
 		{"music song credits migration", migrations.RunMusicSongCreditsMigration},
 		{"books schema migration", migrations.RunBooksMigration},
 		{"books v2 resource migration", migrations.RunBooksV2Migration},
+		{"books catalog integrity migration", migrations.RunBooksCatalogIntegrityMigration},
 		{"user book annotations migration", migrations.MigrateUserBookAnnotations},
 		{"site performance indexes migration", migrations.RunSitePerformanceIndexes},
 		{"music catalog v2 migration", migrations.RunMusicCatalogV2Migration},

@@ -1,6 +1,7 @@
 package books
 
 import (
+	"atoman/internal/platform/authctx"
 	"net/http"
 
 	"atoman/internal/platform/httpx"
@@ -21,6 +22,11 @@ import (
 func (h *Handler) getBookRevisionContent(c *gin.Context) {
 	id, ok := parseCatalogID(c, "revisionId")
 	if !ok {
+		return
+	}
+	viewer, _ := authctx.Current(c)
+	if err := h.service.CanReadBookRevision(c.Request.Context(), viewer.ID, id); err != nil {
+		httpx.Error(c, err)
 		return
 	}
 	content, err := h.service.OpenBookRevision(c.Request.Context(), id)
