@@ -22,6 +22,9 @@ type duplicateGroupIndex struct {
 	groupDays        []int64
 	groupDayCounts   map[int64]int
 	hotFingerprints  map[int]duplicateTitleFingerprint
+	candidateSeen    []uint32
+	candidateEpoch   uint32
+	candidateIDs     []int
 }
 
 func newDuplicateGroupIndex() *duplicateGroupIndex {
@@ -93,6 +96,7 @@ func (index *duplicateGroupIndex) add(group *duplicateGroup, groupID int) {
 	// index is first constructed at the 128-group threshold.
 	day := duplicateDateBucket(group.publishedAt)
 	index.groupDays = append(index.groupDays, day)
+	index.candidateSeen = append(index.candidateSeen, 0)
 	index.groupDayCounts[day]++
 
 	if group.normalizedURL != "" {
@@ -135,10 +139,17 @@ func (index *duplicateGroupIndex) add(group *duplicateGroup, groupID int) {
 // except when EITHER item has Go's zero time. A UTC-day range is a superset
 // of that 72-hour window, including its inclusive endpoints; the final
 // matches() check still filters off-window items within edge day buckets.
-func (index *duplicateGroupIndex) addAnchorCandidates(candidates map[int]struct{},
+func (index *duplicateGroupIndex) addCandidate(id int) {
+	if index.candidateSeen[id] != index.candidateEpoch {
+		index.candidateSeen[id] = index.candidateEpoch
+		index.candidateIDs = append(index.candidateIDs, id)
+	}
+}
+
+func (index *duplicateGroupIndex) addAnchorCandidates(
 	cold map[uint64][]int, hot map[uint64]map[int64][]int, key uint64, date time.Time) {
 	for _, id := range cold[key] {
-		candidates[id] = struct{}{}
+		index.addCandidate(id)
 	}
 	buckets, ok := hot[key]
 	if !ok {
@@ -148,33 +159,38 @@ func (index *duplicateGroupIndex) addAnchorCandidates(candidates map[int]struct{
 		// A zero-dated query may title-match any old representative.
 		for _, posting := range buckets {
 			for _, id := range posting {
-				candidates[id] = struct{}{}
+				index.addCandidate(id)
 			}
 		}
 		return
 	}
 	for _, id := range buckets[duplicateUndatedBucket] {
-		candidates[id] = struct{}{}
+		index.addCandidate(id)
 	}
 	first, last := duplicateDateBucket(date.Add(-duplicateTitleWindow)), duplicateDateBucket(date.Add(duplicateTitleWindow))
 	for day := first; day <= last; day++ {
 		for _, id := range buckets[day] {
-			candidates[id] = struct{}{}
+			index.addCandidate(id)
 		}
 	}
 }
 
 func (index *duplicateGroupIndex) firstMatch(groups []*duplicateGroup, url, title string, publishedAt time.Time) int {
-	candidates := make(map[int]struct{})
+	index.candidateEpoch++
+	if index.candidateEpoch == 0 {
+		clear(index.candidateSeen)
+		index.candidateEpoch = 1
+	}
+	index.candidateIDs = index.candidateIDs[:0]
 	if url != "" {
 		for _, groupID := range index.urls[url] {
-			candidates[groupID] = struct{}{}
+			index.addCandidate(groupID)
 		}
 	}
 	runes := []rune(title)
 	if len(runes) < duplicateShortAnchorSize {
 		for _, groupID := range index.shortTitles[title] {
-			candidates[groupID] = struct{}{}
+			index.addCandidate(groupID)
 		}
 	} else {
 		seen := make(map[uint64]bool)
@@ -184,23 +200,20 @@ func (index *duplicateGroupIndex) firstMatch(groups []*duplicateGroup, url, titl
 					return
 				}
 				seen[key] = true
-				index.addAnchorCandidates(candidates, index.fuzzyAnchors, index.hotFuzzyAnchors, key, publishedAt)
+				index.addAnchorCandidates(index.fuzzyAnchors, index.hotFuzzyAnchors, key, publishedAt)
 			})
 		}
 		duplicateForEachRollingAnchor(runes, duplicateSubstringAnchorSize, func(key uint64) {
-			index.addAnchorCandidates(candidates, index.substringAnchors, index.hotSubAnchors, key, publishedAt)
+			index.addAnchorCandidates(index.substringAnchors, index.hotSubAnchors, key, publishedAt)
 		})
 	}
-	ordered := make([]int, 0, len(candidates))
-	for groupID := range candidates {
-		ordered = append(ordered, groupID)
-	}
+	ordered := index.candidateIDs
 	sort.Ints(ordered)
 	// Ordinary feeds have few candidates. Computing signatures for all
 	// representatives (or for every small query) costs more than it saves.
 	// Only high-collision title queries use this guard, with lazy per-group
 	// fingerprints cached for the lifetime of this one annotation scan.
-	useFingerprint := index.shouldUseBigramGuard(len(candidates), publishedAt)
+	useFingerprint := index.shouldUseBigramGuard(len(ordered), publishedAt)
 	var fingerprint duplicateTitleFingerprint
 	if useFingerprint {
 		fingerprint = fingerprintDuplicateTitle(title)
