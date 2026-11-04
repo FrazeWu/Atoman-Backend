@@ -568,6 +568,23 @@ definitions:
     required:
     - name
     type: object
+  books.BookChapterAnchor:
+    properties:
+      chapter_title:
+        type: string
+      epub_cfi:
+        type: string
+      epub_href:
+        type: string
+      format:
+        type: string
+      pdf_offset:
+        type: number
+      pdf_page:
+        type: integer
+      txt_offset:
+        type: integer
+    type: object
   books.BookContentReviewDTO:
     properties:
       author_id:
@@ -851,6 +868,8 @@ definitions:
     properties:
       body:
         type: string
+      chapter_anchor:
+        $ref: '#/definitions/books.BookChapterAnchor'
       id:
         type: string
       source_revision_id:
@@ -879,6 +898,8 @@ definitions:
     properties:
       body:
         type: string
+      chapter_anchor:
+        $ref: '#/definitions/books.BookChapterAnchor'
       created_at:
         type: string
       id:
@@ -1334,6 +1355,10 @@ definitions:
         type: string
       language:
         type: string
+      new_translator_names:
+        items:
+          type: string
+        type: array
       page_count:
         type: integer
       producer:
@@ -1407,6 +1432,11 @@ definitions:
         type: string
       language:
         type: string
+      new_author_names:
+        description: Explicitly create a homonymous person.
+        items:
+          type: string
+        type: array
       original_title:
         type: string
       subtitle:
@@ -1520,6 +1550,9 @@ definitions:
     type: object
   books.SaveBookCloudReadingStateInput:
     properties:
+      advance_furthest:
+        description: false = navigation, true or omitted = active reading
+        type: boolean
       base_version:
         type: integer
       current_percent:
@@ -1527,6 +1560,9 @@ definitions:
       epub_cfi:
         type: string
       furthest_percent:
+        type: number
+      pdf_offset:
+        description: vertical fraction of the displayed PDF page, independent of zoom
         type: number
       pdf_page:
         type: integer
@@ -1576,6 +1612,10 @@ definitions:
         type: integer
       body:
         type: string
+      chapter_anchor:
+        $ref: '#/definitions/books.BookChapterAnchor'
+      clear_chapter_anchor:
+        type: boolean
       source_revision_id:
         type: string
       tags:
@@ -5957,6 +5997,8 @@ definitions:
       epub_cfi:
         type: string
       furthest_percent:
+        type: number
+      pdf_offset:
         type: number
       pdf_page:
         type: integer
@@ -23888,6 +23930,12 @@ paths:
       - description: 艺术家 ID
         in: query
         name: artist_id
+        type: string
+      - description: participating 通过成员关系查询乐队作品，不代表个人署名
+        enum:
+        - participating
+        in: query
+        name: artist_relation
         type: string
       - description: summary 返回轻量列表信息
         in: query

@@ -463,6 +463,10 @@ func (h *Handler) listAlbums(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "artist_relation must be participating"))
 		return
 	}
+	if artistRelation != "" && artistIDRaw == "" {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "artist_relation requires artist_id"))
+		return
+	}
 
 	cursorRaw, useCursor := c.GetQuery("cursor")
 	cursor, err := parseMusicCreatedAtCursor(strings.TrimSpace(cursorRaw))
@@ -495,7 +499,7 @@ func (h *Handler) listAlbums(c *gin.Context) {
 			return
 		}
 		if artistRelation == "participating" {
-			groupVisibility, groupArgs := musicEntryVisibilityCondition("participating_groups", "created_by", viewerPtr, true)
+			groupVisibility, groupArgs := musicEntryVisibilityCondition("participating_groups", "created_by", viewerPtr, false)
 			whereArgs := append([]any{artistID}, groupArgs...)
 			db = db.Where(`EXISTS (
 				SELECT 1
@@ -504,6 +508,7 @@ func (h *Handler) listAlbums(c *gin.Context) {
 				  ON participating_members.group_artist_id = participating_album_artists.artist_id
 				 AND participating_members.member_artist_id = ?
 				 AND participating_members.deleted_at IS NULL
+				 AND (participating_members.join_date IS NULL OR participating_members.join_date <= CURRENT_DATE)
 				JOIN "Artists" AS participating_groups
 				  ON participating_groups.id = participating_album_artists.artist_id
 				 AND `+groupVisibility+`

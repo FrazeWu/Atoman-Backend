@@ -37,6 +37,7 @@ type musicSearchMeta struct {
 // @Tags music
 // @Produce json
 // @Param artist_id query string false "艺术家 ID"
+// @Param artist_relation query string false "participating 通过成员关系查询乐队作品，不代表个人署名" Enums(participating)
 // @Param view query string false "summary 返回轻量列表信息"
 // @Param release_type query string false "歌曲类型，多个值使用逗号分隔" example(single,leak)
 // @Param tag_id query string false "标签 ID（包含子孙标签及可见所属专辑的标签）"
@@ -47,6 +48,15 @@ type musicSearchMeta struct {
 // @Router /api/v1/music/songs [get]
 func (h *Handler) listSongs(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
+	artistRelation := strings.TrimSpace(c.Query("artist_relation"))
+	if artistRelation != "" && artistRelation != "participating" {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "artist_relation must be participating"))
+		return
+	}
+	if artistRelation != "" && strings.TrimSpace(c.Query("artist_id")) == "" {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "artist_relation requires artist_id"))
+		return
+	}
 	viewer, hasViewer := currentMusicUser(c)
 	viewerPtr := musicViewer(viewer, hasViewer)
 	query := scopeVisibleMusicEntries(h.service.db.Model(&model.Song{}), "\"Songs\"", "uploaded_by", viewerPtr, false)
@@ -59,7 +69,20 @@ func (h *Handler) listSongs(c *gin.Context) {
 		}
 		artistVisibility, artistArgs := musicEntryVisibilityCondition(`"Artists"`, "created_by", viewerPtr, true)
 		whereArgs := append([]any{artistID}, artistArgs...)
-		query = query.Where(`EXISTS (
+		if artistRelation == "participating" {
+			groupVisibility, groupArgs := musicEntryVisibilityCondition("related_groups", "created_by", viewerPtr, false)
+			args := append([]any{artistID}, groupArgs...)
+			query = query.Where(`EXISTS (
+				SELECT 1 FROM song_artists AS group_credits
+				JOIN artist_members AS memberships ON memberships.group_artist_id = group_credits.artist_id
+				JOIN "Artists" AS related_groups ON related_groups.id = group_credits.artist_id
+				WHERE group_credits.song_id = "Songs".id AND memberships.member_artist_id = ?
+				AND memberships.deleted_at IS NULL
+				AND (memberships.join_date IS NULL OR memberships.join_date <= CURRENT_DATE)
+				AND `+groupVisibility+`
+			)`, args...)
+		} else {
+			query = query.Where(`EXISTS (
 			SELECT 1
 			FROM song_artists AS filter_song_artists
 			WHERE filter_song_artists.song_id = "Songs".id
@@ -69,6 +92,7 @@ func (h *Handler) listSongs(c *gin.Context) {
 					WHERE "Artists".id = filter_song_artists.artist_id AND `+artistVisibility+`
 				)
 		)`, whereArgs...)
+		}
 	}
 
 	rawReleaseTypes := strings.ToLower(strings.TrimSpace(c.Query("release_type")))

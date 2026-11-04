@@ -20762,6 +20762,15 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "participating"
+                        ],
+                        "type": "string",
+                        "description": "participating 通过成员关系查询乐队作品，不代表个人署名",
+                        "name": "artist_relation",
+                        "in": "query"
+                    },
+                    {
                         "type": "string",
                         "description": "summary 返回轻量列表信息",
                         "name": "view",
@@ -32808,6 +32817,32 @@ const docTemplate = `{
                 }
             }
         },
+        "books.BookChapterAnchor": {
+            "type": "object",
+            "properties": {
+                "chapter_title": {
+                    "type": "string"
+                },
+                "epub_cfi": {
+                    "type": "string"
+                },
+                "epub_href": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "pdf_offset": {
+                    "type": "number"
+                },
+                "pdf_page": {
+                    "type": "integer"
+                },
+                "txt_offset": {
+                    "type": "integer"
+                }
+            }
+        },
         "books.BookContentReviewDTO": {
             "type": "object",
             "properties": {
@@ -33242,6 +33277,9 @@ const docTemplate = `{
                 "body": {
                     "type": "string"
                 },
+                "chapter_anchor": {
+                    "$ref": "#/definitions/books.BookChapterAnchor"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -33284,6 +33322,9 @@ const docTemplate = `{
             "properties": {
                 "body": {
                     "type": "string"
+                },
+                "chapter_anchor": {
+                    "$ref": "#/definitions/books.BookChapterAnchor"
                 },
                 "created_at": {
                     "type": "string"
@@ -33982,6 +34023,12 @@ const docTemplate = `{
                 "language": {
                     "type": "string"
                 },
+                "new_translator_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "page_count": {
                     "type": "integer"
                 },
@@ -34096,6 +34143,13 @@ const docTemplate = `{
                 },
                 "language": {
                     "type": "string"
+                },
+                "new_author_names": {
+                    "description": "Explicitly create a homonymous person.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "original_title": {
                     "type": "string"
@@ -34269,6 +34323,10 @@ const docTemplate = `{
         "books.SaveBookCloudReadingStateInput": {
             "type": "object",
             "properties": {
+                "advance_furthest": {
+                    "description": "false = navigation, true or omitted = active reading",
+                    "type": "boolean"
+                },
                 "base_version": {
                     "type": "integer"
                 },
@@ -34279,6 +34337,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "furthest_percent": {
+                    "type": "number"
+                },
+                "pdf_offset": {
+                    "description": "vertical fraction of the displayed PDF page, independent of zoom",
                     "type": "number"
                 },
                 "pdf_page": {
@@ -34354,6 +34416,12 @@ const docTemplate = `{
                 },
                 "body": {
                     "type": "string"
+                },
+                "chapter_anchor": {
+                    "$ref": "#/definitions/books.BookChapterAnchor"
+                },
+                "clear_chapter_anchor": {
+                    "type": "boolean"
                 },
                 "source_revision_id": {
                     "type": "string"
@@ -40912,6 +40980,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "furthest_percent": {
+                    "type": "number"
+                },
+                "pdf_offset": {
                     "type": "number"
                 },
                 "pdf_page": {
