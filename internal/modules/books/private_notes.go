@@ -334,6 +334,9 @@ func escapeBookPrivateSearch(value string) string {
 }
 
 func (s *Service) DeleteBookPrivateNote(ctx context.Context, user authctx.CurrentUser, noteID uuid.UUID, baseVersion int64) (BookReadingMarkTombstone, error) {
+	return s.DeleteBookPrivateNoteWithShares(ctx, user, noteID, baseVersion, false)
+}
+func (s *Service) DeleteBookPrivateNoteWithShares(ctx context.Context, user authctx.CurrentUser, noteID uuid.UUID, baseVersion int64, keepShared bool) (BookReadingMarkTombstone, error) {
 	if user.ID == uuid.Nil {
 		return BookReadingMarkTombstone{}, apperr.Unauthorized("Login required")
 	}
@@ -353,6 +356,11 @@ func (s *Service) DeleteBookPrivateNote(ctx context.Context, user authctx.Curren
 		} else {
 			if note.Version != baseVersion {
 				return bookPrivateVersionConflict("books.private_note_conflict", note.Version, false)
+			}
+			if !keepShared {
+				if err := revokeNoteSharesForSource(tx, user.ID, BookNoteReference{Kind: "chapter_note", ID: noteID}); err != nil {
+					return err
+				}
 			}
 			note.Version++
 			note.DeletedAt = privateBookDeletedAt()

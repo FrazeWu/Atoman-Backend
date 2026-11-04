@@ -204,6 +204,9 @@ func privateBookReadingMarkError(err error) error {
 }
 
 func (s *Service) DeleteBookReadingMark(ctx context.Context, user authctx.CurrentUser, revisionID, markID uuid.UUID, baseVersion int64) (BookReadingMarkTombstone, error) {
+	return s.DeleteBookReadingMarkWithShares(ctx, user, revisionID, markID, baseVersion, false)
+}
+func (s *Service) DeleteBookReadingMarkWithShares(ctx context.Context, user authctx.CurrentUser, revisionID, markID uuid.UUID, baseVersion int64, keepShared bool) (BookReadingMarkTombstone, error) {
 	if user.ID == uuid.Nil {
 		return BookReadingMarkTombstone{}, apperr.Unauthorized("Login required")
 	}
@@ -223,6 +226,11 @@ func (s *Service) DeleteBookReadingMark(ctx context.Context, user authctx.Curren
 		} else {
 			if mark.Version != baseVersion {
 				return bookReadingMarkConflict(mark)
+			}
+			if !keepShared && mark.Kind == "highlight" {
+				if err := revokeNoteSharesForSource(tx, user.ID, BookNoteReference{Kind: "highlight", ID: markID}); err != nil {
+					return err
+				}
 			}
 			mark.Version++
 			mark.DeletedAt = gorm.DeletedAt{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true}
