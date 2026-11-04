@@ -36,8 +36,8 @@ var (
 	}
 )
 
-// AccountService reserves addresses without provisioning mailboxes. The feature
-// gate defaults to false and may be enabled only for invitation testing.
+// AccountService reserves addresses without provisioning mailboxes. Invitations
+// require an operator switch; administrators may reserve only their own address.
 type AccountService struct {
 	db             *gorm.DB
 	invitesEnabled bool
@@ -107,7 +107,7 @@ type IssueInviteInput struct {
 
 type IssuedInvite struct {
 	ID        uuid.UUID `json:"id"`
-	Address   string    `json:"address"`
+	Address   string    `json:"address,omitempty"`
 	Token     string    `json:"token"` // only returned once to authorized admin
 	ExpiresAt time.Time `json:"expires_at"`
 }
@@ -124,9 +124,15 @@ func (s *AccountService) IssueInvite(admin authctx.CurrentUser, in IssueInviteIn
 	if err := s.requireInvitesEnabled(); err != nil {
 		return IssuedInvite{}, err
 	}
-	local, err := validateLocalPart(in.LocalPart)
-	if err != nil {
-		return IssuedInvite{}, err
+	// A new invitation normally grants the target user the right to choose
+	// their own local part. A named invite remains supported for compatibility.
+	local := ""
+	if strings.TrimSpace(in.LocalPart) != "" {
+		var err error
+		local, err = validateLocalPart(in.LocalPart)
+		if err != nil {
+			return IssuedInvite{}, err
+		}
 	}
 	if in.TargetUserID == uuid.Nil {
 		return IssuedInvite{}, apperr.BadRequest("mail.target_required", "Valid Atoman user is required")
@@ -141,7 +147,7 @@ func (s *AccountService) IssueInvite(admin authctx.CurrentUser, in IssueInviteIn
 		ID: uuid.New(), TokenHash: tokenHash(token), TargetUserID: in.TargetUserID,
 		CreatedBy: admin.ID, LocalPart: local, ExpiresAt: issuedAt.Add(7 * 24 * time.Hour),
 	}
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var activeUsers int64
 		if err := tx.Model(&model.User{}).Where("uuid = ? AND is_active = ?", in.TargetUserID, true).Count(&activeUsers).Error; err != nil {
 			return err
@@ -150,15 +156,22 @@ func (s *AccountService) IssueInvite(admin authctx.CurrentUser, in IssueInviteIn
 			return apperr.NotFound("mail.user_not_found", "Active Atoman user not found")
 		}
 		var usedAddresses int64
-		if err := tx.Model(&model.MailAccount{}).Where("user_id = ? OR local_part = ?", in.TargetUserID, local).Count(&usedAddresses).Error; err != nil {
+		accountCheck := tx.Model(&model.MailAccount{}).Where("user_id = ?", in.TargetUserID)
+		if local != "" {
+			accountCheck = accountCheck.Or("local_part = ?", local)
+		}
+		if err := accountCheck.Count(&usedAddresses).Error; err != nil {
 			return err
 		}
 		if usedAddresses > 0 {
 			return apperr.Conflict("mail.address_unavailable", "User or address already has a mailbox reservation")
 		}
 		var outstanding int64
-		if err := tx.Model(&model.MailInvite{}).
-			Where("(target_user_id = ? OR local_part = ?) AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?", in.TargetUserID, local, issuedAt).
+		inviteCheck := tx.Model(&model.MailInvite{}).Where("target_user_id = ?", in.TargetUserID)
+		if local != "" {
+			inviteCheck = inviteCheck.Or("local_part = ?", local)
+		}
+		if err := inviteCheck.Where("used_at IS NULL AND revoked_at IS NULL AND expires_at > ?", issuedAt).
 			Count(&outstanding).Error; err != nil {
 			return err
 		}
@@ -170,14 +183,67 @@ func (s *AccountService) IssueInvite(admin authctx.CurrentUser, in IssueInviteIn
 	if err != nil {
 		return IssuedInvite{}, translateDBError(err)
 	}
-	return IssuedInvite{ID: invite.ID, Address: local + "@" + MailDomain, Token: token, ExpiresAt: invite.ExpiresAt}, nil
+	issued := IssuedInvite{ID: invite.ID, Token: token, ExpiresAt: invite.ExpiresAt}
+	if local != "" {
+		issued.Address = local + "@" + MailDomain
+	}
+	return issued, nil
 }
 
 type ReserveInput struct {
-	Token string `json:"token"`
+	Token     string `json:"token"`
+	LocalPart string `json:"local_part"`
 }
 
+type ReserveSelfInput struct {
+	LocalPart string `json:"local_part"`
+}
+
+// ReserveSelf lets an Atoman administrator select their own permanent email
+// address without an invitation. This does NOT create a Stalwart mailbox.
+func (s *AccountService) ReserveSelf(user authctx.CurrentUser, rawLocal string) (AccountInfo, error) {
+	if user.ID == uuid.Nil || !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return AccountInfo{}, apperr.Forbidden("mail.admin_required", "Administrator access required")
+	}
+	if s == nil || s.db == nil {
+		return AccountInfo{}, apperr.New(503, "mail.storage_unavailable", "Mail account storage is not available", nil)
+	}
+	local, err := validateLocalPart(rawLocal)
+	if err != nil {
+		return AccountInfo{}, err
+	}
+	var account model.MailAccount
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&model.User{}).Where("uuid = ? AND is_active = ?", user.ID, true).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			return apperr.Forbidden("mail.user_inactive", "Active Atoman account required")
+		}
+		if err := tx.Model(&model.MailInvite{}).
+			Where("local_part = ? AND target_user_id <> ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?", local, user.ID, s.now().UTC()).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return apperr.Conflict("mail.invite_pending", "An invitation already reserves this address")
+		}
+		account = model.MailAccount{ID: uuid.New(), UserID: user.ID, LocalPart: local, Address: local + "@" + MailDomain, Status: "reserved"}
+		return tx.Create(&account).Error
+	})
+	if err != nil {
+		return AccountInfo{}, translateDBError(err)
+	}
+	return AccountInfo{Available: false, Status: "reserved", Address: account.Address}, nil
+}
+
+// Legacy callers may redeem preassigned addresses without a local part.
 func (s *AccountService) RedeemInvite(user authctx.CurrentUser, token string) (AccountInfo, error) {
+	return s.RedeemInviteWithLocalPart(user, token, "")
+}
+
+func (s *AccountService) RedeemInviteWithLocalPart(user authctx.CurrentUser, token, chosenLocal string) (AccountInfo, error) {
 	if user.ID == uuid.Nil {
 		return AccountInfo{}, apperr.Unauthorized("Login required")
 	}
@@ -207,9 +273,31 @@ func (s *AccountService) RedeemInvite(user authctx.CurrentUser, token string) (A
 		if err := tx.Where("uuid = ? AND is_active = ?", user.ID, true).Take(&userRecord).Error; err != nil {
 			return apperr.Forbidden("mail.user_inactive", "Active Atoman account required")
 		}
+		// Custom address wins over an optional preselected address. Address is
+		// immutable after reservation and never coupled to the site username.
+		selected := invite.LocalPart
+		if strings.TrimSpace(chosenLocal) != "" {
+			selected = chosenLocal
+		}
+		if selected == "" {
+			return apperr.BadRequest("mail.address_required", "Choose a mailbox name")
+		}
+		local, err := validateLocalPart(selected)
+		if err != nil {
+			return err
+		}
+		var otherPending int64
+		if err := tx.Model(&model.MailInvite{}).
+			Where("id <> ? AND local_part = ? AND target_user_id <> ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?", invite.ID, local, user.ID, now).
+			Count(&otherPending).Error; err != nil {
+			return err
+		}
+		if otherPending > 0 {
+			return apperr.Conflict("mail.invite_pending", "An invitation already reserves this address")
+		}
 		account = model.MailAccount{
-			ID: uuid.New(), UserID: user.ID, LocalPart: invite.LocalPart,
-			Address: invite.LocalPart + "@" + MailDomain, Status: "reserved",
+			ID: uuid.New(), UserID: user.ID, LocalPart: local,
+			Address: local + "@" + MailDomain, Status: "reserved",
 		}
 		if err := tx.Create(&account).Error; err != nil {
 			return err

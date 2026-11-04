@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"atoman/internal/middleware"
@@ -129,4 +130,45 @@ func TestMailAccountHTTPDefaultClosed(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.MailInvite{}).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestMailAdminSelfReservationHTTPSecureWhileInvitesClosed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{})
+	require.NoError(t, migrations.RunMailAccountsMigration(db))
+	admin := model.User{Username: "admin-only", Email: "admin-only@example.test", Password: "hash", Role: "admin", IsActive: true}
+	alice := model.User{Username: "mail-other", Email: "mail-other@example.test", Password: "hash", Role: "user", IsActive: true}
+	require.NoError(t, db.Create(&admin).Error)
+	require.NoError(t, db.Create(&alice).Error)
+	adminWeb, err := authsession.New(db).Create(admin.UUID, authsession.KindWeb)
+	require.NoError(t, err)
+	aliceWeb, err := authsession.New(db).Create(alice.UUID, authsession.KindWeb)
+	require.NoError(t, err)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	r := gin.New()
+	RegisterAccountRoutesWithService(r.Group("/api/v1/mail"), NewAccountService(db, false))
+	request := func(token, csrf string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/mail/admin/reserve-self", strings.NewReader(`{"local_part":"my.personal.name"}`))
+		req.Header.Set("Origin", "https://atoman.org")
+		req.Header.Set("Content-Type", "application/json")
+		if csrf != "" {
+			req.Header.Set(middleware.CSRFHeaderName, csrf)
+		}
+		if token != "" {
+			req.AddCookie(&http.Cookie{Name: middleware.AuthSessionCookieName, Value: token})
+		}
+		r.ServeHTTP(w, req)
+		return w
+	}
+	require.Equal(t, http.StatusUnauthorized, request("", "").Code)
+	require.Equal(t, http.StatusForbidden, request(aliceWeb.Token, aliceWeb.CSRFToken).Code)
+	require.Equal(t, http.StatusForbidden, request(adminWeb.Token, "").Code)
+	created := request(adminWeb.Token, adminWeb.CSRFToken)
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	require.Contains(t, created.Body.String(), "my.personal.name@atoman.org")
+	require.Contains(t, created.Body.String(), `"available":false`)
+	require.Equal(t, http.StatusConflict, request(adminWeb.Token, adminWeb.CSRFToken).Code)
 }
