@@ -67,6 +67,9 @@ systemd-run --quiet --scope -p MemoryMax=2200M -p MemorySwapMax=0 -p CPUQuota=15
   /usr/bin/env TEST_POSTGRES_DSN="$TEST_POSTGRES_DSN" TEST_DATABASE_URL="$TEST_DATABASE_URL" \
   FEED_SCALE_PROFILE="$FEED_SCALE_PROFILE" FEED_SCALE_COUNT="$FEED_SCALE_COUNT" FEED_SCALE_ISOLATED=yes GOMAXPROCS=2 GOGC=75 GOMEMLIMIT=1250MiB \
   FEED_SNAPSHOT_STAGE_TRACE="${FEED_SNAPSHOT_STAGE_TRACE:-}" \
+  FEED_SNAPSHOT_BATCH_EXPERIMENT="${FEED_SNAPSHOT_BATCH_EXPERIMENT:-}" \
+  FEED_SNAPSHOT_ROW_BATCH="${FEED_SNAPSHOT_ROW_BATCH:-}" \
+  FEED_SNAPSHOT_MEMBER_BATCH="${FEED_SNAPSHOT_MEMBER_BATCH:-}" \
   go test -buildvcs=false -p 1 -count=1 -timeout 13m -v "${profile_flags[@]}" -run '^TestDedupIsolatedProductionScale$' ./internal/modules/feed
 printf 'POSTGRES_MEM %s\n' "$(docker stats --no-stream --format '{{.MemUsage}}' "$container_id")"
 printf 'TEST_PASSED scale=%s\n' "$1"

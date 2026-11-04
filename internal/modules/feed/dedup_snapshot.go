@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -183,9 +184,10 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 			return err
 		}
 		// Chunking keeps each INSERT below PostgreSQL parameter limits.
+		rowBatch, memberBatch := dedupSnapshotInsertBatchSizes()
 		beginRowInsert := time.Now()
-		for start := 0; start < len(rows); start += 350 {
-			end := start + 350
+		for start := 0; start < len(rows); start += rowBatch {
+			end := start + rowBatch
 			if end > len(rows) {
 				end = len(rows)
 			}
@@ -195,8 +197,8 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 		}
 		stage("insert_representatives", beginRowInsert)
 		beginMemberInsert := time.Now()
-		for start := 0; start < len(members); start += 300 {
-			end := start + 300
+		for start := 0; start < len(members); start += memberBatch {
+			end := start + memberBatch
 			if end > len(members) {
 				end = len(members)
 			}
@@ -219,6 +221,24 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 	})
 	stage("publish_commit", beginCommit)
 	return total, err
+}
+
+// Production defaults are fixed. Only the isolated opt-in benchmark may tune
+// batch sizes. Hard caps keep a single INSERT well below PostgreSQL's parameter
+// ceiling (and under the memory budget of the test container).
+func dedupSnapshotInsertBatchSizes() (int, int) {
+	const defaultRows, defaultMembers = 350, 300
+	if os.Getenv("FEED_SCALE_ISOLATED") != "yes" || os.Getenv("FEED_SNAPSHOT_BATCH_EXPERIMENT") != "yes" {
+		return defaultRows, defaultMembers
+	}
+	read := func(key string, fallback, cap int) int {
+		n, err := strconv.Atoi(os.Getenv(key))
+		if err != nil || n < 1 || n > cap {
+			return fallback
+		}
+		return n
+	}
+	return read("FEED_SNAPSHOT_ROW_BATCH", defaultRows, 2000), read("FEED_SNAPSHOT_MEMBER_BATCH", defaultMembers, 2000)
 }
 
 // readPublicRecentDedupSnapshotPage seeks directly into a stable ordinal in
