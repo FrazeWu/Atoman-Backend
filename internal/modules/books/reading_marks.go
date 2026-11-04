@@ -249,6 +249,9 @@ func (s *Service) ListBookReadingMarks(ctx context.Context, user authctx.Current
 	if user.ID == uuid.Nil {
 		return result, apperr.Unauthorized("Login required")
 	}
+	if err := s.purgeBookReadingMarks(ctx, &user.ID, time.Now().UTC()); err != nil {
+		return result, err
+	}
 	var marks []model.BookReadingMark
 	if err := s.db.WithContext(ctx).Unscoped().Where("user_id = ? AND revision_id = ?", user.ID, revisionID).Order("created_at ASC, id ASC").Find(&marks).Error; err != nil {
 		return result, err

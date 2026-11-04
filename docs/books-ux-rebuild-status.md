@@ -30,7 +30,7 @@
 - External ISBN lookup and stronger OCR extraction.
 - Fixed-revision reader modes, jump-safe furthest, within-PDF-page resume and real Chrome PDF/EPUB tests implemented (see `books-reader-modes-and-jump-progress-20261103.md` and `books-pdf-exact-resume-real-browser-20261104.md`); staging object storage and legacy private reader parity remain open.
 - Work-level private cross-file notes, exact standalone chapter-note anchors, editable curated collections, and immutable private/link/public snapshot sharing with stable links and revocation are implemented (see `books-work-notes-aggregation-20261104.md`, `books-chapter-note-anchor-20261104.md`, and `books-note-collection-sharing-20261104.md`).
-- Remaining: staging-browser/server share end-to-end verification, precise share previews and version history UX, broader import/export format parity, and 30-day trash/restore for reading highlights. Independent private notes already have a 30-day trash.
+- Share preview (including a source-content digest), owner-only immutable snapshot history and 30-day highlight trash/restore/permanent scrub are implemented in isolation (see `books-note-preview-history-trash-20261104.md`). Remaining: staging browser + live server/object storage integration, broader Markdown/JSON/PDF import/export format parity, and eventual production rollout approval.
 - Multi-client integration and security tests against real object storage and a fresh database.
 
 No production reset, deploy, or push has been performed. Old books-module data may be discarded at rollout, but production PostgreSQL is shared with other modules: never execute a blanket destructive schema reset. Keep the rollback/backup plan scoped to books.

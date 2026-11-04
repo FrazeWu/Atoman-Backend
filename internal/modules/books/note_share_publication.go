@@ -22,6 +22,7 @@ type PublishNoteCollectionInput struct {
 	RequestID      uuid.UUID `json:"request_id"`
 	Visibility     string    `json:"visibility"`
 	ConfirmPublish bool      `json:"confirm_publish"`
+	PreviewDigest  string    `json:"preview_digest,omitempty"`
 }
 
 // Freeze a bounded excerpt and the author's commentary, never a live reference
@@ -132,6 +133,12 @@ func (s *Service) PublishNoteCollection(ctx context.Context, user authctx.Curren
 		snapshotBytes, err := json.Marshal(content)
 		if err != nil {
 			return err
+		}
+		if input.PreviewDigest != "" {
+			sum := sha256.Sum256(snapshotBytes)
+			if hex.EncodeToString(sum[:]) != input.PreviewDigest {
+				return apperr.Conflict("books.note_preview_changed", "Private source content changed after preview; preview the exact snapshot again")
+			}
 		}
 		sourceBytes, err := json.Marshal(draft.Items)
 		if err != nil {

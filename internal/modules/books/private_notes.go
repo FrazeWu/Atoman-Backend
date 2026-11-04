@@ -421,5 +421,5 @@ func (s *Service) purgeBookPrivateNotes(ctx context.Context, userID *uuid.UUID, 
 	if userID != nil {
 		query = query.Where("user_id = ?", *userID)
 	}
-	return query.Updates(map[string]any{"title": "", "body": "", "tags_json": "[]", "source_revision_id": nil, "purged_at": now, "version": gorm.Expr("version + 1")}).Error
+	return query.Updates(map[string]any{"title": "", "body": "", "tags_json": "[]", "source_revision_id": nil, "chapter_anchor_json": "{}", "purged_at": now, "version": gorm.Expr("version + 1")}).Error
 }
