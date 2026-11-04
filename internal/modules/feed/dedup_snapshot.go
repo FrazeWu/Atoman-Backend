@@ -115,7 +115,7 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 		Select(feedDuplicateScanColumns).
 		Preload("FeedSource").
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
-		Where("feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL", false).
+		Where("feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL AND feed_sources.source_type = ?", false, "external_rss").
 		Order("feed_items.published_at DESC, feed_items.id DESC").
 		Find(&items).Error
 	if err != nil {
