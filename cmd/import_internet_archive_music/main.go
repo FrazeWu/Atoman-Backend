@@ -87,8 +87,10 @@ func main() {
 			result.Plan.Downloads, countAudioFiles(result.Plan.Files), result.Plan.TotalBytes, uuidValue(result.ImportSessionID),
 		)
 	}
-	if failed > 0 {
-		log.Fatalf("%d of %d candidates failed", failed, len(results))
+	if failed == len(results) && len(results) > 0 {
+		log.Fatalf("all %d candidates failed validation", len(results))
+	} else if failed > 0 {
+		log.Printf("NOTICE: %d of %d candidates skipped due to validation", failed, len(results))
 	}
 	if !*apply {
 		log.Println("dry run only; rerun with -apply after reviewing the plan")
