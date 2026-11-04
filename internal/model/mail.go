@@ -10,13 +10,14 @@ import (
 // mailbox, MIME messages, folders and IMAP credentials belong to Stalwart.
 // No MailAccount can be marked active by the invitation feature.
 type MailAccount struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mail_accounts_user" json:"user_id"`
-	LocalPart string    `gorm:"type:varchar(32);not null;uniqueIndex:idx_mail_accounts_local" json:"local_part"`
-	Address   string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_mail_accounts_address" json:"address"`
-	Status    string    `gorm:"type:varchar(24);not null;default:'reserved'" json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	UserID            uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mail_accounts_user" json:"user_id"`
+	LocalPart         string    `gorm:"type:varchar(32);not null;uniqueIndex:idx_mail_accounts_local" json:"local_part"`
+	Address           string    `gorm:"type:varchar(255);not null;uniqueIndex:idx_mail_accounts_address" json:"address"`
+	Status            string    `gorm:"type:varchar(24);not null;default:'reserved'" json:"status"`
+	StalwartAccountID *string   `gorm:"type:varchar(128);uniqueIndex:idx_mail_accounts_stalwart" json:"-"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 func (MailAccount) TableName() string { return "mail_accounts" }
@@ -36,3 +37,19 @@ type MailInvite struct {
 }
 
 func (MailInvite) TableName() string { return "mail_invites" }
+
+// MailAccessCredential contains only encrypted per-user Stalwart API keys.
+// Admin Stalwart keys are never placed in Atoman database or user sessions.
+type MailAccessCredential struct {
+	ID                uuid.UUID `gorm:"type:uuid;primaryKey" json:"-"`
+	UserID            uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mail_access_user" json:"-"`
+	StalwartAccountID string    `gorm:"type:varchar(128);not null" json:"-"`
+	APIKeyID          string    `gorm:"type:varchar(128);not null" json:"-"`
+	Ciphertext        []byte    `gorm:"type:bytea;not null" json:"-"`
+	Nonce             []byte    `gorm:"type:bytea;not null" json:"-"`
+	KeyVersion        uint      `gorm:"not null;default:1" json:"-"`
+	CreatedAt         time.Time `json:"-"`
+	UpdatedAt         time.Time `json:"-"`
+}
+
+func (MailAccessCredential) TableName() string { return "mail_access_credentials" }

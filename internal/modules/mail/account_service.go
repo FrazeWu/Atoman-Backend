@@ -96,6 +96,7 @@ func (s *AccountService) Me(user authctx.CurrentUser) (AccountInfo, error) {
 	}
 	result.Status = account.Status
 	result.Address = account.Address
+	result.Available = account.Status == "active"
 	return result, nil
 }
 

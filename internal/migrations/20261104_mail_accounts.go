@@ -11,7 +11,7 @@ import (
 // RunMailAccountsMigration creates Atoman's invitation and mailbox-reservation
 // tables. Mail contents and Stalwart's schema remain in the separate mail DB.
 func RunMailAccountsMigration(db *gorm.DB) error {
-	if err := db.AutoMigrate(&model.MailAccount{}, &model.MailInvite{}); err != nil {
+	if err := db.AutoMigrate(&model.MailAccount{}, &model.MailInvite{}, &model.MailAccessCredential{}); err != nil {
 		return fmt.Errorf("create mail accounts and invitations: %w", err)
 	}
 	if db.Dialector.Name() == "postgres" {

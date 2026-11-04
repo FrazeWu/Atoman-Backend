@@ -1,0 +1,114 @@
+package mail
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"net/smtp"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+)
+
+// TestStalwartJMAPRealFixture runs only against a disposable, loopback-bound
+// Stalwart + PostgreSQL + S3 fixture. It must not use production credentials.
+func TestStalwartJMAPRealFixture(t *testing.T) {
+	if os.Getenv("ATOMAN_MAIL_STAGING_JMAP") != "1" {
+		t.Skip("requires disposable local Stalwart staging fixture")
+	}
+	endpoint := os.Getenv("ATOMAN_MAIL_STAGING_JMAP_URL")
+	adminName := os.Getenv("ATOMAN_MAIL_STAGING_ADMIN_USERNAME")
+	adminPassword := os.Getenv("ATOMAN_MAIL_STAGING_ADMIN_PASSWORD")
+	if endpoint != "http://127.0.0.1:18582" || adminName == "" || adminPassword == "" {
+		t.Fatal("staging JMAP fixture is not configured for the expected loopback endpoint")
+	}
+	client, err := NewStalwartJMAPClient(endpoint, nil)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
+	defer cancel()
+	admin := StalwartBasic(adminName, adminPassword)
+	const stageDomain = "atoman-stage.test"
+	const stageLocalPart = "stage-reader"
+
+	var createdDomain struct {
+		Created map[string]struct {
+			ID string `json:"id"`
+		} `json:"created"`
+		NotCreated map[string]struct {
+			Type string `json:"type"`
+		} `json:"notCreated"`
+	}
+	err = client.call(ctx, admin, true, "x:Domain/set", map[string]any{
+		"create": map[string]any{"d1": map[string]any{"name": stageDomain, "enable": true}},
+	}, &createdDomain)
+	require.NoError(t, err)
+	require.Empty(t, createdDomain.NotCreated)
+	domainID := createdDomain.Created["d1"].ID
+	require.NotEmpty(t, domainID)
+
+	foundDomain, err := client.FindDomainID(ctx, admin, stageDomain)
+	require.NoError(t, err)
+	require.Equal(t, domainID, foundDomain)
+
+	createdUser, err := client.CreateUser(ctx, admin, domainID, stageLocalPart, uuid.New(), 512<<20)
+	require.NoError(t, err)
+	require.NotEmpty(t, createdUser.AccountID)
+
+	keyID, key, err := client.CreateUserAPIKey(ctx, admin, createdUser.AccountID)
+	require.NoError(t, err)
+	require.NotEmpty(t, keyID)
+	require.NotEmpty(t, key)
+	userKey := StalwartBearer(key)
+
+	session, err := client.Session(ctx, userKey)
+	require.NoError(t, err)
+	require.Equal(t, createdUser.AccountID, session.PrimaryAccounts[jmapMailCapability])
+
+	// Delivery stays inside the localhost staging SMTP listener.
+	mail := fmt.Sprintf("From: probe@external.test\r\nTo: %s@%s\r\nSubject: Atoman JMAP synthetic mailbox probe\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nAtoman staging JMAP body test.\r\n", stageLocalPart, stageDomain)
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:19025", 6*time.Second)
+	require.NoError(t, err)
+	smtpClient, err := smtp.NewClient(conn, "127.0.0.1")
+	require.NoError(t, err)
+	defer smtpClient.Close()
+	require.NoError(t, smtpClient.Hello("staging.example.test"))
+	require.NoError(t, smtpClient.Mail("probe@external.test"))
+	require.NoError(t, smtpClient.Rcpt(stageLocalPart+"@"+stageDomain))
+	writer, err := smtpClient.Data()
+	require.NoError(t, err)
+	_, err = writer.Write([]byte(mail))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	require.NoError(t, smtpClient.Quit())
+
+	var emails []EmailSummary
+	var deliveredRole string
+	for attempt := 0; attempt < 20; attempt++ {
+		folders, err := client.Mailboxes(ctx, userKey, createdUser.AccountID)
+		require.NoError(t, err)
+		for _, folder := range folders {
+			if folder.Role != nil && (*folder.Role == "inbox" || *folder.Role == "junk") {
+				found, err := client.ListEmails(ctx, userKey, createdUser.AccountID, folder.ID, 10)
+				require.NoError(t, err)
+				for _, candidate := range found {
+					if candidate.Subject == "Atoman JMAP synthetic mailbox probe" {
+						emails = append(emails, candidate)
+						deliveredRole = *folder.Role
+					}
+				}
+			}
+		}
+		if len(emails) > 0 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	require.Len(t, emails, 1)
+	require.Equal(t, "Atoman JMAP synthetic mailbox probe", emails[0].Subject)
+	require.Contains(t, []string{"inbox", "junk"}, deliveredRole)
+	t.Logf("STALWART_JMAP_DELIVERY_MAILBOX_ROLE=%s", deliveredRole)
+	t.Log("STALWART_JMAP_DOMAIN_ACCOUNT_KEY_MAILBOX_EMAIL_VERIFIED")
+}
