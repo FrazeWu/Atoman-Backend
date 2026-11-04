@@ -56,11 +56,17 @@ if [[ "$profile" != 'baseline' && "$profile" != 'prodshape' && "$profile" != 'ad
 if [[ "$profile" == 'adversarial' && "$1" != 10000 ]]; then echo 'Adversarial title stress is limited to 10000 articles' >&2;exit 2;fi
 export FEED_SCALE_PROFILE="$profile" FEED_SCALE_COUNT="$1" FEED_SCALE_ISOLATED=yes GOMAXPROCS=2 GOGC=75 GOMEMLIMIT=1250MiB
 printf 'ISOLATED_SCALE count=%s postgres_container=%s port=%s\n' "$1" "$container_name" "$port"
+# Optional CPU profiling is written only to /tmp, not the worktree.
+profile_flags=()
+if [[ "${FEED_SCALE_CPU_PROFILE:-}" == 'yes' ]]; then
+  profile_flags=(-cpuprofile="/tmp/atoman-feed-scale-$(date -u +%Y%m%d)-${1}-$$.cpu" -outputdir=/tmp)
+fi
 # systemd-run is blocking in scope mode; timeout also bounds the wall-clock run.
 systemd-run --quiet --scope -p MemoryMax=2200M -p MemorySwapMax=0 -p CPUQuota=150% \
   /usr/bin/timeout --signal=TERM --kill-after=15s 14m \
   /usr/bin/env TEST_POSTGRES_DSN="$TEST_POSTGRES_DSN" TEST_DATABASE_URL="$TEST_DATABASE_URL" \
   FEED_SCALE_PROFILE="$FEED_SCALE_PROFILE" FEED_SCALE_COUNT="$FEED_SCALE_COUNT" FEED_SCALE_ISOLATED=yes GOMAXPROCS=2 GOGC=75 GOMEMLIMIT=1250MiB \
-  go test -buildvcs=false -p 1 -count=1 -timeout 13m -v -run '^TestDedupIsolatedProductionScale$' ./internal/modules/feed
+  FEED_SNAPSHOT_STAGE_TRACE="${FEED_SNAPSHOT_STAGE_TRACE:-}" \
+  go test -buildvcs=false -p 1 -count=1 -timeout 13m -v "${profile_flags[@]}" -run '^TestDedupIsolatedProductionScale$' ./internal/modules/feed
 printf 'POSTGRES_MEM %s\n' "$(docker stats --no-stream --format '{{.MemUsage}}' "$container_id")"
 printf 'TEST_PASSED scale=%s\n' "$1"

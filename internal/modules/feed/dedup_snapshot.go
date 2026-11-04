@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -95,6 +96,13 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 	if strings.TrimSpace(revision) == "" {
 		return 0, fmt.Errorf("feed dedup snapshot requires an upstream revision")
 	}
+	profile := os.Getenv("FEED_SNAPSHOT_STAGE_TRACE") == "yes"
+	stage := func(name string, begin time.Time) {
+		if profile {
+			fmt.Printf("FEED_BUILD_STAGE stage=%s elapsed=%s\n", name, time.Since(begin))
+		}
+	}
+	beginFetch := time.Now()
 	var items []model.FeedItem
 	err := r.db.WithContext(ctx).Model(&model.FeedItem{}).
 		Select(feedDuplicateScanColumns).
@@ -109,6 +117,7 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	stage("fetch", beginFetch)
 
 	var firstPublishedAt *time.Time
 	var firstID uuid.UUID
@@ -131,7 +140,10 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 	if err != nil {
 		return 0, err
 	}
+	beginCluster := time.Now()
 	legacyfeed.AnnotateDuplicateFeedItems(items)
+	stage("annotate", beginCluster)
+	beginRows := time.Now()
 	generationID := uuid.New()
 	rows := make([]feedDedupSnapshotRow, 0, len(items))
 	members := make([]feedDedupSnapshotMember, 0, len(items))
@@ -163,12 +175,15 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 		})
 	}
 	total := int64(len(rows))
+	stage("materialize", beginRows)
+	beginCommit := time.Now()
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		generation := feedDedupSnapshotGeneration{GenerationID: generationID, Scope: publicRecentDedupScope, Total: total, BuiltAt: time.Now().UTC()}
 		if err := tx.Create(&generation).Error; err != nil {
 			return err
 		}
 		// Chunking keeps each INSERT below PostgreSQL parameter limits.
+		beginRowInsert := time.Now()
 		for start := 0; start < len(rows); start += 350 {
 			end := start + 350
 			if end > len(rows) {
@@ -178,6 +193,8 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 				return err
 			}
 		}
+		stage("insert_representatives", beginRowInsert)
+		beginMemberInsert := time.Now()
 		for start := 0; start < len(members); start += 300 {
 			end := start + 300
 			if end > len(members) {
@@ -187,6 +204,7 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 				return err
 			}
 		}
+		stage("insert_members", beginMemberInsert)
 		head := feedDedupSnapshotHead{
 			Scope: publicRecentDedupScope, GenerationID: generationID,
 			Revision: revision, Total: total, BuiltAt: time.Now().UTC(),
@@ -199,6 +217,7 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 			DoUpdates: clause.AssignmentColumns([]string{"generation_id", "revision", "total", "built_at", "source_versions", "tail_published_at", "tail_feed_item_id", "first_published_at", "first_feed_item_id", "position_base", "raw_item_count"}),
 		}).Create(&head).Error
 	})
+	stage("publish_commit", beginCommit)
 	return total, err
 }
 

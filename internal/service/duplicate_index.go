@@ -15,10 +15,10 @@ import (
 type duplicateGroupIndex struct {
 	urls             map[string][]int
 	shortTitles      map[string][]int
-	fuzzyAnchors     map[string][]int
-	substringAnchors map[string][]int
-	hotFuzzyAnchors  map[string]map[int64][]int
-	hotSubAnchors    map[string]map[int64][]int
+	fuzzyAnchors     map[uint64][]int
+	substringAnchors map[uint64][]int
+	hotFuzzyAnchors  map[uint64]map[int64][]int
+	hotSubAnchors    map[uint64]map[int64][]int
 	groupDays        []int64
 	groupDayCounts   map[int64]int
 	hotFingerprints  map[int]duplicateTitleFingerprint
@@ -28,10 +28,10 @@ func newDuplicateGroupIndex() *duplicateGroupIndex {
 	return &duplicateGroupIndex{
 		urls:             make(map[string][]int),
 		shortTitles:      make(map[string][]int),
-		fuzzyAnchors:     make(map[string][]int),
-		substringAnchors: make(map[string][]int),
-		hotFuzzyAnchors:  make(map[string]map[int64][]int),
-		hotSubAnchors:    make(map[string]map[int64][]int),
+		fuzzyAnchors:     make(map[uint64][]int),
+		substringAnchors: make(map[uint64][]int),
+		hotFuzzyAnchors:  make(map[uint64]map[int64][]int),
+		hotSubAnchors:    make(map[uint64]map[int64][]int),
 		groupDayCounts:   make(map[int64]int),
 	}
 }
@@ -67,8 +67,8 @@ func duplicateDateBucket(t time.Time) int64 {
 // A cold posting stores only a compact list. Once an anchor becomes hot,
 // its old IDs are transferred to UTC-day buckets, and all future IDs go
 // directly into their day bucket. Only high-frequency keys pay map overhead.
-func (index *duplicateGroupIndex) addTitlePosting(cold map[string][]int,
-	hot map[string]map[int64][]int, key string, id int) {
+func (index *duplicateGroupIndex) addTitlePosting(cold map[uint64][]int,
+	hot map[uint64]map[int64][]int, key uint64, id int) {
 	if buckets, exists := hot[key]; exists {
 		day := index.groupDays[id]
 		buckets[day] = append(buckets[day], id)
@@ -109,9 +109,9 @@ func (index *duplicateGroupIndex) add(group *duplicateGroup, groupID int) {
 	if len(runes) >= 12 {
 		q = duplicateFuzzyAnchorSize
 	}
-	seen := make(map[string]bool)
+	seen := make(map[uint64]bool)
 	for start := 0; start+q <= len(runes); start += q {
-		key := string(runes[start : start+q])
+		key := duplicateAnchorHash(runes, start, q)
 		if seen[key] {
 			continue
 		}
@@ -121,7 +121,7 @@ func (index *duplicateGroupIndex) add(group *duplicateGroup, groupID int) {
 	if len(runes) >= 18 {
 		clear(seen)
 		for start := 0; start+duplicateSubstringAnchorSize <= len(runes); start += duplicateSubstringAnchorStride {
-			key := string(runes[start : start+duplicateSubstringAnchorSize])
+			key := duplicateAnchorHash(runes, start, duplicateSubstringAnchorSize)
 			if seen[key] {
 				continue
 			}
@@ -136,7 +136,7 @@ func (index *duplicateGroupIndex) add(group *duplicateGroup, groupID int) {
 // of that 72-hour window, including its inclusive endpoints; the final
 // matches() check still filters off-window items within edge day buckets.
 func (index *duplicateGroupIndex) addAnchorCandidates(candidates map[int]struct{},
-	cold map[string][]int, hot map[string]map[int64][]int, key string, date time.Time) {
+	cold map[uint64][]int, hot map[uint64]map[int64][]int, key uint64, date time.Time) {
 	for _, id := range cold[key] {
 		candidates[id] = struct{}{}
 	}
@@ -177,21 +177,19 @@ func (index *duplicateGroupIndex) firstMatch(groups []*duplicateGroup, url, titl
 			candidates[groupID] = struct{}{}
 		}
 	} else {
-		seen := make(map[string]bool)
+		seen := make(map[uint64]bool)
 		for _, width := range [...]int{duplicateShortAnchorSize, duplicateFuzzyAnchorSize} {
-			for pos := 0; pos+width <= len(runes); pos++ {
-				key := string(runes[pos : pos+width])
+			duplicateForEachRollingAnchor(runes, width, func(key uint64) {
 				if seen[key] {
-					continue
+					return
 				}
 				seen[key] = true
 				index.addAnchorCandidates(candidates, index.fuzzyAnchors, index.hotFuzzyAnchors, key, publishedAt)
-			}
+			})
 		}
-		for pos := 0; pos+duplicateSubstringAnchorSize <= len(runes); pos++ {
-			key := string(runes[pos : pos+duplicateSubstringAnchorSize])
+		duplicateForEachRollingAnchor(runes, duplicateSubstringAnchorSize, func(key uint64) {
 			index.addAnchorCandidates(candidates, index.substringAnchors, index.hotSubAnchors, key, publishedAt)
-		}
+		})
 	}
 	ordered := make([]int, 0, len(candidates))
 	for groupID := range candidates {
@@ -314,4 +312,40 @@ func (index *duplicateGroupIndex) shouldUseBigramGuard(candidateCount int, date 
 		nearby += index.groupDayCounts[day]
 	}
 	return nearby > 0 && candidateCount*2 >= nearby
+}
+
+// Fixed-width rune anchors use a rolling unsigned polynomial key. It replaces
+// millions of temporary q-gram strings during a full Feed rebuild. Hash
+// collisions can only add candidates, never drop a match: the original
+// duplicateGroup.matches predicate still checks every selected group.
+const duplicateAnchorHashBase uint64 = 11400714819323198485
+const duplicateAnchorWidthSalt uint64 = 0x9e3779b97f4a7c15
+
+func duplicateAnchorHash(runes []rune, start, width int) uint64 {
+	h := uint64(0)
+	for i := start; i < start+width; i++ {
+		h = h*duplicateAnchorHashBase + uint64(runes[i]) + 1
+	}
+	return h ^ (uint64(width) * duplicateAnchorWidthSalt)
+}
+
+func duplicateForEachRollingAnchor(runes []rune, width int, visit func(uint64)) {
+	if len(runes) < width {
+		return
+	}
+	rolling := uint64(0)
+	for i := 0; i < width; i++ {
+		rolling = rolling*duplicateAnchorHashBase + uint64(runes[i]) + 1
+	}
+	power := uint64(1)
+	for i := 1; i < width; i++ {
+		power *= duplicateAnchorHashBase
+	}
+	salt := uint64(width) * duplicateAnchorWidthSalt
+	for start := 0; start+width <= len(runes); start++ {
+		visit(rolling ^ salt)
+		if start+width < len(runes) {
+			rolling = (rolling-(uint64(runes[start])+1)*power)*duplicateAnchorHashBase + uint64(runes[start+width]) + 1
+		}
+	}
 }
