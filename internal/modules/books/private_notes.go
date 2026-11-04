@@ -136,6 +136,9 @@ func (s *Service) SaveBookPrivateNote(ctx context.Context, user authctx.CurrentU
 			return apperr.NotFound("books.private_note_not_found", "Private note not found")
 		}
 		if input.SourceRevisionID != nil && (isNew || !sameOptionalBookID(input.SourceRevisionID, stored.SourceRevisionID)) {
+			if err := service.CanReadBookRevision(ctx, user.ID, *input.SourceRevisionID); err != nil {
+				return err
+			}
 			revision, err := service.readableBookRevision(ctx, *input.SourceRevisionID)
 			if err != nil {
 				return err

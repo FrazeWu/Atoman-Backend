@@ -74,6 +74,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	protected.POST("/me/reading-sessions", handler.createBookReadingSession)
 	protected.GET("/me/reading-states/:revisionId", handler.getBookCloudReadingState)
 	protected.PUT("/me/reading-states/:revisionId", handler.saveBookCloudReadingState)
+	protected.GET("/me/works/:workId/notes", handler.listWorkNotes)
 	protected.GET("/me/reading-marks/:revisionId", handler.listBookRevisionMarks)
 	protected.GET("/me/reading-marks", handler.listBookPrivateHighlights)
 	protected.PUT("/me/reading-marks/:revisionId/:markId", handler.saveBookRevisionMark)

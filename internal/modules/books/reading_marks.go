@@ -135,7 +135,7 @@ func (s *Service) SaveBookReadingMark(ctx context.Context, user authctx.CurrentU
 			if input.BaseVersion != 0 {
 				return apperr.NotFound("books.reading_mark_not_found", "Reading mark not found")
 			}
-			if _, err := service.readableBookRevision(ctx, revisionID); err != nil {
+			if err := service.CanReadBookRevision(ctx, user.ID, revisionID); err != nil {
 				return err
 			}
 		}
