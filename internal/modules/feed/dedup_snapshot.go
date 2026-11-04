@@ -97,6 +97,12 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 	if strings.TrimSpace(revision) == "" {
 		return 0, fmt.Errorf("feed dedup snapshot requires an upstream revision")
 	}
+	// Reject an accidentally enabled COPY experiment on non-test databases
+	// before loading or grouping a potentially large feed.
+	copyExperiment, copyGuardErr := snapshotCopyExperimentEnabled(ctx, r.db)
+	if copyGuardErr != nil {
+		return 0, copyGuardErr
+	}
 	profile := os.Getenv("FEED_SNAPSHOT_STAGE_TRACE") == "yes"
 	stage := func(name string, begin time.Time) {
 		if profile {
@@ -178,6 +184,18 @@ func (r *Repo) publishPublicRecentDedupSnapshotWithCheckpoints(ctx context.Conte
 	total := int64(len(rows))
 	stage("materialize", beginRows)
 	beginCommit := time.Now()
+	if copyExperiment {
+		head := feedDedupSnapshotHead{
+			Scope: publicRecentDedupScope, GenerationID: generationID,
+			Revision: revision, Total: total, BuiltAt: time.Now().UTC(),
+			SourceVersions: encodedVersions, TailPublishedAt: tailPublishedAt, TailFeedItemID: tailID,
+			FirstPublishedAt: firstPublishedAt, FirstFeedItemID: firstID, PositionBase: 0,
+			RawItemCount: int64(len(members)),
+		}
+		err = r.publishDedupSnapshotViaCopyExperiment(ctx, generationID, rows, members, head, stage)
+		stage("publish_commit", beginCommit)
+		return total, err
+	}
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		generation := feedDedupSnapshotGeneration{GenerationID: generationID, Scope: publicRecentDedupScope, Total: total, BuiltAt: time.Now().UTC()}
 		if err := tx.Create(&generation).Error; err != nil {
