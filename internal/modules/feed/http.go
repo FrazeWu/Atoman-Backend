@@ -38,6 +38,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
 	group.GET("/explore", middleware.OptionalAuthMiddleware(), h.getExploreFeed)
+	// RSS-only recent/deduplicated: separate from mixed-content Explore.
+	group.GET("/rss/recent", middleware.OptionalAuthMiddleware(), h.getPublicRSSRecent)
 	group.GET("/explore/sources", middleware.OptionalAuthMiddleware(), GetExploreSources(service.db))
 	group.GET("/recommend/themes", h.getRecommendationThemes)
 	group.GET("/recommend/articles", middleware.OptionalAuthMiddleware(), h.getRecommendedArticles)
