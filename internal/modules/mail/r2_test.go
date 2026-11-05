@@ -87,6 +87,32 @@ func TestR2ConfigCanSpecifyDifferentPrivateBuckets(t *testing.T) {
 	}
 }
 
+func TestR2ConfigDedicatedMailCredentialsDoNotAffectMedia(t *testing.T) {
+	m := validR2Env()
+	m["ATOMAN_MAIL_R2_ACCESS_KEY_ID"] = "mail-only-key"
+	m["ATOMAN_MAIL_R2_SECRET_ACCESS_KEY"] = "mail-only-secret"
+	cfg, err := LoadR2Config(fromMap(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccessKeyID != "mail-only-key" || cfg.SecretKey != "mail-only-secret" {
+		t.Fatal("dedicated private mail credentials not used")
+	}
+	if m["AWS_ACCESS_KEY_ID"] != "example-access-key" || cfg.MediaBucket != "atoman" {
+		t.Fatal("existing media settings unexpectedly changed")
+	}
+}
+
+func TestR2ConfigDedicatedMailCredentialsFailClosedWhenIncomplete(t *testing.T) {
+	for _, only := range []string{"ATOMAN_MAIL_R2_ACCESS_KEY_ID", "ATOMAN_MAIL_R2_SECRET_ACCESS_KEY"} {
+		m := validR2Env()
+		m[only] = "configured"
+		if _, err := LoadR2Config(fromMap(m)); err == nil {
+			t.Fatal("must reject incomplete dedicated mail key pair", only)
+		}
+	}
+}
+
 type fakeBucketHead struct {
 	seen   []string
 	failAt string

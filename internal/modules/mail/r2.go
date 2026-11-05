@@ -57,9 +57,17 @@ func LoadR2Config(lookup func(string) string) (R2Config, error) {
 	if pendingBucket == "" {
 		pendingBucket = DefaultMailPendingBucket
 	}
+	accessKey, secretKey := get("ATOMAN_MAIL_R2_ACCESS_KEY_ID"), get("ATOMAN_MAIL_R2_SECRET_ACCESS_KEY")
+	if accessKey == "" && secretKey == "" {
+		// Compatibility for existing installations. Production release gates
+		// still require verifying access to both private mail buckets.
+		accessKey, secretKey = get("AWS_ACCESS_KEY_ID"), get("AWS_SECRET_ACCESS_KEY")
+	} else if accessKey == "" || secretKey == "" {
+		return R2Config{}, fmt.Errorf("both dedicated mail R2 credentials must be configured")
+	}
 	cfg := R2Config{
 		Endpoint: get("S3_ENDPOINT"), Region: region,
-		AccessKeyID: get("AWS_ACCESS_KEY_ID"), SecretKey: get("AWS_SECRET_ACCESS_KEY"),
+		AccessKeyID: accessKey, SecretKey: secretKey,
 		MediaBucket: get("S3_BUCKET"), BlobBucket: blobBucket, PendingBucket: pendingBucket,
 	}
 	return cfg, cfg.Validate()
