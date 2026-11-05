@@ -26,27 +26,21 @@ func (r *Repo) listPublicRSSRecentLegacy(ctx context.Context, page, size int) ([
 			maxItems = override
 		}
 	}
-	var count int64
-	if err := r.db.WithContext(ctx).Model(&model.FeedItem{}).
-		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
-		Where("feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL AND feed_sources.source_type = ?", false, "external_rss").
-		Count(&count).Error; err != nil {
-		return nil, 0, err
-	}
-	if count > int64(maxItems) {
-		return nil, 0, apperr.New(http.StatusServiceUnavailable, "feed.rss_snapshot_unavailable", "RSS snapshot unavailable; full-scan fallback exceeds the isolated request budget", nil)
-	}
 	var scans []model.FeedItem
 	if err := r.db.WithContext(ctx).Model(&model.FeedItem{}).
 		Select(feedDuplicateScanColumns).Preload("FeedSource").
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL AND feed_sources.source_type = ?", false, "external_rss").
 		Order("feed_items.published_at DESC, feed_items.id DESC").
+		Limit(maxItems + 1).
 		Find(&scans).Error; err != nil {
 		return nil, 0, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
+	}
+	if len(scans) > maxItems {
+		return nil, 0, apperr.New(http.StatusServiceUnavailable, "feed.rss_snapshot_unavailable", "RSS snapshot unavailable; full-scan fallback exceeds the isolated request budget", nil)
 	}
 	legacyfeed.AnnotateDuplicateFeedItems(scans)
 	representatives := make([]model.FeedItem, 0, len(scans))

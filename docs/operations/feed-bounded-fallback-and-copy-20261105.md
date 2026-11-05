@@ -6,10 +6,10 @@ Experimental only; **not deployed or merged**. Production routes and read flags 
 
 ## Bounded legacy fallback
 
-- The RSS-only isolated HTTP legacy reader now counts visible `external_rss` articles before scanning or annotating them. Default maximum: 10,000 raw items. Above it the endpoint returns HTTP 503 with `feed.rss_snapshot_unavailable` instead of synchronous full-corpus deduplication after a stale/missing snapshot.
+- The RSS-only isolated HTTP legacy reader now reads at most 10,001 visible `external_rss` articles in one ordered query before annotating. Default maximum: 10,000 raw items. Above it the endpoint returns HTTP 503 with `feed.rss_snapshot_unavailable` instead of synchronous full-corpus deduplication after a stale/missing snapshot.
 - The small-corpus fallback contract is unchanged. An explicitly isolated env override `FEED_RSS_LEGACY_MAX_ITEMS` accepts positive values up to the default, allowing deterministic tests; invalid/oversized overrides do not increase the cap.
 - Regression `TestRSSRecentHTTPRealParityFallbackAndConcurrency` passed, including stale snapshot and legacy-only 503 assertions at an injected 8-item limit. The service dedup equivalence test selection also passed.
-- This is a safety guard, **not** a proof of bounded latency: `COUNT` still scans potentially large index/table ranges, and a race can insert more items between count and fetch. Before deploying any production equivalent, prefer an index-bounded `LIMIT cap+1` probe and explicit request CPU/time controls. The experimental route still fails closed outside disposable test schemas.
+- This is a safety guard, **not** a proof of bounded latency: The single `LIMIT cap+1` fetch bounds Go memory/CPU input and avoids count/fetch races, but up to 10,001 rows and their source relations may still be expensive. Production request CPU/time limits and explicit overload behavior remain unverified. The experimental route still fails closed outside disposable test schemas.
 
 ## 360,000-item synthetic COPY comparison
 
