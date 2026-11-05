@@ -671,7 +671,7 @@ func activate(options activationOptions) error {
 		Username string `json:"username"`
 		Secret   string `json:"secret"`
 	}
-	if json.Unmarshal(raw, &a) != nil || a.Username == "" || len(a.Secret) < 20 {
+	if json.Unmarshal(raw, &a) != nil || a.Username == "" || a.Secret == "" {
 		return errors.New("service provisioning credential unavailable")
 	}
 	if e := preflightStalwartAdmin(values["ATOMAN_MAIL_STALWART_URL"], a.Username, a.Secret); e != nil {
