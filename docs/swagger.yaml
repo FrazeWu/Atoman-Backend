@@ -5607,6 +5607,31 @@ definitions:
       status:
         type: string
     type: object
+  mail.ComposeMailInput:
+    properties:
+      bcc:
+        items:
+          type: string
+        type: array
+      cc:
+        items:
+          type: string
+        type: array
+      request_id:
+        type: string
+      subject:
+        type: string
+      text:
+        type: string
+      to:
+        items:
+          type: string
+        type: array
+    required:
+    - request_id
+    - text
+    - to
+    type: object
   mail.EmailDetail:
     properties:
       attachments:
@@ -5690,6 +5715,17 @@ definitions:
       size:
         type: integer
       type:
+        type: string
+    type: object
+  mail.MailOutboxInfo:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      send_after:
+        type: string
+      status:
         type: string
     type: object
   mail.MailboxInfo:
@@ -22351,6 +22387,74 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: Mark a message read only when the client explicitly displays it
+      tags:
+      - mail
+  /api/v1/mail/outbox:
+    post:
+      consumes:
+      - application/json
+      description: Disabled until mail delivery, R2, backup recovery and sender transport
+        gates are operator-verified
+      parameters:
+      - description: Plaintext message and idempotency request UUID
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/mail.ComposeMailInput'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/mail.MailOutboxInfo'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Queue a plaintext email with a server-persistent 5-second undo window
+      tags:
+      - mail
+  /api/v1/mail/outbox/{id}:
+    get:
+      parameters:
+      - description: Pending message UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mail.MailOutboxInfo'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Read only current user's pending/sent status
+      tags:
+      - mail
+  /api/v1/mail/outbox/{id}/cancel:
+    post:
+      parameters:
+      - description: Pending message UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mail.MailOutboxInfo'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Undo a queued email before the 5-second delivery deadline
       tags:
       - mail
   /api/v1/music/albums:

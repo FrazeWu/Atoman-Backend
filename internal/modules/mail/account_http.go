@@ -12,12 +12,14 @@ import (
 	"atoman/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type AccountHandler struct {
 	service *AccountService
 	read    *MailReadService
+	outbox  *MailOutboxService
 }
 
 // RegisterAccountRoutes adds site-session-authenticated invitation and
@@ -32,7 +34,10 @@ func RegisterAccountRoutes(group *gin.RouterGroup, db *gorm.DB) {
 			read = NewMailReadService(db, client, vault, true)
 		}
 	}
-	RegisterAccountRoutesWithServices(group, NewAccountService(db, enabled), read)
+	// All sending infrastructure gates are OFF by default. Invalid or
+	// incomplete runtime configuration is not silently treated as readiness.
+	outbox, _ := NewConfiguredMailOutbox(db)
+	RegisterAccountRoutesWithOutbox(group, NewAccountService(db, enabled), read, outbox)
 }
 
 func RegisterAccountRoutesWithService(group *gin.RouterGroup, service *AccountService) {
@@ -40,7 +45,13 @@ func RegisterAccountRoutesWithService(group *gin.RouterGroup, service *AccountSe
 }
 
 func RegisterAccountRoutesWithServices(group *gin.RouterGroup, service *AccountService, read *MailReadService) {
-	h := &AccountHandler{service: service, read: read}
+	RegisterAccountRoutesWithOutbox(group, service, read, nil)
+}
+
+// RegisterAccountRoutesWithOutbox is the integration point for a future
+// operator-authorized sender; production currently deliberately passes nil.
+func RegisterAccountRoutesWithOutbox(group *gin.RouterGroup, service *AccountService, read *MailReadService, outbox *MailOutboxService) {
+	h := &AccountHandler{service: service, read: read, outbox: outbox}
 	group.Use(middleware.AuthMiddleware())
 	group.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "private, no-store")
@@ -54,6 +65,9 @@ func RegisterAccountRoutesWithServices(group *gin.RouterGroup, service *AccountS
 	group.POST("/activate", h.activate)
 	group.POST("/admin/invites", h.issueInvite)
 	group.POST("/admin/reserve-self", h.reserveSelf)
+	group.POST("/outbox", h.queueMail)
+	group.GET("/outbox/:id", h.outboxStatus)
+	group.POST("/outbox/:id/cancel", h.cancelMail)
 }
 
 // me godoc
@@ -307,4 +321,101 @@ func (h *AccountHandler) markSeen(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"read": true})
+}
+
+// queueMail godoc
+// @Summary Queue a plaintext email with a server-persistent 5-second undo window
+// @Description Disabled until mail delivery, R2, backup recovery and sender transport gates are operator-verified
+// @Tags mail
+// @Accept json
+// @Produce json
+// @Param input body ComposeMailInput true "Plaintext message and idempotency request UUID"
+// @Success 202 {object} MailOutboxInfo
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/mail/outbox [post]
+func (h *AccountHandler) queueMail(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if h.outbox == nil {
+		httpx.Error(c, apperr.New(503, "mail.send_not_ready", "Mail sending is not available", nil))
+		return
+	}
+	var input ComposeMailInput
+	if !httpx.BindRequiredJSON(c, &input) {
+		return
+	}
+	result, err := h.outbox.Queue(c.Request.Context(), user, input)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusAccepted, result)
+}
+
+// outboxStatus godoc
+// @Summary Read only current user's pending/sent status
+// @Tags mail
+// @Produce json
+// @Param id path string true "Pending message UUID"
+// @Success 200 {object} MailOutboxInfo
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/mail/outbox/{id} [get]
+func (h *AccountHandler) outboxStatus(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if h.outbox == nil {
+		httpx.Error(c, apperr.New(503, "mail.send_not_ready", "Mail sending is not available", nil))
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("mail.invalid_outbox", "Invalid pending mail identifier"))
+		return
+	}
+	result, err := h.outbox.Status(c.Request.Context(), user, id)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, result)
+}
+
+// cancelMail godoc
+// @Summary Undo a queued email before the 5-second delivery deadline
+// @Tags mail
+// @Produce json
+// @Param id path string true "Pending message UUID"
+// @Success 200 {object} MailOutboxInfo
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/mail/outbox/{id}/cancel [post]
+func (h *AccountHandler) cancelMail(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if h.outbox == nil {
+		httpx.Error(c, apperr.New(503, "mail.send_not_ready", "Mail sending is not available", nil))
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("mail.invalid_outbox", "Invalid pending mail identifier"))
+		return
+	}
+	result, err := h.outbox.Cancel(c.Request.Context(), user, id)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, result)
 }

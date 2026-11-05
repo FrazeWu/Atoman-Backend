@@ -16,6 +16,7 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -102,6 +103,12 @@ func TestMailAccountHTTPUsesAtomanSessionsAndCSRF(t *testing.T) {
 	readPost := req(http.MethodPost, "/api/v1/mail/messages/read", `{"mailbox_id":"inbox","message_id":"message"}`, apiAlice.Token)
 	require.Equal(t, http.StatusServiceUnavailable, readPost.Code)
 
+	outboxBody := fmt.Sprintf(`{"request_id":%q,"to":["synthetic@example.test"],"subject":"test","text":"hello"}`, uuid.NewString())
+	outboxDisabled := req(http.MethodPost, "/api/v1/mail/outbox", outboxBody, apiAlice.Token)
+	require.Equal(t, http.StatusServiceUnavailable, outboxDisabled.Code)
+	require.Contains(t, outboxDisabled.Body.String(), "mail.send_not_ready")
+	outboxStatus := req(http.MethodGet, "/api/v1/mail/outbox/"+uuid.NewString(), "", apiAlice.Token)
+	require.Equal(t, http.StatusServiceUnavailable, outboxStatus.Code)
 	readBeforeActivation := req(http.MethodGet, "/api/v1/mail/folders", "", apiAlice.Token)
 	require.Equal(t, http.StatusServiceUnavailable, readBeforeActivation.Code)
 	require.Contains(t, readBeforeActivation.Body.String(), "mail.read_not_ready")
