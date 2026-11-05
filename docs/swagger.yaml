@@ -5609,11 +5609,27 @@ definitions:
     type: object
   mail.ComposeMailInput:
     properties:
+      attachment_ids:
+        items:
+          type: string
+        type: array
       bcc:
         items:
           type: string
         type: array
       cc:
+        items:
+          type: string
+        type: array
+      draft_id:
+        type: string
+      draft_revision:
+        type: integer
+      html:
+        type: string
+      in_reply_to:
+        type: string
+      references:
         items:
           type: string
         type: array
@@ -5629,8 +5645,6 @@ definitions:
         type: array
     required:
     - request_id
-    - text
-    - to
     type: object
   mail.EmailDetail:
     properties:
@@ -5650,14 +5664,24 @@ definitions:
         type: array
       hasPlainText:
         type: boolean
+      html:
+        type: string
       id:
         type: string
       isRead:
         type: boolean
+      messageId:
+        items:
+          type: string
+        type: array
       plainText:
         type: string
       receivedAt:
         type: string
+      replyTo:
+        items:
+          $ref: '#/definitions/mail.MailAddress'
+        type: array
       subject:
         type: string
       threadId:
@@ -5669,10 +5693,26 @@ definitions:
     type: object
   mail.EmailSummary:
     properties:
+      from:
+        items:
+          $ref: '#/definitions/mail.MailAddress'
+        type: array
       hasAttachment:
         type: boolean
       id:
         type: string
+      isRead:
+        type: boolean
+      isStarred:
+        type: boolean
+      keywords:
+        additionalProperties:
+          type: boolean
+        type: object
+      mailboxIds:
+        additionalProperties:
+          type: boolean
+        type: object
       preview:
         type: string
       receivedAt:
@@ -5681,6 +5721,10 @@ definitions:
         type: string
       threadId:
         type: string
+      to:
+        items:
+          $ref: '#/definitions/mail.MailAddress'
+        type: array
     type: object
   mail.IssueInviteInput:
     properties:
@@ -5712,6 +5756,8 @@ definitions:
     properties:
       name:
         type: string
+      partId:
+        type: string
       size:
         type: integer
       type:
@@ -5720,6 +5766,8 @@ definitions:
   mail.MailOutboxInfo:
     properties:
       created_at:
+        type: string
+      draft_id:
         type: string
       id:
         type: string

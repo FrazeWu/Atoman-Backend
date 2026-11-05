@@ -41004,11 +41004,15 @@ const docTemplate = `{
         "mail.ComposeMailInput": {
             "type": "object",
             "required": [
-                "request_id",
-                "text",
-                "to"
+                "request_id"
             ],
             "properties": {
+                "attachment_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "bcc": {
                     "type": "array",
                     "items": {
@@ -41016,6 +41020,24 @@ const docTemplate = `{
                     }
                 },
                 "cc": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "draft_id": {
+                    "type": "string"
+                },
+                "draft_revision": {
+                    "type": "integer"
+                },
+                "html": {
+                    "type": "string"
+                },
+                "in_reply_to": {
+                    "type": "string"
+                },
+                "references": {
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -41065,17 +41087,32 @@ const docTemplate = `{
                 "hasPlainText": {
                     "type": "boolean"
                 },
+                "html": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
                 "isRead": {
                     "type": "boolean"
                 },
+                "messageId": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "plainText": {
                     "type": "string"
                 },
                 "receivedAt": {
                     "type": "string"
+                },
+                "replyTo": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mail.MailAddress"
+                    }
                 },
                 "subject": {
                     "type": "string"
@@ -41094,11 +41131,35 @@ const docTemplate = `{
         "mail.EmailSummary": {
             "type": "object",
             "properties": {
+                "from": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mail.MailAddress"
+                    }
+                },
                 "hasAttachment": {
                     "type": "boolean"
                 },
                 "id": {
                     "type": "string"
+                },
+                "isRead": {
+                    "type": "boolean"
+                },
+                "isStarred": {
+                    "type": "boolean"
+                },
+                "keywords": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
+                "mailboxIds": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
                 },
                 "preview": {
                     "type": "string"
@@ -41111,6 +41172,12 @@ const docTemplate = `{
                 },
                 "threadId": {
                     "type": "string"
+                },
+                "to": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mail.MailAddress"
+                    }
                 }
             }
         },
@@ -41160,6 +41227,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "partId": {
+                    "type": "string"
+                },
                 "size": {
                     "type": "integer"
                 },
@@ -41172,6 +41242,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "created_at": {
+                    "type": "string"
+                },
+                "draft_id": {
                     "type": "string"
                 },
                 "id": {
