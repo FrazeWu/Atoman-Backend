@@ -87,6 +87,19 @@ def validate_snapshot(source):
         if file.stat().st_size != record.get('bytes') or digest(file) != record.get('sha256'):
             raise BackupError('Backup archive size or checksum mismatch')
         members.append(name)
+    extra = manifest.get('additional_files', [])
+    if not isinstance(extra, list):
+        raise BackupError('Additional recovery files must be a list')
+    for record in extra:
+        name = record.get('name', '')
+        if name in members or record.get('verified') is not True:
+            raise BackupError('Additional recovery files must be unique and verified')
+        file = regular_file(source, name)
+        if file.stat().st_size != record.get('bytes') or digest(file) != record.get('sha256'):
+            raise BackupError('Additional recovery file checksum mismatch')
+        members.append(name)
+    if extra and manifest.get('mail_assets_verified') is not True:
+        raise BackupError('Mail recovery verification is missing')
     return [(name, regular_file(source, name)) for name in sorted(members)]
 
 

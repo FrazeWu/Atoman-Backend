@@ -77,9 +77,9 @@ def backup(container, user, database, target):
                 session.kill(); session.communicate()
 
 
-def verify(image, target, records):
+def verify(image, target, records, data_only_databases=()):
     name = 'atoman-restore-' + uuid.uuid4().hex[:12]
-    cid = sp.check_output(['docker','run','--detach','--rm','--name',name,
+    cid = sp.check_output(['docker','run','--detach','--name',name,
         '--label','atoman.ops=restore-verification','--network','none',
         '--cpus','2','--memory','2g','-e','POSTGRES_USER=atoman_restore',
         '-e','POSTGRES_HOST_AUTH_METHOD=trust','-v',str(target)+':/backup:ro',image,'-c','maintenance_work_mem=256MB'], text=True).strip()
@@ -94,8 +94,13 @@ def verify(image, target, records):
             database = record['database']
             sql(cid,'atoman_restore','postgres','CREATE DATABASE ' + quote_ident(database))
             start = time.monotonic()
-            run(['docker','exec',cid,'pg_restore','-U','atoman_restore','-d',database,
-                 '--exit-on-error','--no-owner','--no-acl','/backup/'+record['dump']])
+            restore_args = ['docker','exec',cid,'pg_restore','-U','atoman_restore','-d',database,
+                            '--exit-on-error','--no-owner','--no-acl']
+            profile = 'data_without_secondary_indexes' if database in data_only_databases else 'full'
+            if database in data_only_databases:
+                restore_args += ['--section=pre-data', '--section=data']
+            run(restore_args + ['/backup/'+record['dump']])
+            record['restore_profile'] = profile
             actual = counts(cid,'atoman_restore',database,record['public_table_counts'])
             if actual != record['public_table_counts']:
                 raise RuntimeError('Restore row counts differ for ' + database)
@@ -104,7 +109,7 @@ def verify(image, target, records):
             record['restore_verified'] = True
             print(json.dumps({k:record[k] for k in ['database','bytes','backup_seconds','restore_seconds','verified_tables','restore_verified']}), flush=True)
     finally:
-        sp.run(['docker','rm','-f',cid],stdout=sp.DEVNULL,stderr=sp.DEVNULL)
+        sp.run(['docker','rm','-f','-v',cid],stdout=sp.DEVNULL,stderr=sp.DEVNULL)
 
 
 def prune_managed_backups(destination, keep):

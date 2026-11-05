@@ -1,0 +1,32 @@
+[Unit]
+Description=Atoman mail trash, attachment and outbox maintenance
+After=network-online.target atoman-backend.service
+Wants=network-online.target
+OnFailure=atoman-mail-ops-alert.service
+
+[Service]
+Type=oneshot
+User=atoman
+Group=atoman
+WorkingDirectory=/var/lib/atoman
+EnvironmentFile=/etc/atoman/backend.env
+EnvironmentFile=/etc/atoman-mail/backend.env
+Environment=ATOMAN_MAIL_CLEANUP_ENABLED=1
+UnsetEnvironment=ATOMAN_MAIL_STALWART_ADMIN_USER ATOMAN_MAIL_STALWART_ADMIN_PASSWORD
+# A backup holds the exclusive lock; skip maintenance safely during that run.
+ExecStart=/usr/bin/flock --shared --nonblock --conflict-exit-code 75 /run/lock/atoman-backup.lock /opt/atoman/backend/current/mail_maintenance_worker
+SuccessExitStatus=75
+TimeoutStartSec=20min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUQuota=100%
+MemoryMax=512M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/atoman /var/log/atoman /run/lock/atoman-backup.lock
+UMask=0077
+StandardOutput=journal
+StandardError=journal

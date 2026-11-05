@@ -249,6 +249,52 @@ def write_status(root, state, details):
             path.unlink(missing_ok=True)
 
 
+
+def prune_completed(root, retain_days, now=None):
+    """Delete only fully verified snapshots outside the selected retention window."""
+    if retain_days == 0:
+        return []
+    if not 1 <= retain_days <= 365:
+        raise PullError("Retention must be between one and 365 days")
+    complete = root / "snapshots"
+    private_directory(complete)
+    current = now or dt.datetime.now(dt.timezone.utc)
+    candidates = []
+    for path in complete.iterdir():
+        if path.is_symlink() or not path.is_dir() or not SNAPSHOT.fullmatch(path.name):
+            continue
+        marker_path = path / "LOCAL_COMPLETE.json"
+        if marker_path.is_symlink() or not marker_path.is_file():
+            continue
+        marker = json.loads(marker_path.read_text())
+        if marker.get("format") != "atoman-nas-copy-v1" or marker.get("source") != path.name:
+            continue
+        try:
+            timestamp = parse_completed_at(marker.get("source_completed_at"))
+        except PullError:
+            continue
+        candidates.append((timestamp, path, marker))
+    if not candidates:
+        return []
+    newest = {x[1] for x in sorted(candidates, key=lambda x: x[0], reverse=True)[:2]}
+    removed = []
+    for timestamp, path, marker in candidates:
+        if path in newest or timestamp >= current - dt.timedelta(days=retain_days):
+            continue
+        # Never delete an unknown or incomplete tree, even under a managed name.
+        members = list(path.iterdir())
+        if {x.name for x in members} != {"backup.tar.age", "receipt.json", "LOCAL_COMPLETE.json"}:
+            continue
+        if any(x.is_symlink() or not x.is_file() for x in members):
+            continue
+        ciphertext = path / "backup.tar.age"
+        if ciphertext.stat().st_size != marker.get("bytes") or digest(ciphertext) != marker.get("sha256"):
+            raise PullError("Retained snapshot failed verification; refusing pruning")
+        shutil.rmtree(path)
+        removed.append(path.name)
+    return sorted(removed)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
@@ -256,6 +302,7 @@ def main():
     parser.add_argument("--identity", type=Path, required=True)
     parser.add_argument("--known-hosts", type=Path, required=True)
     parser.add_argument("--max-age-hours", type=int, default=48)
+    parser.add_argument("--retain-days", type=int, default=0, help="Delete verified snapshots older than this many days; zero disables pruning")
     args = parser.parse_args()
     os.umask(0o077)
     if os.geteuid() == 0:
@@ -263,6 +310,7 @@ def main():
     try:
         copies = pull(args.root, args.host, args.identity, args.known_hosts)
         freshness = verify_freshness(args.root, args.max_age_hours)
+        removed = prune_completed(args.root, args.retain_days)
     except Exception as error:
         try:
             write_status(args.root, "error", {"error_type": type(error).__name__,
@@ -270,8 +318,8 @@ def main():
         except (OSError, PullError):
             pass
         raise
-    write_status(args.root, "ok", {"copies": copies, **freshness})
-    print(json.dumps({"copies": copies, **freshness, "recovery_verified": False}))
+    write_status(args.root, "ok", {"copies": copies, "retention_removed": removed, **freshness})
+    print(json.dumps({"copies": copies, "retention_removed": removed, **freshness, "recovery_verified": False}))
 
 
 if __name__ == "__main__":
