@@ -49,7 +49,7 @@
 - `all_snapshot_files_sha256_verified=false`。
 - `main_bundle_nas.mac_full_ciphertext_readback=false`。
 
-完整邮件胶囊的真实 NAS 恢复证明独立成立；不据此声称全站大包已在 NAS 完整验证或恢复。完整全站源快照、密文和源证据均保留。
+完整邮件胶囊的真实 NAS 恢复证明独立成立；不据此声称全站大包已在 NAS 完整验证或恢复。首次验证时完整全站源快照、密文和源证据均保留；最终守卫通过后的本地保留策略见文末，首次原始 manifest/receipt 与恢复证据持续归档。
 
 ## 配对备份与一致性
 
@@ -76,12 +76,14 @@ SQL 恢复逐表比较源快照计数。`mail-assets.tar` 对所有对象和运�
 
 每日默认 `--verification-profile full`，三个数据库完整恢复，包括全部索引和约束。首次配对快照已经完成此完整检查。
 
-紧接上线后的追加备份使用同一完整配置，并允许：
+本次紧接上线后的追加备份使用同一完整配置，并实际指定：
 
 ~~~text
 --verification-profile data-and-mail
 --reference-full-backup /var/backups/atoman/mail/20261105T123021Z-cl6v20q0
 ~~~
+
+上述原始路径是本次一次性执行时保留的引用。最终清理后保留其证据副本，后续每日任务继续使用 full profile；不应使用已经按策略清理的旧目录再次运行此一次性命令。
 
 该模式仍导出完整数据库归档，索引和约束 DDL 仍在归档中；新 prod/dev 只恢复结构及全部数据并校验计数，避免重复耗时的全站二级索引构建。`atoman_mail` 仍完整恢复。新 manifest 记录参考快照、manifest 摘要和每库的实际恢复 profile，不能冒称完整索引重建。
 
@@ -213,6 +215,19 @@ Stalwart 官方对象参考：[BlobStore](https://stalw.art/docs/ref/object/blob
 
 失败告警目前为本机 systemd/journal 通道，没有新增外部通知收件人或消息凭据。安装顺序为工作进程二进制、Python 模块与单位、tmpfiles、systemd 验证、daemon-reload、启用 timer、实际健康检查。首次 G5 和上线后追加 NAS 恢复证明均须保留。
 
+## 生产运维安装验证
+
+2026-11-05 14:23:51 UTC，19 个运行文件已按提交 `21bf568f23af9bcee0fd4afa002b1968210c9042` 安装：十二个 Python 模块、五个 service/timer 文件、tmpfiles 和 zz drop-in。每个旧文件先备份，安装持有真实 backup 独占 flock；systemd 语法检查与实际生效命令验证通过后释放锁，再运行维护与健康服务。
+
+- 回滚文件：`/var/backups/atoman/mail-ops-install/20261105T142349Z-91bb7cca`。
+- 安装证明：`/var/lib/atoman-mail/ops-installation-receipt.json`，包含各文件摘要、旧文件位置、实际 ExecStart/ExecStartPost、单位和定时器状态。
+- 手动 maintenance：`Result=success`、`ExecMainStatus=0`，用户/组 `atoman`，两个 Stalwart 管理员环境变量已移除；此命令在独占备份锁之外运行。
+- 手动 health：`Result=success`、`ExecMainStatus=0`，首次配对源的全站与邮件胶囊均匹配，`offsite_transfer_confirmed=false`。
+- backend、Stalwart、outbox 三个核心单位均 active；backup、maintenance、health 三个定时器均 enabled/active。原 backup timer、其他 drop-in 及 NAS 端任务保留。
+- 当次观测的下一次 backup 为 2026-11-06 03:31:10 UTC，maintenance 为 02:45:26 UTC；随机延迟使未来具体秒数变化。
+
+日常模板现捕获 `/var/lib/atoman-mail/` 下六份部署与验收记录：`deployment-receipt.json`、`acceptance-webmail.json`、`acceptance-incoming.json`、`acceptance-owned-reply.json`、`acceptance-gmail-production.json`、`dns-cutover-receipt.json`。最终一次追加还捕获本次 `ops-installation-receipt.json`。快照只在主流程确认全部记录就绪后执行。
+
 ## 生产版本与密钥恢复
 
 后端运行在 `/opt/atoman/backend/releases` 与 `current`，使用 `scripts/ops/activate-runtime.py`。旧 `scripts/deploy-production.sh` 不应覆盖受控部署方式。主线负责迁移、五个同版本二进制和激活；邮件 env drop-in 排在 `90-managed-runtime.conf` 后。
@@ -221,6 +236,70 @@ Stalwart 官方对象参考：[BlobStore](https://stalw.art/docs/ref/object/blob
 
 临时 R2 密文中转对象已于 13:22:41.828998 UTC 删除，精确 HEAD 404 与无剩余自有 multipart 已验证；它不会被下一次配对备份递归收录。对应私有回执为首次恢复目录的 `r2-transport-cleanup.json`。
 
-## 上线后最终验收
+## 上线后最终验收与保留策略收尾
 
-待主线激活、真实账户收发验收和最终运行配置安装完成后，在协调窗口执行最后一次配对备份、post-activation 完整邮件胶囊发布、真实 NAS 往返与同样隔离恢复。此节仅在该实际结果完成后填写，不能沿用 pre-activation 成功冒充已激活账户恢复。
+最终配对快照 `20261105T143410Z-xzbrgspt` 在 2026-11-05 14:34:18.730610 UTC 捕获，14:38:31.037178 UTC 完成验证。暂停窗口为 8.636 秒。捕获前以精确邮箱地址与既定 owner 核对：九张邮件表全部存在，目标账户恰好一条、active 一条、已关联 Stalwart 一条。
+
+本次完整导出与本地恢复结果：
+
+| 数据库 | 完整 dump 大小 | 校验表数 | 本次恢复范围 / 耗时 |
+| --- | ---: | ---: | --- |
+| `atoman_prod` | 817,359,445 字节 | 263 | 全部 schema/data 与计数，123.137 秒；二级索引采用先前完整恢复证明 |
+| `atoman_dev` | 6,896,375 字节 | 231 | 全部 schema/data 与计数，2.855 秒 |
+| `atoman_mail` | 182,448 字节 | 29 | 完整恢复，0.704 秒 |
+
+完整 dump 始终包含索引和约束，优化只适用于本次验证方式。应用邮件胶囊另在全新的隔离 PostgreSQL 恢复其全部选定 schema/data，包括邮件表的索引与约束。
+
+### 最终 NAS 与邮箱恢复证明
+
+Mac 实际 NAS 往返流程于 14:43:34.589854 UTC 完成，最终隔离邮箱恢复于 **14:44:25.034315 UTC** 成功，完整任务于 14:44:32 UTC 以 exit 0 结束。
+
+| 字段 | 最终值 |
+| --- | --- |
+| 配对源 ID | `20261105T143410Z-xzbrgspt` |
+| 原始 source manifest SHA256 | `1e79ad4a88726ab47c46c182a91ddb88d034c9d4204200316fbcaddecce79d53` |
+| 全站密文大小 | 825,801,752 字节 |
+| 全站密文 SHA256 | `5dbb59341eabb310f213ed58888b8f7dd8bc9d2daf44661ab287b4de1256e1f6` |
+| 邮件胶囊 ID / scope | `20261105T143410Z-xzbrgsptm` / `post_activation_mail_capsule` |
+| 邮件胶囊大小 | 1,382,936 字节 |
+| 邮件胶囊 SHA256 | `f1d91ef014aec155f8c7458953a93828fad1b9b7bc389b4f32c6e6a0f4c3f3e2` |
+| 胶囊 manifest SHA256 | `c9902e12e083309e77ae7220f8b4b3dc41aff5f69ceb55e549095cec3a184146` |
+| NAS 文件 | `/mnt/basic_pool/AtomanBackups/snapshots/20261105T143410Z-xzbrgsptm/backup.tar.age` |
+| 最终 v2 回执 | `/var/backups/atoman/mail-recovery/20261105T143410Z-xzbrgspt/nas-recovery-receipt.json` |
+| 最终 v2 回执 SHA256 | `f1c79e47acfebc8488fd7ccb0d1db2605d15c1b2ef149d6514a81f6a8ed79d43` |
+
+最终应用恢复为 `phase=active`、`absent_mail_tables=[]`。实际恢复的行数为 Users 42、mail_accounts 1、mail_access_credentials 1、mail_pending_sends 3；mail_invites、mail_drafts、mail_uploads、mail_preferences、mail_action_receipts、mail_retention 均为 0。零行表的完整结构同样恢复。全部表集合和计数一致，用户、账户、凭据与草稿归属关系检查通过。
+
+两个 R2 桶的完整集合为 prod 10 个对象、pending 0 个对象，均从 NAS 胶囊恢复到一次性 MinIO 并逐对象校验。四十个运行文件完整核验，其中包含新运维单位、最终 key/env，以及部署、Webmail、真实入站、正常回复、Gmail 结果、DNS 切换、运维安装七份记录。凭据密文及对应运行密钥被成套保留；应用账号与 Stalwart 账号关联核对通过。
+
+Stalwart 的 29 张表恢复计数一致。原 INBOX UID、完整 MIME、正文以及 4150 字节附件的三个摘要仍与前文原始 canary 完全一致。两个恢复流程均采用隔离网络；Stalwart 恢复不发布任何宿主端口。
+
+全站 NAS 状态仍独立记录为 pending：14:43:46.392005 UTC 的实际观测为新全站文件 0 / 825,801,752 字节，没有完成证明。最终回执中 `full_snapshot_nas_verified=false`、`main_bundle_nas_verified=false`、`all_snapshot_files_sha256_verified=false` 保持不变。最终 G5 证明完整邮件恢复，不将此结果扩展为全站 NAS 恢复证明。
+
+### 独立守卫与清理
+
+主流程在 14:45:40 UTC 使用原始 source manifest、原始全站 export receipt、原始 capsule receipt，以及全站密文 SHA256 运行独立 v2 守卫 dry run，exit 0，输出 `MAIL_ACTIVATION_PREFLIGHT_OK 20261105T143410Z-xzbrgspt`。这一运行没有 `--apply`。本运维记录中的 `independent-guard-confirmation.json` 明确标记其来源为主流程实际工具结果。
+
+守卫通过后，14:48:23.952358 UTC 在实际 backup/offsite 独占锁下执行本地保留策略：
+
+- 配对源目录只保留 `20261105T143410Z-xzbrgspt`。
+- SFTP 发布缓存按 full/mail-complete 两个范围各留最新一份。
+- 私有胶囊缓存保留最新一份。
+- 首次和最终的 `mail-recovery/<id>/source-evidence`、两个稳定 G5 回执与守卫确认记录保留。
+- NAS 文件、NAS 配置及其他备份根目录未被本次清理修改。
+
+`data-and-mail` 的首次完整恢复引用仍可追溯到：
+
+`/var/backups/atoman/mail-recovery/20261105T123021Z-cl6v20q0/source-evidence/manifest.json`
+
+该文件原始 SHA256 为 `f9df735e3b3730163f4b4d08235816977e9a53591d5985753270b1c42002691a`，与最终 source manifest 的 `full_verification_reference.manifest_sha256` 完全一致。清理前后重新校验了两组 source-evidence 的全部记录摘要。
+
+最终清理回执为：
+
+`/var/backups/atoman/mail-recovery/20261105T143410Z-xzbrgspt/retention-completion-receipt.json`
+
+### 清理后的实际健康状态
+
+清理后重新运行已安装的 systemd health 单位，结果为 ok，并严格绑定最终 source ID；full 与 mail-complete 两份发布均有效。backend、Stalwart、outbox 三个服务 enabled/active/success，三个相关定时器 enabled/active。Stalwart 容器实际 running，本地 `/jmap/session` 返回 HTTP 200。
+
+本地健康记录仍保留 `offsite_transfer_confirmed=false`。NAS 完整邮件恢复的成功依据是独立 v2 回执；NAS 全站慢传输、全局状态及十五天清理尚未完成的范围仍按前文如实区分。此次没有增加对外推送告警通道。
