@@ -33,7 +33,7 @@ func outboxAAD(u, id uuid.UUID) []byte {
 	return []byte("atoman-mail-pending/v1/" + u.String() + "/" + id.String())
 }
 func (v *MailOutboxVault) Seal(u, id uuid.UUID, raw []byte) ([]byte, error) {
-	if v == nil || v.aead == nil || u == uuid.Nil || id == uuid.Nil || len(raw) == 0 || len(raw) > 512*1024 {
+	if v == nil || v.aead == nil || u == uuid.Nil || id == uuid.Nil || len(raw) == 0 || len(raw) > maxMailSnapshotBytes {
 		return nil, errors.New("Invalid pending mail snapshot")
 	}
 	nonce := make([]byte, v.aead.NonceSize())
@@ -43,7 +43,7 @@ func (v *MailOutboxVault) Seal(u, id uuid.UUID, raw []byte) ([]byte, error) {
 	return v.aead.Seal(append([]byte{1}, nonce...), nonce, raw, outboxAAD(u, id)), nil
 }
 func (v *MailOutboxVault) Open(u, id uuid.UUID, blob []byte) ([]byte, error) {
-	if v == nil || v.aead == nil || u == uuid.Nil || id == uuid.Nil || len(blob) < 1+v.aead.NonceSize()+v.aead.Overhead() || len(blob) > 513*1024 || blob[0] != 1 {
+	if v == nil || v.aead == nil || u == uuid.Nil || id == uuid.Nil || len(blob) < 1+v.aead.NonceSize()+v.aead.Overhead() || len(blob) > maxMailSnapshotBytes+1024 || blob[0] != 1 {
 		return nil, errors.New("Invalid pending mail ciphertext")
 	}
 	n := v.aead.NonceSize()

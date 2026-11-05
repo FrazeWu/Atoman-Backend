@@ -30,7 +30,7 @@ func NewR2MailPendingStore(cfg R2Config) (MailPendingStore, error) {
 	return &r2PendingStore{client: cli, bucket: cfg.PendingBucket}, nil
 }
 func (s *r2PendingStore) Put(ctx context.Context, key string, value []byte) error {
-	if s == nil || s.client == nil || key == "" || len(value) == 0 || len(value) > 513*1024 {
+	if s == nil || s.client == nil || key == "" || len(value) == 0 || len(value) > maxMailSnapshotBytes+1024 {
 		return errors.New("Invalid private mail snapshot")
 	}
 	_, e := s.client.PutObjectWithContext(ctx, &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key), Body: bytes.NewReader(value), ContentType: aws.String("application/octet-stream")})
@@ -48,8 +48,8 @@ func (s *r2PendingStore) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, errors.New("Private mail snapshot unavailable")
 	}
 	defer item.Body.Close()
-	blob, e := io.ReadAll(io.LimitReader(item.Body, 513*1024+1))
-	if e != nil || len(blob) > 513*1024 {
+	blob, e := io.ReadAll(io.LimitReader(item.Body, maxMailSnapshotBytes+1024+1))
+	if e != nil || len(blob) > maxMailSnapshotBytes+1024 {
 		return nil, errors.New("Private mail snapshot unreadable")
 	}
 	return blob, nil

@@ -22,12 +22,12 @@ func TestStalwartJMAPRealFixture(t *testing.T) {
 	endpoint := os.Getenv("ATOMAN_MAIL_STAGING_JMAP_URL")
 	adminName := os.Getenv("ATOMAN_MAIL_STAGING_ADMIN_USERNAME")
 	adminPassword := os.Getenv("ATOMAN_MAIL_STAGING_ADMIN_PASSWORD")
-	if endpoint != "http://127.0.0.1:18582" || adminName == "" || adminPassword == "" {
+	if (endpoint != "http://127.0.0.1:18582" && endpoint != "http://127.0.0.1:18584") || adminName == "" || adminPassword == "" {
 		t.Fatal("staging JMAP fixture is not configured for the expected loopback endpoint")
 	}
 	client, err := NewStalwartJMAPClient(endpoint, nil)
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	admin := StalwartBasic(adminName, adminPassword)
 	const stageDomain = "atoman-stage.test"
@@ -69,7 +69,7 @@ func TestStalwartJMAPRealFixture(t *testing.T) {
 
 	// Delivery stays inside the localhost staging SMTP listener.
 	mail := fmt.Sprintf("From: probe@external.test\r\nTo: %s@%s\r\nSubject: Atoman JMAP synthetic mailbox probe\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nAtoman staging JMAP body test.\r\n", stageLocalPart, stageDomain)
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:19025", 6*time.Second)
+	conn, err := net.DialTimeout("tcp", fixtureSMTPAddress(t), 6*time.Second)
 	require.NoError(t, err)
 	smtpClient, err := smtp.NewClient(conn, "127.0.0.1")
 	require.NoError(t, err)
@@ -166,5 +166,6 @@ func TestStalwartJMAPRealFixture(t *testing.T) {
 		require.True(t, delivered, "the isolated Stalwart recipient must receive its own synthetic submitted message")
 		t.Log("STALWART_JMAP_SUBMISSION_AND_INTERNAL_DELIVERY_VERIFIED")
 	}
+	testMailWorkspaceRealFixture(t, ctx, client, createdUser.AccountID, userKey, emails[0].ID, targetID)
 	t.Log("STALWART_JMAP_DOMAIN_ACCOUNT_KEY_MAILBOX_EMAIL_VERIFIED")
 }

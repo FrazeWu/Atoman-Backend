@@ -16,14 +16,18 @@ type MailAddress struct {
 }
 
 type MailAttachmentInfo struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Size uint64 `json:"size"`
+	PartID string `json:"partId"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Size   uint64 `json:"size"`
 }
 
 // EmailDetail is a bounded, plain-text-only representation. Raw HTML, blob
 // credentials and JMAP account IDs are deliberately not returned to browsers.
 type EmailDetail struct {
+	HTML          string               `json:"html,omitempty"`
+	MessageID     []string             `json:"messageId"`
+	ReplyTo       []MailAddress        `json:"replyTo"`
 	ID            string               `json:"id"`
 	ThreadID      string               `json:"threadId"`
 	Subject       string               `json:"subject"`
@@ -50,6 +54,9 @@ type jmapTextValue struct {
 }
 
 type jmapFullEmail struct {
+	HTMLBody    []jmapTextPart           `json:"htmlBody"`
+	MessageID   []string                 `json:"messageId"`
+	ReplyTo     []MailAddress            `json:"replyTo"`
 	ID          string                   `json:"id"`
 	ThreadID    string                   `json:"threadId"`
 	Subject     string                   `json:"subject"`
@@ -86,9 +93,9 @@ func (s *StalwartJMAPClient) ReadEmailDetail(ctx context.Context, cred StalwartC
 	}
 	args := map[string]any{
 		"accountId": accountID, "ids": []string{emailID},
-		"properties":          []string{"id", "threadId", "subject", "receivedAt", "mailboxIds", "keywords", "from", "to", "cc", "textBody", "bodyValues", "attachments"},
+		"properties":          []string{"id", "threadId", "subject", "receivedAt", "mailboxIds", "keywords", "from", "to", "cc", "replyTo", "messageId", "textBody", "htmlBody", "bodyValues", "attachments"},
 		"bodyProperties":      []string{"partId", "type", "name", "size"},
-		"fetchTextBodyValues": true, "fetchHTMLBodyValues": false, "maxBodyValueBytes": maxMailTextBodyBytes,
+		"fetchTextBodyValues": true, "fetchHTMLBodyValues": true, "maxBodyValueBytes": maxMailTextBodyBytes,
 	}
 	if err := s.call(ctx, cred, false, "Email/get", args, &got); err != nil {
 		return EmailDetail{}, err
@@ -138,6 +145,17 @@ func (s *StalwartJMAPClient) ReadEmailDetail(ctx context.Context, cred StalwartC
 		buffer.WriteString(text)
 	}
 	result.PlainText = buffer.String()
+	result.MessageID = src.MessageID
+	result.ReplyTo = src.ReplyTo
+	for _, p := range src.HTMLBody {
+		if v, ok := src.BodyValues[p.PartID]; ok {
+			result.HTML = sanitizeMailHTML(v.Value)
+			break
+		}
+	}
+	if result.PlainText == "" && result.HTML != "" {
+		result.PlainText = mailHTMLText(result.HTML)
+	}
 	return result, nil
 }
 

@@ -222,12 +222,18 @@ type MailboxInfo struct {
 }
 
 type EmailSummary struct {
-	ID            string `json:"id"`
-	ThreadID      string `json:"threadId"`
-	Subject       string `json:"subject"`
-	ReceivedAt    string `json:"receivedAt"`
-	Preview       string `json:"preview"`
-	HasAttachment bool   `json:"hasAttachment"`
+	MailboxIDs    map[string]bool `json:"mailboxIds"`
+	ID            string          `json:"id"`
+	ThreadID      string          `json:"threadId"`
+	Subject       string          `json:"subject"`
+	ReceivedAt    string          `json:"receivedAt"`
+	Preview       string          `json:"preview"`
+	HasAttachment bool            `json:"hasAttachment"`
+	From          []MailAddress   `json:"from"`
+	To            []MailAddress   `json:"to"`
+	Keywords      map[string]bool `json:"keywords"`
+	IsRead        bool            `json:"isRead"`
+	IsStarred     bool            `json:"isStarred"`
 }
 
 func (s *StalwartJMAPClient) Mailboxes(ctx context.Context, userKey StalwartCredential, accountID string) ([]MailboxInfo, error) {
@@ -274,12 +280,16 @@ func (s *StalwartJMAPClient) ListEmails(ctx context.Context, userKey StalwartCre
 		List     []EmailSummary `json:"list"`
 		NotFound []string       `json:"notFound"`
 	}
-	getArgs := map[string]any{"accountId": accountID, "ids": query.IDs, "properties": []string{"id", "threadId", "subject", "receivedAt", "preview", "hasAttachment"}}
+	getArgs := map[string]any{"accountId": accountID, "ids": query.IDs, "properties": []string{"id", "threadId", "subject", "receivedAt", "preview", "hasAttachment", "from", "to", "keywords", "mailboxIds"}}
 	if err := s.call(ctx, userKey, false, "Email/get", getArgs, &got); err != nil {
 		return nil, err
 	}
 	if len(got.NotFound) > 0 {
 		return nil, errors.New("Stalwart changed during email fetch; retry state sync")
+	}
+	for i := range got.List {
+		got.List[i].IsRead = got.List[i].Keywords["$seen"]
+		got.List[i].IsStarred = got.List[i].Keywords["$flagged"]
 	}
 	return got.List, nil
 }

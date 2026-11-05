@@ -30,4 +30,10 @@ export TEST_POSTGRES_DSN="postgres://atoman_test:$password@127.0.0.1:$port/atoma
 GOMAXPROCS=2 go test ./internal/modules/mail -count=1 -v
 GOMAXPROCS=2 go test ./internal/migrations -run '^TestRunMail(Accounts|Outbox)Migration$' -count=1
 GOMAXPROCS=2 go test ./internal/app -run '^TestRegisterV1RoutesMountsAtomanMailUnderAuthentication$' -count=1
+# Exercise the operator-only mail migration path against this disposable DB.
+for attempt in 1 2; do
+ DATABASE_TYPE=postgres DATABASE_URL="$TEST_POSTGRES_DSN" GOMAXPROCS=2 go run ./cmd/mail_admin --operation migrate-mail
+done
+nonmail_tables=$(docker exec "$name" psql -U atoman_test -d atoman_mail_test -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name NOT LIKE 'mail_%'")
+if [ "$nonmail_tables" != "0" ]; then echo 'Mail-only migration created unrelated tables' >&2; exit 1; fi
 printf '%s\n' 'MAIL_INVITATION_ISOLATED_POSTGRES_TESTS_PASSED'

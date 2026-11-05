@@ -17,9 +17,11 @@ import (
 )
 
 type AccountHandler struct {
-	service *AccountService
-	read    *MailReadService
-	outbox  *MailOutboxService
+	service   *AccountService
+	read      *MailReadService
+	outbox    *MailOutboxService
+	workspace *MailWorkspaceService
+	provision *MailProvisionService
 }
 
 // RegisterAccountRoutes adds site-session-authenticated invitation and
@@ -37,7 +39,8 @@ func RegisterAccountRoutes(group *gin.RouterGroup, db *gorm.DB) {
 	// All sending infrastructure gates are OFF by default. Invalid or
 	// incomplete runtime configuration is not silently treated as readiness.
 	outbox, _ := NewConfiguredMailOutbox(db)
-	RegisterAccountRoutesWithOutbox(group, NewAccountService(db, enabled), read, outbox)
+	provision, _ := NewConfiguredMailProvision(db)
+	registerAccountRoutes(group, NewAccountService(db, enabled), read, outbox, provision)
 }
 
 func RegisterAccountRoutesWithService(group *gin.RouterGroup, service *AccountService) {
@@ -51,12 +54,17 @@ func RegisterAccountRoutesWithServices(group *gin.RouterGroup, service *AccountS
 // RegisterAccountRoutesWithOutbox is the integration point for a future
 // operator-authorized sender; production currently deliberately passes nil.
 func RegisterAccountRoutesWithOutbox(group *gin.RouterGroup, service *AccountService, read *MailReadService, outbox *MailOutboxService) {
-	h := &AccountHandler{service: service, read: read, outbox: outbox}
+	registerAccountRoutes(group, service, read, outbox, nil)
+}
+
+func registerAccountRoutes(group *gin.RouterGroup, service *AccountService, read *MailReadService, outbox *MailOutboxService, provision *MailProvisionService) {
+	h := &AccountHandler{service: service, read: read, outbox: outbox, workspace: NewMailWorkspaceService(read, outbox), provision: provision}
 	group.Use(middleware.AuthMiddleware())
 	group.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "private, no-store")
 		c.Next()
 	})
+	h.registerWorkspace(group)
 	group.GET("/me", h.me)
 	group.GET("/folders", h.folders)
 	group.GET("/messages", h.messages)
@@ -121,6 +129,13 @@ func (h *AccountHandler) activate(c *gin.Context) {
 	if err != nil {
 		httpx.Error(c, err)
 		return
+	}
+	if h.provision != nil {
+		info, err = h.provision.ProvisionSelf(c.Request.Context(), user)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
 	}
 	httpx.OK(c, http.StatusCreated, info)
 }
@@ -256,6 +271,13 @@ func (h *AccountHandler) reserveSelf(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if h.provision != nil {
+		result, err = h.provision.ProvisionSelf(c.Request.Context(), user)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+	}
 	httpx.OK(c, http.StatusCreated, result)
 }
 
@@ -279,7 +301,7 @@ func (h *AccountHandler) messageDetail(c *gin.Context) {
 		httpx.Error(c, apperr.New(503, "mail.read_not_ready", "Mail reading is not enabled", nil))
 		return
 	}
-	detail, err := h.read.Detail(c.Request.Context(), user, c.Query("mailbox_id"), c.Query("message_id"))
+	detail, err := h.read.Detail(c.Request.Context(), user, c.Query("mailbox_id"), messageQueryID(c))
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -345,7 +367,7 @@ func (h *AccountHandler) queueMail(c *gin.Context) {
 		return
 	}
 	var input ComposeMailInput
-	if !httpx.BindRequiredJSON(c, &input) {
+	if !mailJSON(c, &input) {
 		return
 	}
 	result, err := h.outbox.Queue(c.Request.Context(), user, input)
