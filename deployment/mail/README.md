@@ -77,6 +77,25 @@ bootstrap credentials are not attached to the running production container.
    production built that exact revision. Verify the public mail route
    and API readiness.
 
+## Operator commands
+
+The three Go scripts under scripts/mail-*.go use explicit-file builds; their
+ignore build tags keep them out of ordinary server binaries.
+
+- mail-activate-environment.go validates the dated NAS recovery receipt, the
+  exact reviewed snapshot and ciphertext hash, the original canary attachment
+  hash, and the live local Stalwart administrator session. Without --apply it
+  only verifies. Applying preserves a private pre-activation environment and
+  atomically enables mail gates; it never prints credentials.
+- mail-env-exec.go loads both protected dotenv files without shell evaluation
+  and runs the explicitly supplied local operator command, such as mail_admin
+  --operation migrate-mail or provision.
+- mail-production-acceptance.go requires the exact existing administrator UUID,
+  mailbox address and --confirm-self-send. It verifies draft revisions, a
+  cancelled send, one delivered synthetic self-message and attachment, explicit
+  read state, bulk undo, and IMAPS password revocation. A private receipt
+  prevents blind repetition after an incomplete run.
+
 ## Retention and failure handling
 
 Stalwart's DataRetention singleton is verified to keep Trash/Junk for
