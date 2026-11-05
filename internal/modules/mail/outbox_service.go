@@ -20,14 +20,15 @@ import (
 const mailUndoWindow = 5 * time.Second
 
 type MailOutboxInfo struct {
-	ID        uuid.UUID `json:"id"`
-	Status    string    `json:"status"`
-	SendAfter time.Time `json:"send_after"`
-	CreatedAt time.Time `json:"created_at"`
+	DraftID   *uuid.UUID `json:"draft_id,omitempty"`
+	ID        uuid.UUID  `json:"id"`
+	Status    string     `json:"status"`
+	SendAfter time.Time  `json:"send_after"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 func mailOutboxInfo(o model.MailPendingSend) MailOutboxInfo {
-	return MailOutboxInfo{ID: o.ID, Status: o.Status, SendAfter: o.SendAfter, CreatedAt: o.CreatedAt}
+	return MailOutboxInfo{DraftID: o.DraftID, ID: o.ID, Status: o.Status, SendAfter: o.SendAfter, CreatedAt: o.CreatedAt}
 }
 
 type MailDeliverer interface {
@@ -114,8 +115,25 @@ func (s *MailOutboxService) Queue(ctx context.Context, user authctx.CurrentUser,
 	if active != 1 {
 		return MailOutboxInfo{}, apperr.Forbidden("mail.account_inactive", "Atoman account disabled")
 	}
+	var draftRevision uint64
+	if input.DraftID != nil {
+		if *input.DraftID == uuid.Nil {
+			return MailOutboxInfo{}, apperr.BadRequest("mail.invalid_draft", "Invalid draft")
+		}
+		var draft model.MailDraft
+		if e := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", *input.DraftID, user.ID).Take(&draft).Error; e != nil {
+			return MailOutboxInfo{}, apperr.NotFound("mail.draft_missing", "Draft unavailable")
+		}
+		if input.DraftRevision != 0 && input.DraftRevision != draft.Revision {
+			return MailOutboxInfo{}, apperr.Conflict("mail.draft_conflict", "Draft changed; reload before sending")
+		}
+		draftRevision = draft.Revision
+	}
 	now := s.now().UTC()
 	id := uuid.New()
+	if err := s.resolveAttachments(ctx, user.ID, &input); err != nil {
+		return MailOutboxInfo{}, apperr.BadRequest("mail.invalid_attachment", "Attachment unavailable or total size exceeds 25 MB")
+	}
 	payload, err := buildOutboxPayload(account.Address, id, input, now)
 	if err != nil {
 		return MailOutboxInfo{}, apperr.BadRequest("mail.invalid_compose", "Invalid recipients or message contents")
@@ -132,7 +150,8 @@ func (s *MailOutboxService) Queue(ctx context.Context, user authctx.CurrentUser,
 	if err := s.store.Put(ctx, objectKey, blob); err != nil {
 		return MailOutboxInfo{}, apperr.New(503, "mail.pending_storage_unavailable", "Cannot store pending mail", nil)
 	}
-	entry := model.MailPendingSend{ID: id, UserID: user.ID, RequestID: input.RequestID, AccountID: *account.StalwartAccountID, SnapshotKey: objectKey, PayloadHash: fingerprint, Status: "queued", SendAfter: now.Add(mailUndoWindow), CreatedAt: now, UpdatedAt: now}
+	queuedAt := s.now().UTC()
+	entry := model.MailPendingSend{DraftID: input.DraftID, DraftRevision: draftRevision, ID: id, UserID: user.ID, RequestID: input.RequestID, AccountID: *account.StalwartAccountID, SnapshotKey: objectKey, PayloadHash: fingerprint, Status: "queued", SendAfter: queuedAt.Add(mailUndoWindow), CreatedAt: queuedAt, UpdatedAt: queuedAt}
 	if err := s.db.WithContext(ctx).Create(&entry).Error; err != nil {
 		// We only remove the uniquely named *new* R2 object. A concurrent retry
 		// uses its own random object key and never deletes the winner's snapshot.
@@ -303,14 +322,23 @@ func (s *MailOutboxService) finishClaim(ctx context.Context, id uuid.UUID, state
 	if state == "sent" {
 		fields["sent_at"] = now
 	}
-	result := s.db.WithContext(ctx).Model(&model.MailPendingSend{}).Where("id=? AND status=?", id, "dispatching").Updates(fields)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return errors.New("Pending send state changed unexpectedly")
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.MailPendingSend{}).Where("id=? AND status=?", id, "dispatching").Updates(fields)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("Pending send state changed unexpectedly")
+		}
+		if state == "sent" {
+			var row model.MailPendingSend
+			if e := tx.Where("id = ?", id).Take(&row).Error; e != nil {
+				return e
+			}
+			return deleteAcceptedDraft(tx, row)
+		}
+		return nil
+	})
 }
 
 // Stable digest is a convenient, non-sensitive operation-level identifier;
@@ -318,4 +346,12 @@ func (s *MailOutboxService) finishClaim(ctx context.Context, id uuid.UUID, state
 func outboxPayloadHash(raw []byte) string {
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:])
+}
+
+// Delete only the exact revision queued by this send. Later edits always survive.
+func deleteAcceptedDraft(tx *gorm.DB, row model.MailPendingSend) error {
+	if row.DraftID == nil || row.DraftRevision == 0 {
+		return nil
+	}
+	return tx.Where("id = ? AND user_id = ? AND revision = ?", *row.DraftID, row.UserID, row.DraftRevision).Delete(&model.MailDraft{}).Error
 }

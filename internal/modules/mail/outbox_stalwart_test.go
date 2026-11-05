@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"atoman/internal/model"
 	"context"
 	"encoding/json"
 	"io"
@@ -10,12 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
 func TestStalwartOutboxSubmissionUsesOnlyMappedUserAndNoBccHeader(t *testing.T) {
-	db, _, _, _, alice, bob, _ := mailOutboxFixture(t)
+	db, queue, _, _, alice, bob, _ := mailOutboxFixture(t)
 	const account = "stalwart-user-123"
 	const bearer = "Bearer one-time-staging-secret-value"
 	var calls []string
@@ -77,13 +77,20 @@ func TestStalwartOutboxSubmissionUsesOnlyMappedUserAndNoBccHeader(t *testing.T) 
 	require.NoError(t, err)
 	transport := NewStalwartOutboxSubmitter(db, client, fixtureCredentialVault(t))
 	input := composeFixture()
-	job := uuid.New()
+	queued, err := queue.Queue(context.Background(), alice, input)
+	require.NoError(t, err)
+	job := queued.ID
+	require.NoError(t, db.Model(&model.MailPendingSend{}).Where("id = ?", job).Update("status", "dispatching").Error)
 	payload, err := buildOutboxPayload("stage-alice@atoman.org", job, input, time.Now())
 	require.NoError(t, err)
 	require.Error(t, transport.Submit(context.Background(), bob.ID, account, job, payload), "other Atoman user cannot use sender key")
 	require.Empty(t, calls)
 	require.NoError(t, transport.Submit(context.Background(), alice.ID, account, job, payload))
 	require.Equal(t, []string{"Mailbox/get", "Identity/get", "blob-upload", "Email/import", "EmailSubmission/set", "Email/set"}, calls)
+	var receipt model.MailPendingSend
+	require.NoError(t, db.Where("id = ?", job).Take(&receipt).Error)
+	require.Equal(t, "imported-draft", receipt.ImportedEmailID)
+	require.Equal(t, "submitted-id", receipt.SubmissionID)
 	payload.Sender = "forged@atoman.org"
 	require.Error(t, transport.Submit(context.Background(), alice.ID, account, job, payload))
 }

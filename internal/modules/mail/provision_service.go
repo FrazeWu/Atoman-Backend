@@ -53,6 +53,18 @@ func (s *MailProvisionService) ProvisionReserved(ctx context.Context, actor auth
 	if actor.ID == uuid.Nil || !authctx.RoleAtLeast(actor.Role, authctx.RoleAdmin) {
 		return AccountInfo{}, apperr.Forbidden("mail.admin_required", "Administrator access required")
 	}
+	return s.provisionAuthorized(ctx, userID)
+}
+
+// ProvisionSelf activates only the current site user's existing reservation.
+func (s *MailProvisionService) ProvisionSelf(ctx context.Context, user authctx.CurrentUser) (AccountInfo, error) {
+	if user.ID == uuid.Nil {
+		return AccountInfo{}, apperr.Unauthorized("Login required")
+	}
+	return s.provisionAuthorized(ctx, user.ID)
+}
+
+func (s *MailProvisionService) provisionAuthorized(ctx context.Context, userID uuid.UUID) (AccountInfo, error) {
 	if s == nil || !s.gates.ready() || s.db == nil || s.provider == nil || s.vault == nil || userID == uuid.Nil {
 		return AccountInfo{}, apperr.New(503, "mail.provisioning_not_ready", "Mail provisioning is not operationally approved", nil)
 	}

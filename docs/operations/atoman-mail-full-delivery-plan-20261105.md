@@ -35,3 +35,7 @@ Date: 2026-11-05. Owner: Atoman. This is a **module of the existing Atoman appli
 ## Current implementation focus
 
 G3: read single full plaintext email with sender/recipient + attachment metadata and perform `$seen` mutation **only after actual message expansion**, using a separate authenticated POST endpoint. JMAP `Email/get` must use bounded `fetchTextBodyValues` and `maxBodyValueBytes`, and text is rendered escaped rather than injecting HTML. The user-scoped JMAP credential remains on the backend. Stalwart fixture tests must be executed before merging.
+
+## Backend completion contract (2026-11-05)
+
+The backend implementation and operator commands are documented in [Mail workspace API and runtime delivery](atoman-mail-workspace-api-20261105.md). Production rollout must use the isolated mail-only migration command, existing chosen reservations, continuous durable outbox worker, and native Stalwart 30-day Trash/Junk retention. Application maintenance does not expunge mail. Frontend and deployment acceptance use the linked endpoint/error/state contract.

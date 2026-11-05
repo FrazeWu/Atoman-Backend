@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMailDetailReadsOnlyPlaintextAndExplicitReadMutation(t *testing.T) {
+func TestMailDetailSanitizesHTMLAndUsesExplicitReadMutation(t *testing.T) {
 	var seenCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer synthetic-own-mail-key", r.Header.Get("Authorization"))
@@ -32,7 +32,7 @@ func TestMailDetailReadsOnlyPlaintextAndExplicitReadMutation(t *testing.T) {
 			props := args["properties"].([]any)
 			if len(props) > 2 {
 				require.Equal(t, true, args["fetchTextBodyValues"])
-				require.Equal(t, false, args["fetchHTMLBodyValues"])
+				require.Equal(t, true, args["fetchHTMLBodyValues"])
 				require.Equal(t, float64(maxMailTextBodyBytes), args["maxBodyValueBytes"])
 				result = map[string]any{"list": []any{map[string]any{
 					"id": "message-own", "threadId": "thread-own", "subject": "hello", "receivedAt": "2026-11-05T00:00:00Z",
@@ -41,7 +41,8 @@ func TestMailDetailReadsOnlyPlaintextAndExplicitReadMutation(t *testing.T) {
 					"to":          []any{map[string]string{"email": "reader@example.test"}},
 					"cc":          []any{},
 					"textBody":    []any{map[string]string{"partId": "1", "type": "text/plain"}, map[string]string{"partId": "2", "type": "text/html"}},
-					"bodyValues":  map[string]any{"1": map[string]any{"value": "Hello <script>unsafe</script> as literal text", "isTruncated": false}, "2": map[string]any{"value": "<img src='https://tracker.invalid'>"}},
+					"htmlBody":    []any{map[string]string{"partId": "2", "type": "text/html"}},
+					"bodyValues":  map[string]any{"1": map[string]any{"value": "Hello <script>unsafe</script> as literal text", "isTruncated": false}, "2": map[string]any{"value": "<p onclick='bad()'>Safe HTML</p><script>bad()</script><img src='https://tracker.invalid'>"}},
 					"attachments": []any{map[string]any{"name": "note.pdf", "type": "application/pdf", "size": 1234}},
 				}}}
 			} else {
@@ -64,6 +65,9 @@ func TestMailDetailReadsOnlyPlaintextAndExplicitReadMutation(t *testing.T) {
 	require.Equal(t, "Hello <script>unsafe</script> as literal text", detail.PlainText)
 	require.Equal(t, []MailAddress{{Name: "Sender", Email: "sender@example.test"}}, detail.From)
 	require.Len(t, detail.Attachments, 1)
+	require.Contains(t, detail.HTML, "<p>Safe HTML</p>")
+	require.NotContains(t, detail.HTML, "bad()")
+	require.NotContains(t, detail.HTML, "tracker.invalid")
 	require.False(t, detail.IsRead)
 	require.False(t, detail.BodyTruncated)
 	require.Equal(t, []string{"Email/get"}, seenCalls, "read-only detail must not mark $seen")

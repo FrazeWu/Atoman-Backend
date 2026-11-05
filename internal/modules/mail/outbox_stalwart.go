@@ -27,7 +27,7 @@ type StalwartOutboxSubmitter struct {
 func NewStalwartOutboxSubmitter(db *gorm.DB, client *StalwartJMAPClient, vault *MailCredentialVault) *StalwartOutboxSubmitter {
 	return &StalwartOutboxSubmitter{db: db, client: client, vault: vault}
 }
-func (s *StalwartOutboxSubmitter) Submit(ctx context.Context, userID uuid.UUID, accountID string, _ uuid.UUID, p outboxPayload) error {
+func (s *StalwartOutboxSubmitter) Submit(ctx context.Context, userID uuid.UUID, accountID string, pendingID uuid.UUID, p outboxPayload) error {
 	if s == nil || s.db == nil || s.client == nil || s.vault == nil || userID == uuid.Nil || !validJMAPScopedID(accountID) {
 		return errors.New("Mail submission is not configured")
 	}
@@ -38,7 +38,7 @@ func (s *StalwartOutboxSubmitter) Submit(ctx context.Context, userID uuid.UUID, 
 	if account.Address != p.Sender {
 		return errors.New("Mail sender does not match reserved identity")
 	}
-	if len(p.Recipients) == 0 || len(p.Recipients) > 50 || len(p.MIME) == 0 || len(p.MIME) > 512*1024 {
+	if len(p.Recipients) == 0 || len(p.Recipients) > 50 || len(p.MIME) == 0 || len(p.MIME) > maxMailSnapshotBytes {
 		return errors.New("Invalid encrypted mail composition")
 	}
 	if _, err := validEnvelopeAddresses(p.Recipients); err != nil {
@@ -57,7 +57,19 @@ func (s *StalwartOutboxSubmitter) Submit(ctx context.Context, userID uuid.UUID, 
 	if err != nil || session.PrimaryAccounts[jmapMailCapability] != accountID {
 		return errors.New("Mail JMAP user scope mismatch")
 	}
-	return s.client.SubmitRFC822(ctx, credential, accountID, p)
+	return s.client.submitRFC822(ctx, credential, accountID, p, func(emailID string) error {
+		r := s.db.WithContext(ctx).Model(&model.MailPendingSend{}).Where("id = ? AND user_id = ? AND status = ?", pendingID, userID, "dispatching").Update("imported_email_id", emailID)
+		if r.Error != nil || r.RowsAffected != 1 {
+			return errors.New("Mail import receipt could not be persisted")
+		}
+		return nil
+	}, func(submissionID string) error {
+		r := s.db.WithContext(ctx).Model(&model.MailPendingSend{}).Where("id = ? AND user_id = ? AND status = ?", pendingID, userID, "dispatching").Update("submission_id", submissionID)
+		if r.Error != nil || r.RowsAffected != 1 {
+			return errors.New("Mail submission receipt could not be persisted")
+		}
+		return nil
+	})
 }
 
 // jmapSubmissionCall uses the submission capability in addition to JMAP mail.
@@ -91,7 +103,7 @@ func (s *StalwartJMAPClient) jmapSubmissionCall(ctx context.Context, cred Stalwa
 // uploadRFC822 only accepts a bounded raw email from an authenticated
 // per-user JMAP session. It never creates a public URL or returns the blob.
 func (s *StalwartJMAPClient) uploadRFC822(ctx context.Context, cred StalwartCredential, accountID string, mime []byte) (string, error) {
-	if s == nil || s.http == nil || !validJMAPScopedID(accountID) || len(mime) == 0 || len(mime) > 512*1024 {
+	if s == nil || s.http == nil || !validJMAPScopedID(accountID) || len(mime) == 0 || len(mime) > maxMailSnapshotBytes {
 		return "", errors.New("Invalid mail upload")
 	}
 	authorization, err := cred.authorization()
@@ -133,6 +145,9 @@ func (s *StalwartJMAPClient) uploadRFC822(ctx context.Context, cred StalwartCred
 // No retry occurs after any uncertain upstream side effect. The enclosing
 // outbox worker must record 'uncertain' rather than resubmitting.
 func (s *StalwartJMAPClient) SubmitRFC822(ctx context.Context, cred StalwartCredential, accountID string, p outboxPayload) error {
+	return s.submitRFC822(ctx, cred, accountID, p, nil, nil)
+}
+func (s *StalwartJMAPClient) submitRFC822(ctx context.Context, cred StalwartCredential, accountID string, p outboxPayload, onImported func(string) error, onSubmitted func(string) error) error {
 	if accountID == "" || p.Sender == "" || len(p.Recipients) == 0 {
 		return errors.New("Invalid JMAP submission")
 	}
@@ -192,6 +207,11 @@ func (s *StalwartJMAPClient) SubmitRFC822(ctx context.Context, cred StalwartCred
 	if !validJMAPScopedID(emailID) || len(imported.NotCreated) != 0 {
 		return errors.New("Mail import not confirmed")
 	}
+	if onImported != nil {
+		if err := onImported(emailID); err != nil {
+			return err
+		}
+	}
 	rcpt := make([]map[string]any, 0, len(p.Recipients))
 	for _, addr := range p.Recipients {
 		rcpt = append(rcpt, map[string]any{"email": addr, "parameters": nil})
@@ -221,6 +241,11 @@ func (s *StalwartJMAPClient) SubmitRFC822(ctx context.Context, cred StalwartCred
 	}
 	if _, ok := updated.Updated[emailID]; !ok || len(updated.NotUpdated) != 0 {
 		return errors.New("Submitted copy requires reconciliation")
+	}
+	if onSubmitted != nil {
+		if err := onSubmitted(submitted.Created["s1"].ID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

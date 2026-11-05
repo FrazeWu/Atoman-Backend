@@ -2,7 +2,11 @@
 # Fully disposable Stalwart+PostgreSQL+MinIO (S3 test fixture).
 # Explicitly NOT a Cloudflare R2 credential test or production deployment.
 set -eu
-prefix=atoman-mail-s3-smoke
+case "${ATOMAN_MAIL_FIXTURE_SLOT:-default}" in
+ default) prefix=atoman-mail-s3-smoke; admin_port=18582; smtp_port=19025; imaps_port=19993; s3_port=19000 ;;
+ workspace) prefix=atoman-mail-workspace-smoke; admin_port=18584; smtp_port=19027; imaps_port=19995; s3_port=19002 ;;
+ *) echo 'Unsupported isolated fixture slot' >&2; exit 2 ;;
+esac
 net=$prefix-net
 pg=$prefix-pg
 blob=$prefix-s3
@@ -30,10 +34,6 @@ s3_password=$(openssl rand -hex 24)
 bootstrap_password=$(openssl rand -hex 24)
 export AWS_ACCESS_KEY_ID=stagingtest AWS_SECRET_ACCESS_KEY="$s3_password" AWS_DEFAULT_REGION=us-east-1 AWS_EC2_METADATA_DISABLED=true
 bucket=atoman-mail-s3-staging-test
-admin_port=18582
-smtp_port=19025
-imaps_port=19993
-s3_port=19000
 if ss -lnt | grep -E ":($admin_port|$smtp_port|$imaps_port|$s3_port) " >/dev/null; then echo 'Staging port is occupied' >&2; exit 2; fi
 docker network create "$net" >/dev/null
 for v in "$cfgvol" "$blobvol" "$mailvol"; do docker volume create "$v" >/dev/null; done
@@ -221,7 +221,7 @@ if [ "${ATOMAN_MAIL_STAGE5_JMAP:-}" = "1" ]; then
   ATOMAN_MAIL_STAGING_ADMIN_USERNAME=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["username"])' "$work/staging-admin.json")
   ATOMAN_MAIL_STAGING_ADMIN_PASSWORD=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["secret"])' "$work/staging-admin.json")
   export ATOMAN_MAIL_STAGING_ADMIN_USERNAME ATOMAN_MAIL_STAGING_ADMIN_PASSWORD
-  ATOMAN_MAIL_STAGING_JMAP=1 ATOMAN_MAIL_STAGING_JMAP_URL="http://127.0.0.1:$admin_port" \
+  ATOMAN_MAIL_STAGING_JMAP=1 ATOMAN_MAIL_STAGING_JMAP_URL="http://127.0.0.1:$admin_port" ATOMAN_MAIL_STAGING_SMTP_ADDR="127.0.0.1:$smtp_port" \
     GOMAXPROCS=2 go test ./internal/modules/mail -run '^TestStalwartJMAPRealFixture$' -count=1 -v
   unset ATOMAN_MAIL_STAGING_ADMIN_USERNAME ATOMAN_MAIL_STAGING_ADMIN_PASSWORD
 fi
