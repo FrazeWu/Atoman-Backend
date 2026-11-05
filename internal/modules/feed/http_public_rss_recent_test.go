@@ -200,4 +200,18 @@ func TestRSSRecentHTTPRealParityFallbackAndConcurrency(t *testing.T) {
 	for err := range problems {
 		t.Error(err)
 	}
+	// A stale projection must fail fast instead of running an unbounded scan.
+	t.Setenv("FEED_RSS_LEGACY_MAX_ITEMS", "8")
+	if err := db.Where("scope = ?", publicRecentDedupScope).Delete(&feedDedupSnapshotHead{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	blocked := request(endpoint, false)
+	if blocked.Code != http.StatusServiceUnavailable || !strings.Contains(blocked.Body.String(), "feed.rss_snapshot_unavailable") {
+		t.Fatalf("unbounded RSS fallback was not blocked: status=%d body=%s", blocked.Code, blocked.Body.String())
+	}
+	t.Setenv("FEED_SNAPSHOT_READ_EXPERIMENT", "")
+	blocked = request(endpoint, false)
+	if blocked.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unbounded legacy-only RSS request was not blocked: status=%d", blocked.Code)
+	}
 }

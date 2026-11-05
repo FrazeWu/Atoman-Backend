@@ -1,8 +1,12 @@
 package feed
 
 import (
+	"atoman/internal/platform/apperr"
 	"context"
 	"math"
+	"net/http"
+	"os"
+	"strconv"
 
 	"atoman/internal/model"
 	legacyfeed "atoman/internal/service"
@@ -13,6 +17,25 @@ import (
 // Keep it independent of snapshot tables so it works during rollback.
 func (r *Repo) listPublicRSSRecentLegacy(ctx context.Context, page, size int) ([]model.FeedItem, int64, error) {
 	page, size = normalizedPage(page), normalizedPageSize(size)
+	// The isolated HTTP experiment must never load an unbounded RSS corpus
+	// after a missing/stale snapshot. Production routes do not use this reader.
+	const defaultMaxItems = 10000
+	maxItems := defaultMaxItems
+	if os.Getenv("FEED_SCALE_ISOLATED") == "yes" {
+		if override, err := strconv.Atoi(os.Getenv("FEED_RSS_LEGACY_MAX_ITEMS")); err == nil && override > 0 && override <= defaultMaxItems {
+			maxItems = override
+		}
+	}
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&model.FeedItem{}).
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL AND feed_sources.source_type = ?", false, "external_rss").
+		Count(&count).Error; err != nil {
+		return nil, 0, err
+	}
+	if count > int64(maxItems) {
+		return nil, 0, apperr.New(http.StatusServiceUnavailable, "feed.rss_snapshot_unavailable", "RSS snapshot unavailable; full-scan fallback exceeds the isolated request budget", nil)
+	}
 	var scans []model.FeedItem
 	if err := r.db.WithContext(ctx).Model(&model.FeedItem{}).
 		Select(feedDuplicateScanColumns).Preload("FeedSource").
