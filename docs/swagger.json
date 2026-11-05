@@ -18043,6 +18043,120 @@
                 }
             }
         },
+        "/api/v1/mail/outbox": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Disabled until mail delivery, R2, backup recovery and sender transport gates are operator-verified",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mail"
+                ],
+                "summary": "Queue a plaintext email with a server-persistent 5-second undo window",
+                "parameters": [
+                    {
+                        "description": "Plaintext message and idempotency request UUID",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mail.ComposeMailInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/mail.MailOutboxInfo"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/mail/outbox/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mail"
+                ],
+                "summary": "Read only current user's pending/sent status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pending message UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mail.MailOutboxInfo"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/mail/outbox/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mail"
+                ],
+                "summary": "Undo a queued email before the 5-second delivery deadline",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Pending message UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mail.MailOutboxInfo"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/albums": {
             "get": {
                 "produces": [
@@ -40884,6 +40998,43 @@
                 }
             }
         },
+        "mail.ComposeMailInput": {
+            "type": "object",
+            "required": [
+                "request_id",
+                "text",
+                "to"
+            ],
+            "properties": {
+                "bcc": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "cc": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "mail.EmailDetail": {
             "type": "object",
             "properties": {
@@ -41010,6 +41161,23 @@
                     "type": "integer"
                 },
                 "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "mail.MailOutboxInfo": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "send_after": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }

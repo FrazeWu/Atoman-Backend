@@ -136,5 +136,35 @@ func TestStalwartJMAPRealFixture(t *testing.T) {
 	require.True(t, confirmed.IsRead)
 	t.Log("STALWART_JMAP_TEXT_BODY_AND_EXPAND_ONLY_READ_STATE_VERIFIED")
 	t.Logf("STALWART_JMAP_DELIVERY_MAILBOX_ROLE=%s", deliveredRole)
+	if os.Getenv("ATOMAN_MAIL_STAGE9_SUBMIT") == "1" {
+		subject := "Atoman Stage9 local JMAP outbound synthetic"
+		sender := stageLocalPart + "@" + stageDomain
+		message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: Thu, 05 Nov 2026 03:00:00 +0000\r\nMessage-ID: <%s@atoman-stage.test>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nStage 9 synthetic JMAP internal delivery only.\r\n", sender, sender, subject, uuid.NewString())
+		payload := outboxPayload{Sender: sender, Recipients: []string{sender}, MIME: []byte(message)}
+		require.NoError(t, client.SubmitRFC822(ctx, userKey, createdUser.AccountID, payload))
+		delivered := false
+		for attempt := 0; attempt < 17 && !delivered; attempt++ {
+			listed, err := client.Mailboxes(ctx, userKey, createdUser.AccountID)
+			require.NoError(t, err)
+			for _, folder := range listed {
+				if folder.Role == nil || (*folder.Role != "inbox" && *folder.Role != "junk") {
+					continue
+				}
+				contents, err := client.ListEmails(ctx, userKey, createdUser.AccountID, folder.ID, 30)
+				require.NoError(t, err)
+				for _, candidate := range contents {
+					if candidate.Subject == subject {
+						delivered = true
+						break
+					}
+				}
+			}
+			if !delivered {
+				time.Sleep(time.Second)
+			}
+		}
+		require.True(t, delivered, "the isolated Stalwart recipient must receive its own synthetic submitted message")
+		t.Log("STALWART_JMAP_SUBMISSION_AND_INTERNAL_DELIVERY_VERIFIED")
+	}
 	t.Log("STALWART_JMAP_DOMAIN_ACCOUNT_KEY_MAILBOX_EMAIL_VERIFIED")
 }

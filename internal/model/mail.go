@@ -53,3 +53,23 @@ type MailAccessCredential struct {
 }
 
 func (MailAccessCredential) TableName() string { return "mail_access_credentials" }
+
+// MailPendingSend records a durable, server-side five-second Undo Send state.
+// MIME and recipients live only in an encrypted private R2 snapshot.
+type MailPendingSend struct {
+	ID          uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	UserID      uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_mail_pending_user_request;index:idx_mail_pending_user_state" json:"-"`
+	RequestID   uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_mail_pending_user_request" json:"-"`
+	AccountID   string     `gorm:"type:varchar(128);not null" json:"-"`
+	SnapshotKey string     `gorm:"type:varchar(255);not null;uniqueIndex:idx_mail_pending_snapshot" json:"-"`
+	PayloadHash string     `gorm:"type:char(64);not null" json:"-"`
+	Status      string     `gorm:"type:varchar(24);not null;index:idx_mail_pending_user_state;index:idx_mail_pending_due" json:"status"`
+	SendAfter   time.Time  `gorm:"not null;index:idx_mail_pending_due" json:"send_after"`
+	ClaimedAt   *time.Time `json:"-"`
+	CancelledAt *time.Time `json:"-"`
+	SentAt      *time.Time `json:"-"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"-"`
+}
+
+func (MailPendingSend) TableName() string { return "mail_pending_sends" }

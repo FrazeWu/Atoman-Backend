@@ -110,6 +110,7 @@ func Run(db *gorm.DB) error {
 		{"short note media attachment migration", migrations.RunShortNoteMediaAttachmentMigration},
 		{"user themes migration", migrations.RunUserThemesMigration},
 		{"mail accounts and invites migration", migrations.RunMailAccountsMigration},
+		{"mail pending send outbox migration", migrations.RunMailOutboxMigration},
 	}
 	for _, step := range postSchemaSteps {
 		if err := step.run(db); err != nil {

@@ -28,6 +28,6 @@ until docker exec "$name" pg_isready -q -U atoman_test -d atoman_mail_test; do
 done
 export TEST_POSTGRES_DSN="postgres://atoman_test:$password@127.0.0.1:$port/atoman_mail_test?sslmode=disable"
 GOMAXPROCS=2 go test ./internal/modules/mail -count=1 -v
-GOMAXPROCS=2 go test ./internal/migrations -run '^TestRunMailAccountsMigration$' -count=1
+GOMAXPROCS=2 go test ./internal/migrations -run '^TestRunMail(Accounts|Outbox)Migration$' -count=1
 GOMAXPROCS=2 go test ./internal/app -run '^TestRegisterV1RoutesMountsAtomanMailUnderAuthentication$' -count=1
 printf '%s\n' 'MAIL_INVITATION_ISOLATED_POSTGRES_TESTS_PASSED'
