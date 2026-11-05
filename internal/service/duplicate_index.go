@@ -39,6 +39,37 @@ func newDuplicateGroupIndex() *duplicateGroupIndex {
 	}
 }
 
+// duplicateAnchorSeen skips map allocations for ordinary titles. Long
+// or adversarial titles overflow to an exact set, never dropping anchors.
+type duplicateAnchorSeen struct {
+	inline   [32]uint64
+	count    int
+	overflow map[uint64]struct{}
+}
+
+func (s *duplicateAnchorSeen) remember(key uint64) bool {
+	for i := 0; i < s.count; i++ {
+		if s.inline[i] == key {
+			return false
+		}
+	}
+	if s.overflow != nil {
+		if _, ok := s.overflow[key]; ok {
+			return false
+		}
+		s.overflow[key] = struct{}{}
+		return true
+	}
+	if s.count < len(s.inline) {
+		s.inline[s.count] = key
+		s.count++
+		return true
+	}
+	s.overflow = make(map[uint64]struct{}, 16)
+	s.overflow[key] = struct{}{}
+	return true
+}
+
 const duplicateIndexThreshold = 128
 const duplicateShortAnchorSize = 4
 const duplicateFuzzyAnchorSize = 6
@@ -113,23 +144,21 @@ func (index *duplicateGroupIndex) add(group *duplicateGroup, groupID int) {
 	if len(runes) >= 12 {
 		q = duplicateFuzzyAnchorSize
 	}
-	seen := make(map[uint64]bool)
+	seen := duplicateAnchorSeen{}
 	for start := 0; start+q <= len(runes); start += q {
 		key := duplicateAnchorHash(runes, start, q)
-		if seen[key] {
+		if !seen.remember(key) {
 			continue
 		}
-		seen[key] = true
 		index.addTitlePosting(index.fuzzyAnchors, index.hotFuzzyAnchors, key, groupID)
 	}
 	if len(runes) >= 18 {
-		clear(seen)
+		seen = duplicateAnchorSeen{}
 		for start := 0; start+duplicateSubstringAnchorSize <= len(runes); start += duplicateSubstringAnchorStride {
 			key := duplicateAnchorHash(runes, start, duplicateSubstringAnchorSize)
-			if seen[key] {
+			if !seen.remember(key) {
 				continue
 			}
-			seen[key] = true
 			index.addTitlePosting(index.substringAnchors, index.hotSubAnchors, key, groupID)
 		}
 	}
@@ -193,13 +222,12 @@ func (index *duplicateGroupIndex) firstMatch(groups []*duplicateGroup, url, titl
 			index.addCandidate(groupID)
 		}
 	} else {
-		seen := make(map[uint64]bool)
+		seen := duplicateAnchorSeen{}
 		for _, width := range [...]int{duplicateShortAnchorSize, duplicateFuzzyAnchorSize} {
 			duplicateForEachRollingAnchor(runes, width, func(key uint64) {
-				if seen[key] {
+				if !seen.remember(key) {
 					return
 				}
-				seen[key] = true
 				index.addAnchorCandidates(index.fuzzyAnchors, index.hotFuzzyAnchors, key, publishedAt)
 			})
 		}
