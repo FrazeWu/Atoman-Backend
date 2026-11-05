@@ -22,6 +22,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html"
 	"net"
 	stdmail "net/mail"
 	"os"
@@ -236,7 +237,8 @@ func run(appEnv, mailEnv, address, userID, external string) error {
 		return e
 	}
 	draftID := uuid.New()
-	compose := mail.DraftCompose{To: []string{address}, Subject: "Atoman self verification " + state.RunID, Text: "Atoman self delivery and attachment verification. " + state.RunID, HTML: "<p>Atoman synthetic self delivery.</p>", Attachments: []model.MailUpload{upload}}
+	compose := mail.DraftCompose{To: []string{address}, Subject: "Atoman self verification " + state.RunID, Text: "Atoman self delivery and attachment verification. " + state.RunID, Attachments: []model.MailUpload{upload}}
+	compose.HTML = "<p>" + strings.ReplaceAll(html.EscapeString(compose.Text), "\n", "<br>") + "</p>"
 	if external != "" {
 		compose.Bcc = []string{external}
 	}
@@ -245,6 +247,7 @@ func run(appEnv, mailEnv, address, userID, external string) error {
 		return e
 	}
 	compose.Text += "\nDraft revision persisted."
+	compose.HTML = "<p>" + strings.ReplaceAll(html.EscapeString(compose.Text), "\n", "<br>") + "</p>"
 	draft, e = workspace.SaveDraft(ctx, actor, draftID, mail.SaveMailDraftInput{Revision: draft.Revision, Compose: compose})
 	if e != nil {
 		return e
