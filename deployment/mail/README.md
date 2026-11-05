@@ -133,15 +133,23 @@ the MX destination.
 
 ## Verified transport observations, 2026-11-05
 
-Authenticated external delivery and the replacement support forward both
-reached the owner's Gmail inbox. Received headers reported SPF, RSA DKIM
-and DMARC passing, over TLS 1.3. The configured outbound EHLO matches the
-provider's forward-confirmed reverse hostname
-vmi3410530.contaboserver.net. The customer-facing mail host is
-mail.atoman.org.
+The early admin direct-send and native support-forward tests reached the
+owner's Gmail INBOX. The later fazong self-send with owned Gmail Bcc and
+normal reply were both delivered to Gmail SPAM. All four messages passed
+SPF, RSA DKIM and DMARC over TLS 1.3; their additional Ed25519 signature
+reported neutral (no key). No Gmail labels or allowlists were changed.
+Gmail Inbox placement has not passed acceptance.
 
-A single inbox test does not establish reputation with every receiving
-provider. Retain delivery monitoring and conservative invitation rollout.
+Real Gmail-to-fazong delivery through the new public MX reached the new
+mailbox Inbox with the expected raw message, body and attachment SHA256.
+The normal reply had the exact In-Reply-To and References, and Gmail
+associated it with the original thread. Transport delivery and recipient
+classification are recorded separately in the private acceptance receipts.
+
+The configured outbound EHLO matches the provider's forward-confirmed
+reverse hostname vmi3410530.contaboserver.net. The customer-facing mail
+host is mail.atoman.org. See the complete observed release record in
+[the 2026-11-05 launch record](../../docs/operations/atoman-mail-launch-progress-20261105.md).
 
 Reference: https://stalw.art/docs/storage/maintenance/
 Reference: https://stalw.art/docs/mta/inbound/auth/
