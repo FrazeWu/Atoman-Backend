@@ -1,7 +1,6 @@
 package feed
 
 import (
-	"atoman/internal/platform/apperr"
 	"context"
 	"math"
 	"net/http"
@@ -9,6 +8,7 @@ import (
 	"strconv"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	legacyfeed "atoman/internal/service"
 )
 
@@ -42,7 +42,9 @@ func (r *Repo) listPublicRSSRecentLegacy(ctx context.Context, page, size int) ([
 	if len(scans) > maxItems {
 		return nil, 0, apperr.New(http.StatusServiceUnavailable, "feed.rss_snapshot_unavailable", "RSS snapshot unavailable; full-scan fallback exceeds the isolated request budget", nil)
 	}
-	legacyfeed.AnnotateDuplicateFeedItems(scans)
+	if err := legacyfeed.AnnotateDuplicateFeedItemsContext(ctx, scans); err != nil {
+		return nil, 0, err
+	}
 	representatives := make([]model.FeedItem, 0, len(scans))
 	for i := range scans {
 		if !scans[i].IsDuplicate {

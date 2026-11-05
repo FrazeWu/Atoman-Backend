@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"net/url"
 	"path"
 	"sort"
@@ -29,14 +31,38 @@ type duplicateGroup struct {
 // AnnotateDuplicateFeedItems marks duplicate RSS items within the current timeline slice.
 // The first item in a duplicate cluster remains visible; later items are marked as duplicates.
 func AnnotateDuplicateFeedItems(items []model.FeedItem) {
+	// The existing batch/snapshot API retains its synchronous contract.
+	_ = annotateDuplicateFeedItems(items, nil)
+}
+
+// AnnotateDuplicateFeedItemsContext provides cooperative cancellation for
+// request-bound RSS fallback. A canceled scan is never returned to callers.
+func AnnotateDuplicateFeedItemsContext(ctx context.Context, items []model.FeedItem) error {
+	if ctx == nil {
+		return fmt.Errorf("duplicate annotation requires context")
+	}
+	return annotateDuplicateFeedItems(items, ctx)
+}
+
+func annotateDuplicateFeedItems(items []model.FeedItem, ctx context.Context) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 	if len(items) == 0 {
-		return
+		return nil
 	}
 
 	groups := make([]*duplicateGroup, 0, len(items))
 	var index *duplicateGroupIndex
 
 	for i := range items {
+		if ctx != nil && i%8 == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		items[i].IsDuplicate = false
 		items[i].DuplicateCount = 1
 		items[i].DuplicateOfID = nil
@@ -87,7 +113,12 @@ func AnnotateDuplicateFeedItems(items []model.FeedItem) {
 		groups[matched].sources[duplicateSourceTitle(items[i])] = struct{}{}
 	}
 
-	for _, group := range groups {
+	for i, group := range groups {
+		if ctx != nil && i%8 == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		if len(group.indices) < 2 {
 			continue
 		}
@@ -112,6 +143,10 @@ func AnnotateDuplicateFeedItems(items []model.FeedItem) {
 			items[itemIndex].DuplicateOfID = &primaryID
 		}
 	}
+	if ctx != nil {
+		return ctx.Err()
+	}
+	return nil
 }
 
 func (group *duplicateGroup) matches(normalizedURL, normalizedTitle string, publishedAt time.Time) bool {

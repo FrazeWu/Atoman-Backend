@@ -18,8 +18,8 @@ type PublicRecentDedupLegacyReader func(context.Context, int, int) ([]model.Feed
 // readPublicRecentDedupPageWithFallback never returns a partial projection on
 // any projection read error. It runs the projection under a separate, bounded
 // child context, leaving the original parent context available for the legacy
-// query if the projection is stale, unavailable, or times out. Nothing calls
-// this from the current HTTP routes until contract gates have been met.
+// query if the projection is stale, unavailable, or times out. The isolated
+// RSS-only route supplies a bounded legacy reader; mixed routes never opt in.
 func (r *Repo) readPublicRecentDedupPageWithFallback(ctx context.Context, page, pageSize int,
 	projectionTimeout time.Duration, legacy PublicRecentDedupLegacyReader,
 	onFallback func(error)) ([]model.FeedItem, int64, error) {

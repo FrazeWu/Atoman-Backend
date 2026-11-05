@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -24,12 +25,17 @@ import (
 // @Param hide_duplicates query bool false "Only true" Enums(true)
 // @Success 200 {object} TimelineListResponseDTO
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Router /api/v1/feed/rss/recent [get]
 func (h *Handler) getPublicRSSRecent(c *gin.Context) {
 	// Fail closed: the entire endpoint is unavailable outside disposable
 	// test schemas, regardless of read-path flags.
 	if os.Getenv("FEED_SCALE_ISOLATED") != "yes" || os.Getenv("FEED_SNAPSHOT_RSS_HTTP_EXPERIMENT") != "yes" {
 		c.Status(http.StatusNotFound)
+		return
+	}
+	if err := c.Request.Context().Err(); err != nil {
+		httpx.Error(c, err)
 		return
 	}
 	var target struct {
@@ -76,7 +82,7 @@ func (h *Handler) getPublicRSSRecent(c *gin.Context) {
 	}
 	query := FeedQuery{Page: normalizedPageFromQuery(c), PageSize: normalizedPageSizeFromQuery(c), Sort: "recent", HideDuplicates: true}
 	legacy := func(ctx context.Context, page, size int) ([]model.FeedItem, int64, error) {
-		return h.service.repo.listPublicRSSRecentLegacy(ctx, page, size)
+		return h.service.repo.listPublicRSSRecentWithinRequestBudget(ctx, page, size)
 	}
 	// Future production rollout must use independent reviewed flags. These
 	// experimental flags are only permitted on disposable test databases.
@@ -96,6 +102,10 @@ func (h *Handler) getPublicRSSRecent(c *gin.Context) {
 		rows, total, err = legacy(c.Request.Context(), query.Page, query.PageSize)
 	}
 	if err != nil {
+		var appErr *apperr.AppError
+		if errors.As(err, &appErr) && appErr.HTTPStatus == http.StatusServiceUnavailable {
+			c.Header("Retry-After", "30")
+		}
 		httpx.Error(c, err)
 		return
 	}

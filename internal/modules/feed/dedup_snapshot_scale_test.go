@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
@@ -149,6 +150,20 @@ func TestDedupIsolatedProductionScale(t *testing.T) {
 		}
 	}
 	t.Logf("SCALE_SEED count=%d elapsed=%s db_bytes=%d", count, time.Since(startSeed), scaleDatabaseBytes(t, db))
+	if os.Getenv("FEED_RSS_LEGACY_BUDGET_PROBE") == "yes" {
+		started := time.Now()
+		items, total, readErr := repo.listPublicRSSRecentWithinRequestBudget(ctx, 1, 10)
+		var unavailable *apperr.AppError
+		if !errors.As(readErr, &unavailable) || unavailable.HTTPStatus != 503 ||
+			unavailable.Code != "feed.rss_snapshot_unavailable" || len(items) != 0 || total != 0 {
+			t.Fatalf("360k fallback must reject instead of scanning/deduping: items=%d total=%d err=%v", len(items), total, readErr)
+		}
+		elapsed := time.Since(started)
+		if elapsed > 5*time.Second {
+			t.Fatalf("360k fail-closed fallback too slow: %s", elapsed)
+		}
+		t.Logf("SCALE_FALLBACK_REJECT count=%d elapsed=%s http_status=503 no_partial_results=true", count, elapsed)
+	}
 	if err := installDedupRevisionTracking(db); err != nil {
 		t.Fatal(err)
 	}
