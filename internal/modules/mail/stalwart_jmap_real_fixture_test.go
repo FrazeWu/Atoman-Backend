@@ -109,6 +109,32 @@ func TestStalwartJMAPRealFixture(t *testing.T) {
 	require.Len(t, emails, 1)
 	require.Equal(t, "Atoman JMAP synthetic mailbox probe", emails[0].Subject)
 	require.Contains(t, []string{"inbox", "junk"}, deliveredRole)
+	// Exercise actual Stalwart v1 Email/get bodyValues and read-state patch.
+	var targetID string
+	folders, err := client.Mailboxes(ctx, userKey, createdUser.AccountID)
+	require.NoError(t, err)
+	for _, folder := range folders {
+		if folder.Role != nil && *folder.Role == deliveredRole {
+			found, err := client.ListEmails(ctx, userKey, createdUser.AccountID, folder.ID, 10)
+			require.NoError(t, err)
+			for _, candidate := range found {
+				if candidate.Subject == "Atoman JMAP synthetic mailbox probe" {
+					targetID = folder.ID
+					break
+				}
+			}
+		}
+	}
+	require.NotEmpty(t, targetID)
+	detail, err := client.ReadEmailDetail(ctx, userKey, createdUser.AccountID, targetID, emails[0].ID)
+	require.NoError(t, err)
+	require.Contains(t, detail.PlainText, "Atoman staging JMAP body test")
+	require.Equal(t, "probe@external.test", detail.From[0].Email)
+	require.NoError(t, client.MarkEmailSeen(ctx, userKey, createdUser.AccountID, targetID, emails[0].ID))
+	confirmed, err := client.ReadEmailDetail(ctx, userKey, createdUser.AccountID, targetID, emails[0].ID)
+	require.NoError(t, err)
+	require.True(t, confirmed.IsRead)
+	t.Log("STALWART_JMAP_TEXT_BODY_AND_EXPAND_ONLY_READ_STATE_VERIFIED")
 	t.Logf("STALWART_JMAP_DELIVERY_MAILBOX_ROLE=%s", deliveredRole)
 	t.Log("STALWART_JMAP_DOMAIN_ACCOUNT_KEY_MAILBOX_EMAIL_VERIFIED")
 }

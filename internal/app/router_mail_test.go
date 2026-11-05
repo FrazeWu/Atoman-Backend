@@ -25,6 +25,8 @@ func TestRegisterV1RoutesMountsAtomanMailUnderAuthentication(t *testing.T) {
 		"GET /api/v1/mail/me",
 		"GET /api/v1/mail/folders",
 		"GET /api/v1/mail/messages",
+		"GET /api/v1/mail/message",
+		"POST /api/v1/mail/messages/read",
 		"POST /api/v1/mail/activate",
 		"POST /api/v1/mail/admin/invites",
 		"POST /api/v1/mail/admin/reserve-self",

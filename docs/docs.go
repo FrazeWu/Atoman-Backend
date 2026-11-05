@@ -13382,6 +13382,70 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/rss/recent": {
+            "get": {
+                "description": "RSS-only, not the mixed Feed Explore, subscriptions, or a personalized reading list. Snapshot reads are disabled by default and require disposable-test-only flags.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "Public external RSS articles, recent and deduplicated",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page (\u003e=1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (1-100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "recent"
+                        ],
+                        "type": "string",
+                        "description": "Only recent",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            true
+                        ],
+                        "type": "boolean",
+                        "description": "Only true",
+                        "name": "hide_duplicates",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.TimelineListResponseDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/sources/batch-subscribe": {
             "post": {
                 "consumes": [
@@ -17826,6 +17890,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/mail/message": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mail"
+                ],
+                "summary": "Read a bounded plain-text message in the current user's mailbox",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Selected mailbox ID",
+                        "name": "mailbox_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Selected JMAP message ID",
+                        "name": "message_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/mail.EmailDetail"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/mail/messages": {
             "get": {
                 "security": [
@@ -17890,6 +17997,50 @@ const docTemplate = `{
                         "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/mail/messages/read": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "mail"
+                ],
+                "summary": "Mark a message read only when the client explicitly displays it",
+                "parameters": [
+                    {
+                        "description": "Scoped mail identifiers",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/mail.MarkSeenInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
                         }
                     }
                 }
@@ -40736,6 +40887,59 @@ const docTemplate = `{
                 }
             }
         },
+        "mail.EmailDetail": {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mail.MailAttachmentInfo"
+                    }
+                },
+                "bodyTruncated": {
+                    "type": "boolean"
+                },
+                "cc": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mail.MailAddress"
+                    }
+                },
+                "from": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mail.MailAddress"
+                    }
+                },
+                "hasPlainText": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "isRead": {
+                    "type": "boolean"
+                },
+                "plainText": {
+                    "type": "string"
+                },
+                "receivedAt": {
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
+                },
+                "threadId": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/mail.MailAddress"
+                    }
+                }
+            }
+        },
         "mail.EmailSummary": {
             "type": "object",
             "properties": {
@@ -40788,6 +40992,31 @@ const docTemplate = `{
                 }
             }
         },
+        "mail.MailAddress": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "mail.MailAttachmentInfo": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "mail.MailboxInfo": {
             "type": "object",
             "properties": {
@@ -40808,6 +41037,21 @@ const docTemplate = `{
                 },
                 "unreadEmails": {
                     "type": "integer"
+                }
+            }
+        },
+        "mail.MarkSeenInput": {
+            "type": "object",
+            "required": [
+                "mailbox_id",
+                "message_id"
+            ],
+            "properties": {
+                "mailbox_id": {
+                    "type": "string"
+                },
+                "message_id": {
+                    "type": "string"
                 }
             }
         },

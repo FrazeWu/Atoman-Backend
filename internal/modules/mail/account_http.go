@@ -49,6 +49,8 @@ func RegisterAccountRoutesWithServices(group *gin.RouterGroup, service *AccountS
 	group.GET("/me", h.me)
 	group.GET("/folders", h.folders)
 	group.GET("/messages", h.messages)
+	group.GET("/message", h.messageDetail)
+	group.POST("/messages/read", h.markSeen)
 	group.POST("/activate", h.activate)
 	group.POST("/admin/invites", h.issueInvite)
 	group.POST("/admin/reserve-self", h.reserveSelf)
@@ -241,4 +243,68 @@ func (h *AccountHandler) reserveSelf(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusCreated, result)
+}
+
+// messageDetail godoc
+// @Summary Read a bounded plain-text message in the current user's mailbox
+// @Tags mail
+// @Produce json
+// @Param mailbox_id query string true "Selected mailbox ID"
+// @Param message_id query string true "Selected JMAP message ID"
+// @Success 200 {object} EmailDetail
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/mail/message [get]
+func (h *AccountHandler) messageDetail(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if h.read == nil {
+		httpx.Error(c, apperr.New(503, "mail.read_not_ready", "Mail reading is not enabled", nil))
+		return
+	}
+	detail, err := h.read.Detail(c.Request.Context(), user, c.Query("mailbox_id"), c.Query("message_id"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, detail)
+}
+
+type MarkSeenInput struct {
+	MailboxID string `json:"mailbox_id" binding:"required"`
+	MessageID string `json:"message_id" binding:"required"`
+}
+
+// markSeen godoc
+// @Summary Mark a message read only when the client explicitly displays it
+// @Tags mail
+// @Accept json
+// @Produce json
+// @Param input body MarkSeenInput true "Scoped mail identifiers"
+// @Success 200 {object} map[string]bool
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/mail/messages/read [post]
+func (h *AccountHandler) markSeen(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if h.read == nil {
+		httpx.Error(c, apperr.New(503, "mail.read_not_ready", "Mail reading is not enabled", nil))
+		return
+	}
+	var input MarkSeenInput
+	if !httpx.BindRequiredJSON(c, &input) {
+		return
+	}
+	if err := h.read.MarkSeen(c.Request.Context(), user, input.MailboxID, input.MessageID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"read": true})
 }

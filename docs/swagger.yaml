@@ -5607,6 +5607,41 @@ definitions:
       status:
         type: string
     type: object
+  mail.EmailDetail:
+    properties:
+      attachments:
+        items:
+          $ref: '#/definitions/mail.MailAttachmentInfo'
+        type: array
+      bodyTruncated:
+        type: boolean
+      cc:
+        items:
+          $ref: '#/definitions/mail.MailAddress'
+        type: array
+      from:
+        items:
+          $ref: '#/definitions/mail.MailAddress'
+        type: array
+      hasPlainText:
+        type: boolean
+      id:
+        type: string
+      isRead:
+        type: boolean
+      plainText:
+        type: string
+      receivedAt:
+        type: string
+      subject:
+        type: string
+      threadId:
+        type: string
+      to:
+        items:
+          $ref: '#/definitions/mail.MailAddress'
+        type: array
+    type: object
   mail.EmailSummary:
     properties:
       hasAttachment:
@@ -5641,6 +5676,22 @@ definitions:
         description: only returned once to authorized admin
         type: string
     type: object
+  mail.MailAddress:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+    type: object
+  mail.MailAttachmentInfo:
+    properties:
+      name:
+        type: string
+      size:
+        type: integer
+      type:
+        type: string
+    type: object
   mail.MailboxInfo:
     properties:
       id:
@@ -5655,6 +5706,16 @@ definitions:
         type: integer
       unreadEmails:
         type: integer
+    type: object
+  mail.MarkSeenInput:
+    properties:
+      mailbox_id:
+        type: string
+      message_id:
+        type: string
+    required:
+    - mailbox_id
+    - message_id
     type: object
   mail.ReserveInput:
     properties:
@@ -19373,6 +19434,50 @@ paths:
       summary: 从待读列表移除条目
       tags:
       - feed
+  /api/v1/feed/rss/recent:
+    get:
+      description: RSS-only, not the mixed Feed Explore, subscriptions, or a personalized
+        reading list. Snapshot reads are disabled by default and require disposable-test-only
+        flags.
+      parameters:
+      - description: Page (>=1)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (1-100)
+        in: query
+        name: page_size
+        type: integer
+      - description: Only recent
+        enum:
+        - recent
+        in: query
+        name: sort
+        type: string
+      - description: Only true
+        enum:
+        - true
+        in: query
+        name: hide_duplicates
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.TimelineListResponseDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      summary: Public external RSS articles, recent and deduplicated
+      tags:
+      - feed
   /api/v1/feed/sources/batch-subscribe:
     post:
       consumes:
@@ -22153,6 +22258,32 @@ paths:
       summary: Current Atoman mail reservation (not mail service readiness)
       tags:
       - mail
+  /api/v1/mail/message:
+    get:
+      parameters:
+      - description: Selected mailbox ID
+        in: query
+        name: mailbox_id
+        required: true
+        type: string
+      - description: Selected JMAP message ID
+        in: query
+        name: message_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mail.EmailDetail'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Read a bounded plain-text message in the current user's mailbox
+      tags:
+      - mail
   /api/v1/mail/messages:
     get:
       parameters:
@@ -22194,6 +22325,32 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: List own mail messages in an accessible folder
+      tags:
+      - mail
+  /api/v1/mail/messages/read:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Scoped mail identifiers
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/mail.MarkSeenInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Mark a message read only when the client explicitly displays it
       tags:
       - mail
   /api/v1/music/albums:
