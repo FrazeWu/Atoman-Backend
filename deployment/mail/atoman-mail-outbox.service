@@ -14,6 +14,7 @@ Group=atoman
 WorkingDirectory=/var/lib/atoman
 EnvironmentFile=/etc/atoman/backend.env
 EnvironmentFile=/etc/atoman-mail/backend.env
+UnsetEnvironment=ATOMAN_MAIL_STALWART_ADMIN_USER ATOMAN_MAIL_STALWART_ADMIN_PASSWORD
 ExecStart=/opt/atoman/backend/current/mail_outbox_worker --batch 20
 Restart=on-failure
 RestartSec=15
