@@ -56,8 +56,9 @@ def command(args, *, stdin=None, timeout=120, label="command"):
         raise RuntimeError("Isolated recovery failed during " + label)
     return proc.stdout
 
-def decrypt_selected(ciphertext, identity, destination):
-    selected = {"manifest.json", "atoman_mail.dump", "mail-assets.tar"}
+def decrypt_selected(ciphertext, identity, destination, selected=None):
+    if selected is None:
+        selected = {"manifest.json", "atoman_mail.dump", "mail-assets.tar"}
     observed = {}
     payload = None
     with tempfile.TemporaryFile() as errors:

@@ -75,6 +75,7 @@ def main():
     parser.add_argument("--snapshot", required=True)
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--vps-host", default="Atoman-EU")
+    parser.add_argument("--vps-root", choices=[VPS_ROOT, "/var/backups/atoman/mail-capsules"], default=VPS_ROOT)
     parser.add_argument("--nas-host", default="fa@172.16.10.201")
     parser.add_argument("--nas-identity", type=Path, required=True)
     parser.add_argument("--known-hosts", type=Path, required=True)
@@ -96,7 +97,7 @@ def main():
     readback = local / "nas-readback"
     private_dir(inbound)
     private_dir(readback)
-    source = VPS_ROOT + "/" + args.snapshot
+    source = args.vps_root + "/" + args.snapshot
     receipt_path = inbound / "receipt.json"
     sftp(args.vps_host, args.known_hosts, ["get " + quote(source + "/receipt.json") + " " + quote(receipt_path)])
     receipt = json.loads(receipt_path.read_text())
