@@ -105,3 +105,60 @@ func (s *MailReadService) Messages(ctx context.Context, user authctx.CurrentUser
 	}
 	return messages, nil
 }
+
+func (s *MailReadService) Detail(ctx context.Context, user authctx.CurrentUser, mailboxID, emailID string) (EmailDetail, error) {
+	if !validJMAPScopedID(mailboxID) || !validJMAPScopedID(emailID) {
+		return EmailDetail{}, apperr.BadRequest("mail.invalid_query", "Invalid mail identifiers")
+	}
+	cred, accountID, err := s.authorizedClient(ctx, user)
+	if err != nil {
+		return EmailDetail{}, err
+	}
+	folders, err := s.client.Mailboxes(ctx, cred, accountID)
+	if err != nil {
+		return EmailDetail{}, apperr.New(503, "mail.upstream_unavailable", "Mailbox folders unavailable", nil)
+	}
+	found := false
+	for _, folder := range folders {
+		if folder.ID == mailboxID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return EmailDetail{}, apperr.NotFound("mail.folder_not_found", "Mailbox folder not found")
+	}
+	detail, err := s.client.ReadEmailDetail(ctx, cred, accountID, mailboxID, emailID)
+	if err != nil {
+		return EmailDetail{}, apperr.NotFound("mail.message_unavailable", "Message is unavailable in this folder")
+	}
+	return detail, nil
+}
+
+func (s *MailReadService) MarkSeen(ctx context.Context, user authctx.CurrentUser, mailboxID, emailID string) error {
+	if !validJMAPScopedID(mailboxID) || !validJMAPScopedID(emailID) {
+		return apperr.BadRequest("mail.invalid_query", "Invalid mail identifiers")
+	}
+	cred, accountID, err := s.authorizedClient(ctx, user)
+	if err != nil {
+		return err
+	}
+	folders, err := s.client.Mailboxes(ctx, cred, accountID)
+	if err != nil {
+		return apperr.New(503, "mail.upstream_unavailable", "Mailbox folders unavailable", nil)
+	}
+	found := false
+	for _, folder := range folders {
+		if folder.ID == mailboxID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return apperr.NotFound("mail.folder_not_found", "Mailbox folder not found")
+	}
+	if err := s.client.MarkEmailSeen(ctx, cred, accountID, mailboxID, emailID); err != nil {
+		return apperr.New(503, "mail.read_update_failed", "Could not update message read state", nil)
+	}
+	return nil
+}

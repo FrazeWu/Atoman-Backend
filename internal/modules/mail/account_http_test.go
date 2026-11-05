@@ -94,6 +94,14 @@ func TestMailAccountHTTPUsesAtomanSessionsAndCSRF(t *testing.T) {
 	require.Equal(t, "reserved", reserved.Data.Status)
 	require.False(t, reserved.Data.Available)
 
+	for _, path := range []string{"/api/v1/mail/message?mailbox_id=stage-folder&message_id=stage-id", "/api/v1/mail/folders"} {
+		before := req(http.MethodGet, path, "", apiAlice.Token)
+		require.Equal(t, http.StatusServiceUnavailable, before.Code)
+		require.Contains(t, before.Body.String(), "mail.read_not_ready")
+	}
+	readPost := req(http.MethodPost, "/api/v1/mail/messages/read", `{"mailbox_id":"inbox","message_id":"message"}`, apiAlice.Token)
+	require.Equal(t, http.StatusServiceUnavailable, readPost.Code)
+
 	readBeforeActivation := req(http.MethodGet, "/api/v1/mail/folders", "", apiAlice.Token)
 	require.Equal(t, http.StatusServiceUnavailable, readBeforeActivation.Code)
 	require.Contains(t, readBeforeActivation.Body.String(), "mail.read_not_ready")
