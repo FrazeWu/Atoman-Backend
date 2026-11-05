@@ -163,6 +163,8 @@ def main():
         print("APPLICATION_MAIL_SQL_VERIFIED_STARTING_STALWART_RESTORE", flush=True)
         stack = workspace / "stalwart"
         stack.mkdir(mode=0o700)
+        recovery.DIAGNOSTICS = args.report.parent / "recovery-failure-diagnostics"
+        mail.private_dir(recovery.DIAGNOSTICS)
         result = recovery.run_stack(source, stack, args.postgres_image, args.minio_image, args.mc_image)
         storage.update(all_r2_objects_restored=True, all_runtime_files_verified=True)
         capsule_nas = {"capsule_id": capsule_id, "paired_source_snapshot_id": source_id,

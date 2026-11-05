@@ -34,6 +34,8 @@ SNAPSHOT = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6,20}$")
 PG_IMAGE = "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
 MINIO_IMAGE = "minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
 LABEL = "atoman.ops=mail-isolated-recovery"
+PYTHON_CLIENT_IMAGE = "python@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2"
+DIAGNOSTICS = None
 
 def load(name):
     spec = importlib.util.spec_from_file_location(name.replace("-", "_"), Path(__file__).with_name(name + ".py"))
@@ -153,7 +155,7 @@ def jmap(base, credential, method, args):
     authorization = base64.b64encode((credential["username"] + ":" + credential["secret"]).encode()).decode()
     payload = {"using": ["urn:ietf:params:jmap:core", "urn:stalwart:jmap"],
                "methodCalls": [[method, args, "recovery"]]}
-    request = urllib.request.Request(base + "/jmap/", json.dumps(payload).encode(),
+    request = urllib.request.Request(base + "/jmap", json.dumps(payload).encode(),
         {"Authorization": "Basic " + authorization, "Content-Type": "application/json"})
     try:
         with loopback_open(request, timeout=30) as response:
@@ -170,6 +172,42 @@ def runtime_json(archive, name):
     if not item.isfile() or item.size > 4 << 20:
         raise ValueError("Invalid private recovery metadata")
     return json.load(archive.extractfile(item))
+
+def protocol_client(container, payload):
+    if not re.fullmatch(r"atoman-mail-recovery-[0-9a-f]{12}-mail", container):
+        raise ValueError("Protocol verifier requires its own restored container")
+    inspected = docker_json(["inspect", container])[0]
+    networks = inspected["NetworkSettings"]["Networks"]
+    if len(networks) != 1 or not docker_json(["network", "inspect", next(iter(networks))])[0].get("Internal"):
+        raise RuntimeError("Protocol verifier namespace is not isolated")
+    if inspected["HostConfig"].get("PortBindings"):
+        raise RuntimeError("Restored mail unexpectedly publishes host ports")
+    name = container + "-check-" + uuid.uuid4().hex[:6]
+    args = ["docker", "run", "--rm", "-i", "--name", name, "--label", LABEL,
+            "--network", "container:" + container, "--user", str(os.getuid()) + ":" + str(os.getgid()),
+            "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--pids-limit", "64", "--cpus", "1", "--memory", "192m",
+            "--env", "PYTHONDONTWRITEBYTECODE=1", "--tmpfs", "/tmp:rw,nosuid,nodev,size=16m",
+            "--mount", "type=bind,src=" + str(Path(__file__).resolve()) + ",dst=/client/verify-mail-recovery.py,readonly",
+            "--mount", "type=bind,src=" + str(Path(__file__).with_name("mail-recovery-protocol-client.py").resolve()) + ",dst=/client/mail-recovery-protocol-client.py,readonly",
+            PYTHON_CLIENT_IMAGE, "python", "/client/mail-recovery-protocol-client.py"]
+    try:
+        try:
+            proc = sp.run(args, input=json.dumps(payload).encode(), capture_output=True, timeout=240)
+        except sp.TimeoutExpired:
+            raise RuntimeError("Isolated protocol client timed out") from None
+        try:
+            result = json.loads(proc.stdout)
+        except (ValueError, UnicodeDecodeError):
+            result = {}
+        if proc.returncode or result.get("status") != "ok":
+            phase = result.get("phase", "startup")
+            if not isinstance(phase, str) or not re.fullmatch(r"[a-z_]{1,80}", phase):
+                phase = "protocol"
+            raise RuntimeError("Isolated protocol client failed during " + phase)
+        return result["result"]
+    finally:
+        sp.run(["docker", "rm", "-f", "-v", name], stdout=sp.DEVNULL, stderr=sp.DEVNULL)
 
 def run_stack(source, workspace, pg_image, minio_image, mc_image):
     mail = load("backup-mail")
@@ -215,7 +253,7 @@ def run_stack(source, workspace, pg_image, minio_image, mc_image):
                 if digest(file) != value["sha256"]:
                     raise ValueError("Recovered object bytes differ")
                 blob_sources.append((bucket, key, name))
-    for image in (pg_image, minio_image, mc_image, stalwart_image):
+    for image in (pg_image, minio_image, mc_image, stalwart_image, PYTHON_CLIENT_IMAGE):
         ensure_image(image)
     run_id = uuid.uuid4().hex[:12]
     prefix = "atoman-mail-recovery-" + run_id
@@ -302,81 +340,44 @@ def run_stack(source, workspace, pg_image, minio_image, mc_image):
             label="preparing private Stalwart config")
         command(["docker", "run", "-d", "--name", mail_name, "--label", LABEL, "--network", network,
             "--cpus", "2", "--memory", "1536m", "--env-file", str(mail_env),
-            "-p", "127.0.0.1::8080", "-p", "127.0.0.1::993",
+            "--user", "2000:2000",
             "--mount", "type=volume,src=" + config_volume + ",dst=/etc/stalwart",
             "--tmpfs", "/var/lib/stalwart:rw,nosuid,nodev,uid=2000,gid=2000,mode=0700,size=256m",
             stalwart_image], label="starting isolated Stalwart")
         containers.append(mail_name)
-        base = "http://127.0.0.1:" + str(port(mail_name, 8080))
-        wait_http(base + "/jmap/", {200, 400, 401, 405})
         store = {"@type": "S3", "bucket": mail.BUCKETS[0],
                  "region": {"@type": "Custom", "url": "http://" + minio_name + ":9000", "region": "us-east-1"},
                  "accessKeyId": {"@type": "EnvironmentVariable", "variableName": "AWS_ACCESS_KEY_ID"},
                  "secretKey": {"@type": "EnvironmentVariable", "variableName": "AWS_SECRET_ACCESS_KEY"},
                  "sessionToken": {"@type": "None"}}
-        result = jmap(base, credential, "x:DataStore/set", {"update": {"singleton": {
-            "@type": "PostgreSql", "host": pg_name, "port": 5432, "database": "atoman_mail",
-            "authUsername": pg_user, "authSecret": {"@type": "EnvironmentVariable", "variableName": "STALWART_PG_PASSWORD"},
-            "useTls": False}}})
-        if result.get("notUpdated") or "singleton" not in (result.get("updated") or {}):
-            raise RuntimeError("Isolated primary datastore configuration was not accepted")
-        result = jmap(base, credential, "x:BlobStore/set", {"update": {"singleton": store}})
-        if result.get("notUpdated") or "singleton" not in (result.get("updated") or {}):
-            raise RuntimeError("Isolated S3 configuration was not accepted")
+        datastore = {"@type": "PostgreSql", "host": pg_name, "port": 5432, "database": "atoman_mail",
+                     "authUsername": pg_user, "authSecret": {"@type": "EnvironmentVariable", "variableName": "STALWART_PG_PASSWORD"},
+                     "useTls": False}
+        protocol_client(mail_name, {"action": "configure", "credential": credential,
+                                   "data_store": datastore, "blob_store": store})
         command(["docker", "restart", mail_name], label="applying isolated storage configuration")
-        wait_http(base + "/jmap/", {200, 400, 401, 405})
-        imap_port = port(mail_name, 993)
-        tls = ssl.create_default_context()
-        class LoopbackIMAP(imaplib.IMAP4_SSL):
-            def _create_socket(self, timeout):
-                sock = socket.create_connection(("127.0.0.1", imap_port), timeout)
-                return self.ssl_context.wrap_socket(sock, server_hostname="mail.atoman.org")
-        for _ in range(45):
-            try:
-                client = LoopbackIMAP("mail.atoman.org", imap_port, ssl_context=tls, timeout=15)
-                break
-            except (OSError, ssl.SSLError):
-                time.sleep(1)
-        else:
-            raise RuntimeError("Isolated IMAPS did not become ready")
-        with client:
-            client.login(credential["username"], credential["secret"])
-            status, _ = client.select("INBOX", readonly=True)
-            if status != "OK":
-                raise RuntimeError("Restored inbox is unavailable")
-            status, values = client.uid("fetch", canary["imap_uid"], "(BODY.PEEK[])")
-            raw = next((value[1] for value in values if isinstance(value, tuple)), None)
-            if status != "OK" or raw is None:
-                raise RuntimeError("Restored canary UID is unavailable")
-            if hashlib.sha256(raw).hexdigest() != canary["delivered_eml_sha256"]:
-                raise ValueError("Restored message bytes differ")
-            message = message_from_bytes(raw)
-            if str(message.get("Message-ID", "")).strip() != canary["message_id"].strip():
-                raise ValueError("Restored message identity differs")
-            plaintext = [part.get_payload(decode=True) for part in message.walk()
-                         if part.get_content_type() == "text/plain" and not part.get_filename()]
-            expected_body = (b"SYNTHETIC recovery test only. This message and its attachment contain no user data.\n"
-                             b"The attachment must survive SQL plus object-store backup and NAS recovery.\n")
-            if len(plaintext) != 1:
-                raise ValueError("Restored synthetic body is missing")
-            canonical_body = plaintext[0].replace(b"\r\n", b"\n")
-            body_sha = hashlib.sha256(canonical_body).hexdigest()
-            expected_body_sha = hashlib.sha256(expected_body).hexdigest()
-            if body_sha != expected_body_sha:
-                raise ValueError("Restored synthetic body checksum differs")
-            attachments = [part.get_payload(decode=True) for part in message.walk()
-                           if part.get_filename() == "synthetic-recovery-canary.bin"]
-            if len(attachments) != 1 or hashlib.sha256(attachments[0]).hexdigest() != canary["attachment_sha256"]:
-                raise ValueError("Restored attachment differs")
+        verified = protocol_client(mail_name, {"action": "verify", "credential": credential, "canary": canary})
         return {"isolated_network_internal": True, "s3_credentials_disposable": True,
                 "postgres_restored_tables": len(actual), "postgres_row_counts_match": True,
-                "mail_assets": asset_summary, "mailbox": "INBOX", "canary_uid_preserved": True,
-                "message_bytes_match": True, "message_sha256": hashlib.sha256(raw).hexdigest(),
-                "message_expected_sha256": canary["delivered_eml_sha256"],
-                "body_sha256_matches": True, "body_sha256": body_sha, "body_expected_sha256": expected_body_sha,
-                "attachment_expected_sha256": canary["attachment_sha256"], "attachment_bytes": len(attachments[0]),
-                "attachment_sha256": canary["attachment_sha256"], "attachment_bytes_match": True,
-                "stalwart_image": stalwart_image, "postgres_image": pg_image, "minio_image": minio_image}
+                "mail_assets": asset_summary, "published_host_ports": False,
+                "protocol_client_network_namespace": "restored_mail_container",
+                "protocol_client_image": PYTHON_CLIENT_IMAGE,
+                "stalwart_image": stalwart_image, "postgres_image": pg_image, "minio_image": minio_image,
+                **verified}
+    except Exception:
+        if DIAGNOSTICS is not None:
+            DIAGNOSTICS.mkdir(mode=0o700, parents=True, exist_ok=True)
+            for name in containers:
+                for kind, args in (("inspect", ["docker", "inspect", name]), ("logs", ["docker", "logs", name])):
+                    try:
+                        captured = sp.run(args, capture_output=True, timeout=10)
+                        path = DIAGNOSTICS / (name + "." + kind + ".private")
+                        path.write_bytes(captured.stdout + captured.stderr)
+                        path.chmod(0o600)
+                    except (OSError, sp.TimeoutExpired):
+                        pass
+            print("ISOLATED_FAILURE_DIAGNOSTICS_SAVED_PRIVATELY", flush=True)
+        raise
     finally:
         for name in reversed(containers):
             sp.run(["docker", "rm", "-f", "-v", name], stdout=sp.DEVNULL, stderr=sp.DEVNULL)
