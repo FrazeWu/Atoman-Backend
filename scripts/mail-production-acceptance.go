@@ -1,7 +1,8 @@
 //go:build ignore
 
 // Run explicitly from the reviewed backend checkout. This operator-only canary
-// sends exactly one synthetic message to the already provisioned owner's mailbox.
+// sends one synthetic message to the provisioned owner, with an optional
+// separately confirmed copy to an explicitly supplied owned external mailbox.
 // It never emits credentials and refuses to repeat an incomplete recorded run.
 package main
 
@@ -22,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	stdmail "net/mail"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,14 +35,15 @@ import (
 )
 
 type report struct {
-	RunID         string   `json:"run_id"`
-	Address       string   `json:"address"`
-	Started       string   `json:"started_at"`
-	Finished      string   `json:"finished_at,omitempty"`
-	Complete      bool     `json:"complete"`
-	Steps         []string `json:"steps"`
-	QueueIDs      []string `json:"queue_ids,omitempty"`
-	AttachmentSHA string   `json:"attachment_sha256,omitempty"`
+	RunID             string   `json:"run_id"`
+	Address           string   `json:"address"`
+	ExternalRecipient string   `json:"external_recipient,omitempty"`
+	Started           string   `json:"started_at"`
+	Finished          string   `json:"finished_at,omitempty"`
+	Complete          bool     `json:"complete"`
+	Steps             []string `json:"steps"`
+	QueueIDs          []string `json:"queue_ids,omitempty"`
+	AttachmentSHA     string   `json:"attachment_sha256,omitempty"`
 }
 
 var state report
@@ -111,18 +114,31 @@ func main() {
 	userID := flag.String("user", "", "exact site administrator UUID owning the mailbox")
 	reportPath := flag.String("report", "/var/lib/atoman-mail/acceptance-webmail.json", "private one-run receipt")
 	allow := flag.Bool("confirm-self-send", false, "explicitly authorize one synthetic self delivery")
+	external := flag.String("external-recipient", "", "exact owned external mailbox for an optional delivery copy")
+	allowExternal := flag.Bool("confirm-external-send", false, "explicitly authorize the optional owned external delivery copy")
 	flag.Parse()
 	if os.Geteuid() != 0 || !*allow || *address == "" || *userID == "" {
 		fmt.Println("MAIL_ACCEPTANCE_REQUIRES_EXPLICIT_ROOT_SELF_SCOPE")
 		os.Exit(1)
 	}
+	if (*external != "") != *allowExternal {
+		fmt.Println("MAIL_ACCEPTANCE_EXTERNAL_COPY_REQUIRES_EXPLICIT_CONFIRMATION")
+		os.Exit(1)
+	}
+	if *external != "" {
+		parsed, e := stdmail.ParseAddress(*external)
+		if e != nil || parsed.Address != *external || parsed.Name != "" || strings.EqualFold(*external, *address) {
+			fmt.Println("MAIL_ACCEPTANCE_EXTERNAL_RECIPIENT_INVALID")
+			os.Exit(1)
+		}
+	}
 	destination = *reportPath
-	if e := run(*appEnv, *mailEnv, *address, *userID); e != nil {
+	if e := run(*appEnv, *mailEnv, *address, *userID, *external); e != nil {
 		fmt.Println("MAIL_ACCEPTANCE_FAILED", e.Error())
 		os.Exit(1)
 	}
 }
-func run(appEnv, mailEnv, address, userID string) error {
+func run(appEnv, mailEnv, address, userID, external string) error {
 	uid, e := uuid.Parse(userID)
 	if e != nil {
 		return errors.New("invalid owner UUID")
@@ -136,7 +152,7 @@ func run(appEnv, mailEnv, address, userID string) error {
 			return e
 		}
 		var old report
-		if json.Unmarshal(raw, &old) == nil && old.Complete && old.Address == address {
+		if json.Unmarshal(raw, &old) == nil && old.Complete && old.Address == address && old.ExternalRecipient == external {
 			fmt.Println("MAIL_ACCEPTANCE_ALREADY_COMPLETE", old.RunID)
 			return nil
 		}
@@ -195,7 +211,7 @@ func run(appEnv, mailEnv, address, userID string) error {
 	if e = os.MkdirAll(filepath.Dir(destination), 0700); e != nil {
 		return e
 	}
-	state = report{RunID: uuid.NewString(), Address: address, Started: time.Now().UTC().Format(time.RFC3339), Steps: []string{}}
+	state = report{RunID: uuid.NewString(), Address: address, ExternalRecipient: external, Started: time.Now().UTC().Format(time.RFC3339), Steps: []string{}}
 	if e = checkpoint("scoped_owner_verified"); e != nil {
 		return e
 	}
@@ -221,6 +237,9 @@ func run(appEnv, mailEnv, address, userID string) error {
 	}
 	draftID := uuid.New()
 	compose := mail.DraftCompose{To: []string{address}, Subject: "Atoman self verification " + state.RunID, Text: "Atoman self delivery and attachment verification. " + state.RunID, HTML: "<p>Atoman synthetic self delivery.</p>", Attachments: []model.MailUpload{upload}}
+	if external != "" {
+		compose.Bcc = []string{external}
+	}
 	draft, e := workspace.SaveDraft(ctx, actor, draftID, mail.SaveMailDraftInput{Revision: 0, Compose: compose})
 	if e != nil {
 		return e
@@ -244,7 +263,7 @@ func run(appEnv, mailEnv, address, userID string) error {
 	if e = checkpoint("draft_revision_and_attachment_persisted"); e != nil {
 		return e
 	}
-	input := mail.ComposeMailInput{RequestID: uuid.New(), DraftID: &draftID, DraftRevision: draft.Revision, To: compose.To, Subject: compose.Subject, Text: compose.Text, HTML: compose.HTML, AttachmentIDs: []uuid.UUID{upload.ID}}
+	input := mail.ComposeMailInput{RequestID: uuid.New(), DraftID: &draftID, DraftRevision: draft.Revision, To: compose.To, Bcc: compose.Bcc, Subject: compose.Subject, Text: compose.Text, HTML: compose.HTML, AttachmentIDs: []uuid.UUID{upload.ID}}
 	queued, e := outbox.Queue(ctx, actor, input)
 	if e != nil {
 		return e
