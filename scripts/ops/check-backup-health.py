@@ -6,6 +6,7 @@ object keys, runtime configuration or decrypted email content.
 """
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ import subprocess
 import tempfile
 
 SNAPSHOT = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6,20}$")
+HASH = re.compile(r"^[0-9a-f]{64}$")
 UNIT = re.compile(r"^atoman-[a-z0-9-]+\.service$")
 
 def timestamp(value):
@@ -37,12 +39,13 @@ def latest_snapshot(root, require_mail, max_age_hours=48, now=None):
             continue
         if not (path / "COMPLETE").is_file():
             continue
-        manifest = json.loads(regular(path / "manifest.json").read_text())
+        raw_manifest = regular(path / "manifest.json").read_bytes()
+        manifest = json.loads(raw_manifest)
         if manifest.get("complete") is True:
-            candidates.append((timestamp(manifest["completed_at"]), path, manifest))
+            candidates.append((timestamp(manifest["completed_at"]), path, manifest, hashlib.sha256(raw_manifest).hexdigest()))
     if not candidates:
         raise ValueError("No completed backup exists")
-    when, path, manifest = max(candidates, key=lambda x: x[0])
+    when, path, manifest, manifest_sha = max(candidates, key=lambda x: x[0])
     age = ((now or dt.datetime.now(dt.timezone.utc)) - when).total_seconds() / 3600
     if age < -1 or age > max_age_hours:
         raise ValueError("Latest backup is stale or future-dated")
@@ -68,6 +71,7 @@ def latest_snapshot(root, require_mail, max_age_hours=48, now=None):
             raise ValueError("Mail asset archive size changed")
     return {"source_snapshot_id": path.name, "source_completed_at": when.isoformat(),
             "age_hours": round(age, 2), "databases": sorted(required),
+            "source_manifest_sha256": manifest_sha,
             "mail_assets_verified": manifest.get("mail_assets_verified") is True}
 
 def encrypted_copy(root, source_id):
@@ -80,7 +84,7 @@ def encrypted_copy(root, source_id):
         if not receipt_file.is_file() or receipt_file.is_symlink():
             continue
         receipt = json.loads(receipt_file.read_text())
-        if receipt.get("source_snapshot_id") != source_id:
+        if receipt.get("source_snapshot_id") != source_id or receipt.get("backup_scope", "full") != "full":
             continue
         if receipt.get("format") != "atoman-encrypted-export-v1" or receipt.get("ciphertext") != "backup.tar.age":
             raise ValueError("Invalid encrypted receipt")
@@ -89,6 +93,68 @@ def encrypted_copy(root, source_id):
         return {"export_snapshot_id": path.name, "encrypted_publication_ready": True,
                 "offsite_transfer_confirmed": False}
     raise ValueError("Latest completed backup has not been published as ciphertext")
+
+
+def _published_receipt(path):
+    if path.is_symlink() or not path.is_dir():
+        raise ValueError("Required full or capsule publication is missing")
+    receipt_path = regular(path / "receipt.json")
+    if receipt_path.stat().st_size > 1024 * 1024:
+        raise ValueError("Published receipt is too large")
+    receipt = json.loads(receipt_path.read_bytes())
+    size = receipt.get("bytes")
+    if (receipt.get("format") != "atoman-encrypted-export-v1"
+            or receipt.get("ciphertext") != "backup.tar.age"
+            or receipt.get("offsite_verified") is not False
+            or isinstance(size, bool) or not isinstance(size, int) or size <= 0
+            or not HASH.fullmatch(str(receipt.get("sha256", "")))):
+        raise ValueError("Published receipt is invalid")
+    if regular(path / "backup.tar.age").stat().st_size != size:
+        raise ValueError("Published ciphertext length changed")
+    return receipt
+
+def checksum(path):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+def encrypted_mail_copies(root, source_id, source_manifest_sha256, source_completed_at):
+    """Check both local publications without rehashing the large full package."""
+    if root.is_symlink() or not root.is_dir() or not SNAPSHOT.fullmatch(source_id):
+        raise ValueError("Paired encrypted publication root or source is invalid")
+    if not HASH.fullmatch(str(source_manifest_sha256)):
+        raise ValueError("Original source manifest hash is unavailable")
+    full = _published_receipt(root / source_id)
+    if (full.get("backup_scope", "full") != "full"
+            or full.get("source_snapshot_id") != source_id
+            or timestamp(full["source_completed_at"]) != timestamp(source_completed_at)):
+        raise ValueError("Full publication source differs")
+    if ("source_manifest_sha256" in full
+            and full["source_manifest_sha256"] != source_manifest_sha256):
+        raise ValueError("Full publication source manifest differs")
+    capsule_id = source_id + "m"
+    capsule_path = root / capsule_id
+    capsule = _published_receipt(capsule_path)
+    if (capsule.get("backup_scope") != "mail-complete"
+            or capsule.get("scope") not in {"pre_activation_mail_capsule", "post_activation_mail_capsule"}
+            or capsule.get("source_snapshot_id") != capsule_id
+            or capsule.get("paired_source_snapshot_id") != source_id
+            or timestamp(capsule["source_completed_at"]) != timestamp(source_completed_at)):
+        raise ValueError("Capsule publication source or scope differs")
+    if capsule.get("source_manifest_sha256") != source_manifest_sha256:
+        raise ValueError("Capsule source manifest differs")
+    if (capsule.get("source_full_ciphertext_sha256") != full["sha256"]
+            or capsule.get("source_full_ciphertext_bytes") != full["bytes"]):
+        raise ValueError("Capsule full-ciphertext binding differs")
+    if not HASH.fullmatch(str(capsule.get("capsule_manifest_sha256", ""))):
+        raise ValueError("Capsule manifest binding is unavailable")
+    if checksum(capsule_path / "backup.tar.age") != capsule["sha256"]:
+        raise ValueError("Capsule ciphertext checksum changed")
+    return {"export_snapshot_id": source_id, "encrypted_publication_ready": True,
+            "mail_capsule_export_snapshot_id": capsule_id,
+            "mail_capsule_publication_ready": True,
+            "mail_capsule_scope": capsule["scope"],
+            "source_manifest_sha256": source_manifest_sha256,
+            "offsite_transfer_confirmed": False}
 
 def atomic_status(path, result):
     if path.is_symlink() or path.parent.is_symlink():
@@ -116,7 +182,11 @@ def main():
     result = {"format": "atoman-backup-health-v1", "checked_at": dt.datetime.now(dt.timezone.utc).isoformat()}
     try:
         result.update(latest_snapshot(args.snapshot_root, args.require_mail, args.max_age_hours))
-        result.update(encrypted_copy(args.exports_root, result["source_snapshot_id"]))
+        if args.require_mail:
+            result.update(encrypted_mail_copies(args.exports_root, result["source_snapshot_id"],
+                                               result["source_manifest_sha256"], result["source_completed_at"]))
+        else:
+            result.update(encrypted_copy(args.exports_root, result["source_snapshot_id"]))
         for unit in args.unit:
             if subprocess.run(["systemctl", "is-active", "--quiet", unit], timeout=10).returncode:
                 raise ValueError("Required service is not active: " + unit)
