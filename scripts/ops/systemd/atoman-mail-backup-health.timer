@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor Atoman paired mail backups
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=30min
+RandomizedDelaySec=120
+Unit=atoman-mail-backup-health.service
+
+[Install]
+WantedBy=timers.target

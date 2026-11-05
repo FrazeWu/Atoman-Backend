@@ -1,0 +1,18 @@
+[Unit]
+Description=Check paired mail backup freshness and encrypted publication
+After=network-online.target
+OnFailure=atoman-mail-ops-alert.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/libexec/atoman/check-backup-health.py --snapshot-root /var/backups/atoman/mail --exports-root /srv/atoman-backup-sftp/exports --require-mail --max-age-hours 48 --unit atoman-backend.service --unit atoman-stalwart.service --unit atoman-mail-outbox.service --status-file /var/lib/atoman/mail-backup-health.json
+TimeoutStartSec=2min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/atoman
+UMask=0077
+StandardOutput=journal
+StandardError=journal

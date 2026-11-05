@@ -1,0 +1,10 @@
+[Unit]
+Description=Record actionable Atoman mail operations failures
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger --priority daemon.err --tag atoman-mail-ops "Mail backup, backup health or maintenance failed; inspect systemctl --failed, journalctl -u atoman-backup -u atoman-mail-backup-health -u atoman-mail-maintenance and /var/lib/atoman/mail-backup-health.json"
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

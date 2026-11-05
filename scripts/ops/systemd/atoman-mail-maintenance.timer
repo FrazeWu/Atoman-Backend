@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Atoman mail maintenance before the backup window
+
+[Timer]
+OnCalendar=*-*-* 02:45:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=atoman-mail-maintenance.service
+
+[Install]
+WantedBy=timers.target
