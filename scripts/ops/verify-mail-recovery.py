@@ -27,6 +27,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 import uuid
 
 SNAPSHOT = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6,20}$")
@@ -121,10 +122,22 @@ def port(container, internal):
         raise RuntimeError("Recovery endpoint is not restricted to loopback")
     return int(record[0]["HostPort"])
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        raise urllib.error.HTTPError(request.full_url, code, "Recovery redirects are disabled", headers, fp)
+
+def loopback_open(request, timeout):
+    value = request.full_url if isinstance(request, urllib.request.Request) else request
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or parsed.username is not None:
+        raise ValueError("Recovery management requests must stay on loopback")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+    return opener.open(request, timeout=timeout)
+
 def wait_http(url, accepted):
     for _ in range(60):
         try:
-            with urllib.request.urlopen(url, timeout=2) as response:
+            with loopback_open(url, timeout=2) as response:
                 code = response.status
         except urllib.error.HTTPError as error:
             code = error.code
@@ -142,7 +155,7 @@ def jmap(base, credential, method, args):
     request = urllib.request.Request(base + "/jmap/", json.dumps(payload).encode(),
         {"Authorization": "Basic " + authorization, "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with loopback_open(request, timeout=30) as response:
             data = json.load(response)
     except (OSError, urllib.error.URLError):
         raise RuntimeError("Isolated Stalwart management request failed") from None
@@ -218,7 +231,7 @@ def run_stack(source, workspace, pg_image, minio_image, mc_image):
     pg_env = workspace / "postgres.env"
     pg_env.write_text("POSTGRES_USER=" + pg_user + "\nPOSTGRES_DB=atoman_mail\nPOSTGRES_PASSWORD=" + password + "\n")
     s3_env = workspace / "s3.env"
-    s3_env.write_text("MINIO_ROOT_USER=" + access + "\nMINIO_ROOT_PASSWORD=" + secret + "\n")
+    s3_env.write_text("HOME=/tmp\nMINIO_ROOT_USER=" + access + "\nMINIO_ROOT_PASSWORD=" + secret + "\n")
     mc_env = workspace / "mc.env"
     mc_env.write_text("MC_HOST_recovery=http://" + access + ":" + secret + "@" + minio_name + ":9000\n")
     mail_env = workspace / "mail.env"
