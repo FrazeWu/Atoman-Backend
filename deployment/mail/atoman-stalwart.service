@@ -1,0 +1,16 @@
+[Unit]
+Description=Atoman Stalwart mail service
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/etc/atoman-mail
+ExecStart=/usr/bin/docker compose -f /etc/atoman-mail/compose.yml up -d --no-build
+ExecStop=/usr/bin/docker compose -f /etc/atoman-mail/compose.yml stop
+TimeoutStartSec=90
+TimeoutStopSec=90
+UMask=0077
+[Install]
+WantedBy=multi-user.target

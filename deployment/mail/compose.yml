@@ -1,0 +1,38 @@
+name: atoman-mail
+services:
+  stalwart:
+    image: stalwartlabs/stalwart@sha256:154e55adecadfcc4a67044b9b94d482a20286e1101c97a2b322224bb596053d5
+    container_name: atoman-stalwart
+    hostname: mail.atoman.org
+    init: true
+    restart: unless-stopped
+    env_file:
+      - /etc/atoman-mail/stalwart.env
+    networks:
+      - database
+    ports:
+      - "127.0.0.1:18580:8080"
+      - "127.0.0.1:19025:25"
+      - "127.0.0.1:19993:993"
+      - "169.58.161.96:25:25"
+      - "169.58.161.96:465:465"
+      - "169.58.161.96:587:587"
+      - "169.58.161.96:993:993"
+      - "169.58.161.96:4190:4190"
+    volumes:
+      - /etc/atoman-mail/stalwart-config:/etc/stalwart
+      - /var/lib/atoman-mail/stalwart:/var/lib/stalwart
+    mem_limit: 1536m
+    cpus: 2.0
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  database:
+    external: true
+    name: atoman-dev_default

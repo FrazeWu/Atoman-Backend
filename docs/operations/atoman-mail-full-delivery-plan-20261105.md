@@ -1,12 +1,12 @@
 # Atoman Mail — production delivery plan and release gates
 
-Date: 2026-11-05. Owner: Atoman. This is a **module of the existing Atoman application**, not a separate service login or website. Existing Stalwart+PostgreSQL 16+Cloudflare R2 design and existing Atoman S3 credentials are retained; no additional R2 API Token is required.
+Date: 2026-11-05. Owner: Atoman. This is a **module of the existing Atoman application**, not a separate service login or website. The Stalwart + PostgreSQL 16 + Cloudflare R2 design is retained. Dedicated mail R2 credentials isolate the two private mail buckets from the existing public media bucket.
 
 ## Non-negotiable requirements
 
 - A user chooses an available `local-part@atoman.org` address, permanently bound to the existing Atoman user UUID. Admin may reserve without a token; admin generates 7-day single-use targeted invitations for non-admin users. No public signup, shared credentials or cross-account read.
 - Stalwart v1 owns actual mail accounts, mailboxes, JMAP/IMAP/SMTP submission, Sieve and mailbox content. Atoman backend stores account mappings, encrypted per-user JMAP API key and durable pending-send metadata. Use the same Postgres 16 **instance** but a dedicated `atoman_mail` database for Stalwart; Atoman production DB is independent.
-- Stalwart blob/attachment objects go to private `atoman-mail-prod`; encrypted pending-send snapshots go to private `atoman-mail-pending`. Use the current Atoman `S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, without changing the existing public `atoman` media bucket, ACL, access methods or keys. No browser exposure of R2/JMAP admin credentials.
+- Stalwart blob/attachment objects go to private `atoman-mail-prod`; encrypted pending-send snapshots go to private `atoman-mail-pending`. Use the existing S3_ENDPOINT with dedicated ATOMAN_MAIL_R2_ACCESS_KEY_ID and ATOMAN_MAIL_R2_SECRET_ACCESS_KEY; do not change the public atoman media bucket, ACL, access methods or credentials. No browser exposure of R2/JMAP admin credentials.
 - Webmail desktop three panes, mobile one pane, conversation mode by default, optional single mail view, bulk actions, archive, trash, undo and 30-day trash/junk retention; only expanded messages become read. Sieve rules include filters, blocking, auto-response.
 - Compose must support autosaved drafts, reply/reply-all/forward, attachments, accessible plain text and sanitized HTML; **5-second server-persistent undo send** (atomic cancel-vs-dispatch, idempotent external send and crash recovery). Do not claim Undo works if only the browser delays submission.
 - Invite-only accounts initially; IMAP/SMTP app-specific credentials must be revocable and never copy the Atoman website password into Stalwart.

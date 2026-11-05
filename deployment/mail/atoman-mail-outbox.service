@@ -1,0 +1,45 @@
+[Unit]
+Description=Atoman durable mail submission worker
+After=network-online.target docker.service atoman-stalwart.service atoman-backend.service
+Wants=network-online.target
+Requires=atoman-stalwart.service
+ConditionPathIsRegular=/etc/atoman-mail/backend.env
+StartLimitIntervalSec=300
+StartLimitBurst=20
+
+[Service]
+Type=simple
+User=atoman
+Group=atoman
+WorkingDirectory=/var/lib/atoman
+EnvironmentFile=/etc/atoman/backend.env
+EnvironmentFile=/etc/atoman-mail/backend.env
+ExecStart=/opt/atoman/backend/current/mail_outbox_worker --batch 20
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=90
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+StateDirectory=atoman
+StateDirectoryMode=0750
+LogsDirectory=atoman
+LogsDirectoryMode=0750
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
