@@ -15,6 +15,10 @@ A v1 report retains the original full encrypted snapshot NAS roundtrip contract.
 
 The application tables are `mail_accounts`, `mail_invites`, `mail_access_credentials`, `mail_pending_sends`, `mail_drafts`, `mail_uploads`, `mail_preferences`, `mail_action_receipts`, and `mail_retention`. Every additional `mail_*` table present in the source manifest is also required. Source and restored table sets and counts must match exactly.
 
+## Webmail application baseline
+
+To restore the Webmail web entry point, first restore a compatible Atoman website baseline or initialize the complete application/authentication schema and configuration, then restore the capsule's mail data and `Users` at its declared snapshot point; the capsule is not an independent whole-site restore. `Users` preserves the UUIDs, password hashes, roles, and authentication versions needed for existing password users to sign in again once `auth_sessions` and `auth_login_events` exist, while continuity of old sessions, OAuth bindings and flows (`external_identities` and `oauth_flows`), and unrelated website state is the responsibility of the website baseline/full backup.
+
 ## Independent operator inputs
 
 The existing `--recovery-report`, `--snapshot`, and `--ciphertext-sha256` arguments remain. **For v2, `--ciphertext-sha256` always denotes the original full source bundle, never the capsule.** V2 additionally requires:
