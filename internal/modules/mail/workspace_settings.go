@@ -30,8 +30,15 @@ type MailFilterRule struct {
 	Action    string `json:"action"`
 	MailboxID string `json:"mailbox_id,omitempty"`
 }
+type MailSignature struct {
+	Enabled bool   `json:"enabled"`
+	Text    string `json:"text"`
+	HTML    string `json:"html"`
+	OnReply bool   `json:"on_reply"`
+}
 type MailSettings struct {
 	ConversationMode bool             `json:"conversation_mode"`
+	Signature        MailSignature    `json:"signature"`
 	BlockedSenders   []string         `json:"blocked_senders"`
 	AutoReply        MailAutoReply    `json:"auto_reply"`
 	Rules            []MailFilterRule `json:"rules"`
@@ -44,8 +51,11 @@ func sieveQuote(v string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", "", "\n", "\r\n").Replace(v) + `"`
 }
 func validateSettings(v *MailSettings) error {
-	if len(v.BlockedSenders) > 100 || len(v.Rules) > 50 || len(v.AutoReply.Subject) > 200 || len(v.AutoReply.Text) > 8192 {
+	if len(v.Signature.Text) > 4096 || len(v.Signature.HTML) > 8192 || strings.ContainsRune(v.Signature.Text, 0) || strings.ContainsRune(v.Signature.HTML, 0) || len(v.BlockedSenders) > 100 || len(v.Rules) > 50 || len(v.AutoReply.Subject) > 200 || len(v.AutoReply.Text) > 8192 {
 		return errors.New("Mail settings exceed limits")
+	}
+	if v.Signature.HTML != "" {
+		v.Signature.HTML = sanitizeMailHTML(v.Signature.HTML)
 	}
 	if strings.ContainsAny(v.AutoReply.Subject, "\r\n\x00") || strings.ContainsRune(v.AutoReply.Text, '\x00') {
 		return errors.New("Invalid auto reply")

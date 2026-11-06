@@ -15,6 +15,11 @@ import (
 
 func (h *AccountHandler) registerWorkspace(g *gin.RouterGroup) {
 	g.GET("/search", h.searchMail)
+	g.GET("/unread", h.unreadMail)
+	g.GET("/contacts", h.listContacts)
+	g.POST("/contacts", h.createContact)
+	g.PUT("/contacts/:id", h.updateContact)
+	g.DELETE("/contacts/:id", h.deleteContact)
 	g.POST("/folders", h.createMailFolder)
 	g.DELETE("/folders/:id", h.deleteMailFolder)
 	g.POST("/messages/actions", h.mailActions)
@@ -74,6 +79,87 @@ func messageQueryID(c *gin.Context) string {
 	}
 	return c.Query("email_id")
 }
+
+// unreadMail reports the authenticated mailbox's inbox count; no global count
+// or other user's Stalwart identifiers are accepted from the browser.
+func (h *AccountHandler) unreadMail(c *gin.Context) {
+	u, ok := h.workspaceUser(c)
+	if !ok {
+		return
+	}
+	credential, accountID, err := h.workspace.read.authorizedClient(c.Request.Context(), u)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	folders, err := h.workspace.read.client.Mailboxes(c.Request.Context(), credential, accountID)
+	if err != nil {
+		httpx.Error(c, apperr.New(503, "mail.upstream_unavailable", "Mailbox unavailable", nil))
+		return
+	}
+	var count uint64
+	var latestID string
+	for _, folder := range folders {
+		if folder.Role != nil && *folder.Role == "inbox" {
+			count = folder.UnreadEmails
+			newest, e := h.workspace.read.client.ListEmails(c.Request.Context(), credential, accountID, folder.ID, 1)
+			if e == nil && len(newest) > 0 {
+				latestID = newest[0].ID
+			}
+			break
+		}
+	}
+	httpx.OK(c, 200, gin.H{"count": count, "latest_id": latestID})
+}
+
+func (h *AccountHandler) listContacts(c *gin.Context) {
+	u, ok := h.workspaceUser(c)
+	if !ok {
+		return
+	}
+	v, e := h.workspace.Contacts(c.Request.Context(), u)
+	mailResult(c, 200, v, e)
+}
+func (h *AccountHandler) createContact(c *gin.Context) {
+	u, ok := h.workspaceUser(c)
+	if !ok {
+		return
+	}
+	var in MailContactInput
+	if !mailJSON(c, &in) {
+		return
+	}
+	v, e := h.workspace.SaveContact(c.Request.Context(), u, uuid.Nil, in)
+	mailResult(c, 201, v, e)
+}
+func (h *AccountHandler) updateContact(c *gin.Context) {
+	u, ok := h.workspaceUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseMailUUID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	var in MailContactInput
+	if !mailJSON(c, &in) {
+		return
+	}
+	v, e := h.workspace.SaveContact(c.Request.Context(), u, id, in)
+	mailResult(c, 200, v, e)
+}
+func (h *AccountHandler) deleteContact(c *gin.Context) {
+	u, ok := h.workspaceUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseMailUUID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	e := h.workspace.DeleteContact(c.Request.Context(), u, id)
+	mailResult(c, 200, gin.H{"deleted": e == nil}, e)
+}
 func (h *AccountHandler) searchMail(c *gin.Context) {
 	u, ok := h.workspaceUser(c)
 	if !ok {
@@ -81,7 +167,27 @@ func (h *AccountHandler) searchMail(c *gin.Context) {
 	}
 	p, _ := strconv.Atoi(c.DefaultQuery("position", "0"))
 	l, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	v, e := h.workspace.Search(c.Request.Context(), u, c.Query("mailbox_id"), c.Query("q"), c.Query("thread_id"), p, l)
+	options := MailSearchOptions{Folder: c.Query("mailbox_id"), Text: c.Query("q"), Thread: c.Query("thread_id"), From: c.Query("from"), To: c.Query("to"), Subject: c.Query("subject"), After: c.Query("after"), Before: c.Query("before"), Position: p, Limit: l}
+	for _, name := range []string{"unread", "starred", "attachment"} {
+		raw, exists := c.GetQuery(name)
+		if !exists {
+			continue
+		}
+		val, err := strconv.ParseBool(raw)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("mail.invalid_query", "Invalid search filter"))
+			return
+		}
+		switch name {
+		case "unread":
+			options.Unread = &val
+		case "starred":
+			options.Starred = &val
+		case "attachment":
+			options.Attachment = &val
+		}
+	}
+	v, e := h.workspace.SearchAdvanced(c.Request.Context(), u, options)
 	mailResult(c, 200, v, e)
 }
 func (h *AccountHandler) mailActions(c *gin.Context) {
@@ -275,7 +381,7 @@ func (h *AccountHandler) listOutbox(c *gin.Context) {
 		return
 	}
 	var rows []model.MailPendingSend
-	e := h.outbox.db.Where("user_id = ? AND created_at > ?", u.ID, time.Now().Add(-30*24*time.Hour)).Order("created_at DESC").Limit(100).Find(&rows).Error
+	e := h.outbox.db.Where("user_id = ? AND (created_at > ? OR status IN ?)", u.ID, time.Now().Add(-30*24*time.Hour), []string{"queued", "dispatching", "sending", "uncertain"}).Order("created_at DESC").Limit(100).Find(&rows).Error
 	out := []MailOutboxInfo{}
 	for _, r := range rows {
 		out = append(out, mailOutboxInfo(r))

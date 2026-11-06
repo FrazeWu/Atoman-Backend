@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Explicit capability envelopes for Sieve and account-security operations.
@@ -101,23 +102,109 @@ type MailSearchResult struct {
 	HasMore  bool           `json:"has_more"`
 }
 
+// MailSearchOptions accepts only whitelisted JMAP Email/query filters.
+type MailSearchOptions struct {
+	Folder     string
+	Text       string
+	Thread     string
+	From       string
+	To         string
+	Subject    string
+	After      string
+	Before     string
+	Unread     *bool
+	Starred    *bool
+	Attachment *bool
+	Position   int
+	Limit      int
+}
+
 func (s *MailWorkspaceService) Search(ctx context.Context, u authctx.CurrentUser, folder, q, thread string, position, limit int) (MailSearchResult, error) {
-	if position < 0 || position > 100000 || limit < 1 || limit > 100 || len(q) > 512 {
+	return s.SearchAdvanced(ctx, u, MailSearchOptions{Folder: folder, Text: q, Thread: thread, Position: position, Limit: limit})
+}
+func buildMailQueryFilter(o MailSearchOptions) (map[string]any, error) {
+	conditions := []map[string]any{}
+	if o.Folder != "" {
+		if !validJMAPScopedID(o.Folder) {
+			return nil, apperr.BadRequest("mail.invalid_folder", "Invalid folder")
+		}
+		conditions = append(conditions, map[string]any{"inMailbox": o.Folder})
+	}
+	for _, term := range []struct {
+		key   string
+		value string
+		max   int
+	}{
+		{"text", o.Text, 512}, {"from", o.From, 254}, {"to", o.To, 254}, {"subject", o.Subject, 512},
+	} {
+		if len(term.value) > term.max || strings.ContainsAny(term.value, "\r\n\x00") {
+			return nil, apperr.BadRequest("mail.invalid_query", "Invalid search criteria")
+		}
+		if v := strings.TrimSpace(term.value); v != "" {
+			conditions = append(conditions, map[string]any{term.key: v})
+		}
+	}
+	for _, date := range []struct {
+		key   string
+		value string
+	}{{"after", o.After}, {"before", o.Before}} {
+		if date.value == "" {
+			continue
+		}
+		parsed, e := time.Parse(time.RFC3339, date.value)
+		if e != nil {
+			return nil, apperr.BadRequest("mail.invalid_query", "Invalid search date")
+		}
+		conditions = append(conditions, map[string]any{date.key: parsed.UTC().Format(time.RFC3339)})
+	}
+	if o.After != "" && o.Before != "" {
+		after, _ := time.Parse(time.RFC3339, o.After)
+		before, _ := time.Parse(time.RFC3339, o.Before)
+		if !after.Before(before) {
+			return nil, apperr.BadRequest("mail.invalid_query", "Invalid date range")
+		}
+	}
+	if o.Attachment != nil {
+		conditions = append(conditions, map[string]any{"hasAttachment": *o.Attachment})
+	}
+	if o.Unread != nil {
+		if *o.Unread {
+			conditions = append(conditions, map[string]any{"notKeyword": "$seen"})
+		} else {
+			conditions = append(conditions, map[string]any{"hasKeyword": "$seen"})
+		}
+	}
+	if o.Starred != nil {
+		if *o.Starred {
+			conditions = append(conditions, map[string]any{"hasKeyword": "$flagged"})
+		} else {
+			conditions = append(conditions, map[string]any{"notKeyword": "$flagged"})
+		}
+	}
+	if len(conditions) == 0 {
+		return map[string]any{}, nil
+	}
+	if len(conditions) == 1 {
+		return conditions[0], nil
+	}
+	return map[string]any{"operator": "AND", "conditions": conditions}, nil
+}
+func (s *MailWorkspaceService) SearchAdvanced(ctx context.Context, u authctx.CurrentUser, o MailSearchOptions) (MailSearchResult, error) {
+	thread, position, limit := o.Thread, o.Position, o.Limit
+
+	if position < 0 || position > 100000 || limit < 1 || limit > 100 {
 		return MailSearchResult{}, apperr.BadRequest("mail.invalid_query", "Invalid search")
 	}
 	cred, aid, e := s.auth(ctx, u)
 	if e != nil {
 		return MailSearchResult{}, e
 	}
-	filter := map[string]any{}
-	if folder != "" {
-		if !validJMAPScopedID(folder) {
-			return MailSearchResult{}, apperr.BadRequest("mail.invalid_folder", "Invalid folder")
-		}
-		filter["inMailbox"] = folder
+	filter, e := buildMailQueryFilter(o)
+	if e != nil {
+		return MailSearchResult{}, e
 	}
-	if q != "" {
-		filter["text"] = q
+	if thread != "" && (o.Text != "" || o.From != "" || o.To != "" || o.Subject != "" || o.After != "" || o.Before != "" || o.Attachment != nil || o.Unread != nil || o.Starred != nil) {
+		return MailSearchResult{}, apperr.BadRequest("mail.invalid_query", "Thread query cannot be combined with advanced filters")
 	}
 	var query struct {
 		IDs      []string `json:"ids"`

@@ -24,11 +24,12 @@ type MailOutboxInfo struct {
 	ID        uuid.UUID  `json:"id"`
 	Status    string     `json:"status"`
 	SendAfter time.Time  `json:"send_after"`
+	Scheduled bool       `json:"scheduled"`
 	CreatedAt time.Time  `json:"created_at"`
 }
 
 func mailOutboxInfo(o model.MailPendingSend) MailOutboxInfo {
-	return MailOutboxInfo{DraftID: o.DraftID, ID: o.ID, Status: o.Status, SendAfter: o.SendAfter, CreatedAt: o.CreatedAt}
+	return MailOutboxInfo{DraftID: o.DraftID, ID: o.ID, Status: o.Status, SendAfter: o.SendAfter, CreatedAt: o.CreatedAt, Scheduled: o.SendAfter.Sub(o.CreatedAt) > 10*time.Second}
 }
 
 type MailDeliverer interface {
@@ -130,6 +131,12 @@ func (s *MailOutboxService) Queue(ctx context.Context, user authctx.CurrentUser,
 		draftRevision = draft.Revision
 	}
 	now := s.now().UTC()
+	if input.SendAt != nil {
+		planned := input.SendAt.UTC()
+		if planned.Before(now.Add(mailUndoWindow)) || planned.After(now.Add(90*24*time.Hour)) {
+			return MailOutboxInfo{}, apperr.BadRequest("mail.invalid_schedule", "Scheduled time must be at least 5 seconds ahead and within 90 days")
+		}
+	}
 	id := uuid.New()
 	if err := s.resolveAttachments(ctx, user.ID, &input); err != nil {
 		return MailOutboxInfo{}, apperr.BadRequest("mail.invalid_attachment", "Attachment unavailable or total size exceeds 25 MB")
@@ -151,7 +158,13 @@ func (s *MailOutboxService) Queue(ctx context.Context, user authctx.CurrentUser,
 		return MailOutboxInfo{}, apperr.New(503, "mail.pending_storage_unavailable", "Cannot store pending mail", nil)
 	}
 	queuedAt := s.now().UTC()
-	entry := model.MailPendingSend{DraftID: input.DraftID, DraftRevision: draftRevision, ID: id, UserID: user.ID, RequestID: input.RequestID, AccountID: *account.StalwartAccountID, SnapshotKey: objectKey, PayloadHash: fingerprint, Status: "queued", SendAfter: queuedAt.Add(mailUndoWindow), CreatedAt: queuedAt, UpdatedAt: queuedAt}
+	// The five-second Undo Send window always starts AFTER encrypted storage
+	// succeeds, even when upload latency or the operator clock moves.
+	sendAfter := queuedAt.Add(mailUndoWindow)
+	if input.SendAt != nil && input.SendAt.UTC().After(sendAfter) {
+		sendAfter = input.SendAt.UTC()
+	}
+	entry := model.MailPendingSend{DraftID: input.DraftID, DraftRevision: draftRevision, ID: id, UserID: user.ID, RequestID: input.RequestID, AccountID: *account.StalwartAccountID, SnapshotKey: objectKey, PayloadHash: fingerprint, Status: "queued", SendAfter: sendAfter, CreatedAt: queuedAt, UpdatedAt: queuedAt}
 	if err := s.db.WithContext(ctx).Create(&entry).Error; err != nil {
 		// We only remove the uniquely named *new* R2 object. A concurrent retry
 		// uses its own random object key and never deletes the winner's snapshot.

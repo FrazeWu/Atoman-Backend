@@ -24,6 +24,7 @@ import (
 type ComposeMailInput struct {
 	DraftID       *uuid.UUID  `json:"draft_id,omitempty"`
 	DraftRevision uint64      `json:"draft_revision,omitempty"`
+	SendAt        *time.Time  `json:"send_at,omitempty"`
 	RequestID     uuid.UUID   `json:"request_id" binding:"required"`
 	To            []string    `json:"to"`
 	Cc            []string    `json:"cc"`
