@@ -6,5 +6,5 @@ import (
 )
 
 func RunMailWorkspaceMigration(db *gorm.DB) error {
-	return db.AutoMigrate(&model.MailDraft{}, &model.MailUpload{}, &model.MailPreference{}, &model.MailActionReceipt{}, &model.MailRetention{})
+	return db.AutoMigrate(&model.MailDraft{}, &model.MailUpload{}, &model.MailPreference{}, &model.MailActionReceipt{}, &model.MailRetention{}, &model.MailContact{})
 }

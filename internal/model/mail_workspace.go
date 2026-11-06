@@ -57,3 +57,16 @@ type MailRetention struct {
 }
 
 func (MailRetention) TableName() string { return "mail_retention" }
+
+// MailContact is a private per-user address-book record. The email address,
+// name and notes are stored only inside authenticated ciphertext.
+type MailContact struct {
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID     uuid.UUID `gorm:"type:uuid;not null;index:idx_mail_contact_user_updated"`
+	Ciphertext []byte    `gorm:"type:bytea;not null"`
+	Revision   uint64    `gorm:"not null;default:1"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time `gorm:"index:idx_mail_contact_user_updated"`
+}
+
+func (MailContact) TableName() string { return "mail_contacts" }

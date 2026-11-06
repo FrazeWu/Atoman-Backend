@@ -55,6 +55,7 @@ type DraftCompose struct {
 	Subject     string             `json:"subject"`
 	Text        string             `json:"text"`
 	HTML        string             `json:"html,omitempty"`
+	SendAt      *time.Time         `json:"send_at,omitempty"`
 	InReplyTo   string             `json:"in_reply_to,omitempty"`
 	References  []string           `json:"references,omitempty"`
 	Attachments []model.MailUpload `json:"attachments"`
