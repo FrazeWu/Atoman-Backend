@@ -126,6 +126,11 @@ class AlertTests(unittest.TestCase):
                           now=NOW,send=lambda *a:None)
 
 
+class LoopbackSocket:
+    def __enter__(self): return self
+    def __exit__(self,*args): return None
+
+
 class WatchdogTests(unittest.TestCase):
     def fixture(self, file, *, stamp=NOW, status="ok", age=1):
         file.write_text(json.dumps({
@@ -143,14 +148,23 @@ class WatchdogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)/"health.json";self.fixture(p)
             self.assertEqual(watchdog.check(now=NOW,path=p,run=self.fake_run,
-                                            open_url=lambda *a,**k:Response(200)),"ok")
+                                            open_url=lambda *a,**k:Response(200), connect=lambda *a,**k:LoopbackSocket()),"ok")
+    def test_stalwart_private_port_unreachable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp)/"health.json"; self.fixture(p)
+            def refuse(*args,**kwargs):raise ConnectionRefusedError()
+            with self.assertRaisesRegex(RuntimeError, "private JMAP"):
+                watchdog.check(now=NOW,path=p,run=self.fake_run,
+                               open_url=lambda *a,**k:Response(200),
+                               connect=refuse)
+
     def test_stale_health_is_fault(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)/"health.json"
             self.fixture(p,stamp=NOW-dt.timedelta(hours=2))
             with self.assertRaisesRegex(RuntimeError, "stale"):
                 watchdog.check(now=NOW,path=p,run=self.fake_run,
-                               open_url=lambda *a,**k:Response(200))
+                               open_url=lambda *a,**k:Response(200), connect=lambda *a,**k:LoopbackSocket())
     def test_inactive_service_is_fault(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/"health.json";self.fixture(p)
@@ -160,7 +174,7 @@ class WatchdogTests(unittest.TestCase):
                 return self.fake_run(args,**kwargs)
             with self.assertRaisesRegex(RuntimeError,"inactive"):
                 watchdog.check(now=NOW,path=p,run=fake_run,
-                               open_url=lambda *a,**k:Response(200))
+                               open_url=lambda *a,**k:Response(200), connect=lambda *a,**k:LoopbackSocket())
 
 
 if __name__=="__main__":

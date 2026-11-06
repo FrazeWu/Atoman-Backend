@@ -7,7 +7,6 @@ OnFailure=atoman-mail-ops-alert.service
 Type=oneshot
 User=root
 UMask=0077
-User=atoman
 Group=atoman
 ExecStart=/usr/bin/python3 /usr/local/libexec/atoman/check-mail-ops-watchdog.py
 TimeoutStartSec=40
