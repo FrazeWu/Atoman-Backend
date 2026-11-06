@@ -1,0 +1,25 @@
+[Unit]
+Description=Verify live mail services and verified paired backup health
+After=network-online.target
+OnFailure=atoman-mail-ops-alert.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+User=atoman
+Group=atoman
+ExecStart=/usr/bin/python3 /usr/local/libexec/atoman/check-mail-ops-watchdog.py
+TimeoutStartSec=40
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StandardOutput=journal
+StandardError=journal

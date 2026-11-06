@@ -1,10 +1,30 @@
 [Unit]
-Description=Record actionable Atoman mail operations failures
+Description=Send owner-only external Atoman mail operational failure alert
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/logger --priority daemon.err --tag atoman-mail-ops "Mail backup, backup health or maintenance failed; inspect systemctl --failed, journalctl -u atoman-backup -u atoman-mail-backup-health -u atoman-mail-maintenance and /var/lib/atoman/mail-backup-health.json"
+User=atoman
+Group=atoman
+WorkingDirectory=/var/lib/atoman
+EnvironmentFile=/etc/atoman-mail/ops-alert.env
+ExecStart=/usr/bin/python3 /usr/local/libexec/atoman/send-mail-ops-alert.py
+StateDirectory=atoman
+StateDirectoryMode=0750
+UMask=0077
+TimeoutStartSec=35
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectHome=true
 ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/atoman
+StandardOutput=journal
+StandardError=journal

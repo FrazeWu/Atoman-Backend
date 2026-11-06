@@ -1,0 +1,6 @@
+# Host-specific outbound alert MTA hardening for vmi3410530.
+# Requires Debian Exim configtype internet, loopback-only local_interfaces
+# and empty relay_nets. Never expose Exim's SMTP listener publicly.
+MAIN_HARDCODE_PRIMARY_HOSTNAME = vmi3410530.contaboserver.net
+REMOTE_SMTP_HELO_DATA = vmi3410530.contaboserver.net
+disable_ipv6 = true

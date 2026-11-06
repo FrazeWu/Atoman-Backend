@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor live Atoman mail infrastructure every ten minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+RandomizedDelaySec=45
+Unit=atoman-mail-ops-watchdog.service
+
+[Install]
+WantedBy=timers.target
