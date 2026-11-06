@@ -30,7 +30,17 @@ type MailFilterRule struct {
 	Action    string `json:"action"`
 	MailboxID string `json:"mailbox_id,omitempty"`
 }
+
+// MailSignature is an account-scoped encrypted preference, never a global Sieve setting.
+// HTML is sanitized at save time; text remains the accessibility/plaintext fallback.
+type MailSignature struct {
+	Enabled bool   `json:"enabled"`
+	Text    string `json:"text"`
+	HTML    string `json:"html,omitempty"`
+	OnReply bool   `json:"on_reply"`
+}
 type MailSettings struct {
+	Signature        MailSignature    `json:"signature"`
 	ConversationMode bool             `json:"conversation_mode"`
 	BlockedSenders   []string         `json:"blocked_senders"`
 	AutoReply        MailAutoReply    `json:"auto_reply"`
@@ -44,14 +54,19 @@ func sieveQuote(v string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", "", "\n", "\r\n").Replace(v) + `"`
 }
 func validateSettings(v *MailSettings) error {
-	if len(v.BlockedSenders) > 100 || len(v.Rules) > 50 || len(v.AutoReply.Subject) > 200 || len(v.AutoReply.Text) > 8192 {
+	if len(v.BlockedSenders) > 100 || len(v.Rules) > 50 || len(v.AutoReply.Subject) > 200 || len(v.AutoReply.Text) > 8192 || len(v.Signature.Text) > 8192 || len(v.Signature.HTML) > 16384 {
 		return errors.New("Mail settings exceed limits")
 	}
-	if strings.ContainsAny(v.AutoReply.Subject, "\r\n\x00") || strings.ContainsRune(v.AutoReply.Text, '\x00') {
+	if strings.ContainsAny(v.AutoReply.Subject, "\r\n\x00") || strings.ContainsRune(v.AutoReply.Text, '\x00') || strings.ContainsRune(v.Signature.Text, '\x00') || strings.ContainsRune(v.Signature.HTML, '\x00') {
 		return errors.New("Invalid auto reply")
 	}
 	if v.AutoReply.Enabled && strings.TrimSpace(v.AutoReply.Text) == "" {
 		return errors.New("Auto reply text is required")
+	}
+	// Keep a narrowly sanitized formatting subset; reject nonempty hostile-only markup.
+	v.Signature.HTML = sanitizeMailHTML(v.Signature.HTML)
+	if v.Signature.Enabled && strings.TrimSpace(v.Signature.Text) == "" && strings.TrimSpace(mailHTMLText(v.Signature.HTML)) == "" {
+		return errors.New("Enabled signature requires text")
 	}
 	seen := map[string]bool{}
 	normalized := []string{}

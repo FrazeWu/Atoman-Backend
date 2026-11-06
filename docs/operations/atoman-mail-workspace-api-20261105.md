@@ -124,3 +124,8 @@ The outbox worker must run continuously. Run `mail_maintenance_worker` periodica
 Draft saves and orphan upload retirement take the same PostgreSQL advisory lock per user. Cleanup rechecks all encrypted draft references under that lock and commits a hidden `retired_at` marker before deleting the R2 object. New saves and sends reject retired upload IDs; failed object deletion is safely retried from its retained metadata row. A referenced draft attachment is never retired.
 
 The bounded maintenance worker also retries deletion of encrypted send snapshots older than30days only for terminal `sent`, `cancelled`, or `blocked` rows, recording `snapshot_deleted_at` after success. It preserves every `queued`, `dispatching`, and `uncertain` snapshot. Each pass considers at most200 uploads and200 terminal snapshots. These are private application artifacts; Stalwart exclusively owns message retention.
+
+
+## Mail V2 signature preference (2026-11-06)
+
+The existing authenticated, per-owner GET/PUT /api/v1/mail/settings now supports an optional signature object with enabled (boolean), text (UTF-8, maximum 8192 bytes), html (optional HTML, maximum 16384 bytes, allowlist-sanitized), and on_reply (boolean). Existing encrypted preference rows without this object retain a disabled zero-value signature. The signature does not modify Sieve filtering rules; it is inserted only by the composer when creating an unsaved draft. The server persists sanitized HTML and rejects NUL/oversized settings. Do not treat local browser notification permission as a synchronized mailbox setting.
