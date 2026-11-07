@@ -1,0 +1,32 @@
+[Unit]
+Description=Synchronize encrypted external IMAP accounts
+After=network-online.target atoman-backend.service
+Wants=network-online.target
+OnFailure=atoman-mail-ops-alert.service
+
+[Service]
+Type=oneshot
+User=atoman
+Group=atoman
+WorkingDirectory=/var/lib/atoman
+EnvironmentFile=/etc/atoman/backend.env
+EnvironmentFile=/etc/atoman-mail/backend.env
+Environment=ATOMAN_MAIL_EXTERNAL_IMAP_ENABLED=1
+UnsetEnvironment=ATOMAN_MAIL_STALWART_ADMIN_USER ATOMAN_MAIL_STALWART_ADMIN_PASSWORD
+ExecStart=/opt/atoman/backend/current/mail_external_sync_worker
+TimeoutStartSec=11min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=512M
+StandardOutput=journal
+StandardError=journal

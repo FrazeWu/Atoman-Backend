@@ -21,6 +21,7 @@ type AccountHandler struct {
 	read      *MailReadService
 	outbox    *MailOutboxService
 	workspace *MailWorkspaceService
+	external  *MailExternalService
 	provision *MailProvisionService
 }
 
@@ -59,6 +60,9 @@ func RegisterAccountRoutesWithOutbox(group *gin.RouterGroup, service *AccountSer
 
 func registerAccountRoutes(group *gin.RouterGroup, service *AccountService, read *MailReadService, outbox *MailOutboxService, provision *MailProvisionService) {
 	h := &AccountHandler{service: service, read: read, outbox: outbox, workspace: NewMailWorkspaceService(read, outbox), provision: provision}
+	if os.Getenv("ATOMAN_MAIL_EXTERNAL_IMAP_ENABLED") == "1" {
+		h.external = NewMailExternalService(h.workspace, nil)
+	}
 	group.Use(middleware.AuthMiddleware())
 	group.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "private, no-store")

@@ -14,6 +14,13 @@ import (
 )
 
 func (h *AccountHandler) registerWorkspace(g *gin.RouterGroup) {
+	g.GET("/external/providers", h.externalProviders)
+	g.GET("/external/accounts", h.listExternalAccounts)
+	g.POST("/external/accounts", h.connectExternalAccount)
+	g.POST("/external/accounts/:id/sync", h.syncExternalAccount)
+	g.DELETE("/external/accounts/:id", h.deleteExternalAccount)
+	g.GET("/external/unified", h.unifiedExternalInbox)
+	g.GET("/external/accounts/:id/messages/:uid", h.readExternalMessage)
 	g.GET("/search", h.searchMail)
 	g.GET("/unread", h.unreadMail)
 	g.GET("/contacts", h.listContacts)
