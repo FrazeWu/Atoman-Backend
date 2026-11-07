@@ -5635,6 +5635,8 @@ definitions:
         type: array
       request_id:
         type: string
+      send_at:
+        type: string
       subject:
         type: string
       text:
@@ -5771,6 +5773,8 @@ definitions:
         type: string
       id:
         type: string
+      scheduled:
+        type: boolean
       send_after:
         type: string
       status:

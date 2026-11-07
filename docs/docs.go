@@ -41046,6 +41046,9 @@ const docTemplate = `{
                 "request_id": {
                     "type": "string"
                 },
+                "send_at": {
+                    "type": "string"
+                },
                 "subject": {
                     "type": "string"
                 },
@@ -41249,6 +41252,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "scheduled": {
+                    "type": "boolean"
                 },
                 "send_after": {
                     "type": "string"
