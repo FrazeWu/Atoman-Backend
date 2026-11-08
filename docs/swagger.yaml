@@ -5609,6 +5609,8 @@ definitions:
     type: object
   mail.ComposeMailInput:
     properties:
+      alias_id:
+        type: string
       attachment_ids:
         items:
           type: string
@@ -5625,6 +5627,8 @@ definitions:
         type: string
       draft_revision:
         type: integer
+      external_account_id:
+        type: string
       html:
         type: string
       in_reply_to:

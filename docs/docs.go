@@ -41007,6 +41007,9 @@ const docTemplate = `{
                 "request_id"
             ],
             "properties": {
+                "alias_id": {
+                    "type": "string"
+                },
                 "attachment_ids": {
                     "type": "array",
                     "items": {
@@ -41030,6 +41033,9 @@ const docTemplate = `{
                 },
                 "draft_revision": {
                     "type": "integer"
+                },
+                "external_account_id": {
+                    "type": "string"
                 },
                 "html": {
                     "type": "string"
