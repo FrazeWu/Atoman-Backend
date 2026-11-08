@@ -313,6 +313,28 @@ func (s *MailExternalService) Delete(ctx context.Context, u authctx.CurrentUser,
 			return apperr.Conflict("mail.external_import_active", "Pause or cancel history import before removing this account")
 		}
 	}
+	// A disconnected source must not strand a user-approved automated flag
+	// job or its never-retry-until-reconciled receipt.
+	if s.workspace.db.Migrator().HasTable(&model.MailExternalImportJob{}) && s.workspace.db.Migrator().HasColumn(&model.MailExternalImportJob{}, "flag_sync_enabled") {
+		var enabled int64
+		err := s.workspace.db.WithContext(ctx).Model(&model.MailExternalImportJob{}).Where("user_id=? AND external_account_id=? AND flag_sync_enabled=?", u.ID, id, true).Count(&enabled).Error
+		if err != nil {
+			return apperr.Internal(err)
+		}
+		if enabled > 0 {
+			return apperr.Conflict("mail.external_flag_sync_active", "Pause two-way flag synchronization before disconnecting")
+		}
+	}
+	if s.workspace.db.Migrator().HasTable(&model.MailExternalImportItem{}) && s.workspace.db.Migrator().HasColumn(&model.MailExternalImportItem{}, "flag_mutation_id") {
+		var flagged int64
+		err := s.workspace.db.WithContext(ctx).Model(&model.MailExternalImportItem{}).Where("user_id=? AND external_account_id=? AND flag_mutation_id IS NOT NULL", u.ID, id).Count(&flagged).Error
+		if err != nil {
+			return apperr.Internal(err)
+		}
+		if flagged > 0 {
+			return apperr.Conflict("mail.external_flag_reconcile_required", "Reconcile uncertain flag changes before disconnecting")
+		}
+	}
 	if s.workspace.db.Migrator().HasTable(&model.MailPendingSend{}) {
 		var pending int64
 		err := s.workspace.db.WithContext(ctx).Model(&model.MailPendingSend{}).Where("user_id=? AND external_account_id=? AND status IN ?", u.ID, id, []string{"queued", "dispatching", "uncertain"}).Count(&pending).Error

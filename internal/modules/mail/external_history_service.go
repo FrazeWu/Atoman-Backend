@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -17,10 +18,13 @@ import (
 )
 
 type MailExternalHistoryService struct {
-	external   *MailExternalService
-	source     ExternalHistoryRemote
-	target     ExternalHistoryTarget
-	flagReader MailFlagTargetReader
+	external         *MailExternalService
+	source           ExternalHistoryRemote
+	target           ExternalHistoryTarget
+	flagReader       MailFlagTargetReader
+	flagSourceWriter MailExternalFlagSourceWriter
+	flagTargetWriter MailExternalFlagTargetWriter
+	flagsAllowed     bool
 }
 
 func NewMailExternalHistoryService(external *MailExternalService, source ExternalHistoryRemote, target ExternalHistoryTarget) *MailExternalHistoryService {
@@ -41,20 +45,25 @@ func NewMailExternalHistoryService(external *MailExternalService, source Externa
 }
 
 type ExternalHistoryJobInfo struct {
-	ID            uuid.UUID  `json:"id"`
-	AccountID     uuid.UUID  `json:"account_id"`
-	Folder        string     `json:"folder"`
-	Status        string     `json:"status"`
-	Continuous    bool       `json:"continuous"`
-	LastPolledAt  *time.Time `json:"last_polled_at,omitempty"`
-	UIDValidity   uint32     `json:"uid_validity"`
-	UpperUID      uint32     `json:"upper_uid"`
-	NextUID       uint32     `json:"next_uid"`
-	Imported      uint32     `json:"imported"`
-	Skipped       uint32     `json:"skipped"`
-	LastErrorCode string     `json:"last_error_code,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID                 uuid.UUID  `json:"id"`
+	AccountID          uuid.UUID  `json:"account_id"`
+	Folder             string     `json:"folder"`
+	Status             string     `json:"status"`
+	Continuous         bool       `json:"continuous"`
+	FlagSyncEnabled    bool       `json:"flag_sync_enabled"`
+	FlagSyncGeneration uint64     `json:"flag_sync_generation"`
+	FlagSyncCursorUID  uint32     `json:"flag_sync_cursor_uid"`
+	FlagLastPolledAt   *time.Time `json:"flag_last_polled_at,omitempty"`
+	FlagLastErrorCode  string     `json:"flag_last_error_code,omitempty"`
+	LastPolledAt       *time.Time `json:"last_polled_at,omitempty"`
+	UIDValidity        uint32     `json:"uid_validity"`
+	UpperUID           uint32     `json:"upper_uid"`
+	NextUID            uint32     `json:"next_uid"`
+	Imported           uint32     `json:"imported"`
+	Skipped            uint32     `json:"skipped"`
+	LastErrorCode      string     `json:"last_error_code,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 func externalHistoryFolderKey(accountID uuid.UUID, folder string) string {
@@ -101,7 +110,7 @@ func (s *MailExternalHistoryService) info(row model.MailExternalImportJob) (Exte
 	if json.Unmarshal(raw, &data) != nil || !validExternalFolder(data.Folder) {
 		return ExternalHistoryJobInfo{}, workspaceErr(errors.New("invalid protected folder"))
 	}
-	return ExternalHistoryJobInfo{ID: row.ID, AccountID: row.ExternalAccountID, Folder: data.Folder, Status: row.Status, Continuous: row.Continuous, LastPolledAt: row.LastPolledAt, UIDValidity: row.UIDValidity, UpperUID: row.UpperUID, NextUID: row.NextUID, Imported: row.Imported, Skipped: row.Skipped, LastErrorCode: row.LastErrorCode, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
+	return ExternalHistoryJobInfo{ID: row.ID, AccountID: row.ExternalAccountID, Folder: data.Folder, Status: row.Status, Continuous: row.Continuous, FlagSyncEnabled: row.FlagSyncEnabled, FlagSyncGeneration: row.FlagSyncGeneration, FlagSyncCursorUID: row.FlagSyncCursorUID, FlagLastPolledAt: row.FlagLastPolledAt, FlagLastErrorCode: row.FlagLastErrorCode, LastPolledAt: row.LastPolledAt, UIDValidity: row.UIDValidity, UpperUID: row.UpperUID, NextUID: row.NextUID, Imported: row.Imported, Skipped: row.Skipped, LastErrorCode: row.LastErrorCode, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 func (s *MailExternalHistoryService) List(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID) ([]ExternalHistoryJobInfo, error) {
 	if e := s.valid(); e != nil {
@@ -296,6 +305,9 @@ func NewConfiguredExternalHistory(db *gorm.DB, vault *MailOutboxVault, read *Mai
 	service := NewMailExternalHistoryService(external, nil, nil)
 	if service == nil {
 		return nil, errors.New("Cannot initialize history importer")
+	}
+	if os.Getenv("ATOMAN_MAIL_TWO_WAY_FLAGS_ENABLED") == "1" {
+		service.EnableFlagSync(liveExternalHistoryRemote{}, stalwartMailFlagWriter{read: read})
 	}
 	return service, nil
 }

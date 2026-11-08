@@ -55,6 +55,14 @@ func main() {
 		if e != nil {
 			log.Fatal("Mail history worker failed")
 		}
+		if os.Getenv("ATOMAN_MAIL_TWO_WAY_FLAGS_ENABLED") == "1" {
+			flagsReport, flagErr := mail.RunExternalFlagSyncDue(ctx, history)
+			if flagErr != nil {
+				log.Fatal("Two-way flag worker failed")
+			}
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"sync": report, "history": importReport, "flag_sync": flagsReport})
+			return
+		}
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"sync": report, "history": importReport})
 		return
 	}
