@@ -22,26 +22,28 @@ import (
 // ComposeMailInput accepts only server-owned attachment identifiers. The server
 // resolves and authenticates all bytes before creating the immutable snapshot.
 type ComposeMailInput struct {
-	DraftID       *uuid.UUID  `json:"draft_id,omitempty"`
-	DraftRevision uint64      `json:"draft_revision,omitempty"`
-	SendAt        *time.Time  `json:"send_at,omitempty"`
-	RequestID     uuid.UUID   `json:"request_id" binding:"required"`
-	To            []string    `json:"to"`
-	Cc            []string    `json:"cc"`
-	Bcc           []string    `json:"bcc"`
-	Subject       string      `json:"subject"`
-	Text          string      `json:"text"`
-	HTML          string      `json:"html,omitempty"`
-	AttachmentIDs []uuid.UUID `json:"attachment_ids,omitempty"`
-	InReplyTo     string      `json:"in_reply_to,omitempty"`
-	References    []string    `json:"references,omitempty"`
-	attachments   []composeAttachment
+	DraftID           *uuid.UUID  `json:"draft_id,omitempty"`
+	ExternalAccountID *uuid.UUID  `json:"external_account_id,omitempty"`
+	DraftRevision     uint64      `json:"draft_revision,omitempty"`
+	SendAt            *time.Time  `json:"send_at,omitempty"`
+	RequestID         uuid.UUID   `json:"request_id" binding:"required"`
+	To                []string    `json:"to"`
+	Cc                []string    `json:"cc"`
+	Bcc               []string    `json:"bcc"`
+	Subject           string      `json:"subject"`
+	Text              string      `json:"text"`
+	HTML              string      `json:"html,omitempty"`
+	AttachmentIDs     []uuid.UUID `json:"attachment_ids,omitempty"`
+	InReplyTo         string      `json:"in_reply_to,omitempty"`
+	References        []string    `json:"references,omitempty"`
+	attachments       []composeAttachment
 }
 
 type outboxPayload struct {
-	Sender     string   `json:"sender"`
-	Recipients []string `json:"recipients"`
-	MIME       []byte   `json:"mime"`
+	Sender            string     `json:"sender"`
+	ExternalAccountID *uuid.UUID `json:"external_account_id,omitempty"`
+	Recipients        []string   `json:"recipients"`
+	MIME              []byte     `json:"mime"`
 }
 
 func (c ComposeMailInput) fingerprint() (string, error) {

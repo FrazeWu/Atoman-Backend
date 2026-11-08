@@ -313,6 +313,16 @@ func (s *MailExternalService) Delete(ctx context.Context, u authctx.CurrentUser,
 			return apperr.Conflict("mail.external_import_active", "Pause or cancel history import before removing this account")
 		}
 	}
+	if s.workspace.db.Migrator().HasTable(&model.MailPendingSend{}) {
+		var pending int64
+		err := s.workspace.db.WithContext(ctx).Model(&model.MailPendingSend{}).Where("user_id=? AND external_account_id=? AND status IN ?", u.ID, id, []string{"queued", "dispatching", "uncertain"}).Count(&pending).Error
+		if err != nil {
+			return apperr.Internal(err)
+		}
+		if pending > 0 {
+			return apperr.Conflict("mail.external_send_active", "Cancel or reconcile pending external mail before disconnecting")
+		}
+	}
 	result := s.workspace.db.WithContext(ctx).Where("id=? AND user_id=?", id, u.ID).Delete(&model.MailExternalAccount{})
 	if result.Error != nil {
 		return apperr.Internal(result.Error)

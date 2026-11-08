@@ -19,13 +19,21 @@ import (
 // StalwartOutboxSubmitter sends solely as the mapped Atoman user; never use
 // an administrator token to send as arbitrary mailboxes.
 type StalwartOutboxSubmitter struct {
-	db     *gorm.DB
-	client *StalwartJMAPClient
-	vault  *MailCredentialVault
+	db             *gorm.DB
+	client         *StalwartJMAPClient
+	vault          *MailCredentialVault
+	externalVault  *MailOutboxVault
+	externalRemote ExternalSMTPRemote
 }
 
 func NewStalwartOutboxSubmitter(db *gorm.DB, client *StalwartJMAPClient, vault *MailCredentialVault) *StalwartOutboxSubmitter {
 	return &StalwartOutboxSubmitter{db: db, client: client, vault: vault}
+}
+func (s *StalwartOutboxSubmitter) EnableExternalSMTP(vault *MailOutboxVault, remote ExternalSMTPRemote) {
+	if s != nil {
+		s.externalVault = vault
+		s.externalRemote = remote
+	}
 }
 func (s *StalwartOutboxSubmitter) Submit(ctx context.Context, userID uuid.UUID, accountID string, pendingID uuid.UUID, p outboxPayload) error {
 	if s == nil || s.db == nil || s.client == nil || s.vault == nil || userID == uuid.Nil || !validJMAPScopedID(accountID) {
@@ -34,6 +42,9 @@ func (s *StalwartOutboxSubmitter) Submit(ctx context.Context, userID uuid.UUID, 
 	var account model.MailAccount
 	if err := s.db.WithContext(ctx).Where("user_id=? AND status=? AND stalwart_account_id=?", userID, "active", accountID).Take(&account).Error; err != nil {
 		return errors.New("Mail account mapping unavailable")
+	}
+	if p.ExternalAccountID != nil {
+		return s.submitExternalSMTP(ctx, userID, accountID, pendingID, p)
 	}
 	if account.Address != p.Sender {
 		return errors.New("Mail sender does not match reserved identity")

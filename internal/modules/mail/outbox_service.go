@@ -39,12 +39,13 @@ type MailDeliverer interface {
 }
 
 type MailOutboxService struct {
-	db        *gorm.DB
-	store     MailPendingStore
-	vault     *MailOutboxVault
-	deliverer MailDeliverer
-	allowed   bool
-	now       func() time.Time
+	db                  *gorm.DB
+	store               MailPendingStore
+	vault               *MailOutboxVault
+	deliverer           MailDeliverer
+	allowed             bool
+	externalSMTPAllowed bool
+	now                 func() time.Time
 }
 
 // This service is NOT constructed by the default production route builder.
@@ -52,6 +53,13 @@ type MailOutboxService struct {
 // controlled operator when Stalwart and recovery are genuinely available.
 func NewMailOutboxService(db *gorm.DB, store MailPendingStore, vault *MailOutboxVault, deliverer MailDeliverer, sendAllowed bool, gates MailActivationGates) *MailOutboxService {
 	return &MailOutboxService{db: db, store: store, vault: vault, deliverer: deliverer, allowed: sendAllowed && gates.ready(), now: time.Now}
+}
+
+// EnableExternalSMTP is only called under an additional explicit operational gate.
+func (s *MailOutboxService) EnableExternalSMTP(enabled bool) {
+	if s != nil {
+		s.externalSMTPAllowed = enabled
+	}
 }
 func (s *MailOutboxService) ready() bool {
 	return s != nil && s.allowed && s.db != nil && s.store != nil && s.vault != nil
@@ -137,11 +145,33 @@ func (s *MailOutboxService) Queue(ctx context.Context, user authctx.CurrentUser,
 			return MailOutboxInfo{}, apperr.BadRequest("mail.invalid_schedule", "Scheduled time must be at least 5 seconds ahead and within 90 days")
 		}
 	}
+	sender := account.Address
+	var externalID *uuid.UUID
+	if input.ExternalAccountID != nil {
+		if !s.externalSMTPAllowed {
+			return MailOutboxInfo{}, apperr.New(503, "mail.external_send_disabled", "External SMTP sending is not enabled", nil)
+		}
+		if *input.ExternalAccountID == uuid.Nil {
+			return MailOutboxInfo{}, apperr.BadRequest("mail.external_invalid_account", "Choose a connected mailbox")
+		}
+		var external model.MailExternalAccount
+		if e := s.db.WithContext(ctx).Where("id=? AND user_id=?", *input.ExternalAccountID, user.ID).Take(&external).Error; e != nil {
+			return MailOutboxInfo{}, apperr.NotFound("mail.external_account_missing", "External mailbox unavailable")
+		}
+		creds, e := openExternalSMTPSecrets(s.vault, external)
+		if e != nil {
+			return MailOutboxInfo{}, apperr.New(503, "mail.external_credential_unavailable", "External mailbox credential unavailable", nil)
+		}
+		sender = creds.Address
+		idCopy := external.ID
+		externalID = &idCopy
+	}
 	id := uuid.New()
 	if err := s.resolveAttachments(ctx, user.ID, &input); err != nil {
 		return MailOutboxInfo{}, apperr.BadRequest("mail.invalid_attachment", "Attachment unavailable or total size exceeds 25 MB")
 	}
-	payload, err := buildOutboxPayload(account.Address, id, input, now)
+	payload, err := buildOutboxPayload(sender, id, input, now)
+	payload.ExternalAccountID = externalID
 	if err != nil {
 		return MailOutboxInfo{}, apperr.BadRequest("mail.invalid_compose", "Invalid recipients or message contents")
 	}
@@ -164,7 +194,7 @@ func (s *MailOutboxService) Queue(ctx context.Context, user authctx.CurrentUser,
 	if input.SendAt != nil && input.SendAt.UTC().After(sendAfter) {
 		sendAfter = input.SendAt.UTC()
 	}
-	entry := model.MailPendingSend{DraftID: input.DraftID, DraftRevision: draftRevision, ID: id, UserID: user.ID, RequestID: input.RequestID, AccountID: *account.StalwartAccountID, SnapshotKey: objectKey, PayloadHash: fingerprint, Status: "queued", SendAfter: sendAfter, CreatedAt: queuedAt, UpdatedAt: queuedAt}
+	entry := model.MailPendingSend{DraftID: input.DraftID, DraftRevision: draftRevision, ID: id, UserID: user.ID, RequestID: input.RequestID, AccountID: *account.StalwartAccountID, ExternalAccountID: externalID, SnapshotKey: objectKey, PayloadHash: fingerprint, Status: "queued", SendAfter: sendAfter, CreatedAt: queuedAt, UpdatedAt: queuedAt}
 	if err := s.db.WithContext(ctx).Create(&entry).Error; err != nil {
 		// We only remove the uniquely named *new* R2 object. A concurrent retry
 		// uses its own random object key and never deletes the winner's snapshot.

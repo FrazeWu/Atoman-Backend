@@ -49,16 +49,17 @@ func workspaceErr(err error) error {
 }
 
 type DraftCompose struct {
-	To          []string           `json:"to"`
-	Cc          []string           `json:"cc"`
-	Bcc         []string           `json:"bcc"`
-	Subject     string             `json:"subject"`
-	Text        string             `json:"text"`
-	HTML        string             `json:"html,omitempty"`
-	SendAt      *time.Time         `json:"send_at,omitempty"`
-	InReplyTo   string             `json:"in_reply_to,omitempty"`
-	References  []string           `json:"references,omitempty"`
-	Attachments []model.MailUpload `json:"attachments"`
+	ExternalAccountID *uuid.UUID         `json:"external_account_id,omitempty"`
+	To                []string           `json:"to"`
+	Cc                []string           `json:"cc"`
+	Bcc               []string           `json:"bcc"`
+	Subject           string             `json:"subject"`
+	Text              string             `json:"text"`
+	HTML              string             `json:"html,omitempty"`
+	SendAt            *time.Time         `json:"send_at,omitempty"`
+	InReplyTo         string             `json:"in_reply_to,omitempty"`
+	References        []string           `json:"references,omitempty"`
+	Attachments       []model.MailUpload `json:"attachments"`
 }
 type MailDraftInfo struct {
 	ID        uuid.UUID     `json:"id"`

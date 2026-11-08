@@ -63,6 +63,7 @@ type MailPendingSend struct {
 	UserID            uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_mail_pending_user_request;index:idx_mail_pending_user_state" json:"-"`
 	RequestID         uuid.UUID  `gorm:"type:uuid;not null;uniqueIndex:idx_mail_pending_user_request" json:"-"`
 	AccountID         string     `gorm:"type:varchar(128);not null" json:"-"`
+	ExternalAccountID *uuid.UUID `gorm:"type:uuid;index:idx_mail_pending_external" json:"-"`
 	SnapshotKey       string     `gorm:"type:varchar(255);not null;uniqueIndex:idx_mail_pending_snapshot" json:"-"`
 	SnapshotDeletedAt *time.Time `json:"-"`
 	PayloadHash       string     `gorm:"type:char(64);not null" json:"-"`

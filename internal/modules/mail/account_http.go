@@ -77,6 +77,7 @@ func registerAccountRoutes(group *gin.RouterGroup, service *AccountService, read
 	group.POST("/activate", h.activate)
 	group.POST("/admin/invites", h.issueInvite)
 	group.POST("/admin/reserve-self", h.reserveSelf)
+	group.GET("/senders", h.mailSenders)
 	group.POST("/outbox", h.queueMail)
 	group.GET("/outbox/:id", h.outboxStatus)
 	group.POST("/outbox/:id/cancel", h.cancelMail)
