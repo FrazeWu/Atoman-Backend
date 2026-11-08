@@ -48,12 +48,13 @@ func (h *AccountHandler) externalHistoryStart(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Folder string `json:"folder" binding:"required"`
+		Folder     string `json:"folder" binding:"required"`
+		Continuous bool   `json:"continuous"`
 	}
 	if !mailJSON(c, &body) {
 		return
 	}
-	job, err := service.Start(c.Request.Context(), user, id, body.Folder)
+	job, err := service.StartWithOptions(c.Request.Context(), user, id, body.Folder, body.Continuous)
 	mailResult(c, http.StatusCreated, job, err)
 }
 func (h *AccountHandler) externalHistoryAction(c *gin.Context) {

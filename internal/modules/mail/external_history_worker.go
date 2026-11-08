@@ -11,6 +11,7 @@ import (
 	"atoman/internal/platform/authctx"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ExternalHistoryReport struct {
@@ -20,10 +21,12 @@ type ExternalHistoryReport struct {
 	NeedReview  int `json:"need_review"`
 	Failed      int `json:"failed"`
 	Completed   int `json:"completed"`
+	Watching    int `json:"watching"`
 }
 
 const historyRunLimit = 40
 const historyStaleLease = 10 * time.Minute
+const historyWatchInterval = 5 * time.Minute
 
 // RunExternalHistoryDue processes opt-in migration jobs only. No background
 // provider or Stalwart account is touched until an owner creates a job.
@@ -34,8 +37,9 @@ func RunExternalHistoryDue(ctx context.Context, service *MailExternalHistoryServ
 	}
 	db := service.external.workspace.db.WithContext(ctx)
 	cutoff := time.Now().UTC().Add(-historyStaleLease)
+	pollCutoff := time.Now().UTC().Add(-historyWatchInterval)
 	var jobs []model.MailExternalImportJob
-	if e := db.Where("status=? OR (status=? AND claimed_at < ?)", "queued", "running", cutoff).Order("updated_at ASC").Limit(2).Find(&jobs).Error; e != nil {
+	if e := db.Where("status=? OR (status=? AND claimed_at < ?) OR (status=? AND (last_polled_at IS NULL OR last_polled_at < ?))", "queued", "running", cutoff, "watching", pollCutoff).Order("updated_at ASC").Limit(2).Find(&jobs).Error; e != nil {
 		return report, e
 	}
 	for _, job := range jobs {
@@ -43,7 +47,7 @@ func RunExternalHistoryDue(ctx context.Context, service *MailExternalHistoryServ
 			return report, ctx.Err()
 		}
 		now := time.Now().UTC()
-		claimed := db.Model(&model.MailExternalImportJob{}).Where("id=? AND user_id=? AND (status=? OR (status=? AND claimed_at < ?))", job.ID, job.UserID, "queued", "running", cutoff).
+		claimed := db.Model(&model.MailExternalImportJob{}).Where("id=? AND user_id=? AND (status=? OR (status=? AND claimed_at < ?) OR (status=? AND (last_polled_at IS NULL OR last_polled_at < ?)))", job.ID, job.UserID, "queued", "running", cutoff, "watching", pollCutoff).
 			Updates(map[string]any{"status": "running", "claimed_at": now, "updated_at": now})
 		if claimed.Error != nil {
 			return report, claimed.Error
@@ -65,7 +69,13 @@ func RunExternalHistoryDue(ctx context.Context, service *MailExternalHistoryServ
 			report.NeedReview++
 			continue
 		}
-		outcome, e := service.processHistoryJob(ctx, job.ID, &report)
+		outcome := ""
+		var e error
+		if job.Status == "watching" {
+			outcome, e = service.processWatchJob(ctx, job.ID, &report)
+		} else {
+			outcome, e = service.processHistoryJob(ctx, job.ID, &report)
+		}
 		if e != nil {
 			return report, e
 		}
@@ -76,6 +86,8 @@ func RunExternalHistoryDue(ctx context.Context, service *MailExternalHistoryServ
 			report.Failed++
 		case "completed":
 			report.Completed++
+		case "watching":
+			report.Watching++
 		}
 	}
 	return report, nil
@@ -157,7 +169,7 @@ func (s *MailExternalHistoryService) processHistoryJob(ctx context.Context, id u
 		return s.historyStop(id, "source_identity_changed", true)
 	}
 	if job.NextUID > job.UpperUID {
-		return "completed", s.historyMark(id, "completed", "")
+		return s.historyComplete(id)
 	}
 	targetName := externalHistoryFolderName(account.Provider, job.FolderKey, info.Folder)
 	targetFolder, e := s.target.EnsureFolder(ctx, owner, targetName)
@@ -175,7 +187,7 @@ func (s *MailExternalHistoryService) processHistoryJob(ctx context.Context, id u
 			return "paused", nil
 		}
 		if job.NextUID > job.UpperUID {
-			return "completed", s.historyMark(id, "completed", "")
+			return s.historyComplete(id)
 		}
 		end := job.NextUID + externalImportUIDWindow - 1
 		if end < job.NextUID || end > job.UpperUID {
@@ -338,8 +350,87 @@ func (s *MailExternalHistoryService) processHistoryJob(ctx context.Context, id u
 			}
 		}
 	}
-	if ctx.Err() != nil {
-		return s.historyStop(id, "worker_interrupted", false)
-	}
+	// A normal worker deadline between messages is recoverable. Unknown
+	// JMAP import outcomes are separately tracked as uncertain items.
 	return "queued", s.historyMark(id, "queued", "")
+}
+
+// historyComplete chooses a terminal one-shot state or the opt-in watching
+// state without exposing imported message content.
+func (s *MailExternalHistoryService) historyComplete(id uuid.UUID) (string, error) {
+	status := "paused"
+	// Serialize with a concurrent user's enable/disable action; otherwise an
+	// old one-shot decision could strand a newly opted-in live watcher.
+	err := s.external.workspace.db.Transaction(func(tx *gorm.DB) error {
+		var job model.MailExternalImportJob
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=?", id).Take(&job).Error; e != nil {
+			return e
+		}
+		if job.Status != "running" {
+			status = job.Status
+			return nil
+		}
+		now := time.Now().UTC()
+		status = "completed"
+		updates := map[string]any{"status": status, "claimed_at": nil, "last_error_code": "", "updated_at": now}
+		if job.Continuous {
+			status = "watching"
+			updates["status"] = status
+			updates["last_polled_at"] = now
+		}
+		changed := tx.Model(&model.MailExternalImportJob{}).Where("id=? AND status=? AND continuous=?", id, "running", job.Continuous).Updates(updates)
+		if changed.Error != nil {
+			return changed.Error
+		}
+		if changed.RowsAffected != 1 {
+			return errors.New("Import completion state conflict")
+		}
+		return nil
+	})
+	return status, err
+}
+
+// processWatchJob only expands the high-water UID of the originally authorized
+// folder. A source UIDVALIDITY rollover is never silently replayed.
+func (s *MailExternalHistoryService) processWatchJob(ctx context.Context, id uuid.UUID, report *ExternalHistoryReport) (string, error) {
+	job, err := s.historyJob(id)
+	if err != nil {
+		return "", err
+	}
+	if job.Status != "running" || !job.Continuous {
+		return "paused", nil
+	}
+	owner := authctx.CurrentUser{ID: job.UserID}
+	account, err := s.external.ownRow(ctx, owner, job.ExternalAccountID)
+	if err != nil {
+		return s.historyStop(id, "account_disconnected", false)
+	}
+	creds, err := s.external.secrets(account)
+	if err != nil {
+		return s.historyStop(id, "credential_unavailable", false)
+	}
+	info, err := s.info(job)
+	if err != nil {
+		return s.historyStop(id, "folder_unavailable", false)
+	}
+	probe, err := s.source.Inspect(ctx, account.Provider, creds.Address, creds.AppPassword, info.Folder)
+	if err != nil {
+		return s.historyStop(id, "provider_unavailable", false)
+	}
+	if probe.UIDValidity != job.UIDValidity || probe.UpperUID < job.UpperUID || probe.UpperUID == ^uint32(0) {
+		return s.historyStop(id, "source_identity_changed", true)
+	}
+	if probe.UpperUID == job.UpperUID {
+		return s.historyComplete(id)
+	}
+	now := time.Now().UTC()
+	updated := s.external.workspace.db.Model(&model.MailExternalImportJob{}).Where("id=? AND status=? AND continuous=? AND uid_validity=? AND upper_uid=?", id, "running", true, job.UIDValidity, job.UpperUID).
+		Updates(map[string]any{"upper_uid": probe.UpperUID, "last_polled_at": now, "updated_at": now})
+	if updated.Error != nil {
+		return "", updated.Error
+	}
+	if updated.RowsAffected != 1 {
+		return "paused", nil
+	}
+	return s.processHistoryJob(ctx, id, report)
 }

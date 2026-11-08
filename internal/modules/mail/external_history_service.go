@@ -36,18 +36,20 @@ func NewMailExternalHistoryService(external *MailExternalService, source Externa
 }
 
 type ExternalHistoryJobInfo struct {
-	ID            uuid.UUID `json:"id"`
-	AccountID     uuid.UUID `json:"account_id"`
-	Folder        string    `json:"folder"`
-	Status        string    `json:"status"`
-	UIDValidity   uint32    `json:"uid_validity"`
-	UpperUID      uint32    `json:"upper_uid"`
-	NextUID       uint32    `json:"next_uid"`
-	Imported      uint32    `json:"imported"`
-	Skipped       uint32    `json:"skipped"`
-	LastErrorCode string    `json:"last_error_code,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            uuid.UUID  `json:"id"`
+	AccountID     uuid.UUID  `json:"account_id"`
+	Folder        string     `json:"folder"`
+	Status        string     `json:"status"`
+	Continuous    bool       `json:"continuous"`
+	LastPolledAt  *time.Time `json:"last_polled_at,omitempty"`
+	UIDValidity   uint32     `json:"uid_validity"`
+	UpperUID      uint32     `json:"upper_uid"`
+	NextUID       uint32     `json:"next_uid"`
+	Imported      uint32     `json:"imported"`
+	Skipped       uint32     `json:"skipped"`
+	LastErrorCode string     `json:"last_error_code,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func externalHistoryFolderKey(accountID uuid.UUID, folder string) string {
@@ -94,7 +96,7 @@ func (s *MailExternalHistoryService) info(row model.MailExternalImportJob) (Exte
 	if json.Unmarshal(raw, &data) != nil || !validExternalFolder(data.Folder) {
 		return ExternalHistoryJobInfo{}, workspaceErr(errors.New("invalid protected folder"))
 	}
-	return ExternalHistoryJobInfo{ID: row.ID, AccountID: row.ExternalAccountID, Folder: data.Folder, Status: row.Status, UIDValidity: row.UIDValidity, UpperUID: row.UpperUID, NextUID: row.NextUID, Imported: row.Imported, Skipped: row.Skipped, LastErrorCode: row.LastErrorCode, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
+	return ExternalHistoryJobInfo{ID: row.ID, AccountID: row.ExternalAccountID, Folder: data.Folder, Status: row.Status, Continuous: row.Continuous, LastPolledAt: row.LastPolledAt, UIDValidity: row.UIDValidity, UpperUID: row.UpperUID, NextUID: row.NextUID, Imported: row.Imported, Skipped: row.Skipped, LastErrorCode: row.LastErrorCode, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
 }
 func (s *MailExternalHistoryService) List(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID) ([]ExternalHistoryJobInfo, error) {
 	if e := s.valid(); e != nil {
@@ -121,6 +123,9 @@ func (s *MailExternalHistoryService) List(ctx context.Context, u authctx.Current
 	return out, nil
 }
 func (s *MailExternalHistoryService) Start(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID, folder string) (ExternalHistoryJobInfo, error) {
+	return s.StartWithOptions(ctx, u, accountID, folder, false)
+}
+func (s *MailExternalHistoryService) StartWithOptions(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID, folder string, continuous bool) (ExternalHistoryJobInfo, error) {
 	if e := s.valid(); e != nil {
 		return ExternalHistoryJobInfo{}, e
 	}
@@ -157,7 +162,7 @@ func (s *MailExternalHistoryService) Start(ctx context.Context, u authctx.Curren
 		return ExternalHistoryJobInfo{}, apperr.New(502, "mail.external_history_inspect_failed", "Cannot inspect the source folder", nil)
 	}
 	now := time.Now().UTC()
-	job := model.MailExternalImportJob{ID: uuid.New(), UserID: u.ID, ExternalAccountID: accountID, FolderKey: key, UIDValidity: probe.UIDValidity, UpperUID: probe.UpperUID, NextUID: 1, Status: "queued", CreatedAt: now, UpdatedAt: now}
+	job := model.MailExternalImportJob{ID: uuid.New(), UserID: u.ID, ExternalAccountID: accountID, FolderKey: key, UIDValidity: probe.UIDValidity, UpperUID: probe.UpperUID, NextUID: 1, Status: "queued", Continuous: continuous, CreatedAt: now, UpdatedAt: now}
 	payload, _ := json.Marshal(map[string]string{"folder": folder})
 	job.FolderCiphertext, e = s.external.workspace.vault.Seal(u.ID, job.ID, payload)
 	if e != nil {
@@ -183,11 +188,56 @@ func (s *MailExternalHistoryService) Action(ctx context.Context, u authctx.Curre
 	if e := db.Where("id=? AND user_id=? AND external_account_id=?", jobID, u.ID, accountID).Take(&row).Error; e != nil {
 		return ExternalHistoryJobInfo{}, apperr.NotFound("mail.external_history_missing", "Import job unavailable")
 	}
+	// Live copying is explicit opt-in. It never authorizes remote deletion,
+	// modification of source mail, or unsolicited copying from other folders.
+	if action == "enable_live" || action == "disable_live" {
+		updatedStatus := row.Status
+		enabled := action == "enable_live"
+		if enabled {
+			switch row.Status {
+			case "completed":
+				updatedStatus = "watching"
+			case "queued", "running", "paused", "failed":
+			default:
+				return ExternalHistoryJobInfo{}, apperr.Conflict("mail.external_history_state_changed", "Import cannot enter live mode from its current state")
+			}
+		} else {
+			switch row.Status {
+			case "watching":
+				updatedStatus = "completed"
+			case "running":
+				updatedStatus = "paused" // stop an in-flight poll after the current safe item
+			case "queued", "paused", "failed":
+			default:
+				return ExternalHistoryJobInfo{}, apperr.Conflict("mail.external_history_state_changed", "Live mode is not active")
+			}
+		}
+		changes := map[string]any{"continuous": enabled, "status": updatedStatus, "updated_at": time.Now().UTC()}
+		if enabled && updatedStatus == "watching" {
+			changes["last_polled_at"] = nil
+		}
+		result := db.Model(&model.MailExternalImportJob{}).
+			Where("id=? AND user_id=? AND status=? AND continuous=?", jobID, u.ID, row.Status, row.Continuous).
+			Updates(changes)
+		if result.Error != nil {
+			return ExternalHistoryJobInfo{}, apperr.Internal(result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ExternalHistoryJobInfo{}, apperr.Conflict("mail.external_history_state_changed", "Import state changed; refresh")
+		}
+		row.Continuous = enabled
+		row.Status = updatedStatus
+		if enabled && updatedStatus == "watching" {
+			row.LastPolledAt = nil
+		}
+		row.UpdatedAt = time.Now().UTC()
+		return s.info(row)
+	}
 	var from []string
 	to := ""
 	switch action {
 	case "pause":
-		from = []string{"queued", "running"}
+		from = []string{"queued", "running", "watching"}
 		to = "paused"
 	case "resume":
 		from = []string{"paused", "failed"}

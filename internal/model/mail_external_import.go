@@ -17,9 +17,11 @@ type MailExternalImportJob struct {
 	UpperUID          uint32    `gorm:"not null"`
 	NextUID           uint32    `gorm:"not null;default:1"`
 	Status            string    `gorm:"type:varchar(24);not null;index:idx_mail_ext_import_due"`
-	Imported          uint32    `gorm:"not null;default:0"`
-	Skipped           uint32    `gorm:"not null;default:0"`
-	LastErrorCode     string    `gorm:"type:varchar(48);not null;default:''"`
+	Continuous        bool      `gorm:"not null;default:false"`
+	LastPolledAt      *time.Time
+	Imported          uint32 `gorm:"not null;default:0"`
+	Skipped           uint32 `gorm:"not null;default:0"`
+	LastErrorCode     string `gorm:"type:varchar(48);not null;default:''"`
 	ClaimedAt         *time.Time
 	LastCompletedAt   *time.Time
 	CreatedAt         time.Time

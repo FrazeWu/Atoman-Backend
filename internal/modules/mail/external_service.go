@@ -305,7 +305,7 @@ func (s *MailExternalService) Delete(ctx context.Context, u authctx.CurrentUser,
 	if s.workspace.db.Migrator().HasTable(&model.MailExternalImportJob{}) {
 		var active int64
 		err := s.workspace.db.WithContext(ctx).Model(&model.MailExternalImportJob{}).
-			Where("user_id=? AND external_account_id=? AND status IN ?", u.ID, id, []string{"queued", "running"}).Count(&active).Error
+			Where("user_id=? AND external_account_id=? AND status IN ?", u.ID, id, []string{"queued", "running", "watching"}).Count(&active).Error
 		if err != nil {
 			return apperr.Internal(err)
 		}
