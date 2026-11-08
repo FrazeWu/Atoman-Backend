@@ -374,3 +374,64 @@ func (s *MailExternalService) Read(ctx context.Context, u authctx.CurrentUser, i
 	}
 	return plaintext, nil
 }
+
+// SetSeen is an explicit, authenticated action. Previewing mail never marks it
+// read. Provider state is verified before encrypted local metadata is updated.
+func (s *MailExternalService) SetSeen(ctx context.Context, u authctx.CurrentUser, id uuid.UUID, uid, validity uint32, seen bool) (MailExternalAccountInfo, error) {
+	if err := s.access(ctx, u); err != nil {
+		return MailExternalAccountInfo{}, err
+	}
+	row, err := s.ownRow(ctx, u, id)
+	if err != nil {
+		return MailExternalAccountInfo{}, err
+	}
+	snap, err := s.snapshot(row)
+	if err != nil {
+		return MailExternalAccountInfo{}, err
+	}
+	if validity == 0 || snap.UIDValidity != validity {
+		return MailExternalAccountInfo{}, apperr.Conflict("mail.external_stale", "Mailbox changed; synchronize again")
+	}
+	index := -1
+	for i, m := range snap.Messages {
+		if m.UID == uid {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return MailExternalAccountInfo{}, apperr.NotFound("mail.external_message_missing", "Message unavailable")
+	}
+	if snap.Messages[index].Seen == seen {
+		return s.info(row)
+	}
+	creds, err := s.secrets(row)
+	if err != nil {
+		return MailExternalAccountInfo{}, err
+	}
+	if err := s.remote.SetSeen(ctx, row.Provider, creds.Address, creds.AppPassword, validity, uid, seen); err != nil {
+		return MailExternalAccountInfo{}, apperr.New(502, "mail.external_flag_failed", "Provider did not confirm the change; refresh mailbox", nil)
+	}
+	snap.Messages[index].Seen = seen
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		return MailExternalAccountInfo{}, apperr.Internal(err)
+	}
+	ciphertext, err := s.workspace.vault.Seal(u.ID, id, raw)
+	if err != nil {
+		return MailExternalAccountInfo{}, workspaceErr(err)
+	}
+	now := time.Now().UTC()
+	updated := s.workspace.db.WithContext(ctx).Model(&model.MailExternalAccount{}).
+		Where("id=? AND user_id=? AND revision=?", id, u.ID, row.Revision).
+		Updates(map[string]any{"snapshot_ciphertext": ciphertext, "revision": row.Revision + 1, "updated_at": now})
+	if updated.Error != nil {
+		return MailExternalAccountInfo{}, apperr.Internal(updated.Error)
+	}
+	if updated.RowsAffected != 1 {
+		return MailExternalAccountInfo{}, apperr.Conflict("mail.external_sync_conflict", "Provider changed; refresh mailbox")
+	}
+	row.SnapshotCiphertext = ciphertext
+	row.Revision++
+	return s.info(row)
+}

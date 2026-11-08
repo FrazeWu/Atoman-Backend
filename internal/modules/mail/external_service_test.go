@@ -15,6 +15,9 @@ import (
 type fakeExternalIMAP struct {
 	SyncCalls int
 	ReadCalls int
+	FlagCalls int
+	FlagFail  bool
+	LastSeen  bool
 	Fail      bool
 	Body      string
 }
@@ -40,6 +43,49 @@ func (f *fakeExternalIMAP) ReadPlain(ctx context.Context, provider, user, pass s
 	return "external private plain text", nil
 }
 
+func (f *fakeExternalIMAP) SetSeen(ctx context.Context, provider, user, pass string, validity, uid uint32, seen bool) error {
+	f.FlagCalls++
+	if f.FlagFail || pass != "own-app-password" || validity != 27 || uid != 123 {
+		return context.DeadlineExceeded
+	}
+	f.LastSeen = seen
+	return nil
+}
+func TestExternalSeenWriteScopedAndEncrypted(t *testing.T) {
+	workspace, _, _, alice, bob := workspaceFixture(t, nil)
+	fake := &fakeExternalIMAP{}
+	svc := NewMailExternalService(workspace, fake)
+	ctx := context.Background()
+	account, err := svc.Connect(ctx, alice, ExternalConnectInput{Provider: "gmail", Address: "alice@gmail.com", AppPassword: "own-app-password"})
+	require.NoError(t, err)
+	_, err = svc.SetSeen(ctx, bob, account.ID, 123, 27, true)
+	assertAppCode(t, err, "mail.external_account_missing")
+	_, err = svc.SetSeen(ctx, alice, account.ID, 123, 26, true)
+	assertAppCode(t, err, "mail.external_stale")
+	_, err = svc.SetSeen(ctx, alice, account.ID, 999, 27, true)
+	assertAppCode(t, err, "mail.external_message_missing")
+	require.Equal(t, 0, fake.FlagCalls)
+	fake.FlagFail = true
+	_, err = svc.SetSeen(ctx, alice, account.ID, 123, 27, true)
+	assertAppCode(t, err, "mail.external_flag_failed")
+	again, err := svc.Accounts(ctx, alice)
+	require.NoError(t, err)
+	require.Equal(t, 1, again[0].UnreadCount)
+	fake.FlagFail = false
+	result, err := svc.SetSeen(ctx, alice, account.ID, 123, 27, true)
+	require.NoError(t, err)
+	require.Equal(t, 0, result.UnreadCount)
+	require.True(t, fake.LastSeen)
+	rows, err := svc.Unified(ctx, alice)
+	require.NoError(t, err)
+	require.True(t, rows.Messages[0].Seen)
+	var persisted model.MailExternalAccount
+	require.NoError(t, workspace.db.Where("id=?", account.ID).Take(&persisted).Error)
+	require.NotContains(t, string(persisted.SnapshotCiphertext), "Private mail")
+	_, err = svc.SetSeen(ctx, alice, account.ID, 123, 27, false)
+	require.NoError(t, err)
+	require.False(t, fake.LastSeen)
+}
 func TestExternalProviderAllowlistAndEmailValidation(t *testing.T) {
 	for _, provider := range []string{"gmail", "qq", "163", "icloud", "yahoo"} {
 		host, ok := externalProviderHost(provider)

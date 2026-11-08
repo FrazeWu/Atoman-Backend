@@ -111,3 +111,32 @@ func (h *AccountHandler) externalProviders(c *gin.Context) {
 		{"id": "yahoo", "label": "Yahoo Mail", "host": "imap.mail.yahoo.com", "port": 993},
 	})
 }
+
+func (h *AccountHandler) updateExternalSeen(c *gin.Context) {
+	u, ok := h.externalUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseMailUUID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	uid, e := strconv.ParseUint(c.Param("uid"), 10, 32)
+	if e != nil || uid == 0 {
+		httpx.Error(c, apperr.BadRequest("mail.external_invalid_uid", "Invalid provider UID"))
+		return
+	}
+	var payload struct {
+		UIDValidity uint32 `json:"uid_validity" binding:"required"`
+		Seen        *bool  `json:"seen" binding:"required"`
+	}
+	if !mailJSON(c, &payload) {
+		return
+	}
+	if payload.UIDValidity == 0 || payload.Seen == nil {
+		httpx.Error(c, apperr.BadRequest("mail.external_invalid_flag", "Invalid message flag request"))
+		return
+	}
+	result, err := h.external.SetSeen(c.Request.Context(), u, id, uint32(uid), payload.UIDValidity, *payload.Seen)
+	mailResult(c, http.StatusOK, result, err)
+}

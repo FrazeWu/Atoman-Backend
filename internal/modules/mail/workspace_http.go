@@ -21,6 +21,7 @@ func (h *AccountHandler) registerWorkspace(g *gin.RouterGroup) {
 	g.DELETE("/external/accounts/:id", h.deleteExternalAccount)
 	g.GET("/external/unified", h.unifiedExternalInbox)
 	g.GET("/external/accounts/:id/messages/:uid", h.readExternalMessage)
+	g.POST("/external/accounts/:id/messages/:uid/seen", h.updateExternalSeen)
 	g.GET("/search", h.searchMail)
 	g.GET("/unread", h.unreadMail)
 	g.GET("/organize", h.mailOrganizerState)

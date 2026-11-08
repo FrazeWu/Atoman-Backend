@@ -49,6 +49,7 @@ type ExternalInboxSnapshot struct {
 type ExternalIMAPRemote interface {
 	Sync(ctx context.Context, provider, user, appPassword string) (ExternalInboxSnapshot, error)
 	ReadPlain(ctx context.Context, provider, user, appPassword string, uidValidity uint32, uid uint32) (string, error)
+	SetSeen(ctx context.Context, provider, user, appPassword string, uidValidity uint32, uid uint32, seen bool) error
 }
 
 type liveExternalIMAPRemote struct{}
@@ -260,4 +261,47 @@ func (liveExternalIMAPRemote) ReadPlain(ctx context.Context, provider, username,
 		return "", errors.New("Provider exceeded preview byte limit")
 	}
 	return externalPlainFromMIME(body), nil
+}
+
+// SetSeen changes only the Seen flag of the explicitly selected UID. UIDVALIDITY
+// is checked under the same IMAP session before any remote write is attempted.
+func (liveExternalIMAPRemote) SetSeen(ctx context.Context, provider, username, appPassword string, validity, uid uint32, seen bool) error {
+	if uid == 0 || validity == 0 {
+		return errors.New("Invalid provider UID")
+	}
+	client, closeClient, err := externalIMAPConnect(ctx, provider, username, appPassword)
+	if err != nil {
+		return err
+	}
+	defer closeClient()
+	selected, err := client.Select("INBOX", nil).Wait()
+	if err != nil || selected.UIDValidity != validity {
+		return errors.New("Provider Inbox changed; synchronize again")
+	}
+	set := imap.UIDSetNum(imap.UID(uid))
+	rows, err := client.Fetch(set, &imap.FetchOptions{UID: true, Flags: true}).Collect()
+	if err != nil || len(rows) != 1 || uint32(rows[0].UID) != uid {
+		return errors.New("Provider message is no longer available")
+	}
+	op := imap.StoreFlagsDel
+	if seen {
+		op = imap.StoreFlagsAdd
+	}
+	if _, err = client.Store(set, &imap.StoreFlags{Op: op, Flags: []imap.Flag{imap.FlagSeen}}, nil).Collect(); err != nil {
+		return errors.New("Provider rejected flag update")
+	}
+	rows, err = client.Fetch(set, &imap.FetchOptions{UID: true, Flags: true}).Collect()
+	if err != nil || len(rows) != 1 || uint32(rows[0].UID) != uid {
+		return errors.New("Cannot confirm provider flag update")
+	}
+	actual := false
+	for _, flag := range rows[0].Flags {
+		if flag == imap.FlagSeen {
+			actual = true
+		}
+	}
+	if actual != seen {
+		return errors.New("Provider flag update not confirmed")
+	}
+	return nil
 }
