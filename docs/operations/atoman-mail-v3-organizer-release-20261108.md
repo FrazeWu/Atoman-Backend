@@ -11,7 +11,7 @@ New private API endpoints:
 - DELETE /api/v1/mail/organize/labels/:id
 - POST /api/v1/mail/organize/messages
 
-The Vue interface reuses current PSheet, PButton, PInput and PDatetimePicker components. Users can create, rename, delete and filter by private labels, set Snooze or follow-up times on a mail item, clear a reminder, or restore a snoozed message. The Inbox hides conversations only when all their messages have a future snooze; after the deadline the message reappears automatically during an active client session. Selection for bulk actions excludes the hidden messages. Search and explicit label-filter views can still find these emails.
+The Vue interface reuses current PSheet, PButton, PInput and PDatetimePicker components. Users can create, rename, delete and filter by private labels, set Snooze or follow-up times on a mail item, clear a reminder, or restore a snoozed message. The Inbox hides a conversation when its latest displayed message has a future snooze; after the deadline the conversation reappears automatically during an active client session. Snoozing a non-latest message alone does not hide the whole conversation. Selection for bulk actions excludes the hidden messages. Search and explicit label-filter views can still find these emails.
 
 Caveat: this is LOCAL WEBMAIL organization. It does not move underlying Stalwart/IMAP messages and does not synchronize Snooze to other clients. Follow-up is a dashboard due-date reminder only, not a push alert from the server or automatic no-reply detection. All user-visible operations leave IMAP flags intact.
 
