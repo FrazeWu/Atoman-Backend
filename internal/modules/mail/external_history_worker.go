@@ -276,7 +276,7 @@ func (s *MailExternalHistoryService) processHistoryJob(ctx context.Context, id u
 				return s.historyStop(id, "source_content_changed", true)
 			}
 			if !exists {
-				item = model.MailExternalImportItem{ID: uuid.New(), JobID: id, UserID: job.UserID, ExternalAccountID: job.ExternalAccountID, FolderKey: job.FolderKey, UIDValidity: job.UIDValidity, SourceUID: msg.UID, MIMEHash: digest, Size: uint64(len(raw)), Status: "prepared"}
+				item = model.MailExternalImportItem{ID: uuid.New(), JobID: id, UserID: job.UserID, ExternalAccountID: job.ExternalAccountID, FolderKey: job.FolderKey, UIDValidity: job.UIDValidity, SourceUID: msg.UID, MIMEHash: digest, Size: uint64(len(raw)), FlagsBaselineKnown: true, BaselineSeen: msg.Seen, BaselineFlagged: msg.Flagged, Status: "prepared"}
 				if e = s.external.workspace.db.Create(&item).Error; e != nil {
 					return "", e
 				}
@@ -312,7 +312,7 @@ func (s *MailExternalHistoryService) processHistoryJob(ctx context.Context, id u
 			// Persist the receipt BEFORE advancing the source cursor. A DB failure
 			// preserves importing state; the next worker will fail closed.
 			e = s.external.workspace.db.Transaction(func(tx *gorm.DB) error {
-				upd := tx.Model(&model.MailExternalImportItem{}).Where("id=? AND status=?", item.ID, "importing").Updates(map[string]any{"status": "imported", "imported_email_id": importedID, "error_code": "", "updated_at": time.Now().UTC()})
+				upd := tx.Model(&model.MailExternalImportItem{}).Where("id=? AND status=?", item.ID, "importing").Updates(map[string]any{"status": "imported", "imported_email_id": importedID, "flags_baseline_known": true, "baseline_seen": msg.Seen, "baseline_flagged": msg.Flagged, "error_code": "", "updated_at": time.Now().UTC()})
 				if upd.Error != nil {
 					return upd.Error
 				}

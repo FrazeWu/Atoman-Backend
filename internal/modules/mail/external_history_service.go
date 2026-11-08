@@ -17,9 +17,10 @@ import (
 )
 
 type MailExternalHistoryService struct {
-	external *MailExternalService
-	source   ExternalHistoryRemote
-	target   ExternalHistoryTarget
+	external   *MailExternalService
+	source     ExternalHistoryRemote
+	target     ExternalHistoryTarget
+	flagReader MailFlagTargetReader
 }
 
 func NewMailExternalHistoryService(external *MailExternalService, source ExternalHistoryRemote, target ExternalHistoryTarget) *MailExternalHistoryService {
@@ -32,7 +33,11 @@ func NewMailExternalHistoryService(external *MailExternalService, source Externa
 	if target == nil && external.workspace.read != nil {
 		target = stalwartExternalHistoryTarget{read: external.workspace.read}
 	}
-	return &MailExternalHistoryService{external: external, source: source, target: target}
+	var flagReader MailFlagTargetReader
+	if external.workspace.read != nil {
+		flagReader = stalwartMailFlagReader{read: external.workspace.read}
+	}
+	return &MailExternalHistoryService{external: external, source: source, target: target, flagReader: flagReader}
 }
 
 type ExternalHistoryJobInfo struct {

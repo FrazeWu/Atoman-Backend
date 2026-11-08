@@ -26,6 +26,7 @@ func (h *AccountHandler) registerWorkspace(g *gin.RouterGroup) {
 	g.GET("/external/accounts/:id/imports", h.externalHistoryList)
 	g.POST("/external/accounts/:id/imports", h.externalHistoryStart)
 	g.POST("/external/accounts/:id/imports/:job_id/action", h.externalHistoryAction)
+	g.GET("/external/accounts/:id/imports/:job_id/flag-preview", h.externalFlagPreview)
 	g.GET("/external/accounts/:id/folders", h.listExternalFolders)
 	g.GET("/external/accounts/:id/folder-messages", h.browseExternalFolder)
 	g.GET("/external/accounts/:id/messages/:uid", h.readExternalMessage)

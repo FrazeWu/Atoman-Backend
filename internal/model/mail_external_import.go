@@ -34,20 +34,23 @@ func (MailExternalImportJob) TableName() string { return "mail_external_import_j
 // never sent again without a manually reviewed reconciliation. Message-ID is
 // not treated as an identity; source folder+UIDVALIDITY+UID is authoritative.
 type MailExternalImportItem struct {
-	ID                uuid.UUID `gorm:"type:uuid;primaryKey"`
-	JobID             uuid.UUID `gorm:"type:uuid;not null;index:idx_mail_ext_item_job"`
-	UserID            uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mail_ext_item_identity"`
-	ExternalAccountID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mail_ext_item_identity"`
-	FolderKey         string    `gorm:"type:char(64);not null;uniqueIndex:idx_mail_ext_item_identity"`
-	UIDValidity       uint32    `gorm:"not null;uniqueIndex:idx_mail_ext_item_identity"`
-	SourceUID         uint32    `gorm:"not null;uniqueIndex:idx_mail_ext_item_identity"`
-	MIMEHash          string    `gorm:"type:char(64)"`
-	Size              uint64
-	Status            string `gorm:"type:varchar(24);not null"`
-	ImportedEmailID   string `gorm:"type:varchar(512)"`
-	ErrorCode         string `gorm:"type:varchar(48)"`
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                 uuid.UUID `gorm:"type:uuid;primaryKey"`
+	JobID              uuid.UUID `gorm:"type:uuid;not null;index:idx_mail_ext_item_job"`
+	UserID             uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mail_ext_item_identity"`
+	ExternalAccountID  uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_mail_ext_item_identity"`
+	FolderKey          string    `gorm:"type:char(64);not null;uniqueIndex:idx_mail_ext_item_identity"`
+	UIDValidity        uint32    `gorm:"not null;uniqueIndex:idx_mail_ext_item_identity"`
+	SourceUID          uint32    `gorm:"not null;uniqueIndex:idx_mail_ext_item_identity"`
+	MIMEHash           string    `gorm:"type:char(64)"`
+	Size               uint64
+	FlagsBaselineKnown bool   `gorm:"not null;default:false"`
+	BaselineSeen       bool   `gorm:"not null;default:false"`
+	BaselineFlagged    bool   `gorm:"not null;default:false"`
+	Status             string `gorm:"type:varchar(24);not null"`
+	ImportedEmailID    string `gorm:"type:varchar(512)"`
+	ErrorCode          string `gorm:"type:varchar(48)"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 func (MailExternalImportItem) TableName() string { return "mail_external_import_items" }

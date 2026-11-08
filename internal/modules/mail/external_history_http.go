@@ -5,6 +5,7 @@ import (
 	"atoman/internal/platform/httpx"
 	"github.com/gin-gonic/gin"
 	"net/http"
+	"strconv"
 )
 
 func (h *AccountHandler) externalHistoryService(c *gin.Context) (*MailExternalHistoryService, bool) {
@@ -82,4 +83,36 @@ func (h *AccountHandler) externalHistoryAction(c *gin.Context) {
 	}
 	job, err := service.Action(c.Request.Context(), user, id, jobID, body.Action)
 	mailResult(c, http.StatusOK, job, err)
+}
+
+// externalFlagPreview compares the owner-approved source folder and its
+// imported native copies. The endpoint is intentionally read-only.
+func (h *AccountHandler) externalFlagPreview(c *gin.Context) {
+	service, ok := h.externalHistoryService(c)
+	if !ok {
+		return
+	}
+	user, ok := h.workspaceUser(c)
+	if !ok {
+		return
+	}
+	accountID, ok := parseMailUUID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	jobID, ok := parseMailUUID(c, c.Param("job_id"))
+	if !ok {
+		return
+	}
+	position := 0
+	if raw := c.Query("position"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > externalFlagPreviewMaxPosition {
+			httpx.Error(c, apperr.BadRequest("mail.external_flag_position", "Invalid preview position"))
+			return
+		}
+		position = n
+	}
+	result, err := service.FlagPreview(c.Request.Context(), user, accountID, jobID, position)
+	mailResult(c, http.StatusOK, result, err)
 }
