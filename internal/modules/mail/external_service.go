@@ -325,9 +325,9 @@ func (s *MailExternalService) Delete(ctx context.Context, u authctx.CurrentUser,
 			return apperr.Conflict("mail.external_flag_sync_active", "Pause two-way flag synchronization before disconnecting")
 		}
 	}
-	if s.workspace.db.Migrator().HasTable(&model.MailExternalImportItem{}) && s.workspace.db.Migrator().HasColumn(&model.MailExternalImportItem{}, "flag_mutation_id") {
+	if s.workspace.db.Migrator().HasTable(&model.MailExternalImportItem{}) && s.workspace.db.Migrator().HasColumn(&model.MailExternalImportItem{}, "flag_mutation_id") && s.workspace.db.Migrator().HasColumn(&model.MailExternalImportItem{}, "location_mutation_id") {
 		var flagged int64
-		err := s.workspace.db.WithContext(ctx).Model(&model.MailExternalImportItem{}).Where("user_id=? AND external_account_id=? AND flag_mutation_id IS NOT NULL", u.ID, id).Count(&flagged).Error
+		err := s.workspace.db.WithContext(ctx).Model(&model.MailExternalImportItem{}).Where("user_id=? AND external_account_id=? AND (flag_mutation_id IS NOT NULL OR location_mutation_id IS NOT NULL)", u.ID, id).Count(&flagged).Error
 		if err != nil {
 			return apperr.Internal(err)
 		}

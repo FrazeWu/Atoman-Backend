@@ -96,7 +96,7 @@ func (s *MailExternalHistoryService) processFlagJob(ctx context.Context, u authc
 		return s.disableFlagJob(ctx, job, "owner_unavailable")
 	}
 	var pending int64
-	if err := db.Model(&model.MailExternalImportItem{}).Where("job_id=? AND user_id=? AND flag_mutation_id IS NOT NULL", job.ID, u.ID).Count(&pending).Error; err != nil {
+	if err := db.Model(&model.MailExternalImportItem{}).Where("job_id=? AND user_id=? AND (flag_mutation_id IS NOT NULL OR location_mutation_id IS NOT NULL)", job.ID, u.ID).Count(&pending).Error; err != nil {
 		return err
 	}
 	if pending != 0 {
@@ -129,7 +129,16 @@ func (s *MailExternalHistoryService) processFlagJob(ctx context.Context, u authc
 			report.Skipped++
 			continue
 		}
-		if item.FlagMutationID != nil {
+		var cases []model.MailExternalLocationCase
+		if e := db.Where("user_id=? AND import_item_id=? AND status IN ?", u.ID, item.ID, []string{"kept", "trashed", "moved_resolved", "restored", "action_needs_review"}).Limit(1).Find(&cases).Error; e != nil {
+			return e
+		}
+		if len(cases) > 0 {
+			report.Skipped++
+			continue
+		}
+
+		if item.FlagMutationID != nil || item.LocationMutationID != nil {
 			report.NeedReview++
 			return s.disableFlagJob(ctx, job, "flag_receipt_pending")
 		}

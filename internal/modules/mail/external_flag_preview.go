@@ -133,7 +133,7 @@ func (s *MailExternalHistoryService) FlagPreview(ctx context.Context, user authc
 	// lookup is read-only and UIDVALIDITY checked by the underlying IMAP adapter.
 	for _, row := range receipts {
 		item := ExternalFlagPreviewItem{SourceUID: row.SourceUID, NativeEmailID: row.ImportedEmailID, Status: "ready"}
-		if row.FlagMutationID != nil {
+		if row.FlagMutationID != nil || row.LocationMutationID != nil {
 			item.Status = "sync_needs_review"
 			out.Items = append(out.Items, item)
 			continue

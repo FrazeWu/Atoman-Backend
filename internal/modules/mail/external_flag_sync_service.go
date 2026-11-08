@@ -32,7 +32,7 @@ func (s *MailExternalHistoryService) flagSyncReady() error {
 	if !s.flagsAllowed || s.flagSourceWriter == nil || s.flagTargetWriter == nil || s.flagReader == nil {
 		return apperr.New(503, "mail.external_flag_sync_disabled", "Two-way flag changes are disabled", nil)
 	}
-	if !s.external.workspace.db.Migrator().HasColumn(&model.MailExternalImportJob{}, "flag_sync_enabled") || !s.external.workspace.db.Migrator().HasColumn(&model.MailExternalImportItem{}, "flag_mutation_id") || !s.external.workspace.db.Migrator().HasTable(&model.MailExternalFlagAttempt{}) {
+	if !s.external.workspace.db.Migrator().HasColumn(&model.MailExternalImportJob{}, "flag_sync_enabled") || !s.external.workspace.db.Migrator().HasColumn(&model.MailExternalImportItem{}, "flag_mutation_id") || !s.external.workspace.db.Migrator().HasColumn(&model.MailExternalImportItem{}, "location_mutation_id") || !s.external.workspace.db.Migrator().HasTable(&model.MailExternalFlagAttempt{}) {
 		return apperr.New(503, "mail.external_flag_migration_required", "Flag receipt migration is required", nil)
 	}
 	return nil
@@ -64,7 +64,7 @@ func (s *MailExternalHistoryService) ConfigureFlagSync(ctx context.Context, u au
 	}
 	if enabled {
 		var pending int64
-		if err = s.external.workspace.db.WithContext(ctx).Model(&model.MailExternalImportItem{}).Where("job_id=? AND user_id=? AND flag_mutation_id IS NOT NULL", jobID, u.ID).Count(&pending).Error; err != nil {
+		if err = s.external.workspace.db.WithContext(ctx).Model(&model.MailExternalImportItem{}).Where("job_id=? AND user_id=? AND (flag_mutation_id IS NOT NULL OR location_mutation_id IS NOT NULL)", jobID, u.ID).Count(&pending).Error; err != nil {
 			return ExternalHistoryJobInfo{}, apperr.Internal(err)
 		}
 		if pending != 0 {
@@ -139,7 +139,7 @@ func (s *MailExternalHistoryService) prepareFlagAttempt(ctx context.Context, job
 	err := s.external.workspace.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// An in-progress receipt is a durable per-item lease with no expiry: a
 		// restart can NEVER reinterpret it as a new permission to retry.
-		current := tx.Model(&model.MailExternalImportItem{}).Where("id=? AND job_id=? AND user_id=? AND status=? AND flags_baseline_known=? AND flag_mutation_id IS NULL", item.ID, job.ID, job.UserID, "imported", true)
+		current := tx.Model(&model.MailExternalImportItem{}).Where("id=? AND job_id=? AND user_id=? AND status=? AND flags_baseline_known=? AND flag_mutation_id IS NULL AND location_mutation_id IS NULL", item.ID, job.ID, job.UserID, "imported", true)
 		if flag == "seen" {
 			current = current.Where("baseline_seen=?", baseline)
 		} else {

@@ -50,6 +50,7 @@ type MailExternalImportItem struct {
 	Size               uint64
 	FlagsBaselineKnown bool       `gorm:"not null;default:false"`
 	FlagMutationID     *uuid.UUID `gorm:"type:uuid;index:idx_mail_import_pending_flag"`
+	LocationMutationID *uuid.UUID `gorm:"type:uuid;index:idx_mail_import_pending_location"`
 	BaselineSeen       bool       `gorm:"not null;default:false"`
 	BaselineFlagged    bool       `gorm:"not null;default:false"`
 	Status             string     `gorm:"type:varchar(24);not null"`
