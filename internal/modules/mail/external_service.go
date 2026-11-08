@@ -368,7 +368,7 @@ func (s *MailExternalService) Read(ctx context.Context, u authctx.CurrentUser, i
 	if err != nil {
 		return "", err
 	}
-	plaintext, err := s.remote.ReadPlain(ctx, row.Provider, creds.Address, creds.AppPassword, validity, uid)
+	plaintext, err := s.remote.ReadPlain(ctx, row.Provider, creds.Address, creds.AppPassword, "INBOX", validity, uid)
 	if err != nil {
 		return "", apperr.New(502, "mail.external_read_failed", "Cannot read provider message", nil)
 	}
@@ -409,7 +409,7 @@ func (s *MailExternalService) SetSeen(ctx context.Context, u authctx.CurrentUser
 	if err != nil {
 		return MailExternalAccountInfo{}, err
 	}
-	if err := s.remote.SetSeen(ctx, row.Provider, creds.Address, creds.AppPassword, validity, uid, seen); err != nil {
+	if err := s.remote.SetSeen(ctx, row.Provider, creds.Address, creds.AppPassword, "INBOX", validity, uid, seen); err != nil {
 		return MailExternalAccountInfo{}, apperr.New(502, "mail.external_flag_failed", "Provider did not confirm the change; refresh mailbox", nil)
 	}
 	snap.Messages[index].Seen = seen
@@ -434,4 +434,177 @@ func (s *MailExternalService) SetSeen(ctx context.Context, u authctx.CurrentUser
 	row.SnapshotCiphertext = ciphertext
 	row.Revision++
 	return s.info(row)
+}
+
+// Folder access always resolves the source account from the logged-in user.
+// Provider hostnames and credentials never come from browse requests.
+func (s *MailExternalService) Folders(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID) ([]ExternalFolderInfo, error) {
+	if err := s.access(ctx, u); err != nil {
+		return nil, err
+	}
+	row, err := s.ownRow(ctx, u, accountID)
+	if err != nil {
+		return nil, err
+	}
+	creds, err := s.secrets(row)
+	if err != nil {
+		return nil, err
+	}
+	folders, err := s.remote.ListFolders(ctx, row.Provider, creds.Address, creds.AppPassword)
+	if err != nil {
+		return nil, apperr.New(502, "mail.external_folders_failed", "Cannot list provider folders", nil)
+	}
+	return folders, nil
+}
+func (s *MailExternalService) BrowseFolder(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID, folder string, position uint32) (ExternalFolderPage, error) {
+	if err := s.access(ctx, u); err != nil {
+		return ExternalFolderPage{}, err
+	}
+	if !validExternalFolder(folder) || position > 100000 {
+		return ExternalFolderPage{}, apperr.BadRequest("mail.external_invalid_folder", "Invalid folder")
+	}
+	row, err := s.ownRow(ctx, u, accountID)
+	if err != nil {
+		return ExternalFolderPage{}, err
+	}
+	creds, err := s.secrets(row)
+	if err != nil {
+		return ExternalFolderPage{}, err
+	}
+	page, err := s.remote.BrowseFolder(ctx, row.Provider, creds.Address, creds.AppPassword, folder, position)
+	if err != nil {
+		return ExternalFolderPage{}, apperr.New(502, "mail.external_browse_failed", "Cannot browse provider folder", nil)
+	}
+	return page, nil
+}
+func (s *MailExternalService) ReadFolder(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID, folder string, uid, validity uint32) (string, error) {
+	if err := s.access(ctx, u); err != nil {
+		return "", err
+	}
+	if !validExternalFolder(folder) || uid == 0 || validity == 0 {
+		return "", apperr.BadRequest("mail.external_invalid_folder", "Invalid folder or message")
+	}
+	row, err := s.ownRow(ctx, u, accountID)
+	if err != nil {
+		return "", err
+	}
+	creds, err := s.secrets(row)
+	if err != nil {
+		return "", err
+	}
+	text, err := s.remote.ReadPlain(ctx, row.Provider, creds.Address, creds.AppPassword, folder, validity, uid)
+	if err != nil {
+		return "", apperr.New(502, "mail.external_read_failed", "Cannot read provider message", nil)
+	}
+	return text, nil
+}
+
+// A folder-specific write cannot silently become an INBOX operation. Live
+// provider UIDVALIDITY and message UID are checked again on the write connection.
+func (s *MailExternalService) SetFolderSeen(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID, folder string, uid, validity uint32, seen bool) error {
+	if err := s.access(ctx, u); err != nil {
+		return err
+	}
+	if !validExternalFolder(folder) || uid == 0 || validity == 0 {
+		return apperr.BadRequest("mail.external_invalid_folder", "Invalid folder or message")
+	}
+	row, err := s.ownRow(ctx, u, accountID)
+	if err != nil {
+		return err
+	}
+	// Reuse the revision-protected cache update when this is a cached Inbox UID.
+	if strings.EqualFold(folder, "INBOX") {
+		snap, e := s.snapshot(row)
+		if e != nil {
+			return e
+		}
+		if snap.UIDValidity == validity {
+			for _, m := range snap.Messages {
+				if m.UID == uid {
+					_, e = s.SetSeen(ctx, u, accountID, uid, validity, seen)
+					return e
+				}
+			}
+		}
+	}
+	creds, err := s.secrets(row)
+	if err != nil {
+		return err
+	}
+	if err := s.remote.SetSeen(ctx, row.Provider, creds.Address, creds.AppPassword, folder, validity, uid, seen); err != nil {
+		return apperr.New(502, "mail.external_flag_failed", "Provider did not confirm the change; refresh mailbox", nil)
+	}
+	return nil
+}
+
+type ExternalMoveReceipt struct {
+	Moved              bool `json:"moved"`
+	InboxCacheUpdated  bool `json:"inbox_cache_updated"`
+	RefreshRecommended bool `json:"refresh_recommended"`
+}
+
+// A confirmed remote MOVE is never presented as failed just because the local
+// Inbox preview cache has a concurrent revision. Client can refresh safely.
+func (s *MailExternalService) MoveFolderMessage(ctx context.Context, u authctx.CurrentUser, accountID uuid.UUID, source, target string, uid, validity uint32) (ExternalMoveReceipt, error) {
+	if err := s.access(ctx, u); err != nil {
+		return ExternalMoveReceipt{}, err
+	}
+	if !validExternalFolder(source) || !validExternalFolder(target) || source == target || uid == 0 || validity == 0 {
+		return ExternalMoveReceipt{}, apperr.BadRequest("mail.external_invalid_move", "Invalid source or destination")
+	}
+	row, err := s.ownRow(ctx, u, accountID)
+	if err != nil {
+		return ExternalMoveReceipt{}, err
+	}
+	creds, err := s.secrets(row)
+	if err != nil {
+		return ExternalMoveReceipt{}, err
+	}
+	if err = s.remote.Move(ctx, row.Provider, creds.Address, creds.AppPassword, source, target, validity, uid); err != nil {
+		return ExternalMoveReceipt{}, apperr.New(502, "mail.external_move_failed", "Provider did not confirm safe MOVE; refresh folders", nil)
+	}
+	receipt := ExternalMoveReceipt{Moved: true}
+	if !strings.EqualFold(source, "INBOX") {
+		return receipt, nil
+	}
+	snap, err := s.snapshot(row)
+	if err != nil {
+		receipt.RefreshRecommended = true
+		return receipt, nil
+	}
+	if snap.UIDValidity != validity {
+		receipt.RefreshRecommended = true
+		return receipt, nil
+	}
+	index := -1
+	for i, m := range snap.Messages {
+		if m.UID == uid {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return receipt, nil
+	}
+	snap.Messages = append(snap.Messages[:index], snap.Messages[index+1:]...)
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		receipt.RefreshRecommended = true
+		return receipt, nil
+	}
+	encrypted, err := s.workspace.vault.Seal(u.ID, accountID, raw)
+	if err != nil {
+		receipt.RefreshRecommended = true
+		return receipt, nil
+	}
+	now := time.Now().UTC()
+	updated := s.workspace.db.WithContext(ctx).Model(&model.MailExternalAccount{}).
+		Where("id=? AND user_id=? AND revision=?", accountID, u.ID, row.Revision).
+		Updates(map[string]any{"snapshot_ciphertext": encrypted, "revision": row.Revision + 1, "updated_at": now})
+	if updated.Error != nil || updated.RowsAffected != 1 {
+		receipt.RefreshRecommended = true
+		return receipt, nil
+	}
+	receipt.InboxCacheUpdated = true
+	return receipt, nil
 }
