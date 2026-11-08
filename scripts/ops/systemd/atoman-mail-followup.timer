@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Atoman mail follow-up reminders every minute
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=1min
+RandomizedDelaySec=15s
+Unit=atoman-mail-followup.service
+
+[Install]
+WantedBy=timers.target

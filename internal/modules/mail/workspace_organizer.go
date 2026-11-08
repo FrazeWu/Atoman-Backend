@@ -387,6 +387,26 @@ func (s *MailWorkspaceService) MutateOrganizer(ctx context.Context, user authctx
 				return e
 			}
 		}
+		// Index only the selected due timestamp for off-browser delivery.
+		// This mutation and its schedule are committed atomically, including
+		// reschedules and cancellations, before any worker can see them.
+		if input.Action == "follow_up" && payload.FollowUpAt != nil {
+			currentRevision := row.Revision
+			if exists {
+				currentRevision++
+			}
+			schedule := model.MailFollowUpSchedule{RecordID: row.ID, UserID: user.ID, DueAt: followUpDBTime(*payload.FollowUpAt), OrganizerRevision: currentRevision, CreatedAt: now, UpdatedAt: now}
+			e := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "record_id"}}, DoUpdates: clause.Assignments(map[string]any{
+				"due_at": schedule.DueAt, "organizer_revision": schedule.OrganizerRevision, "delivered_at": nil, "updated_at": now,
+			})}).Create(&schedule).Error
+			if e != nil {
+				return e
+			}
+		} else if input.Action == "clear_follow_up" {
+			if e := tx.Where("record_id=? AND user_id=?", row.ID, user.ID).Delete(&model.MailFollowUpSchedule{}).Error; e != nil {
+				return e
+			}
+		}
 		updated = OrganizerRecordInfo{MessageID: input.MessageID, SnoozeUntil: payload.SnoozeUntil,
 			FollowUpAt: payload.FollowUpAt, LabelIDs: payload.LabelIDs, Revision: row.Revision}
 		if exists {

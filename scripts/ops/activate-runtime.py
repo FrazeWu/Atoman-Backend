@@ -115,7 +115,7 @@ def main():
     # new runtime already ships one. Older two-binary releases stay supported.
     if a.kind == 'backend':
         mail_components = ['mail_outbox_worker', 'mail_maintenance_worker',
-                           'mail_admin', 'mail_external_sync_worker']
+                           'mail_admin', 'mail_external_sync_worker', 'mail_followup_worker']
         names += [name for name in mail_components if (a.binary_directory/name).is_file()]
     hashes={name:hashlib.sha256((a.binary_directory/name).read_bytes()).hexdigest() for name in names}
     release=Path('/opt/atoman')/a.kind/'releases'/(a.revision[:12]+'-'+hashes[names[0]][:12])
