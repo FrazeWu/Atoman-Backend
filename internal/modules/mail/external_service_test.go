@@ -13,10 +13,17 @@ import (
 )
 
 type fakeExternalIMAP struct {
-	SyncCalls int
-	ReadCalls int
-	Fail      bool
-	Body      string
+	SyncCalls      int
+	ReadCalls      int
+	FlagCalls      int
+	FlagFail       bool
+	MoveCalls      int
+	MoveFail       bool
+	LastMoveSource string
+	LastMoveTarget string
+	LastSeen       bool
+	Fail           bool
+	Body           string
 }
 
 func (f *fakeExternalIMAP) Sync(ctx context.Context, provider, user, pass string) (ExternalInboxSnapshot, error) {
@@ -32,14 +39,57 @@ func (f *fakeExternalIMAP) Sync(ctx context.Context, provider, user, pass string
 		{UID: 122, Subject: "Other mail", From: "second@example.org", Date: time.Now().Add(-2 * time.Hour), Seen: true},
 	}, SyncedAt: time.Now().UTC()}, nil
 }
-func (f *fakeExternalIMAP) ReadPlain(ctx context.Context, provider, user, pass string, validity, uid uint32) (string, error) {
+func (f *fakeExternalIMAP) ReadPlain(ctx context.Context, provider, user, pass, folder string, validity, uid uint32) (string, error) {
 	f.ReadCalls++
-	if pass != "own-app-password" || validity != 27 || uid != 123 {
+	if pass != "own-app-password" || validity != 27 || uid != 123 || folder != "INBOX" {
 		return "", context.Canceled
 	}
 	return "external private plain text", nil
 }
 
+func (f *fakeExternalIMAP) SetSeen(ctx context.Context, provider, user, pass, folder string, validity, uid uint32, seen bool) error {
+	f.FlagCalls++
+	if f.FlagFail || pass != "own-app-password" || !((folder == "INBOX" && validity == 27 && uid == 123) || (folder == "Archive/2026" && validity == 72 && uid == 321)) {
+		return context.DeadlineExceeded
+	}
+	f.LastSeen = seen
+	return nil
+}
+func TestExternalSeenWriteScopedAndEncrypted(t *testing.T) {
+	workspace, _, _, alice, bob := workspaceFixture(t, nil)
+	fake := &fakeExternalIMAP{}
+	svc := NewMailExternalService(workspace, fake)
+	ctx := context.Background()
+	account, err := svc.Connect(ctx, alice, ExternalConnectInput{Provider: "gmail", Address: "alice@gmail.com", AppPassword: "own-app-password"})
+	require.NoError(t, err)
+	_, err = svc.SetSeen(ctx, bob, account.ID, 123, 27, true)
+	assertAppCode(t, err, "mail.external_account_missing")
+	_, err = svc.SetSeen(ctx, alice, account.ID, 123, 26, true)
+	assertAppCode(t, err, "mail.external_stale")
+	_, err = svc.SetSeen(ctx, alice, account.ID, 999, 27, true)
+	assertAppCode(t, err, "mail.external_message_missing")
+	require.Equal(t, 0, fake.FlagCalls)
+	fake.FlagFail = true
+	_, err = svc.SetSeen(ctx, alice, account.ID, 123, 27, true)
+	assertAppCode(t, err, "mail.external_flag_failed")
+	again, err := svc.Accounts(ctx, alice)
+	require.NoError(t, err)
+	require.Equal(t, 1, again[0].UnreadCount)
+	fake.FlagFail = false
+	result, err := svc.SetSeen(ctx, alice, account.ID, 123, 27, true)
+	require.NoError(t, err)
+	require.Equal(t, 0, result.UnreadCount)
+	require.True(t, fake.LastSeen)
+	rows, err := svc.Unified(ctx, alice)
+	require.NoError(t, err)
+	require.True(t, rows.Messages[0].Seen)
+	var persisted model.MailExternalAccount
+	require.NoError(t, workspace.db.Where("id=?", account.ID).Take(&persisted).Error)
+	require.NotContains(t, string(persisted.SnapshotCiphertext), "Private mail")
+	_, err = svc.SetSeen(ctx, alice, account.ID, 123, 27, false)
+	require.NoError(t, err)
+	require.False(t, fake.LastSeen)
+}
 func TestExternalProviderAllowlistAndEmailValidation(t *testing.T) {
 	for _, provider := range []string{"gmail", "qq", "163", "icloud", "yahoo"} {
 		host, ok := externalProviderHost(provider)
@@ -138,4 +188,67 @@ func TestExternalMIMEPlaintextNeverRendersHTML(t *testing.T) {
 	require.NotContains(t, externalPlainFromMIME([]byte(plain)), "<script>")
 	multipart := "MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=x\r\n\r\n--x\r\nContent-Type: text/plain\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nSafe=20plain\r\n--x\r\nContent-Type: text/html\r\n\r\n<script>alert(1)</script>\r\n--x--\r\n"
 	require.Equal(t, "Safe plain", externalPlainFromMIME([]byte(multipart)))
+}
+
+func (f *fakeExternalIMAP) ListFolders(ctx context.Context, provider, user, pass string) ([]ExternalFolderInfo, error) {
+	if pass != "own-app-password" {
+		return nil, context.Canceled
+	}
+	return []ExternalFolderInfo{{Name: "INBOX", Role: "inbox"}, {Name: "Archive/2026", Role: "archive"}}, nil
+}
+func (f *fakeExternalIMAP) BrowseFolder(ctx context.Context, provider, user, pass, folder string, position uint32) (ExternalFolderPage, error) {
+	if pass != "own-app-password" || folder != "Archive/2026" {
+		return ExternalFolderPage{}, context.Canceled
+	}
+	if position != 0 {
+		return ExternalFolderPage{Folder: folder, UIDValidity: 72, Messages: []ExternalMessageInfo{}, Total: 1}, nil
+	}
+	return ExternalFolderPage{Folder: folder, UIDValidity: 72, Messages: []ExternalMessageInfo{{UID: 321, Subject: "Older record", Seen: false}}, Total: 1, NextPosition: 1}, nil
+}
+func TestExternalMultiFolderAccessIsScoped(t *testing.T) {
+	workspace, _, _, alice, bob := workspaceFixture(t, nil)
+	fake := &fakeExternalIMAP{}
+	svc := NewMailExternalService(workspace, fake)
+	ctx := context.Background()
+	acc, err := svc.Connect(ctx, alice, ExternalConnectInput{Provider: "gmail", Address: "alice@gmail.com", AppPassword: "own-app-password"})
+	require.NoError(t, err)
+	_, err = svc.Folders(ctx, bob, acc.ID)
+	assertAppCode(t, err, "mail.external_account_missing")
+	_, err = svc.BrowseFolder(ctx, bob, acc.ID, "Archive/2026", 0)
+	assertAppCode(t, err, "mail.external_account_missing")
+	_, err = svc.ReadFolder(ctx, bob, acc.ID, "Archive/2026", 321, 72)
+	assertAppCode(t, err, "mail.external_account_missing")
+	err = svc.SetFolderSeen(ctx, bob, acc.ID, "Archive/2026", 321, 72, true)
+	assertAppCode(t, err, "mail.external_account_missing")
+	folders, err := svc.Folders(ctx, alice, acc.ID)
+	require.NoError(t, err)
+	require.Len(t, folders, 2)
+	page, err := svc.BrowseFolder(ctx, alice, acc.ID, "Archive/2026", 0)
+	require.NoError(t, err)
+	require.Equal(t, uint32(72), page.UIDValidity)
+	require.Equal(t, uint32(321), page.Messages[0].UID)
+	_, err = svc.BrowseFolder(ctx, alice, acc.ID, "Archive/2026\r\nINBOX", 0)
+	assertAppCode(t, err, "mail.external_invalid_folder")
+	_, err = svc.ReadFolder(ctx, alice, acc.ID, "", 321, 72)
+	assertAppCode(t, err, "mail.external_invalid_folder")
+	err = svc.SetFolderSeen(ctx, alice, acc.ID, "Archive/2026", 321, 72, true)
+	// The remote archived message changes while Inbox metadata stays untouched.
+	require.NoError(t, err)
+	require.True(t, fake.LastSeen)
+	// A different UIDVALIDITY must never be treated as a different folder.
+	err = svc.SetFolderSeen(ctx, alice, acc.ID, "Archive/2026", 321, 71, false)
+	assertAppCode(t, err, "mail.external_flag_failed")
+	inbox, err := svc.Unified(ctx, alice)
+	require.NoError(t, err)
+	require.False(t, inbox.Messages[0].Seen)
+}
+
+func (f *fakeExternalIMAP) Move(ctx context.Context, provider, user, pass, source, target string, validity, uid uint32) error {
+	f.MoveCalls++
+	if f.MoveFail || pass != "own-app-password" || source != "INBOX" || target != "Archive/2026" || validity != 27 || uid != 123 {
+		return context.Canceled
+	}
+	f.LastMoveSource = source
+	f.LastMoveTarget = target
+	return nil
 }

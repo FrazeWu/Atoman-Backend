@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"atoman/internal/model"
 	"errors"
 	"os"
 
@@ -44,5 +45,19 @@ func NewConfiguredMailOutbox(db *gorm.DB) (*MailOutboxService, error) {
 		return nil, errors.New("Mail sending database migration is missing")
 	}
 	transport := NewStalwartOutboxSubmitter(db, jmap, keyVault)
-	return NewMailOutboxService(db, privateStore, snapshotVault, transport, true, MailActivationGates{ProvisioningAllowed: true, R2ReadWriteVerified: true, TrueNASRestoreVerified: true}), nil
+	externalEnabled := os.Getenv("ATOMAN_MAIL_EXTERNAL_SMTP_ENABLED") == "1"
+	if externalEnabled {
+		if !db.Migrator().HasTable(&model.MailExternalAccount{}) {
+			return nil, errors.New("External SMTP account migration required")
+		}
+		transport.EnableExternalSMTP(snapshotVault, liveExternalSMTPRemote{})
+	}
+	outbox := NewMailOutboxService(db, privateStore, snapshotVault, transport, true, MailActivationGates{ProvisioningAllowed: true, R2ReadWriteVerified: true, TrueNASRestoreVerified: true})
+	outbox.EnableExternalSMTP(externalEnabled)
+	aliasEnabled := os.Getenv("ATOMAN_MAIL_ALIASES_ENABLED") == "1"
+	if aliasEnabled && !db.Migrator().HasTable(&model.MailAlias{}) {
+		return nil, errors.New("Mail aliases migration required")
+	}
+	outbox.EnableMailAliases(aliasEnabled)
+	return outbox, nil
 }

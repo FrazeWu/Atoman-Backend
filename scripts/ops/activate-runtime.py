@@ -110,6 +110,13 @@ def main():
     user='atoman' if a.kind=='backend' else 'atoman-mirror'
     services=['atoman-backend','atoman-music-import-worker'] if a.kind=='backend' else ['atoman-mirror']
     names=['start_server','music_import_worker'] if a.kind=='backend' else ['hubproxy']
+    # Mail workers are part of the immutable backend release when present in
+    # the staged binary directory. Never retain a stale mail worker when the
+    # new runtime already ships one. Older two-binary releases stay supported.
+    if a.kind == 'backend':
+        mail_components = ['mail_outbox_worker', 'mail_maintenance_worker',
+                           'mail_admin', 'mail_external_sync_worker', 'mail_followup_worker']
+        names += [name for name in mail_components if (a.binary_directory/name).is_file()]
     hashes={name:hashlib.sha256((a.binary_directory/name).read_bytes()).hexdigest() for name in names}
     release=Path('/opt/atoman')/a.kind/'releases'/(a.revision[:12]+'-'+hashes[names[0]][:12])
     if a.dry_run:

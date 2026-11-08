@@ -23,6 +23,7 @@ type AccountHandler struct {
 	workspace *MailWorkspaceService
 	external  *MailExternalService
 	provision *MailProvisionService
+	aliases   *MailAliasService
 }
 
 // RegisterAccountRoutes adds site-session-authenticated invitation and
@@ -60,6 +61,9 @@ func RegisterAccountRoutesWithOutbox(group *gin.RouterGroup, service *AccountSer
 
 func registerAccountRoutes(group *gin.RouterGroup, service *AccountService, read *MailReadService, outbox *MailOutboxService, provision *MailProvisionService) {
 	h := &AccountHandler{service: service, read: read, outbox: outbox, workspace: NewMailWorkspaceService(read, outbox), provision: provision}
+	if service != nil {
+		h.aliases, _ = NewConfiguredMailAliases(service.db)
+	}
 	if os.Getenv("ATOMAN_MAIL_EXTERNAL_IMAP_ENABLED") == "1" {
 		h.external = NewMailExternalService(h.workspace, nil)
 	}
@@ -77,6 +81,7 @@ func registerAccountRoutes(group *gin.RouterGroup, service *AccountService, read
 	group.POST("/activate", h.activate)
 	group.POST("/admin/invites", h.issueInvite)
 	group.POST("/admin/reserve-self", h.reserveSelf)
+	group.GET("/senders", h.mailSenders)
 	group.POST("/outbox", h.queueMail)
 	group.GET("/outbox/:id", h.outboxStatus)
 	group.POST("/outbox/:id/cancel", h.cancelMail)

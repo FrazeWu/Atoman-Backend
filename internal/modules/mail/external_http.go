@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 func (h *AccountHandler) externalUser(c *gin.Context) (authctx.CurrentUser, bool) {
@@ -89,10 +90,17 @@ func (h *AccountHandler) readExternalMessage(c *gin.Context) {
 	}
 	validity, e := strconv.ParseUint(c.Query("uid_validity"), 10, 32)
 	if e != nil || validity == 0 {
-		httpx.Error(c, apperr.BadRequest("mail.external_invalid_uid_validity", "Invalid provider Inbox UID validity"))
+		httpx.Error(c, apperr.BadRequest("mail.external_invalid_uid_validity", "Invalid provider folder UID validity"))
 		return
 	}
-	text, err := h.external.Read(c.Request.Context(), u, id, uint32(uid), uint32(validity))
+	var text string
+	var err error
+	folder := strings.TrimSpace(c.Query("folder"))
+	if folder != "" {
+		text, err = h.external.ReadFolder(c.Request.Context(), u, id, folder, uint32(uid), uint32(validity))
+	} else {
+		text, err = h.external.Read(c.Request.Context(), u, id, uint32(uid), uint32(validity))
+	}
 	mailResult(c, http.StatusOK, gin.H{"text": text}, err)
 }
 
@@ -110,4 +118,95 @@ func (h *AccountHandler) externalProviders(c *gin.Context) {
 		{"id": "icloud", "label": "iCloud 邮箱", "host": "imap.mail.me.com", "port": 993},
 		{"id": "yahoo", "label": "Yahoo Mail", "host": "imap.mail.yahoo.com", "port": 993},
 	})
+}
+
+func (h *AccountHandler) updateExternalSeen(c *gin.Context) {
+	u, ok := h.externalUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseMailUUID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	uid, e := strconv.ParseUint(c.Param("uid"), 10, 32)
+	if e != nil || uid == 0 {
+		httpx.Error(c, apperr.BadRequest("mail.external_invalid_uid", "Invalid provider UID"))
+		return
+	}
+	var payload struct {
+		UIDValidity uint32 `json:"uid_validity" binding:"required"`
+		Folder      string `json:"folder,omitempty"`
+		Seen        *bool  `json:"seen" binding:"required"`
+	}
+	if !mailJSON(c, &payload) {
+		return
+	}
+	if payload.UIDValidity == 0 || payload.Seen == nil {
+		httpx.Error(c, apperr.BadRequest("mail.external_invalid_flag", "Invalid message flag request"))
+		return
+	}
+	if payload.Folder != "" {
+		err := h.external.SetFolderSeen(c.Request.Context(), u, id, payload.Folder, uint32(uid), payload.UIDValidity, *payload.Seen)
+		mailResult(c, http.StatusOK, gin.H{"updated": err == nil}, err)
+		return
+	}
+	result, err := h.external.SetSeen(c.Request.Context(), u, id, uint32(uid), payload.UIDValidity, *payload.Seen)
+	mailResult(c, http.StatusOK, result, err)
+}
+
+func (h *AccountHandler) listExternalFolders(c *gin.Context) {
+	u, ok := h.externalUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseMailUUID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	rows, err := h.external.Folders(c.Request.Context(), u, id)
+	mailResult(c, http.StatusOK, rows, err)
+}
+func (h *AccountHandler) browseExternalFolder(c *gin.Context) {
+	u, ok := h.externalUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseMailUUID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	pos, e := strconv.ParseUint(c.DefaultQuery("position", "0"), 10, 32)
+	if e != nil || pos > 100000 {
+		httpx.Error(c, apperr.BadRequest("mail.external_invalid_offset", "Invalid folder position"))
+		return
+	}
+	page, err := h.external.BrowseFolder(c.Request.Context(), u, id, c.Query("folder"), uint32(pos))
+	mailResult(c, http.StatusOK, page, err)
+}
+
+func (h *AccountHandler) moveExternalMessage(c *gin.Context) {
+	u, ok := h.externalUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseMailUUID(c, c.Param("id"))
+	if !ok {
+		return
+	}
+	uid, e := strconv.ParseUint(c.Param("uid"), 10, 32)
+	if e != nil || uid == 0 {
+		httpx.Error(c, apperr.BadRequest("mail.external_invalid_uid", "Invalid UID"))
+		return
+	}
+	var payload struct {
+		UIDValidity uint32 `json:"uid_validity" binding:"required"`
+		Source      string `json:"source" binding:"required"`
+		Destination string `json:"destination" binding:"required"`
+	}
+	if !mailJSON(c, &payload) {
+		return
+	}
+	receipt, err := h.external.MoveFolderMessage(c.Request.Context(), u, id, payload.Source, payload.Destination, uint32(uid), payload.UIDValidity)
+	mailResult(c, http.StatusOK, receipt, err)
 }
