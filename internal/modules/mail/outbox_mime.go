@@ -24,6 +24,7 @@ import (
 type ComposeMailInput struct {
 	DraftID           *uuid.UUID  `json:"draft_id,omitempty"`
 	ExternalAccountID *uuid.UUID  `json:"external_account_id,omitempty"`
+	AliasID           *uuid.UUID  `json:"alias_id,omitempty"`
 	DraftRevision     uint64      `json:"draft_revision,omitempty"`
 	SendAt            *time.Time  `json:"send_at,omitempty"`
 	RequestID         uuid.UUID   `json:"request_id" binding:"required"`
@@ -42,6 +43,7 @@ type ComposeMailInput struct {
 type outboxPayload struct {
 	Sender            string     `json:"sender"`
 	ExternalAccountID *uuid.UUID `json:"external_account_id,omitempty"`
+	AliasID           *uuid.UUID `json:"alias_id,omitempty"`
 	Recipients        []string   `json:"recipients"`
 	MIME              []byte     `json:"mime"`
 }

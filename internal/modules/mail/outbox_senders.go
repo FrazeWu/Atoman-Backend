@@ -19,6 +19,7 @@ type MailSenderInfo struct {
 	Address           string     `json:"address"`
 	Provider          string     `json:"provider"`
 	ExternalAccountID *uuid.UUID `json:"external_account_id,omitempty"`
+	AliasID           *uuid.UUID `json:"alias_id,omitempty"`
 }
 
 func (s *MailOutboxService) Senders(ctx context.Context, u authctx.CurrentUser) ([]MailSenderInfo, error) {
@@ -32,7 +33,23 @@ func (s *MailOutboxService) Senders(ctx context.Context, u authctx.CurrentUser) 
 	if err := s.db.WithContext(ctx).Where("user_id=? AND status=?", u.ID, "active").Take(&own).Error; err != nil {
 		return nil, apperr.Forbidden("mail.mailbox_inactive", "Active mailbox required")
 	}
+	if own.StalwartAccountID == nil || !validJMAPScopedID(*own.StalwartAccountID) {
+		return nil, apperr.New(503, "mail.mailbox_unavailable", "Mailbox is not provisioned", nil)
+	}
 	out := []MailSenderInfo{{Address: own.Address, Provider: "atoman"}}
+	if s.aliasesAllowed {
+		var aliases []model.MailAlias
+		if err := s.db.WithContext(ctx).Where("user_id=? AND stalwart_account_id=? AND status=?", u.ID, *own.StalwartAccountID, "active").Order("created_at ASC").Limit(maxMailAliases + 1).Find(&aliases).Error; err != nil {
+			return nil, apperr.Internal(err)
+		}
+		if len(aliases) > maxMailAliases {
+			return nil, apperr.New(503, "mail.alias_limit", "Too many aliases", nil)
+		}
+		for _, alias := range aliases {
+			id := alias.ID
+			out = append(out, MailSenderInfo{Address: alias.Address, Provider: "atoman-alias", AliasID: &id})
+		}
+	}
 	if !s.externalSMTPAllowed {
 		return out, nil
 	}

@@ -148,12 +148,20 @@ func (s *AccountService) IssueInvite(admin authctx.CurrentUser, in IssueInviteIn
 		CreatedBy: admin.ID, LocalPart: local, ExpiresAt: issuedAt.Add(7 * 24 * time.Hour),
 	}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if e := lockMailAddressSpace(tx); e != nil {
+			return e
+		}
 		var activeUsers int64
 		if err := tx.Model(&model.User{}).Where("uuid = ? AND is_active = ?", in.TargetUserID, true).Count(&activeUsers).Error; err != nil {
 			return err
 		}
 		if activeUsers != 1 {
 			return apperr.NotFound("mail.user_not_found", "Active Atoman user not found")
+		}
+		if local != "" {
+			if e := checkMailAliasAddress(tx, local); e != nil {
+				return e
+			}
 		}
 		var usedAddresses int64
 		accountCheck := tx.Model(&model.MailAccount{}).Where("user_id = ?", in.TargetUserID)
@@ -214,6 +222,9 @@ func (s *AccountService) ReserveSelf(user authctx.CurrentUser, rawLocal string) 
 	}
 	var account model.MailAccount
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if e := lockMailAddressSpace(tx); e != nil {
+			return e
+		}
 		var count int64
 		if err := tx.Model(&model.User{}).Where("uuid = ? AND is_active = ?", user.ID, true).Count(&count).Error; err != nil {
 			return err
@@ -228,6 +239,9 @@ func (s *AccountService) ReserveSelf(user authctx.CurrentUser, rawLocal string) 
 		}
 		if count > 0 {
 			return apperr.Conflict("mail.invite_pending", "An invitation already reserves this address")
+		}
+		if e := checkMailAliasAddress(tx, local); e != nil {
+			return e
 		}
 		account = model.MailAccount{ID: uuid.New(), UserID: user.ID, LocalPart: local, Address: local + "@" + MailDomain, Status: "reserved"}
 		return tx.Create(&account).Error
@@ -255,6 +269,9 @@ func (s *AccountService) RedeemInviteWithLocalPart(user authctx.CurrentUser, tok
 	}
 	var account model.MailAccount
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if e := lockMailAddressSpace(tx); e != nil {
+			return e
+		}
 		var invite model.MailInvite
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("token_hash = ?", tokenHash(token)).Take(&invite).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -294,6 +311,9 @@ func (s *AccountService) RedeemInviteWithLocalPart(user authctx.CurrentUser, tok
 		}
 		if otherPending > 0 {
 			return apperr.Conflict("mail.invite_pending", "An invitation already reserves this address")
+		}
+		if e := checkMailAliasAddress(tx, local); e != nil {
+			return e
 		}
 		account = model.MailAccount{
 			ID: uuid.New(), UserID: user.ID, LocalPart: local,

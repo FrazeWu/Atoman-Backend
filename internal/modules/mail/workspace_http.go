@@ -14,6 +14,9 @@ import (
 )
 
 func (h *AccountHandler) registerWorkspace(g *gin.RouterGroup) {
+	g.GET("/aliases", h.listMailAliases)
+	g.POST("/aliases", h.createMailAlias)
+	g.POST("/aliases/:id/action", h.actionMailAlias)
 	g.GET("/external/providers", h.externalProviders)
 	g.GET("/external/accounts", h.listExternalAccounts)
 	g.POST("/external/accounts", h.connectExternalAccount)

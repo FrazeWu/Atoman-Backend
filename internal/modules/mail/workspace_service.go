@@ -50,6 +50,7 @@ func workspaceErr(err error) error {
 
 type DraftCompose struct {
 	ExternalAccountID *uuid.UUID         `json:"external_account_id,omitempty"`
+	AliasID           *uuid.UUID         `json:"alias_id,omitempty"`
 	To                []string           `json:"to"`
 	Cc                []string           `json:"cc"`
 	Bcc               []string           `json:"bcc"`

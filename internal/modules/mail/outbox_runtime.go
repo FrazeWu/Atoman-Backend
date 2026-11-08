@@ -54,5 +54,10 @@ func NewConfiguredMailOutbox(db *gorm.DB) (*MailOutboxService, error) {
 	}
 	outbox := NewMailOutboxService(db, privateStore, snapshotVault, transport, true, MailActivationGates{ProvisioningAllowed: true, R2ReadWriteVerified: true, TrueNASRestoreVerified: true})
 	outbox.EnableExternalSMTP(externalEnabled)
+	aliasEnabled := os.Getenv("ATOMAN_MAIL_ALIASES_ENABLED") == "1"
+	if aliasEnabled && !db.Migrator().HasTable(&model.MailAlias{}) {
+		return nil, errors.New("Mail aliases migration required")
+	}
+	outbox.EnableMailAliases(aliasEnabled)
 	return outbox, nil
 }

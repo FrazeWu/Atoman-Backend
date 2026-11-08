@@ -46,7 +46,22 @@ func (s *StalwartOutboxSubmitter) Submit(ctx context.Context, userID uuid.UUID, 
 	if p.ExternalAccountID != nil {
 		return s.submitExternalSMTP(ctx, userID, accountID, pendingID, p)
 	}
-	if account.Address != p.Sender {
+	if p.AliasID != nil {
+		if p.ExternalAccountID != nil || *p.AliasID == uuid.Nil {
+			return errors.New("Invalid multiple sender identities")
+		}
+		var alias model.MailAlias
+		if err := s.db.WithContext(ctx).Where("id=? AND user_id=? AND stalwart_account_id=? AND status=?", *p.AliasID, userID, accountID, "active").Take(&alias).Error; err != nil {
+			return errors.New("Alias no longer authorized")
+		}
+		if alias.Address != p.Sender {
+			return errors.New("Alias sender mismatch")
+		}
+		var pending model.MailPendingSend
+		if err := s.db.WithContext(ctx).Where("id=? AND user_id=? AND account_id=? AND alias_id=? AND status=?", pendingID, userID, accountID, *p.AliasID, "dispatching").Take(&pending).Error; err != nil {
+			return errors.New("Alias pending send mismatch")
+		}
+	} else if account.Address != p.Sender {
 		return errors.New("Mail sender does not match reserved identity")
 	}
 	if len(p.Recipients) == 0 || len(p.Recipients) > 50 || len(p.MIME) == 0 || len(p.MIME) > maxMailSnapshotBytes {
