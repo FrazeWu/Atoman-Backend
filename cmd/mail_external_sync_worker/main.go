@@ -37,5 +37,26 @@ func main() {
 	if err != nil {
 		log.Fatal("External IMAP synchronization failed")
 	}
+	if os.Getenv("ATOMAN_MAIL_HISTORY_IMPORT_ENABLED") == "1" {
+		jmapVault, e := mail.NewMailCredentialVault(os.Getenv("ATOMAN_MAIL_JMAP_ENCRYPTION_KEY_B64"))
+		if e != nil {
+			log.Fatal("Mail user credential vault unavailable")
+		}
+		jmap, e := mail.NewStalwartJMAPClient(os.Getenv("ATOMAN_MAIL_STALWART_URL"), nil)
+		if e != nil {
+			log.Fatal("Mail JMAP configuration unavailable")
+		}
+		reader := mail.NewMailReadService(db, jmap, jmapVault, true)
+		history, e := mail.NewConfiguredExternalHistory(db, vault, reader)
+		if e != nil {
+			log.Fatal("Mail history import configuration unavailable")
+		}
+		importReport, e := mail.RunExternalHistoryDue(ctx, history)
+		if e != nil {
+			log.Fatal("Mail history worker failed")
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"sync": report, "history": importReport})
+		return
+	}
 	_ = json.NewEncoder(os.Stdout).Encode(report)
 }

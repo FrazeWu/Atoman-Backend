@@ -2,7 +2,7 @@
 Description=Refresh external mail summaries on a bounded schedule
 [Timer]
 OnBootSec=6min
-OnUnitInactiveSec=10min
+OnUnitInactiveSec=1min
 RandomizedDelaySec=50
 Unit=atoman-mail-external-sync.service
 [Install]

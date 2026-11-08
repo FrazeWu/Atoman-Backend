@@ -300,6 +300,19 @@ func (s *MailExternalService) Delete(ctx context.Context, u authctx.CurrentUser,
 	if err := s.access(ctx, u); err != nil {
 		return err
 	}
+	// A queued/running history transfer must not silently lose its source
+	// credential while importing. Users can pause/cancel first.
+	if s.workspace.db.Migrator().HasTable(&model.MailExternalImportJob{}) {
+		var active int64
+		err := s.workspace.db.WithContext(ctx).Model(&model.MailExternalImportJob{}).
+			Where("user_id=? AND external_account_id=? AND status IN ?", u.ID, id, []string{"queued", "running"}).Count(&active).Error
+		if err != nil {
+			return apperr.Internal(err)
+		}
+		if active > 0 {
+			return apperr.Conflict("mail.external_import_active", "Pause or cancel history import before removing this account")
+		}
+	}
 	result := s.workspace.db.WithContext(ctx).Where("id=? AND user_id=?", id, u.ID).Delete(&model.MailExternalAccount{})
 	if result.Error != nil {
 		return apperr.Internal(result.Error)

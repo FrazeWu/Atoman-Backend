@@ -12,6 +12,7 @@ WorkingDirectory=/var/lib/atoman
 EnvironmentFile=/etc/atoman/backend.env
 EnvironmentFile=/etc/atoman-mail/backend.env
 Environment=ATOMAN_MAIL_EXTERNAL_IMAP_ENABLED=1
+Environment=ATOMAN_MAIL_HISTORY_IMPORT_ENABLED=1
 UnsetEnvironment=ATOMAN_MAIL_STALWART_ADMIN_USER ATOMAN_MAIL_STALWART_ADMIN_PASSWORD
 ExecStart=/opt/atoman/backend/current/mail_external_sync_worker
 TimeoutStartSec=11min
