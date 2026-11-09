@@ -237,7 +237,19 @@ func (s *Service) SavePlaybackSession(user authctx.CurrentUser, input SavePlayba
 	txErr := s.db.Transaction(func(tx *gorm.DB) error {
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", user.ID).First(&stored).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			candidate := model.MusicPlaybackSession{UserID: user.ID, CurrentSongID: &currentSongID, QueueJSON: serialized, PositionSeconds: input.PositionSeconds, PlaybackMode: input.PlaybackMode, ReportedAt: reportedAt}
+			candidate := model.MusicPlaybackSession{
+				UserID:          user.ID,
+				CurrentSongID:   &currentSongID,
+				QueueJSON:       serialized,
+				PositionSeconds: input.PositionSeconds,
+				PlaybackMode:    input.PlaybackMode,
+				ReportedAt:      reportedAt,
+				DeviceID:        input.DeviceID,
+				DeviceName:      input.DeviceName,
+				DeviceType:      input.DeviceType,
+				IsRadio:         input.IsRadio,
+				RadioStationID:  input.RadioStationID,
+			}
 			create := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&candidate)
 			if create.Error != nil {
 				return create.Error
@@ -260,6 +272,11 @@ func (s *Service) SavePlaybackSession(user authctx.CurrentUser, input SavePlayba
 			"position_seconds": input.PositionSeconds,
 			"playback_mode":    input.PlaybackMode,
 			"reported_at":      reportedAt,
+			"device_id":        input.DeviceID,
+			"device_name":      input.DeviceName,
+			"device_type":      input.DeviceType,
+			"is_radio":         input.IsRadio,
+			"radio_station_id": input.RadioStationID,
 		}).Error; err != nil {
 			return err
 		}
@@ -268,6 +285,11 @@ func (s *Service) SavePlaybackSession(user authctx.CurrentUser, input SavePlayba
 		stored.PositionSeconds = input.PositionSeconds
 		stored.PlaybackMode = input.PlaybackMode
 		stored.ReportedAt = reportedAt
+		stored.DeviceID = input.DeviceID
+		stored.DeviceName = input.DeviceName
+		stored.DeviceType = input.DeviceType
+		stored.IsRadio = input.IsRadio
+		stored.RadioStationID = input.RadioStationID
 		return nil
 	})
 	if txErr != nil {
@@ -282,7 +304,18 @@ func (s *Service) SavePlaybackSession(user authctx.CurrentUser, input SavePlayba
 	if stored.CurrentSongID == nil || !playbackQueueContains(queue, *stored.CurrentSongID) {
 		return PlaybackSessionResponse{}, apperr.NotFound("music.song_not_found", "Song not found")
 	}
-	return PlaybackSessionResponse{Queue: queue, CurrentSongID: *stored.CurrentSongID, PositionSeconds: stored.PositionSeconds, PlaybackMode: stored.PlaybackMode, UpdatedAt: stored.UpdatedAt}, nil
+	return PlaybackSessionResponse{
+		Queue:           queue,
+		CurrentSongID:   *stored.CurrentSongID,
+		PositionSeconds: stored.PositionSeconds,
+		PlaybackMode:    stored.PlaybackMode,
+		UpdatedAt:       stored.UpdatedAt,
+		DeviceID:        stored.DeviceID,
+		DeviceName:      stored.DeviceName,
+		DeviceType:      stored.DeviceType,
+		IsRadio:         stored.IsRadio,
+		RadioStationID:  stored.RadioStationID,
+	}, nil
 }
 
 func (s *Service) GetPlaybackSession(user authctx.CurrentUser) (*PlaybackSessionResponse, error) {
@@ -310,7 +343,18 @@ func (s *Service) GetPlaybackSession(user authctx.CurrentUser) (*PlaybackSession
 	if !playbackQueueContains(queue, *session.CurrentSongID) {
 		return nil, nil
 	}
-	return &PlaybackSessionResponse{Queue: queue, CurrentSongID: *session.CurrentSongID, PositionSeconds: session.PositionSeconds, PlaybackMode: session.PlaybackMode, UpdatedAt: session.UpdatedAt}, nil
+	return &PlaybackSessionResponse{
+		Queue:           queue,
+		CurrentSongID:   *session.CurrentSongID,
+		PositionSeconds: session.PositionSeconds,
+		PlaybackMode:    session.PlaybackMode,
+		UpdatedAt:       session.UpdatedAt,
+		DeviceID:        session.DeviceID,
+		DeviceName:      session.DeviceName,
+		DeviceType:      session.DeviceType,
+		IsRadio:         session.IsRadio,
+		RadioStationID:  session.RadioStationID,
+	}, nil
 }
 
 func (s *Service) loadPlaybackSessionQueueFromStored(session model.MusicPlaybackSession, viewer *authctx.CurrentUser) ([]model.Song, error) {

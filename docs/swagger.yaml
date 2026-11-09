@@ -9254,6 +9254,14 @@ definitions:
     properties:
       current_song_id:
         type: string
+      device_id:
+        type: string
+      device_name:
+        type: string
+      device_type:
+        type: string
+      is_radio:
+        type: boolean
       playback_mode:
         type: string
       position_seconds:
@@ -9262,6 +9270,8 @@ definitions:
         items:
           $ref: '#/definitions/model.Song'
         type: array
+      radio_station_id:
+        type: string
       updated_at:
         type: string
     type: object
@@ -9461,10 +9471,20 @@ definitions:
     properties:
       current_song_id:
         type: string
+      device_id:
+        type: string
+      device_name:
+        type: string
+      device_type:
+        type: string
+      is_radio:
+        type: boolean
       playback_mode:
         type: string
       position_seconds:
         type: number
+      radio_station_id:
+        type: string
       reported_at:
         type: string
       song_ids:

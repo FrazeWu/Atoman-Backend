@@ -508,6 +508,11 @@ type MusicPlaybackSession struct {
 	PositionSeconds float64         `json:"position_seconds" gorm:"not null;default:0"`
 	PlaybackMode    string          `json:"playback_mode" gorm:"type:varchar(16);not null;default:'loop'"`
 	ReportedAt      time.Time       `json:"reported_at" gorm:"not null;default:CURRENT_TIMESTAMP;index"`
+	DeviceID        string          `json:"device_id,omitempty" gorm:"type:varchar(64)"`
+	DeviceName      string          `json:"device_name,omitempty" gorm:"type:varchar(128)"`
+	DeviceType      string          `json:"device_type,omitempty" gorm:"type:varchar(32)"`
+	IsRadio         bool            `json:"is_radio" gorm:"not null;default:false"`
+	RadioStationID  string          `json:"radio_station_id,omitempty" gorm:"type:varchar(64)"`
 }
 
 func (MusicPlaybackSession) TableName() string {

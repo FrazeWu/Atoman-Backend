@@ -46508,6 +46508,18 @@ const docTemplate = `{
                 "current_song_id": {
                     "type": "string"
                 },
+                "device_id": {
+                    "type": "string"
+                },
+                "device_name": {
+                    "type": "string"
+                },
+                "device_type": {
+                    "type": "string"
+                },
+                "is_radio": {
+                    "type": "boolean"
+                },
                 "playback_mode": {
                     "type": "string"
                 },
@@ -46519,6 +46531,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/model.Song"
                     }
+                },
+                "radio_station_id": {
+                    "type": "string"
                 },
                 "updated_at": {
                     "type": "string"
@@ -46832,11 +46847,26 @@ const docTemplate = `{
                 "current_song_id": {
                     "type": "string"
                 },
+                "device_id": {
+                    "type": "string"
+                },
+                "device_name": {
+                    "type": "string"
+                },
+                "device_type": {
+                    "type": "string"
+                },
+                "is_radio": {
+                    "type": "boolean"
+                },
                 "playback_mode": {
                     "type": "string"
                 },
                 "position_seconds": {
                     "type": "number"
+                },
+                "radio_station_id": {
+                    "type": "string"
                 },
                 "reported_at": {
                     "type": "string"

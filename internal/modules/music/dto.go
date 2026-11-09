@@ -193,6 +193,11 @@ type SavePlaybackSessionRequest struct {
 	PositionSeconds float64     `json:"position_seconds"`
 	PlaybackMode    string      `json:"playback_mode" binding:"required"`
 	ReportedAt      time.Time   `json:"reported_at"`
+	DeviceID        string      `json:"device_id"`
+	DeviceName      string      `json:"device_name"`
+	DeviceType      string      `json:"device_type"`
+	IsRadio         bool        `json:"is_radio"`
+	RadioStationID  string      `json:"radio_station_id"`
 }
 
 type PlaybackSessionResponse struct {
@@ -201,6 +206,11 @@ type PlaybackSessionResponse struct {
 	PositionSeconds float64      `json:"position_seconds"`
 	PlaybackMode    string       `json:"playback_mode"`
 	UpdatedAt       time.Time    `json:"updated_at"`
+	DeviceID        string       `json:"device_id,omitempty"`
+	DeviceName      string       `json:"device_name,omitempty"`
+	DeviceType      string       `json:"device_type,omitempty"`
+	IsRadio         bool         `json:"is_radio"`
+	RadioStationID  string       `json:"radio_station_id,omitempty"`
 }
 
 type PlaylistSongStatusResponse struct {
