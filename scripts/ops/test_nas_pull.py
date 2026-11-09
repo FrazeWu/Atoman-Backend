@@ -184,6 +184,7 @@ class NasPullTests(unittest.TestCase):
             nas.fetch("host", self.key, self.known_hosts,
                       "/exports/id/backup.tar.age", partial)
         self.assertTrue(sftp.call_args.args[3][0].startswith("reget "))
+        self.assertEqual(sftp.call_args.kwargs["timeout"], 4 * 3600)
 
     def test_new_ciphertext_fetch_starts_from_zero(self):
         target = self.root / "backup.tar.age"
@@ -191,6 +192,14 @@ class NasPullTests(unittest.TestCase):
             nas.fetch("host", self.key, self.known_hosts,
                       "/exports/id/backup.tar.age", target)
         self.assertTrue(sftp.call_args.args[3][0].startswith("get "))
+        self.assertEqual(sftp.call_args.kwargs["timeout"], 4 * 3600)
+
+    def test_receipt_fetch_keeps_metadata_timeout(self):
+        target = self.root / "receipt.json"
+        with mock.patch.object(nas, "run_sftp") as sftp:
+            nas.fetch("host", self.key, self.known_hosts,
+                      "/exports/id/receipt.json", target)
+        self.assertEqual(sftp.call_args.kwargs["timeout"], 3600)
 
     def test_existing_symlink_is_rejected_before_fetch(self):
         outside = self.root / "outside"

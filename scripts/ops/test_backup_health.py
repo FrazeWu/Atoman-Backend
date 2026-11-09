@@ -1,5 +1,6 @@
 import datetime as dt
 import hashlib
+import subprocess
 import importlib.util
 import json
 from pathlib import Path
@@ -135,6 +136,83 @@ class BackupHealthTest(unittest.TestCase):
             file.write(b"\n")
         with self.assertRaisesRegex(ValueError, "source manifest differs"):
             self.check_publications()
+
+    def signed_evidence(self, full=False):
+        self.publications()
+        identity = self.root / "offline-private-ed25519"
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(identity)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        allowed = self.root / "allowed_signers"
+        allowed.write_text("atoman-mail-attestor " + (self.root / "offline-private-ed25519.pub").read_text().strip() + "\n")
+        evidence = self.root / "evidence"
+        evidence.mkdir()
+        record = {
+            "format": "atoman-offsite-recovery-attestation-v1",
+            "source_snapshot_id": self.snapshot.name,
+            "source_manifest_sha256": hashlib.sha256((self.snapshot / "manifest.json").read_bytes()).hexdigest(),
+            "mail_capsule_snapshot_id": self.snapshot.name + "m",
+            "mail_ciphertext_sha256": self.capsule_receipt["sha256"],
+            "full_ciphertext_sha256": self.full_receipt["sha256"],
+            "mail_report_sha256": "b" * 64,
+            "mail_recovery_verified": True,
+            "full_restore_verified": full,
+            "production_data_modified": False,
+            "verified_at": self.now.isoformat(),
+        }
+        if full:
+            record["full_report_sha256"] = "c" * 64
+        body = evidence / "evidence.json"
+        body.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")))
+        subprocess.run(["ssh-keygen", "-Y", "sign", "-f", str(identity),
+                        "-n", "atoman-mail-recovery", str(body)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return evidence, allowed, record
+
+    def verify_evidence(self, evidence, allowed):
+        return health.offsite_signed_evidence(evidence, allowed, self.exports,
+            self.snapshot.name,
+            hashlib.sha256((self.snapshot / "manifest.json").read_bytes()).hexdigest(),
+            self.manifest["completed_at"], now=self.now + dt.timedelta(minutes=20))
+
+    def test_signed_mail_restore_confirms_mail_only_not_whole_site(self):
+        evidence, allowed, record = self.signed_evidence()
+        result = self.verify_evidence(evidence, allowed)
+        self.assertEqual(result["offsite_evidence_status"], "verified_mail_only")
+        self.assertTrue(result["mail_capsule_offsite_recovery_confirmed"])
+        self.assertFalse(result["full_site_offsite_recovery_confirmed"])
+        self.assertFalse(result["offsite_transfer_confirmed"])
+
+    def test_signed_full_site_restore_marks_both_only_when_bound(self):
+        evidence, allowed, record = self.signed_evidence(full=True)
+        result = self.verify_evidence(evidence, allowed)
+        self.assertTrue(result["offsite_transfer_confirmed"])
+        self.assertEqual(result["offsite_evidence_status"], "verified_mail_and_site")
+
+    def test_tampered_signature_and_mismatched_snapshot_fail(self):
+        evidence, allowed, record = self.signed_evidence()
+        body = evidence / "evidence.json"
+        body.write_text(body.read_text().replace("mail_only", "tampered") + " ")
+        with self.assertRaisesRegex(ValueError, "signature"):
+            self.verify_evidence(evidence, allowed)
+        record["source_snapshot_id"] = "20261106T000000Z-deadbe"
+        body.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")))
+        secret = self.root / "offline-private-ed25519"
+        # ssh-keygen refuses to overwrite a signed file without a prompt.
+        (evidence / "evidence.json.sig").unlink()
+        subprocess.run(["ssh-keygen", "-Y", "sign", "-f", str(secret),
+                        "-n", "atoman-mail-recovery", str(body)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with self.assertRaises(health.OffsiteEvidencePending):
+            self.verify_evidence(evidence, allowed)
+
+    def test_missing_offsite_receipt_is_pending_not_forged_success(self):
+        self.publications()
+        evidence = self.root / "empty-evidence"
+        evidence.mkdir()
+        allowed = self.root / "fake-attestor-key"
+        allowed.write_text("atoman-mail-attestor ssh-ed25519 synthetic\n")
+        with self.assertRaises(health.OffsiteEvidencePending):
+            self.verify_evidence(evidence, allowed)
 
     def test_capsule_ciphertext_change_is_detected_at_same_length(self):
         self.publications()

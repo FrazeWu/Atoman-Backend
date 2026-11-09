@@ -119,8 +119,14 @@ def fetch(host, identity, known_hosts, remote, local):
     resume = (local.name == "backup.tar.age" and local.is_file()
               and local.stat().st_size > 0)
     action = "reget" if resume else "get"
+    # A full-site encrypted snapshot can exceed 800 MiB on limited routes.
+    # Keep generic metadata/list requests short, but allow one resumable
+    # ciphertext transfer up to four hours. The final SHA256 still gates the
+    # atomic LOCAL_COMPLETE marker; an interrupted reget never publishes it.
+    transfer_timeout = 4 * 3600 if local.name == "backup.tar.age" else 3600
     run_sftp(host, identity, known_hosts,
-             [action + " " + quote_sftp(remote) + " " + quote_sftp(str(local))])
+             [action + " " + quote_sftp(remote) + " " + quote_sftp(str(local))],
+             timeout=transfer_timeout)
 
 
 def pull(root, host, identity, known_hosts):
