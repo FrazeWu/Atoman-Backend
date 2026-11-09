@@ -2,6 +2,7 @@ package mail
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -21,24 +22,77 @@ type stalwartAccountAlias struct {
 	Enable   bool   `json:"enable"`
 }
 
+// Stalwart 1.0.2 returns aliases as a numeric-keyed JSON object (not an
+// array). The slot IDs are part of the remote mutation identity; never sort
+// aliases by name or compact a sparse map, which could modify another alias.
+func decodeStalwartAccountAliases(raw json.RawMessage) ([]stalwartAccountAlias, error) {
+	if len(raw) == 0 {
+		return nil, errors.New("Remote aliases property missing")
+	}
+	if string(raw) == "null" {
+		return []stalwartAccountAlias{}, nil
+	}
+	var entries []stalwartAccountAlias
+	switch raw[0] {
+	case '[':
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return nil, errors.New("Invalid remote alias array")
+		}
+	case '{':
+		var slots map[string]stalwartAccountAlias
+		if err := json.Unmarshal(raw, &slots); err != nil {
+			return nil, errors.New("Invalid remote alias object")
+		}
+		if len(slots) > 25 {
+			return nil, errors.New("Remote alias slot count exceeded")
+		}
+		entries = make([]stalwartAccountAlias, len(slots))
+		seen := make([]bool, len(slots))
+		for key, alias := range slots {
+			i, err := strconv.Atoi(key)
+			if err != nil || i < 0 || i >= len(entries) || strconv.Itoa(i) != key || seen[i] {
+				return nil, errors.New("Remote alias slot mapping is unsafe")
+			}
+			entries[i] = alias
+			seen[i] = true
+		}
+		for _, ok := range seen {
+			if !ok {
+				return nil, errors.New("Remote alias slots are sparse")
+			}
+		}
+	default:
+		return nil, errors.New("Unknown remote alias JSON representation")
+	}
+	if len(entries) > 25 {
+		return nil, errors.New("Remote alias slot count exceeded")
+	}
+	for _, alias := range entries {
+		if alias.Name == "" || !validJMAPScopedID(alias.DomainID) {
+			return nil, errors.New("Invalid remote alias identity")
+		}
+	}
+	return entries, nil
+}
+
 func (s *StalwartJMAPClient) readAccountAliases(ctx context.Context, admin StalwartCredential, accountID string) ([]stalwartAccountAlias, error) {
 	if !validJMAPScopedID(accountID) {
 		return nil, errors.New("Invalid Stalwart alias target")
 	}
 	var resp struct {
 		List []struct {
-			ID      string                 `json:"id"`
-			Aliases []stalwartAccountAlias `json:"aliases"`
+			ID      string          `json:"id"`
+			Aliases json.RawMessage `json:"aliases"`
 		} `json:"list"`
 		NotFound []string `json:"notFound"`
 	}
 	if err := s.call(ctx, admin, true, "x:Account/get", map[string]any{"ids": []string{accountID}, "properties": []string{"id", "aliases"}}, &resp); err != nil {
 		return nil, err
 	}
-	if len(resp.NotFound) > 0 || len(resp.List) != 1 || resp.List[0].ID != accountID || len(resp.List[0].Aliases) > 25 {
+	if len(resp.NotFound) > 0 || len(resp.List) != 1 || resp.List[0].ID != accountID {
 		return nil, errors.New("Stalwart alias target mismatch")
 	}
-	return resp.List[0].Aliases, nil
+	return decodeStalwartAccountAliases(resp.List[0].Aliases)
 }
 func (s *StalwartJMAPClient) patchAlias(ctx context.Context, admin StalwartCredential, accountID, key string, value any) error {
 	var resp struct {
