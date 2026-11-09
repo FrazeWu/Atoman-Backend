@@ -81,8 +81,8 @@ def verify(image, target, records, data_only_databases=()):
     name = 'atoman-restore-' + uuid.uuid4().hex[:12]
     cid = sp.check_output(['docker','run','--detach','--name',name,
         '--label','atoman.ops=restore-verification','--network','none',
-        '--cpus','2','--memory','2g','-e','POSTGRES_USER=atoman_restore',
-        '-e','POSTGRES_HOST_AUTH_METHOD=trust','-v',str(target)+':/backup:ro',image,'-c','maintenance_work_mem=256MB'], text=True).strip()
+        '--cpus','2','--memory','3g','-e','POSTGRES_USER=atoman_restore',
+        '-e','POSTGRES_HOST_AUTH_METHOD=trust','-v',str(target)+':/backup:ro',image,'-c','maintenance_work_mem=128MB'], text=True).strip()
     try:
         for _ in range(60):
             if sp.run(['docker','exec',cid,'pg_isready','-U','atoman_restore'],stdout=sp.DEVNULL,stderr=sp.DEVNULL).returncode == 0:

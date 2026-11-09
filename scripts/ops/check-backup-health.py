@@ -156,6 +156,77 @@ def encrypted_mail_copies(root, source_id, source_manifest_sha256, source_comple
             "source_manifest_sha256": source_manifest_sha256,
             "offsite_transfer_confirmed": False}
 
+class OffsiteEvidencePending(ValueError):
+    """A fresh backup has not yet received a signed independent NAS recovery."""
+
+
+def offsite_signed_evidence(directory, allowed_signers, exports, source_id, manifest_hash, source_completed_at, now=None):
+    """Verify offline Mac recovery proof without trusting a copied JSON claim.
+
+    A mail-only restore NEVER marks the whole-site offsite archive verified.
+    The private signing key stays on the independent recovery Mac; this host
+    has only an Ed25519 SSH allowed-signers public trust anchor.
+    """
+    if (directory.is_symlink() or not directory.is_dir() or
+            allowed_signers.is_symlink() or not allowed_signers.is_file()):
+        raise ValueError("Offsite evidence directory or pinned public key is missing")
+    evidence_file = directory / "evidence.json"
+    signature_file = directory / "evidence.json.sig"
+    if not evidence_file.exists() and not signature_file.exists():
+        raise OffsiteEvidencePending("Independent NAS restore evidence is pending")
+    evidence_file = regular(evidence_file)
+    signature_file = regular(signature_file)
+    if (not 20 <= evidence_file.stat().st_size <= 16384 or
+            not 20 <= signature_file.stat().st_size <= 16384):
+        raise ValueError("Offsite evidence size is invalid")
+    raw = evidence_file.read_bytes()
+    try:
+        signature_checked = subprocess.run(
+            ["ssh-keygen", "-Y", "verify", "-f", str(allowed_signers),
+             "-I", "atoman-mail-attestor", "-n", "atoman-mail-recovery",
+             "-s", str(signature_file)], input=raw, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("Offsite attestation signature verifier unavailable") from error
+    if signature_checked.returncode:
+        raise ValueError("Offsite recovery attestation signature is invalid")
+    attestation = json.loads(raw)
+    if (attestation.get("format") == "atoman-offsite-recovery-attestation-v1"
+            and attestation.get("source_snapshot_id") != source_id):
+        # A new backup can be published before its independent Mac restore.
+        # Keep the older signed proof, but never apply it to the new snapshot.
+        if not SNAPSHOT.fullmatch(str(attestation.get("source_snapshot_id", ""))):
+            raise ValueError("Signed offsite source identity is invalid")
+        raise OffsiteEvidencePending("Latest NAS restore evidence is pending")
+    if (attestation.get("format") != "atoman-offsite-recovery-attestation-v1"
+            or attestation.get("source_manifest_sha256") != manifest_hash
+            or attestation.get("mail_capsule_snapshot_id") != source_id + "m"
+            or attestation.get("mail_recovery_verified") is not True
+            or attestation.get("production_data_modified") is not False
+            or not HASH.fullmatch(str(attestation.get("mail_report_sha256", "")))):
+        raise ValueError("Signed mail recovery claim is incomplete or stale")
+    reported_at = timestamp(attestation["verified_at"])
+    observed_at = now or dt.datetime.now(dt.timezone.utc)
+    if (reported_at < timestamp(source_completed_at) or
+            reported_at > observed_at + dt.timedelta(minutes=10)):
+        raise ValueError("Signed offsite restore timestamp is outside the backup window")
+    mail_receipt = _published_receipt(exports / (source_id + "m"))
+    site_receipt = _published_receipt(exports / source_id)
+    if (attestation.get("mail_ciphertext_sha256") != mail_receipt["sha256"] or
+            attestation.get("full_ciphertext_sha256") != site_receipt["sha256"]):
+        raise ValueError("Signed offsite ciphertext checksum does not match published backup")
+    full = attestation.get("full_restore_verified") is True
+    if type(attestation.get("full_restore_verified")) is not bool:
+        raise ValueError("Signed full-site restoration status is absent")
+    if full and not HASH.fullmatch(str(attestation.get("full_report_sha256", ""))):
+        raise ValueError("Signed full-site restoration report is absent")
+    return {"offsite_evidence_status": "verified_mail_and_site" if full else "verified_mail_only",
+            "mail_capsule_offsite_recovery_confirmed": True,
+            "full_site_offsite_recovery_confirmed": full,
+            "offsite_transfer_confirmed": full,
+            "offsite_evidence_verified_at": reported_at.isoformat()}
+
+
 def atomic_status(path, result):
     if path.is_symlink() or path.parent.is_symlink():
         raise ValueError("Status path cannot be a symbolic link")
@@ -176,7 +247,13 @@ def main():
     parser.add_argument("--max-age-hours", type=int, default=48)
     parser.add_argument("--unit", action="append", default=[])
     parser.add_argument("--status-file", type=Path)
+    parser.add_argument("--offsite-evidence-dir", type=Path)
+    parser.add_argument("--offsite-allowed-signers", type=Path)
+    parser.add_argument("--offsite-grace-hours", type=int, default=36)
     args = parser.parse_args()
+    if ((args.offsite_evidence_dir is None) != (args.offsite_allowed_signers is None)
+            or not 1 <= args.offsite_grace_hours <= 168):
+        parser.error("Offsite attestation needs both paths and a bounded grace period")
     if not 1 <= args.max_age_hours <= 720 or any(not UNIT.fullmatch(x) for x in args.unit):
         parser.error("Invalid freshness limit or service name")
     result = {"format": "atoman-backup-health-v1", "checked_at": dt.datetime.now(dt.timezone.utc).isoformat()}
@@ -187,6 +264,25 @@ def main():
                                                result["source_manifest_sha256"], result["source_completed_at"]))
         else:
             result.update(encrypted_copy(args.exports_root, result["source_snapshot_id"]))
+        if args.offsite_evidence_dir:
+            try:
+                result.update(offsite_signed_evidence(
+                    args.offsite_evidence_dir, args.offsite_allowed_signers,
+                    args.exports_root, result["source_snapshot_id"],
+                    result["source_manifest_sha256"], result["source_completed_at"]))
+            except OffsiteEvidencePending:
+                # New backups can take hours to reach NAS and undergo a real
+                # offline restore; record pending rather than invent success.
+                result.update(offsite_evidence_status="pending",
+                              mail_capsule_offsite_recovery_confirmed=False,
+                              full_site_offsite_recovery_confirmed=False,
+                              offsite_transfer_confirmed=False)
+                if result["age_hours"] > args.offsite_grace_hours:
+                    raise ValueError("Independent NAS mail restore evidence is overdue")
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+                # Malformed or forged evidence is a security alert, never a
+                # reason to substitute local publication as offsite proof.
+                raise ValueError("Independent NAS restore evidence is invalid")
         for unit in args.unit:
             if subprocess.run(["systemctl", "is-active", "--quiet", unit], timeout=10).returncode:
                 raise ValueError("Required service is not active: " + unit)
