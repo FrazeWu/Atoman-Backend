@@ -42,6 +42,24 @@ class MailBackupTests(unittest.TestCase):
             return {}
         self.client.call = fake_call
 
+    def test_snapshot_id_uses_strict_publisher_safe_charset(self):
+        publisher = load("publish-offsite-backups")
+        created = [mail.new_snapshot_directory(self.root) for _ in range(12)]
+        self.assertEqual(len({x.name for x in created}), 12)
+        for path in created:
+            self.assertTrue(mail.SNAPSHOT.fullmatch(path.name))
+            self.assertTrue(publisher.SNAPSHOT.fullmatch(path.name))
+            self.assertTrue(exporter.SNAPSHOT_ID.fullmatch(path.name))
+            self.assertEqual(path.stat().st_mode & 0o077, 0)
+
+    def test_snapshot_id_handles_collision_without_overwrite(self):
+        fixed = '01234567'
+        with mock.patch.object(mail.secrets, "token_hex", side_effect=[fixed,fixed,'89abcdef']):
+            first = mail.new_snapshot_directory(self.root)
+            second = mail.new_snapshot_directory(self.root)
+        self.assertNotEqual(first,second)
+        self.assertTrue(first.is_dir() and second.is_dir())
+
     def test_media_credentials_cannot_be_used(self):
         with self.assertRaisesRegex(ValueError, "Dedicated"):
             mail.R2({"S3_ENDPOINT": "https://storage.invalid", "AWS_ACCESS_KEY_ID": "media", "AWS_SECRET_ACCESS_KEY": "media"})

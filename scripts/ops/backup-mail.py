@@ -22,11 +22,29 @@ import stat
 import subprocess as sp
 import tarfile
 import tempfile
+import secrets
 import time
 
 BUCKETS = ("atoman-mail-prod", "atoman-mail-pending")
 UNIT = re.compile(r"^atoman-[a-z0-9-]+\.service$")
 SNAPSHOT = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[a-z0-9]{6,20}$")
+
+def new_snapshot_directory(destination):
+    """Generate snapshot IDs accepted by every downstream backup component.
+
+    tempfile.mkdtemp() may generate underscores, while publishers reject them.
+    """
+    prefix = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-")
+    for _ in range(12):
+        path = destination / (prefix + secrets.token_hex(4))
+        if not SNAPSHOT.fullmatch(path.name):
+            raise ValueError("Generated backup snapshot ID is invalid")
+        try:
+            path.mkdir(mode=0o700)
+            return path
+        except FileExistsError:
+            continue
+    raise RuntimeError("Unable to allocate a unique backup snapshot directory")
 
 def load_pg():
     path = Path(__file__).with_name("backup-postgres.py")
@@ -337,7 +355,7 @@ def main():
     with open("/run/lock/atoman-backup.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         cached_inventory(client, args.cache)
-        target = Path(tempfile.mkdtemp(prefix=dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-"), dir=args.destination))
+        target = new_snapshot_directory(args.destination)
         manifest = {"format": "atoman-postgres-logical-v1", "complete": False,
                     "started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                      "container": args.container, "image_id": info["Image"], "backups": [], "additional_files": [],
