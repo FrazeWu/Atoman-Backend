@@ -3,6 +3,7 @@ package books
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -89,23 +90,30 @@ type BookPublicEditionDetailDTO struct {
 	Sources []BookPublicSourceDTO `json:"sources,omitempty"`
 }
 
+type CatalogFilterOptions struct {
+	Languages []string
+	MinRating float64
+	YearFrom  int
+	YearTo    int
+}
+
 func (s *Service) SearchPublicCatalog(ctx context.Context, query string, limit, offset int) ([]BookPublicWorkDTO, int64, error) {
-	return s.searchBookCatalog(ctx, query, limit, offset, false)
+	return s.searchBookCatalogFiltered(ctx, query, CatalogFilterOptions{}, limit, offset, false)
 }
 
 func (s *Service) SearchBookWorks(ctx context.Context, query string, limit, offset int) ([]BookPublicWorkDTO, int64, error) {
-	return s.searchBookCatalog(ctx, query, limit, offset, true)
+	return s.searchBookCatalogFiltered(ctx, query, CatalogFilterOptions{}, limit, offset, true)
 }
 
-func (s *Service) searchBookCatalog(ctx context.Context, query string, limit, offset int, wikiOnly bool) ([]BookPublicWorkDTO, int64, error) {
-	if s == nil || s.db == nil {
-		return nil, 0, errors.New("book catalog database is required")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	limit, offset = normalizeCatalogPagination(limit, offset)
-	query = strings.TrimSpace(query)
+func (s *Service) SearchBookWorksFiltered(ctx context.Context, query string, filters CatalogFilterOptions, limit, offset int) ([]BookPublicWorkDTO, int64, error) {
+	return s.searchBookCatalogFiltered(ctx, query, filters, limit, offset, true)
+}
+
+func (s *Service) buildPublicCatalogBaseQuery(ctx context.Context, query string, wikiOnly bool) *gorm.DB {
+	return s.buildPublicCatalogBaseQueryFiltered(ctx, query, wikiOnly, CatalogFilterOptions{})
+}
+
+func (s *Service) buildPublicCatalogBaseQueryFiltered(ctx context.Context, query string, wikiOnly bool, filters CatalogFilterOptions) *gorm.DB {
 	base := s.db.WithContext(ctx).Model(&model.BookWork{}).
 		Where("lifecycle_status = ? AND edit_status <> ?", model.BookLifecycleStatusActive, model.BookEditStatusClosed)
 	if wikiOnly {
@@ -122,15 +130,49 @@ func (s *Service) searchBookCatalog(ctx context.Context, query string, limit, of
 			WHERE bc.deleted_at IS NULL AND bp.deleted_at IS NULL AND bp.name ILIKE ? ESCAPE '\'
 		)`, pattern, pattern, pattern, pattern)
 	}
-	cacheKey := "catalog:" + query
-	if wikiOnly {
-		cacheKey = "books-v2:" + query
+	if len(filters.Languages) > 0 {
+		base = base.Where("book_works.language IN ?", filters.Languages)
 	}
-	total, err := s.countPublicCatalog(base, cacheKey)
+	if filters.MinRating > 0 {
+		ratingsSub := s.db.WithContext(ctx).Table("(?) AS ratings", bookWeightedRatingQuery(s.db.WithContext(ctx))).
+			Select("ratings.work_id").
+			Where("ratings.weighted_rating_score >= ?", filters.MinRating)
+		base = base.Where("book_works.id IN (?)", ratingsSub)
+	}
+	if filters.YearFrom > 0 || filters.YearTo > 0 {
+		editions := s.db.WithContext(ctx).Model(&model.BookEdition{}).
+			Select("1").Where("book_editions.work_id = book_works.id AND book_editions.lifecycle_status = 'active' AND book_editions.edit_status <> 'closed'")
+		if filters.YearFrom > 0 {
+			editions = editions.Where("published_date >= make_date(?, 1, 1)", filters.YearFrom)
+		}
+		if filters.YearTo > 0 {
+			editions = editions.Where("published_date < make_date(?, 1, 1) + INTERVAL '1 year'", filters.YearTo)
+		}
+		base = base.Where("EXISTS (?)", editions)
+	}
+	return base
+}
+
+func (s *Service) searchBookCatalog(ctx context.Context, query string, limit, offset int, wikiOnly bool) ([]BookPublicWorkDTO, int64, error) {
+	return s.searchBookCatalogFiltered(ctx, query, CatalogFilterOptions{}, limit, offset, wikiOnly)
+}
+
+func (s *Service) searchBookCatalogFiltered(ctx context.Context, query string, filters CatalogFilterOptions, limit, offset int, wikiOnly bool) ([]BookPublicWorkDTO, int64, error) {
+	if s == nil || s.db == nil {
+		return nil, 0, errors.New("book catalog database is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	limit, offset = normalizeCatalogPagination(limit, offset)
+	query = strings.TrimSpace(query)
+
+	total, err := s.countPublicCatalogFiltered(ctx, query, wikiOnly, filters)
 	if err != nil {
 		return nil, 0, err
 	}
 	var works []model.BookWork
+	base := s.buildPublicCatalogBaseQueryFiltered(ctx, query, wikiOnly, filters)
 	if err := base.Order("title ASC").Offset(offset).Limit(limit).Find(&works).Error; err != nil {
 		return nil, 0, err
 	}
@@ -138,10 +180,21 @@ func (s *Service) searchBookCatalog(ctx context.Context, query string, limit, of
 	return result, total, err
 }
 
-func (s *Service) countPublicCatalog(base *gorm.DB, query string) (int64, error) {
-	return s.catalogCounts.Get(base.Statement.Context, query, func(ctx context.Context) (int64, error) {
+func (s *Service) countPublicCatalog(ctx context.Context, query string, wikiOnly bool) (int64, error) {
+	return s.countPublicCatalogFiltered(ctx, query, wikiOnly, CatalogFilterOptions{})
+}
+
+func (s *Service) countPublicCatalogFiltered(ctx context.Context, query string, wikiOnly bool, filters CatalogFilterOptions) (int64, error) {
+	cacheKey := "catalog:" + query
+	if wikiOnly {
+		cacheKey = "books-v2:" + query
+	}
+	if len(filters.Languages) > 0 || filters.MinRating > 0 || filters.YearFrom > 0 || filters.YearTo > 0 {
+		cacheKey += fmt.Sprintf(":l=%s:r=%.1f:y=%d-%d", strings.Join(filters.Languages, ","), filters.MinRating, filters.YearFrom, filters.YearTo)
+	}
+	return s.catalogCounts.Get(ctx, cacheKey, func(loadCtx context.Context) (int64, error) {
 		var total int64
-		err := base.Session(&gorm.Session{}).WithContext(ctx).Count(&total).Error
+		err := s.buildPublicCatalogBaseQueryFiltered(loadCtx, query, wikiOnly, filters).Count(&total).Error
 		return total, err
 	})
 }

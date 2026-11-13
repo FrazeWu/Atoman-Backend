@@ -1300,6 +1300,21 @@ definitions:
       title:
         type: string
     type: object
+  books.BookWorkFacetsResult:
+    properties:
+      decades:
+        items:
+          $ref: '#/definitions/books.FacetCountItem'
+        type: array
+      languages:
+        items:
+          $ref: '#/definitions/books.FacetCountItem'
+        type: array
+      ratings:
+        items:
+          $ref: '#/definitions/books.FacetCountItem'
+        type: array
+    type: object
   books.BookWorkMergePreview:
     properties:
       conflict_policy:
@@ -1445,6 +1460,15 @@ definitions:
         type: string
     required:
     - title
+    type: object
+  books.FacetCountItem:
+    properties:
+      count:
+        type: integer
+      key:
+        type: string
+      label:
+        type: string
     type: object
   books.ImportBookPrivateNotesInput:
     properties:
@@ -16844,6 +16868,22 @@ paths:
         in: query
         name: q
         type: string
+      - description: 作品语言（逗号分隔）
+        in: query
+        name: language
+        type: string
+      - description: 最低评分
+        in: query
+        name: min_rating
+        type: number
+      - description: 出版年份起
+        in: query
+        name: year_from
+        type: integer
+      - description: 出版年份止
+        in: query
+        name: year_to
+        type: integer
       - description: 每页数量
         in: query
         name: limit
@@ -17252,6 +17292,23 @@ paths:
       summary: 将本人的统一博客内容关联为图书长评
       tags:
       - books-reviews
+  /api/v1/books/works/facets:
+    get:
+      parameters:
+      - description: 查询词
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookWorkFacetsResult'
+      summary: 获取图书作品分面统计（语言、年代、评分）
+      tags:
+      - books-catalog
   /api/v1/comments/{comment_id}:
     delete:
       responses:

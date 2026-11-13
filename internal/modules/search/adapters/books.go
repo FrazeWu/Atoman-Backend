@@ -26,6 +26,7 @@ func (p *BooksProvider) Capabilities(_ context.Context, viewer search.Viewer, sc
 			fields     []string
 		}{
 			{"note", "私人笔记", []string{"title", "body"}},
+			{"reading_mark", "划线书摘", []string{"quote", "note", "title"}},
 			{"book_list", "我创建的书单", []string{"title", "description"}},
 			{"library", "我的书架", []string{"title", "description"}},
 			{"bookmark", "收藏书单", []string{"title", "description"}},
@@ -39,12 +40,14 @@ func (p *BooksProvider) Capabilities(_ context.Context, viewer search.Viewer, sc
 	}
 	sorts := []search.SortDefinition{{Key: "relevance", Label: "相关度"}, {Key: "title", Label: "名称"}, {Key: "newest", Label: "最新"}}
 	minYear, maxYear := 1.0, 9999.0
+	minRating, maxRating := 0.0, 10.0
 	caps.Types = []search.TypeCapability{
 		{Key: "work", Label: "作品", DefaultSort: "relevance", DiscoverySort: "title", AllowEmptyQuery: true,
 			Sorts: append(append([]search.SortDefinition{}, sorts...), search.SortDefinition{Key: "rating_desc", Label: "评分（至少 6 条有效评分）"}),
 			Filters: []search.FilterDefinition{
 				{Key: "language", Label: "作品语言", Kind: "text", Multiple: true},
 				{Key: "author_id", Label: "作者", Kind: "entity", Multiple: true},
+				{Key: "min_rating", Label: "最低评分", Kind: "number", Min: &minRating, Max: &maxRating},
 				{Key: "year_from", Label: "出版年份起", Kind: "number", Integer: true, Min: &minYear, Max: &maxYear},
 				{Key: "year_to", Label: "出版年份止", Kind: "number", Integer: true, Min: &minYear, Max: &maxYear},
 			}, SearchFields: []string{"title", "original_title", "subtitle", "author"},
@@ -66,12 +69,17 @@ func (p *BooksProvider) Search(ctx context.Context, viewer search.Viewer, req se
 			switch req.Type {
 			case "note":
 				href = "/books/notes?work=" + item.WorkID.String()
+			case "reading_mark":
+				href = "/books/notes?tab=highlights"
+				if item.WorkID != uuid.Nil {
+					href += "&work=" + item.WorkID.String()
+				}
 			case "library":
 				href = "/books/work/" + item.WorkID.String()
 			case "book_list":
 				href += "/edit"
 			}
-			out.Items = append(out.Items, search.SearchHit{Module: p.Module(), Type: req.Type, ID: item.ID.String(), Title: item.Title, Snippet: searchSnippet(item.Snippet), Href: href})
+			out.Items = append(out.Items, search.SearchHit{Module: p.Module(), Type: req.Type, ID: item.ID.String(), Title: item.Title, Snippet: searchSnippet(item.Snippet, req.Query), Href: href})
 		}
 		return out, err
 	}
@@ -89,11 +97,16 @@ func (p *BooksProvider) Search(ctx context.Context, viewer search.Viewer, req se
 			}
 			workOpts.AuthorIDs = append(workOpts.AuthorIDs, id)
 		}
+		if raw := req.Filters["min_rating"]; len(raw) > 0 {
+			if val, err := strconv.ParseFloat(raw[0], 64); err == nil && val >= 0 {
+				workOpts.MinRating = val
+			}
+		}
 		workOpts.YearFrom, workOpts.YearTo = yearFilter(req.Filters["year_from"]), yearFilter(req.Filters["year_to"])
 		result, err := p.service.SearchWorksAdvanced(ctx, workOpts)
 		out := search.ProviderSearchResult{Items: []search.SearchHit{}, Total: result.Total}
 		for _, item := range result.Items {
-			out.Items = append(out.Items, mapBookWorkHit(item))
+			out.Items = append(out.Items, mapBookWorkHit(item, req.Query))
 		}
 		return out, err
 	case "author":
@@ -124,13 +137,13 @@ func yearFilter(values []string) int {
 	return int(year)
 }
 
-func mapBookWorkHit(item books.BookWorkSearchItem) search.SearchHit {
+func mapBookWorkHit(item books.BookWorkSearchItem, query ...string) search.SearchHit {
 	names := make([]string, 0, len(item.Authors))
 	for _, author := range item.Authors {
 		names = append(names, author.Name)
 	}
 	return search.SearchHit{Module: "books", Type: "work", ID: item.ID.String(), Title: item.Title,
-		Subtitle: strings.Join(names, "、"), Snippet: searchSnippet(item.Description), CoverURL: item.CoverURL,
+		Subtitle: strings.Join(names, "、"), Snippet: searchSnippet(item.Description, query...), CoverURL: item.CoverURL,
 		Href: "/books/work/" + item.ID.String(), Metadata: map[string]any{
 			"authors": item.Authors, "language": item.Language, "rating_score": item.RatingScore,
 			"weighted_rating_score": item.WeightedRatingScore, "rating_count": item.RatingCount,
@@ -144,16 +157,43 @@ func mapBookAuthorHit(item books.BookAuthorSearchItem) search.SearchHit {
 		Snippet: searchSnippet(item.Description), Href: "/books/search?" + query.Encode(), Metadata: map[string]any{"work_count": item.WorkCount}}
 }
 
-func mapBookListHit(item books.PublicBookListSearchItem) search.SearchHit {
+func mapBookListHit(item books.PublicBookListSearchItem, query ...string) search.SearchHit {
 	return search.SearchHit{Module: "books", Type: "book_list", ID: item.ID.String(), Title: item.Title,
-		Subtitle: item.OwnerName, Snippet: searchSnippet(item.Description), Href: "/books/lists/" + item.ID.String(),
+		Subtitle: item.OwnerName, Snippet: searchSnippet(item.Description, query...), Href: "/books/lists/" + item.ID.String(),
 		Metadata: map[string]any{"owner_id": item.OwnerID.String(), "owner_name": item.OwnerName, "item_count": item.ItemCount, "published_at": item.PublishedAt}}
 }
 
-func searchSnippet(value string) string {
-	runes := []rune(strings.Join(strings.Fields(value), " "))
-	if len(runes) > 240 {
+func searchSnippet(value string, query ...string) string {
+	cleaned := strings.Join(strings.Fields(value), " ")
+	runes := []rune(cleaned)
+	if len(runes) <= 240 {
+		return string(runes)
+	}
+	var q string
+	if len(query) > 0 {
+		q = strings.TrimSpace(query[0])
+	}
+	if q == "" {
 		return string(runes[:240]) + "…"
 	}
-	return string(runes)
+	lowerVal := strings.ToLower(cleaned)
+	lowerQ := strings.ToLower(q)
+	byteIdx := strings.Index(lowerVal, lowerQ)
+	if byteIdx == -1 {
+		return string(runes[:240]) + "…"
+	}
+	matchRuneIdx := len([]rune(cleaned[:byteIdx]))
+	start := matchRuneIdx - 40
+	prefix := "…"
+	if start <= 0 {
+		start = 0
+		prefix = ""
+	}
+	end := start + 240
+	suffix := "…"
+	if end >= len(runes) {
+		end = len(runes)
+		suffix = ""
+	}
+	return prefix + string(runes[start:end]) + suffix
 }

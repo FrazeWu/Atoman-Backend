@@ -119,7 +119,7 @@ func TestBooksProviderUnifiedAPIContract(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, result.Pagination.Total)
 	}
-	require.Len(t, provider.Capabilities(context.Background(), search.Viewer{ID: user.UUID}, search.ScopeMine).Types, 4)
+	require.Len(t, provider.Capabilities(context.Background(), search.Viewer{ID: user.UUID}, search.ScopeMine).Types, 5)
 	_, err := provider.Search(context.Background(), search.Viewer{}, search.ProviderSearchRequest{Scope: search.ScopeMine, Type: "book_list"})
 	require.Error(t, err)
 }

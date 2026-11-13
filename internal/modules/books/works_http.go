@@ -2,6 +2,7 @@ package books
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"atoman/internal/model"
@@ -11,11 +12,31 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// getBookWorkFacets godoc
+// @Summary 获取图书作品分面统计（语言、年代、评分）
+// @Tags books-catalog
+// @Produce json
+// @Param q query string false "查询词"
+// @Success 200 {object} BookWorkFacetsResult
+// @Router /api/v1/books/works/facets [get]
+func (h *Handler) getBookWorkFacets(c *gin.Context) {
+	facets, err := h.service.GetBookWorkFacets(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, facets)
+}
+
 // searchBookWorks godoc
 // @Summary 搜索新版公开作品，不迁移或兼容旧版条目
 // @Tags books-catalog
 // @Produce json
 // @Param q query string false "标题或作者"
+// @Param language query string false "作品语言（逗号分隔）"
+// @Param min_rating query number false "最低评分"
+// @Param year_from query int false "出版年份起"
+// @Param year_to query int false "出版年份止"
 // @Param limit query int false "每页数量"
 // @Param offset query int false "偏移量"
 // @Success 200 {object} map[string]interface{}
@@ -25,7 +46,30 @@ func (h *Handler) searchBookWorks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, err := h.service.SearchBookWorks(c.Request.Context(), c.Query("q"), limit, offset)
+	var filters CatalogFilterOptions
+	if rawLang := c.Query("language"); rawLang != "" {
+		for _, l := range strings.Split(rawLang, ",") {
+			if trimmed := strings.TrimSpace(l); trimmed != "" {
+				filters.Languages = append(filters.Languages, trimmed)
+			}
+		}
+	}
+	if rawRating := c.Query("min_rating"); rawRating != "" {
+		if val, err := strconv.ParseFloat(rawRating, 64); err == nil && val >= 0 {
+			filters.MinRating = val
+		}
+	}
+	if rawFrom := c.Query("year_from"); rawFrom != "" {
+		if val, err := strconv.Atoi(rawFrom); err == nil && val > 0 {
+			filters.YearFrom = val
+		}
+	}
+	if rawTo := c.Query("year_to"); rawTo != "" {
+		if val, err := strconv.Atoi(rawTo); err == nil && val > 0 {
+			filters.YearTo = val
+		}
+	}
+	items, total, err := h.service.SearchBookWorksFiltered(c.Request.Context(), c.Query("q"), filters, limit, offset)
 	if err != nil {
 		httpx.Error(c, err)
 		return

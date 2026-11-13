@@ -112,6 +112,7 @@ func Run(db *gorm.DB) error {
 		{"mail accounts and invites migration", migrations.RunMailAccountsMigration},
 		{"mail pending send outbox migration", migrations.RunMailOutboxMigration},
 		{"mail workspace migration", migrations.RunMailWorkspaceMigration},
+		{"books search optimization indexes migration", migrations.RunBooksSearchOptimizationMigration},
 	}
 	for _, step := range postSchemaSteps {
 		if err := step.run(db); err != nil {

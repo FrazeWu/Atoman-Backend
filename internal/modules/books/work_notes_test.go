@@ -80,6 +80,24 @@ func TestWorkNotesAcrossConcreteFilesAndPrivateChapterNotes(t *testing.T) {
 	require.Empty(t, isolated.Items)
 	_, err = service.ListWorkNotes(ctx, user, workID, WorkNotesFilter{Kind: "invalid"})
 	require.Error(t, err)
+
+	// Filter by keyword query in work notes
+	qMatch, err := service.ListWorkNotes(ctx, user, workID, WorkNotesFilter{Query: "另一个文件"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, qMatch.Total)
+	require.Len(t, qMatch.Items, 1)
+	require.Equal(t, newMark.ID, qMatch.Items[0].ID)
+
+	qChapter, err := service.ListWorkNotes(ctx, user, workID, WorkNotesFilter{Query: "独立笔记"})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, qChapter.Total)
+	require.Len(t, qChapter.Items, 1)
+	require.Equal(t, chapterID, qChapter.Items[0].ID)
+
+	qNone, err := service.ListWorkNotes(ctx, user, workID, WorkNotesFilter{Query: "无此生僻词"})
+	require.NoError(t, err)
+	require.Zero(t, qNone.Total)
+	require.Empty(t, qNone.Items)
 }
 
 func TestWorkNotesPrivateHTTP(t *testing.T) {

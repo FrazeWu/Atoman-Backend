@@ -20,7 +20,10 @@ func (h *Handler) listWorkNotes(c *gin.Context) {
 	if !ok {
 		return
 	}
-	filter := WorkNotesFilter{Kind: strings.ToLower(strings.TrimSpace(c.DefaultQuery("kind", "all")))}
+	filter := WorkNotesFilter{
+		Kind:  strings.ToLower(strings.TrimSpace(c.DefaultQuery("kind", "all"))),
+		Query: strings.TrimSpace(c.Query("q")),
+	}
 	if raw := strings.TrimSpace(c.Query("revision_id")); raw != "" {
 		parsed, err := uuid.Parse(raw)
 		if err != nil || parsed == uuid.Nil {

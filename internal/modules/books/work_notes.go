@@ -1,14 +1,17 @@
 package books
 
 import (
-	"atoman/internal/model"
-	"atoman/internal/platform/apperr"
-	"atoman/internal/platform/authctx"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
+	"strings"
 	"time"
+
+	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authctx"
+
+	"github.com/google/uuid"
 )
 
 // Work-level timeline preserves the exact immutable file behind every mark.
@@ -46,6 +49,7 @@ type WorkNotesResult struct {
 type WorkNotesFilter struct {
 	Kind          string
 	RevisionID    uuid.UUID
+	Query         string
 	Limit, Offset int
 }
 type workNoteRow struct {
@@ -126,6 +130,13 @@ func (s *Service) ListWorkNotes(ctx context.Context, user authctx.CurrentUser, w
 		markArgs = append(markArgs, filter.RevisionID)
 		privateSQL += " AND n.source_revision_id = ?"
 		privateArgs = append(privateArgs, filter.RevisionID)
+	}
+	if q := strings.TrimSpace(filter.Query); q != "" {
+		pattern := "%" + escapeBookCatalogQuery(q) + "%"
+		markSQL += " AND (m.quote ILIKE ? ESCAPE '\\' OR m.note ILIKE ? ESCAPE '\\' OR m.label ILIKE ? ESCAPE '\\')"
+		markArgs = append(markArgs, pattern, pattern, pattern)
+		privateSQL += " AND (n.title ILIKE ? ESCAPE '\\' OR n.body ILIKE ? ESCAPE '\\')"
+		privateArgs = append(privateArgs, pattern, pattern)
 	}
 	union := fmt.Sprintf("(%s UNION ALL %s)", markSQL, privateSQL)
 	args := append(markArgs, privateArgs...)

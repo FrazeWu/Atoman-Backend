@@ -27,6 +27,7 @@ type WorkSearchOptions struct {
 	AuthorIDs []uuid.UUID
 	YearFrom  int
 	YearTo    int
+	MinRating float64
 }
 
 type BookWorkSearchItem struct {
@@ -71,6 +72,12 @@ func applyWorkSearchFilters(db *gorm.DB, opts WorkSearchOptions) *gorm.DB {
 			editions = editions.Where("published_date < make_date(?, 1, 1) + INTERVAL '1 year'", opts.YearTo)
 		}
 		db = db.Where("EXISTS (?)", editions)
+	}
+	if opts.MinRating > 0 {
+		ratingsSub := db.Session(&gorm.Session{NewDB: true}).Table("(?) AS ratings", bookWeightedRatingQuery(db)).
+			Select("ratings.work_id").
+			Where("ratings.weighted_rating_score >= ?", opts.MinRating)
+		db = db.Where("book_works.id IN (?)", ratingsSub)
 	}
 	return db
 }

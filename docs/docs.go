@@ -9116,6 +9116,30 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "作品语言（逗号分隔）",
+                        "name": "language",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "最低评分",
+                        "name": "min_rating",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "出版年份起",
+                        "name": "year_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "出版年份止",
+                        "name": "year_to",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "每页数量",
                         "name": "limit",
@@ -9179,6 +9203,33 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/books/works/facets": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "books-catalog"
+                ],
+                "summary": "获取图书作品分面统计（语言、年代、评分）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "查询词",
+                        "name": "q",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/books.BookWorkFacetsResult"
                         }
                     }
                 }
@@ -34544,6 +34595,29 @@ const docTemplate = `{
                 }
             }
         },
+        "books.BookWorkFacetsResult": {
+            "type": "object",
+            "properties": {
+                "decades": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.FacetCountItem"
+                    }
+                },
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.FacetCountItem"
+                    }
+                },
+                "ratings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/books.FacetCountItem"
+                    }
+                }
+            }
+        },
         "books.BookWorkMergePreview": {
             "type": "object",
             "properties": {
@@ -34763,6 +34837,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "books.FacetCountItem": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "label": {
                     "type": "string"
                 }
             }

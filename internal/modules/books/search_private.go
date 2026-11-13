@@ -58,6 +58,13 @@ AND published_at IS NOT NULL AND (visibility = 'public' OR book_lists.user_id = 
 				// 其他作者修改草稿不能改变收藏搜索的排序、泄漏私人编辑时间。
 				updated = "book_lists.published_at"
 			}
+		case "reading_mark":
+			query = tx.Model(&model.BookReadingMark{}).
+				Joins("JOIN book_asset_revisions r ON r.id = book_reading_marks.revision_id").
+				Joins("JOIN book_assets a ON a.id = r.asset_id").
+				Joins("JOIN book_works w ON w.id = a.work_id").
+				Where("book_reading_marks.user_id = ? AND book_reading_marks.purged_at IS NULL AND book_reading_marks.kind = 'highlight'", user.ID)
+			title, body, id, updated, workID = "COALESCE(NULLIF(w.title, ''), '未命名作品')", "COALESCE(book_reading_marks.quote, '') || ' ' || COALESCE(book_reading_marks.note, '')", "book_reading_marks.id", "book_reading_marks.updated_at", "w.id"
 		case "library":
 			query = tx.Model(&model.BookLibraryEntry{}).Where("book_library_entries.user_id = ?", user.ID).
 				Joins("JOIN book_works w ON w.id = book_library_entries.work_id AND w.deleted_at IS NULL").
