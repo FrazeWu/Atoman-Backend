@@ -373,3 +373,71 @@ func TestBookPDFExactPageFractionPersistsAndIsolatedByRevision(t *testing.T) {
 	require.Zero(t, otherState.PDFPage)
 	require.Zero(t, otherState.PDFOffset)
 }
+
+func TestBookMultiDeviceWebAndFlutterSyncRebaseWorkflow(t *testing.T) {
+	service, user, work, _ := newBookResourceTestService(t)
+	ctx := context.Background()
+	_, rev := readyBookReadingFile(t, service, user, uuid.MustParse(work.ID), "zh", "txt")
+
+	// 1. Web client creates session, reads to 50% (version 1)
+	webSession := newBookCloudTestSession(t, service, user, rev.ID, "web-client-desktop")
+	webResult, err := service.SaveBookCloudReadingState(ctx, user, rev.ID, SaveBookCloudReadingStateInput{
+		SessionID:      webSession.Session.ID,
+		RequestID:      uuid.New(),
+		Sequence:       1,
+		BaseVersion:    0,
+		TXTOffset:      5000,
+		CurrentPercent: .50,
+	})
+	require.NoError(t, err)
+	require.Equal(t, .50, webResult.State.CurrentPercent)
+	require.Equal(t, .50, webResult.State.FurthestPercent)
+	require.EqualValues(t, 1, webResult.State.Version)
+
+	// 2. Flutter client creates session (initially offline / decoupled)
+	flutterSession := newBookCloudTestSession(t, service, user, rev.ID, "flutter-client-mobile")
+
+	// 3. Flutter client attempts sync with outdated base_version: 0
+	_, err = service.SaveBookCloudReadingState(ctx, user, rev.ID, SaveBookCloudReadingStateInput{
+		SessionID:      flutterSession.Session.ID,
+		RequestID:      uuid.New(),
+		Sequence:       1,
+		BaseVersion:    0,
+		TXTOffset:      3000,
+		CurrentPercent: .30,
+	})
+	require.Error(t, err)
+	appErr := apperr.FromError(err)
+	require.Equal(t, "books.reading_state_conflict", appErr.Code)
+	require.Equal(t, http.StatusConflict, appErr.HTTPStatus)
+
+	// Verify conflict details contain the latest server state directly
+	conflictStateRaw, ok := appErr.Details["state"]
+	require.True(t, ok)
+	conflictState, ok := conflictStateRaw.(model.BookReadingState)
+	require.True(t, ok)
+	require.EqualValues(t, 1, conflictState.Version)
+	require.Equal(t, .50, conflictState.CurrentPercent)
+
+	// 4. Flutter client triggers re-base: adopts newBaseVersion: 1 and keeps local position 30%
+	rebasedResult, err := service.SaveBookCloudReadingState(ctx, user, rev.ID, SaveBookCloudReadingStateInput{
+		SessionID:      flutterSession.Session.ID,
+		RequestID:      uuid.New(),
+		Sequence:       2,
+		BaseVersion:    conflictState.Version,
+		TXTOffset:      3000,
+		CurrentPercent: .30,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, rebasedResult.State.Version)
+	require.Equal(t, .30, rebasedResult.State.CurrentPercent)
+	// Historical furthest progress from Web (50%) is preserved
+	require.Equal(t, .50, rebasedResult.State.FurthestPercent)
+
+	// 5. Subsequent query from either device returns consistent state
+	finalState, err := service.GetBookCloudReadingState(ctx, user, rev.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, finalState.Version)
+	require.Equal(t, .30, finalState.CurrentPercent)
+	require.Equal(t, .50, finalState.FurthestPercent)
+}
