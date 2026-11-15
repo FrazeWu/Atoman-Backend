@@ -27,6 +27,26 @@ class OperationsContracts(unittest.TestCase):
             module('backup-postgres').terminate_on_signal(15, None)
         self.assertEqual(raised.exception.code,143)
 
+    def test_managed_backend_mail_release_requires_complete_bundle(self):
+        runtime=module('activate-runtime')
+        with tempfile.TemporaryDirectory() as raw:
+            path=Path(raw)
+            for name in ('start_server','music_import_worker'):
+                (path/name).write_bytes(b'fixture')
+            # Old two-binary releases remain possible on hosts without mail.
+            self.assertEqual(runtime.release_binary_names('backend',path,False),
+                             ['start_server','music_import_worker'])
+            with self.assertRaisesRegex(RuntimeError,'incomplete mail-enabled backend release'):
+                runtime.release_binary_names('backend',path,True)
+            for name in ('mail_outbox_worker','mail_maintenance_worker','mail_admin',
+                         'mail_external_sync_worker','mail_followup_worker'):
+                (path/name).write_bytes(b'fixture')
+            names=runtime.release_binary_names('backend',path,True)
+            self.assertEqual(len(names),7)
+            (path/'mail_followup_worker').unlink()
+            with self.assertRaisesRegex(RuntimeError,'mail_followup_worker'):
+                runtime.release_binary_names('backend',path,True)
+
     def test_managed_environment_overrides_unsafe_old_paths(self):
         text=module('activate-runtime').managed_backend_environment('LOG_DIR=/root/old\nHTTP_HOST=0.0.0.0\nRUN_MIGRATIONS_ON_START=true')
         env=dict(line.split('=',1) for line in text.splitlines())

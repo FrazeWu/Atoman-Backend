@@ -123,4 +123,23 @@ if output="$(
 fi
 printf '%s' "$output" | grep -q 'DATABASE_URL password must match POSTGRES_PASSWORD'
 
-echo "deployment environment checks passed"
+# Mail releases must package every worker and the operator CLI, and
+# preflight must reject incomplete staged releases without touching production.
+TEMP_MAIL_BIN_DIR="$workspace/mail-workers"
+mkdir -p "$TEMP_MAIL_BIN_DIR"
+for component in "${MAIL_COMPONENTS[@]}"; do
+  printf '#!/bin/sh\nexit 0\n' > "$TEMP_MAIL_BIN_DIR/$component"
+  chmod 0755 "$TEMP_MAIL_BIN_DIR/$component"
+done
+staged="$workspace/staged"
+mkdir -p "$staged"
+stage_mail_components "$staged"
+for component in "${MAIL_COMPONENTS[@]}"; do
+  [ -x "$staged/$component" ] || { echo "missing staged mail component: $component" >&2; exit 1; }
+done
+rm -f "$TEMP_MAIL_BIN_DIR/mail_followup_worker"
+if ( stage_mail_components "$workspace/broken-stage" ) 2>/dev/null; then
+  echo "incomplete mail release was accepted" >&2
+  exit 1
+fi
+echo "deployment environment and mail release checks passed"

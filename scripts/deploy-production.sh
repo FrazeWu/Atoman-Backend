@@ -27,6 +27,8 @@ STATE_DIR="${ATOMAN_STATE_DIR:-/var/lib/$SERVICE_NAME}"
 TEMP_BINARY=""
 TEMP_WORKER_BINARY=""
 TEMP_MIGRATE_BINARY=""
+TEMP_MAIL_BIN_DIR=""
+MAIL_COMPONENTS=(mail_outbox_worker mail_maintenance_worker mail_external_sync_worker mail_followup_worker mail_admin)
 BACKUP_BINARY=""
 BACKUP_WORKER_BINARY=""
 
@@ -58,6 +60,7 @@ cleanup() {
   [[ -z "$TEMP_BINARY" ]] || rm -f "$TEMP_BINARY"
   [[ -z "$TEMP_WORKER_BINARY" ]] || rm -f "$TEMP_WORKER_BINARY"
   [[ -z "$TEMP_MIGRATE_BINARY" ]] || rm -f "$TEMP_MIGRATE_BINARY"
+  [[ -z "$TEMP_MAIL_BIN_DIR" ]] || rm -rf -- "$TEMP_MAIL_BIN_DIR"
 }
 trap cleanup EXIT
 
@@ -199,12 +202,16 @@ build_backend() {
   TEMP_BINARY="$(mktemp "$REPO_DIR/.start_server.new.XXXXXX")"
   TEMP_WORKER_BINARY="$(mktemp "$REPO_DIR/.music_import_worker.new.XXXXXX")"
   TEMP_MIGRATE_BINARY="$(mktemp "$REPO_DIR/.migrate.new.XXXXXX")"
+  TEMP_MAIL_BIN_DIR="$(mktemp -d "$REPO_DIR/.mail-workers.new.XXXXXX")"
   log "Building backend"
   (
     cd "$REPO_DIR"
     go build ./...
     go build -trimpath -o "$TEMP_BINARY" ./cmd/start_server
     go build -trimpath -o "$TEMP_WORKER_BINARY" ./cmd/music_import_worker
+    for mail_component in "${MAIL_COMPONENTS[@]}"; do
+      go build -buildvcs=false -trimpath -o "$TEMP_MAIL_BIN_DIR/$mail_component" "./cmd/$mail_component"
+    done
     go build -trimpath -o "$TEMP_MIGRATE_BINARY" ./cmd/migrate
   )
   chmod 0755 "$TEMP_BINARY"
@@ -360,6 +367,18 @@ rollback_binary() {
   wait_for_url "$LOCAL_HEALTH_URL"
 }
 
+stage_mail_components() {
+  local target_dir="$1" component
+  # Fail before activation if any mail program is missing. Never silently
+  # publish a two-binary backend release over an active mail installation.
+  for component in "${MAIL_COMPONENTS[@]}"; do
+    [[ -f "$TEMP_MAIL_BIN_DIR/$component" && -x "$TEMP_MAIL_BIN_DIR/$component" ]] || die "missing required mail component: $component"
+  done
+  for component in "${MAIL_COMPONENTS[@]}"; do
+    install -m 0755 "$TEMP_MAIL_BIN_DIR/$component" "$target_dir/$component"
+  done
+}
+
 activate_backend() {
   if [[ -f "${SERVICE_FILE}.d/90-managed-runtime.conf" ]]; then
     local staged_dir revision
@@ -367,6 +386,7 @@ activate_backend() {
     revision="$(git -C "$REPO_DIR" rev-parse HEAD)"
     install -m 0755 "$TEMP_BINARY" "$staged_dir/start_server"
     install -m 0755 "$TEMP_WORKER_BINARY" "$staged_dir/music_import_worker"
+    stage_mail_components "$staged_dir"
     if ! python3 "$REPO_DIR/scripts/ops/activate-runtime.py" --kind backend \
       --binary-directory "$staged_dir" --revision "$revision" --environment-file "$ENV_FILE"; then
       rm -rf "$staged_dir"

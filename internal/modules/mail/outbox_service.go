@@ -285,8 +285,15 @@ func (s *MailOutboxService) ClaimDue(ctx context.Context) (*model.MailPendingSen
 		if tx.Dialector.Name() == "postgres" {
 			q = q.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 		}
-		if err := q.Take(&entry).Error; err != nil {
-			return err
+		// An empty queue is an ordinary poll, not a record-not-found error.
+		// Find keeps PostgreSQL's FOR UPDATE SKIP LOCKED semantics without
+		// causing GORM to emit error-level logs on every idle poll.
+		found := q.Find(&entry)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected == 0 {
+			return nil
 		}
 		result := tx.Model(&model.MailPendingSend{}).Where("id=? AND status=?", entry.ID, "queued").Updates(map[string]any{"status": "dispatching", "claimed_at": now, "updated_at": now})
 		if result.Error != nil {
@@ -297,11 +304,11 @@ func (s *MailOutboxService) ClaimDue(ctx context.Context) (*model.MailPendingSen
 		}
 		return nil
 	})
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, err
+	}
+	if entry.ID == uuid.Nil {
+		return nil, nil
 	}
 	entry.Status = "dispatching"
 	entry.ClaimedAt = &now

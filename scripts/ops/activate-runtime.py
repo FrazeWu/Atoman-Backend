@@ -97,6 +97,18 @@ def healthy(url):
     raise RuntimeError('Health check failed: ' + url)
 
 
+def release_binary_names(kind, binary_directory, mail_enabled=False):
+    if kind != 'backend':
+        return ['hubproxy']
+    names = ['start_server', 'music_import_worker']
+    mail_components = ['mail_outbox_worker', 'mail_maintenance_worker',
+                       'mail_admin', 'mail_external_sync_worker', 'mail_followup_worker']
+    missing = [name for name in mail_components if not (binary_directory/name).is_file()]
+    if mail_enabled and missing:
+        raise RuntimeError('Refusing incomplete mail-enabled backend release: ' + ', '.join(missing))
+    return names + [name for name in mail_components if name not in missing]
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--kind',choices=['backend','mirror'],required=True)
@@ -109,14 +121,10 @@ def main():
         p.error('A full Git commit ID is required')
     user='atoman' if a.kind=='backend' else 'atoman-mirror'
     services=['atoman-backend','atoman-music-import-worker'] if a.kind=='backend' else ['atoman-mirror']
-    names=['start_server','music_import_worker'] if a.kind=='backend' else ['hubproxy']
-    # Mail workers are part of the immutable backend release when present in
-    # the staged binary directory. Never retain a stale mail worker when the
-    # new runtime already ships one. Older two-binary releases stay supported.
-    if a.kind == 'backend':
-        mail_components = ['mail_outbox_worker', 'mail_maintenance_worker',
-                           'mail_admin', 'mail_external_sync_worker', 'mail_followup_worker']
-        names += [name for name in mail_components if (a.binary_directory/name).is_file()]
+    # Any host with an installed mail outbox must publish all five mail
+    # components atomically, even if an operator bypasses deploy-production.sh.
+    mail_enabled = a.kind == 'backend' and Path('/etc/systemd/system/atoman-mail-outbox.service').is_file()
+    names=release_binary_names(a.kind,a.binary_directory,mail_enabled)
     hashes={name:hashlib.sha256((a.binary_directory/name).read_bytes()).hexdigest() for name in names}
     release=Path('/opt/atoman')/a.kind/'releases'/(a.revision[:12]+'-'+hashes[names[0]][:12])
     if a.dry_run:
