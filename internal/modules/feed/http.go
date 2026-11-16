@@ -59,6 +59,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/timeline/mark-unread", h.markUnread)
 		protected.POST("/timeline/mark-all-read", h.markAllRead)
 		protected.POST("/timeline/mark-all-unread", h.markAllUnread)
+		protected.GET("/search", h.searchSubscribedFeed)
 		protected.GET("/timeline/updates", h.getTimelineUpdates)
 		protected.POST("/timeline/star", h.toggleStar)
 		protected.POST("/events/read", h.recordReadEvent)
