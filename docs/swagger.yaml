@@ -19985,6 +19985,64 @@ paths:
       summary: Public external RSS articles, recent and deduplicated
       tags:
       - feed
+  /api/v1/feed/search:
+    get:
+      description: 在当前用户的订阅流里按相关度或时间检索标题、摘要、来源和正文。不读取去重快照。
+      parameters:
+      - description: 搜索词
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: 排序
+        enum:
+        - relevance
+        - recent
+        in: query
+        name: rank
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      - description: 订阅 UUID
+        in: query
+        name: source_id
+        type: string
+      - description: 分组 UUID
+        in: query
+        name: group_id
+        type: string
+      - description: 只看未读
+        in: query
+        name: unread_only
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 搜索已订阅内容
+      tags:
+      - feed
   /api/v1/feed/sources/batch-subscribe:
     post:
       consumes:
