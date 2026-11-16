@@ -3870,6 +3870,72 @@ definitions:
     required:
     - username
     type: object
+  handlers.ClientErrorReport:
+    properties:
+      context:
+        example: 'Vue: render'
+        type: string
+      kind:
+        enum:
+        - window
+        - unhandledrejection
+        - vue
+        - chunk
+        example: vue
+        type: string
+      message:
+        example: render failed
+        type: string
+      name:
+        example: TypeError
+        type: string
+      release:
+        example: v0.3.0
+        type: string
+      route:
+        example: /blog/:id
+        type: string
+      stack:
+        type: string
+      user_agent:
+        example: Mozilla/5.0
+        type: string
+    type: object
+  handlers.ClientErrorSummary:
+    properties:
+      from:
+        example: "2026-11-10"
+        type: string
+      groups:
+        items:
+          $ref: '#/definitions/handlers.ClientErrorSummaryGroup'
+        type: array
+      to:
+        example: "2026-11-16"
+        type: string
+    type: object
+  handlers.ClientErrorSummaryGroup:
+    properties:
+      count:
+        example: 2
+        type: integer
+      kinds:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      release:
+        example: v0.3.0
+        type: string
+      route:
+        example: /blog/:id
+        type: string
+    type: object
+  handlers.ClientErrorSummaryResponse:
+    properties:
+      data:
+        $ref: '#/definitions/handlers.ClientErrorSummary'
+    type: object
   handlers.CompleteVideoImportPartInput:
     properties:
       etag:
@@ -11369,6 +11435,56 @@ paths:
       summary: 转移频道所有权
       tags:
       - admin-users
+  /api/v1/admin/client-errors/summary:
+    get:
+      description: 管理员查询 UTC 日期范围内按 release 与 route 聚合的错误次数。未传日期时默认最近 7 天（含今天），跨度不超过
+        93 天。
+      parameters:
+      - description: 起始日期，YYYY-MM-DD
+        in: query
+        name: from
+        type: string
+      - description: 结束日期，YYYY-MM-DD
+        in: query
+        name: to
+        type: string
+      - description: 版本过滤
+        in: query
+        name: release
+        type: string
+      - description: 路由过滤
+        in: query
+        name: route
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ClientErrorSummaryResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 按版本和路由汇总前端错误
+      tags:
+      - observability
   /api/v1/admin/comment-reports:
     get:
       parameters:
@@ -17490,6 +17606,47 @@ paths:
       summary: 获取图书作品分面统计（语言、年代、评分）
       tags:
       - books-catalog
+  /api/v1/client-errors:
+    post:
+      consumes:
+      - application/json
+      description: 匿名接收已脱敏的浏览器错误。请求体最大 8KB，同一 IP 每分钟最多 30 次。不校验 CSRF，以便 navigator.sendBeacon
+        以 text/plain 投递 JSON；非可信 Origin 返回 403。kind 仅接受 window、unhandledrejection、vue、chunk。
+      parameters:
+      - description: 前端错误报告
+        in: body
+        name: report
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ClientErrorReport'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 已记录
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 上报前端错误
+      tags:
+      - observability
   /api/v1/comments/{comment_id}:
     delete:
       responses:

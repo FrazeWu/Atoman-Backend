@@ -38,28 +38,36 @@ var clientErrorKinds = map[string]struct{}{
 	"chunk":              {},
 }
 
-type clientErrorPayload struct {
-	Release   string `json:"release"`
-	Route     string `json:"route"`
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Message   string `json:"message"`
+// ClientErrorReport is a sanitized browser error accepted by the public ingest endpoint.
+type ClientErrorReport struct {
+	Release   string `json:"release" example:"v0.3.0"`
+	Route     string `json:"route" example:"/blog/:id"`
+	Kind      string `json:"kind" enums:"window,unhandledrejection,vue,chunk" example:"vue"`
+	Name      string `json:"name" example:"TypeError"`
+	Message   string `json:"message" example:"render failed"`
 	Stack     string `json:"stack"`
-	Context   string `json:"context"`
-	UserAgent string `json:"user_agent"`
+	Context   string `json:"context" example:"Vue: render"`
+	UserAgent string `json:"user_agent" example:"Mozilla/5.0"`
 }
 
-type clientErrorSummaryGroup struct {
-	Release string           `json:"release"`
-	Route   string           `json:"route"`
-	Count   int64            `json:"count"`
+// ClientErrorSummaryGroup counts one release and route across error kinds.
+type ClientErrorSummaryGroup struct {
+	Release string           `json:"release" example:"v0.3.0"`
+	Route   string           `json:"route" example:"/blog/:id"`
+	Count   int64            `json:"count" example:"2"`
 	Kinds   map[string]int64 `json:"kinds"`
 }
 
-type clientErrorSummary struct {
-	From   string                    `json:"from"`
-	To     string                    `json:"to"`
-	Groups []clientErrorSummaryGroup `json:"groups"`
+// ClientErrorSummary is the admin aggregate for a UTC date range.
+type ClientErrorSummary struct {
+	From   string                    `json:"from" example:"2026-11-10"`
+	To     string                    `json:"to" example:"2026-11-16"`
+	Groups []ClientErrorSummaryGroup `json:"groups"`
+}
+
+// ClientErrorSummaryResponse wraps the admin summary in the standard data envelope.
+type ClientErrorSummaryResponse struct {
+	Data ClientErrorSummary `json:"data"`
 }
 
 // SetupClientErrorRoutes registers anonymous ingest and the admin summary.
@@ -73,6 +81,20 @@ func SetupClientErrorRoutes(router *gin.Engine, db *gorm.DB) {
 	admin.GET("/summary", GetClientErrorSummary(db))
 }
 
+// RecordClientError godoc
+// @Summary 上报前端错误
+// @Description 匿名接收已脱敏的浏览器错误。请求体最大 8KB，同一 IP 每分钟最多 30 次。不校验 CSRF，以便 navigator.sendBeacon 以 text/plain 投递 JSON；非可信 Origin 返回 403。kind 仅接受 window、unhandledrejection、vue、chunk。
+// @Tags observability
+// @Accept json
+// @Produce json
+// @Param report body ClientErrorReport true "前端错误报告"
+// @Success 204 "已记录"
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
+// @Failure 429 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/client-errors [post]
 func RecordClientError(db *gorm.DB, limiter *ratelimit.Limiter) gin.HandlerFunc {
 	return recordClientError(db, limiter, clientErrorIPLimit, clientErrorIPWindow, time.Now)
 }
@@ -147,24 +169,24 @@ func readClientErrorBody(c *gin.Context) ([]byte, error) {
 	return io.ReadAll(c.Request.Body)
 }
 
-func normalizeClientError(body []byte) (clientErrorPayload, bool) {
+func normalizeClientError(body []byte) (ClientErrorReport, bool) {
 	if len(body) == 0 || body[0] != '{' {
-		return clientErrorPayload{}, false
+		return ClientErrorReport{}, false
 	}
-	var payload clientErrorPayload
+	var payload ClientErrorReport
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return clientErrorPayload{}, false
+		return ClientErrorReport{}, false
 	}
 	release, ok := sanitizeClientErrorRelease(payload.Release)
 	if !ok {
-		return clientErrorPayload{}, false
+		return ClientErrorReport{}, false
 	}
 	route, ok := sanitizeClientErrorRoute(payload.Route)
 	if !ok {
-		return clientErrorPayload{}, false
+		return ClientErrorReport{}, false
 	}
 	if _, known := clientErrorKinds[payload.Kind]; !known {
-		return clientErrorPayload{}, false
+		return ClientErrorReport{}, false
 	}
 	name := sanitizeClientErrorField(payload.Name, clientErrorMaxName)
 	if name == "" {
@@ -174,7 +196,7 @@ func normalizeClientError(body []byte) (clientErrorPayload, bool) {
 	stack := sanitizeClientErrorField(limitClientErrorLines(payload.Stack, clientErrorMaxLines), clientErrorMaxStack)
 	context := sanitizeClientErrorField(payload.Context, clientErrorMaxContext)
 	userAgent := sanitizeClientErrorField(payload.UserAgent, clientErrorMaxAgent)
-	return clientErrorPayload{
+	return ClientErrorReport{
 		Release:   release,
 		Route:     route,
 		Kind:      payload.Kind,
@@ -186,7 +208,7 @@ func normalizeClientError(body []byte) (clientErrorPayload, bool) {
 	}, true
 }
 
-func storeClientError(db *gorm.DB, report clientErrorPayload, now time.Time) error {
+func storeClientError(db *gorm.DB, report ClientErrorReport, now time.Time) error {
 	row := model.ClientErrorDaily{
 		Day:             now.Format("2006-01-02"),
 		Release:         report.Release,
@@ -221,6 +243,23 @@ func storeClientError(db *gorm.DB, report clientErrorPayload, now time.Time) err
 	}).Create(&row).Error
 }
 
+// GetClientErrorSummary godoc
+// @Summary 按版本和路由汇总前端错误
+// @Description 管理员查询 UTC 日期范围内按 release 与 route 聚合的错误次数。未传日期时默认最近 7 天（含今天），跨度不超过 93 天。
+// @Tags observability
+// @Produce json
+// @Param from query string false "起始日期，YYYY-MM-DD"
+// @Param to query string false "结束日期，YYYY-MM-DD"
+// @Param release query string false "版本过滤"
+// @Param route query string false "路由过滤"
+// @Success 200 {object} ClientErrorSummaryResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/admin/client-errors/summary [get]
 func GetClientErrorSummary(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		from, to, ok := clientErrorSummaryRange(c, time.Now().UTC())
@@ -253,7 +292,7 @@ func GetClientErrorSummary(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query client errors"})
 			return
 		}
-		httpx.OK(c, http.StatusOK, clientErrorSummary{From: from, To: to, Groups: groups})
+		httpx.OK(c, http.StatusOK, ClientErrorSummary{From: from, To: to, Groups: groups})
 	}
 }
 
@@ -288,7 +327,7 @@ type clientErrorAggregateRow struct {
 	Count   int64
 }
 
-func queryClientErrorSummary(db *gorm.DB, from, to, release, route string) ([]clientErrorSummaryGroup, error) {
+func queryClientErrorSummary(db *gorm.DB, from, to, release, route string) ([]ClientErrorSummaryGroup, error) {
 	query := db.Model(&model.ClientErrorDaily{}).
 		Select("release, route, kind, SUM(count) AS count").
 		Where("day >= ? AND day <= ?", from, to)
@@ -302,7 +341,7 @@ func queryClientErrorSummary(db *gorm.DB, from, to, release, route string) ([]cl
 	if err := query.Group("release, route, kind").Order("SUM(count) DESC").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	groups := make([]clientErrorSummaryGroup, 0)
+	groups := make([]ClientErrorSummaryGroup, 0)
 	index := map[string]int{}
 	for _, row := range rows {
 		key := row.Release + "\n" + row.Route
@@ -313,7 +352,7 @@ func queryClientErrorSummary(db *gorm.DB, from, to, release, route string) ([]cl
 			}
 			position = len(groups)
 			index[key] = position
-			groups = append(groups, clientErrorSummaryGroup{
+			groups = append(groups, ClientErrorSummaryGroup{
 				Release: row.Release,
 				Route:   row.Route,
 				Kinds:   map[string]int64{},

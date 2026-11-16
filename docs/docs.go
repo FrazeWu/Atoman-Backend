@@ -290,6 +290,84 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/client-errors/summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "管理员查询 UTC 日期范围内按 release 与 route 聚合的错误次数。未传日期时默认最近 7 天（含今天），跨度不超过 93 天。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "observability"
+                ],
+                "summary": "按版本和路由汇总前端错误",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起始日期，YYYY-MM-DD",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束日期，YYYY-MM-DD",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "版本过滤",
+                        "name": "release",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "路由过滤",
+                        "name": "route",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ClientErrorSummaryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/comment-reports": {
             "get": {
                 "security": [
@@ -10025,6 +10103,67 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "boolean"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/client-errors": {
+            "post": {
+                "description": "匿名接收已脱敏的浏览器错误。请求体最大 8KB，同一 IP 每分钟最多 30 次。不校验 CSRF，以便 navigator.sendBeacon 以 text/plain 投递 JSON；非可信 Origin 返回 403。kind 仅接受 window、unhandledrejection、vue、chunk。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "observability"
+                ],
+                "summary": "上报前端错误",
+                "parameters": [
+                    {
+                        "description": "前端错误报告",
+                        "name": "report",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ClientErrorReport"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "已记录"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -38703,6 +38842,99 @@ const docTemplate = `{
             "properties": {
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.ClientErrorReport": {
+            "type": "object",
+            "properties": {
+                "context": {
+                    "type": "string",
+                    "example": "Vue: render"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "window",
+                        "unhandledrejection",
+                        "vue",
+                        "chunk"
+                    ],
+                    "example": "vue"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "render failed"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "TypeError"
+                },
+                "release": {
+                    "type": "string",
+                    "example": "v0.3.0"
+                },
+                "route": {
+                    "type": "string",
+                    "example": "/blog/:id"
+                },
+                "stack": {
+                    "type": "string"
+                },
+                "user_agent": {
+                    "type": "string",
+                    "example": "Mozilla/5.0"
+                }
+            }
+        },
+        "handlers.ClientErrorSummary": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string",
+                    "example": "2026-11-10"
+                },
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ClientErrorSummaryGroup"
+                    }
+                },
+                "to": {
+                    "type": "string",
+                    "example": "2026-11-16"
+                }
+            }
+        },
+        "handlers.ClientErrorSummaryGroup": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "kinds": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "release": {
+                    "type": "string",
+                    "example": "v0.3.0"
+                },
+                "route": {
+                    "type": "string",
+                    "example": "/blog/:id"
+                }
+            }
+        },
+        "handlers.ClientErrorSummaryResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/handlers.ClientErrorSummary"
                 }
             }
         },

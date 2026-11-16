@@ -100,7 +100,7 @@ func TestRecordClientErrorAggregatesByReleaseAndRoute(t *testing.T) {
 		t.Fatalf("summary status %d: %s", summary.Code, summary.Body.String())
 	}
 	var payload struct {
-		Data clientErrorSummary `json:"data"`
+		Data ClientErrorSummary `json:"data"`
 	}
 	if err := json.Unmarshal(summary.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode summary: %v", err)
