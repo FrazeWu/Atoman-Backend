@@ -79,6 +79,9 @@ func initDefaultPolicies() {
 	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/v1/videos/:id/view", "POST"); ok {
 		policyAdded = true
 	}
+	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/v1/client-errors", "POST"); ok {
+		policyAdded = true
+	}
 	if ok, _ := Enforcer.AddPolicy("anonymous", "/uploads/*", "(GET|HEAD)"); ok {
 		policyAdded = true
 	}
@@ -157,8 +160,8 @@ func CasbinMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Public page-view reporting is intentionally anonymous.
-		if role == "anonymous" && method == "POST" && path == "/api/v1/site/visits" {
+		// Public page-view and client-error reporting are intentionally anonymous.
+		if role == "anonymous" && method == "POST" && (path == "/api/v1/site/visits" || path == "/api/v1/client-errors") {
 			c.Next()
 			return
 		}

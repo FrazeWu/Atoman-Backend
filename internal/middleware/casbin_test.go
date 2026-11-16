@@ -107,6 +107,13 @@ func TestCasbinMiddlewareOnlyAllowsAnonymousPlaybackCounterPosts(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected another anonymous video POST to remain unauthorized, got %d: %s", w.Code, w.Body.String())
 	}
+
+	r.POST("/api/v1/client-errors", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/client-errors", nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected anonymous client error ingest to pass Casbin, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 func TestCasbinMiddlewareTreatsDeniedV1AuthPostsAsForbidden(t *testing.T) {

@@ -144,6 +144,7 @@ func RegisterV1Routes(
 
 	handlers.SetupAuthRoutes(r, db, emailService)
 	handlers.SetupSiteRoutes(r, db)
+	handlers.SetupClientErrorRoutes(r, db)
 	handlers.SetupOnboardingRoutes(r, db)
 	handlers.SetupUserRoutes(r, db)
 	handlers.SetupBlogUploadRoutes(r, db, s3Client)

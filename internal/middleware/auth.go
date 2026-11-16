@@ -212,8 +212,15 @@ func requiresCSRF(method string) bool {
 	}
 }
 
+// ExemptFromWebCSRF allows the public client-error beacon to be sent without
+// a CSRF header. sendBeacon cannot set custom headers, and the payload is
+// sanitized telemetry rather than an account mutation.
+func ExemptFromWebCSRF(method, path string) bool {
+	return method == http.MethodPost && path == "/api/v1/client-errors"
+}
+
 func verifyWebRequest(c *gin.Context, resolved authsession.Resolved, credential requestCredential) bool {
-	if credential.kind != authsession.KindWeb || !requiresCSRF(c.Request.Method) {
+	if credential.kind != authsession.KindWeb || !requiresCSRF(c.Request.Method) || ExemptFromWebCSRF(c.Request.Method, c.Request.URL.Path) {
 		return true
 	}
 	if !IsTrustedWebOrigin(c.GetHeader("Origin")) || !authsession.New(currentAuthDB()).VerifyCSRF(resolved.Session, c.GetHeader(CSRFHeaderName)) {
