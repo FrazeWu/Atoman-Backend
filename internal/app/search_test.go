@@ -52,6 +52,7 @@ func TestRegisterV1RoutesMountsUnifiedSearchWithoutSwitchingLegacySearch(t *test
 func TestRegisteredPrivateSearchUsesOnlyBooksAndMusic(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.SiteSetting{}, &model.User{}, &model.AuthSession{}, &model.Revision{}, &model.BookWork{},
+		&model.BookAsset{}, &model.BookAssetRevision{}, &model.BookReadingMark{},
 		&model.BookList{}, &model.BookListBookmark{}, &model.BookPrivateNote{}, &model.BookLibraryEntry{}, &model.Playlist{}, &model.PlaylistBookmark{})
 	user := model.User{Username: "private-search", Email: "private-search@example.test", Password: "hash", IsActive: true, Role: "user"}
 	require.NoError(t, db.Create(&user).Error)
@@ -70,16 +71,38 @@ func TestRegisteredPrivateSearchUsesOnlyBooksAndMusic(t *testing.T) {
 		if path == "/api/v1/search/capabilities?scope=mine" {
 			var envelope search.CapabilitiesEnvelope
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
-			require.Len(t, envelope.Data.Modules, 2)
-			require.Equal(t, "books", envelope.Data.Modules[0].Module)
-			require.Len(t, envelope.Data.Modules[0].Types, 4)
-			require.Equal(t, "music", envelope.Data.Modules[1].Module)
-			require.Len(t, envelope.Data.Modules[1].Types, 2)
+			require.Equal(t, []string{"books", "music"}, moduleNames(envelope.Data.Modules))
+			require.Equal(t, []string{"note", "reading_mark", "book_list", "library", "bookmark"}, typeNames(envelope.Data.Modules[0].Types))
+			require.Equal(t, []string{"playlist", "bookmark"}, typeNames(envelope.Data.Modules[1].Types))
 		} else {
 			var envelope search.SearchEnvelope
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &envelope))
 			require.False(t, envelope.Data.Partial, response.Body.String())
-			require.Len(t, envelope.Data.Groups, 6)
+			groups := make([]string, 0, len(envelope.Data.Groups))
+			for _, group := range envelope.Data.Groups {
+				require.Nil(t, group.Error)
+				groups = append(groups, group.Module+"/"+group.Type)
+			}
+			require.Equal(t, []string{
+				"books/note", "books/reading_mark", "books/book_list", "books/library", "books/bookmark",
+				"music/playlist", "music/bookmark",
+			}, groups)
 		}
 	}
+}
+
+func moduleNames(modules []search.ModuleCapabilities) []string {
+	names := make([]string, 0, len(modules))
+	for _, module := range modules {
+		names = append(names, module.Module)
+	}
+	return names
+}
+
+func typeNames(types []search.TypeCapability) []string {
+	names := make([]string, 0, len(types))
+	for _, kind := range types {
+		names = append(names, kind.Key)
+	}
+	return names
 }
