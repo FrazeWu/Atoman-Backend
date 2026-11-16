@@ -6,13 +6,14 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
+	"atoman/internal/platform/ratelimit"
 
 	"github.com/gin-gonic/gin"
 )
 
 // RegisterRoutes registers private import routes under /api/v1/books.
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
-	handler := &Handler{service: service}
+	handler := &Handler{service: service, reportLimiter: ratelimit.New()}
 	public := group.Group("")
 	public.Use(middleware.OptionalAuthMiddleware())
 	public.GET("/note-shares", handler.searchPublicNoteShares)
@@ -102,6 +103,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	protected.POST("/works/:workId/editions", handler.createBookEdition)
 	protected.POST("/people", handler.createBookPerson)
 	protected.POST("/works/:workId/assets", handler.createBookResource)
+	protected.POST("/assets/:assetId/reports", handler.reportPublishedBookAsset)
+	protected.GET("/admin/publication-reports", handler.listPublicationReports)
+	protected.PUT("/admin/publication-reports/:reportId", handler.reviewPublicationReport)
 	protected.PATCH("/assets/:assetId/status", handler.setBookResourceStatus)
 	protected.POST("/assets/:assetId/upload-sessions", handler.createBookResourceUpload)
 	protected.GET("/upload-sessions/:uploadId", handler.getBookResourceUpload)
@@ -118,7 +122,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 }
 
 type Handler struct {
-	service *Service
+	service       *Service
+	reportLimiter *ratelimit.Limiter
 }
 
 func requireCurrentUser() gin.HandlerFunc {

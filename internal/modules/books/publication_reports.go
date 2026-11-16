@@ -112,12 +112,19 @@ func (s *Service) ReviewPublicationReport(reviewer authctx.CurrentUser, reportID
 			return apperr.Conflict("books.report_already_reviewed", "Publication report is no longer pending")
 		}
 		now := time.Now().UTC()
-		if err := tx.Model(&report).Updates(map[string]any{"status": decision, "reviewer_id": reviewer.ID, "reviewed_at": now, "decision_note": strings.TrimSpace(note)}).Error; err != nil {
+		trimmed := strings.TrimSpace(note)
+		if err := tx.Model(&report).Updates(map[string]any{"status": decision, "reviewer_id": reviewer.ID, "reviewed_at": now, "decision_note": trimmed}).Error; err != nil {
 			return err
 		}
 		if decision == model.BookPublicationReportStatusRemoved {
-			return tx.Model(&model.PublishedBookAsset{}).Where("id = ? AND status = ?", report.AssetID, model.BookPublicationStatusPublished).Updates(map[string]any{"status": model.BookPublicationStatusRemoved, "removed_at": now, "removal_reason": "removed after publication report"}).Error
+			if err := tx.Model(&model.PublishedBookAsset{}).Where("id = ? AND status = ?", report.AssetID, model.BookPublicationStatusPublished).Updates(map[string]any{"status": model.BookPublicationStatusRemoved, "removed_at": now, "removal_reason": "removed after publication report"}).Error; err != nil {
+				return err
+			}
 		}
+		report.Status = decision
+		report.ReviewerID = &reviewer.ID
+		report.ReviewedAt = &now
+		report.DecisionNote = trimmed
 		return nil
 	})
 	if err != nil {
