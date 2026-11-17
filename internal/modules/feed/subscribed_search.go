@@ -594,8 +594,8 @@ func (s *Service) blogSearchBodies(ids []uuid.UUID) (map[uuid.UUID]string, error
 func feedItemSearchMatch(needle string, useDocument bool) (string, []any) {
 	pattern := escapedContainsPattern(needle)
 	if useDocument {
-		return `(public.atoman_feed_search_document_v2(feed_items.title, feed_items.summary, feed_items.author) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_sources.title, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_sources.rss_url, '')) LIKE ? ESCAPE '\')`,
-			[]any{pattern, pattern, pattern}
+		return `(public.atoman_feed_search_document_v2(feed_items.title, feed_items.summary, feed_items.author) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_items.reader_html, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_items.full_text_html, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_sources.title, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_sources.rss_url, '')) LIKE ? ESCAPE '\')`,
+			[]any{pattern, pattern, pattern, pattern, pattern}
 	}
 	return `(LOWER(COALESCE(feed_items.title, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_items.summary, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_items.author, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_items.reader_html, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_items.full_text_html, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_items.feed_content_html, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_sources.title, '')) LIKE ? ESCAPE '\' OR LOWER(COALESCE(feed_sources.rss_url, '')) LIKE ? ESCAPE '\')`,
 		[]any{pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern}
