@@ -25,32 +25,33 @@ func TestFeedFullTextSearchIndex(t *testing.T) {
 
 	var plain string
 	require.NoError(t, db.Raw(
-		`SELECT public.atoman_feed_search_document_v1(?, ?, ?, ?, ?, ?)`,
-		"Title", "summary", "", "<p>Body Phrase</p>", "", "",
+		`SELECT public.atoman_feed_search_document_v2(?, ?, ?)`,
+		"Title", "Summary Phrase", "Author",
 	).Scan(&plain).Error)
-	require.Contains(t, plain, "body phrase")
-	require.NotContains(t, plain, "<p>")
+	require.Contains(t, plain, "title")
+	require.Contains(t, plain, "summary phrase")
+	require.Contains(t, plain, "author")
 
 	var indexName string
-	require.NoError(t, db.Raw(`SELECT indexname FROM pg_indexes WHERE indexname = 'idx_feed_items_search_document_trgm_v1'`).Scan(&indexName).Error)
-	require.Equal(t, "idx_feed_items_search_document_trgm_v1", indexName)
+	require.NoError(t, db.Raw(`SELECT indexname FROM pg_indexes WHERE indexname = 'idx_feed_items_search_document_trgm_v2'`).Scan(&indexName).Error)
+	require.Equal(t, "idx_feed_items_search_document_trgm_v2", indexName)
 	var valid bool
 	require.NoError(t, db.Raw(`SELECT i.indisvalid
 		FROM pg_index i
 		JOIN pg_class c ON c.oid = i.indexrelid
-		WHERE c.relname = 'idx_feed_items_search_document_trgm_v1'`).Scan(&valid).Error)
+		WHERE c.relname = 'idx_feed_items_search_document_trgm_v2'`).Scan(&valid).Error)
 	require.True(t, valid)
 
 	source := model.FeedSource{SourceType: "external_rss", Hash: "fulltext-index", Title: "Indexed"}
 	require.NoError(t, db.Create(&source).Error)
-	match := model.FeedItem{FeedSourceID: source.ID, GUID: "match", Title: "other", FullTextHTML: "<p>Body Phrase inside markup</p>"}
-	miss := model.FeedItem{FeedSourceID: source.ID, GUID: "miss", Title: "other", FullTextHTML: "<p>unrelated</p>"}
+	match := model.FeedItem{FeedSourceID: source.ID, GUID: "match", Title: "Body Phrase in title", Summary: "unrelated"}
+	miss := model.FeedItem{FeedSourceID: source.ID, GUID: "miss", Title: "unrelated", Summary: "unrelated"}
 	require.NoError(t, db.Create(&match).Error)
 	require.NoError(t, db.Create(&miss).Error)
 	var ids []string
 	require.NoError(t, db.Raw(`SELECT id::text FROM feed_items
 		WHERE deleted_at IS NULL
-		  AND public.atoman_feed_search_document_v1(title, summary, author, reader_html, full_text_html, feed_content_html) LIKE ?`,
+		  AND public.atoman_feed_search_document_v2(title, summary, author) LIKE ?`,
 		"%body phrase%").Scan(&ids).Error)
 	require.Equal(t, []string{match.ID.String()}, ids)
 }
@@ -58,8 +59,8 @@ func TestFeedFullTextSearchIndex(t *testing.T) {
 func TestFeedFullTextSearchStatementsAreConcurrentAndIdempotent(t *testing.T) {
 	statements := feedFullTextSearchStatements("public.gin_trgm_ops")
 	require.Len(t, statements, 2)
-	require.Contains(t, statements[0], "CREATE OR REPLACE FUNCTION public.atoman_feed_search_document_v1")
-	require.Contains(t, statements[1], "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_feed_items_search_document_trgm_v1")
+	require.Contains(t, statements[0], "CREATE OR REPLACE FUNCTION public.atoman_feed_search_document_v2")
+	require.Contains(t, statements[1], "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_feed_items_search_document_trgm_v2")
 	require.Contains(t, statements[1], "public.gin_trgm_ops")
 	require.NotContains(t, feedSearchDocumentIndexSQL("public.gin_trgm_ops", false), "CONCURRENTLY")
 }
@@ -76,7 +77,7 @@ func TestFeedFullTextSearchIndexInsideTransaction(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT i.indisvalid
 		FROM pg_index i
 		JOIN pg_class c ON c.oid = i.indexrelid
-		WHERE c.relname = 'idx_feed_items_search_document_trgm_v1'`).Scan(&valid).Error)
+		WHERE c.relname = 'idx_feed_items_search_document_trgm_v2'`).Scan(&valid).Error)
 	require.True(t, valid)
 }
 
@@ -127,7 +128,7 @@ func TestFeedFullTextSearchSkipsWhenExtensionPrivilegeDenied(t *testing.T) {
 	require.NoError(t, owner.Raw(`SELECT COALESCE(n.nspname, '')
 		FROM pg_proc p
 		JOIN pg_namespace n ON n.oid = p.pronamespace
-		WHERE p.proname = 'atoman_feed_search_document_v1'`).Scan(&functionSchema).Error)
+		WHERE p.proname = 'atoman_feed_search_document_v2'`).Scan(&functionSchema).Error)
 	require.Empty(t, functionSchema)
 }
 

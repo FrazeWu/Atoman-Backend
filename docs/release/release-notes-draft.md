@@ -34,7 +34,7 @@ Atoman 0.4.0 上线自建邮件服务与 Webmail、按文件管理的图书与�
 
 后端部署包含两处 schema 变更：
 
-- `internal/migrations/feed_fulltext_search.go`：创建 `pg_trgm`（无权限时跳过）和 `atoman_feed_search_document_v1` 函数，并在 `feed_items` 上用 `CREATE INDEX CONCURRENTLY` 建 trigram 索引。`feed_items` 在 2026-11-03 约 36 万行，建索引耗时尚未评估。
+- `internal/migrations/feed_fulltext_search.go`：创建 `pg_trgm`（无权限时跳过）和 `atoman_feed_search_document_v2` 函数，并在 `feed_items` 上用 `CREATE INDEX CONCURRENTLY` 建 trigram 索引。索引只覆盖 `title + summary + author`，不含三个大 TOAST 列（`reader_html` / `full_text_html` / `feed_content_html`），避免 RSS cron 每次写入都要解压全文导致的 2.5× 写入开销。`feed_items` 在 2026-11-17 约 40.6 万行，预计索引 ~200–300 MB，构建约 5–10 分钟。
 - `client_error_daily` 表：由 migrationrunner 的 AutoMigrate 创建（`internal/model/client_error.go`）。
 
 部署前确认备份新鲜度，在生产数据副本上评估建索引耗时，再按 `docs/operations/production-runtime.md` 激活。后端部署后，ROADMAP P0 中"订阅流全文检索已可用"才与线上一致。
@@ -76,7 +76,7 @@ Atoman 0.4.0 adds a self-hosted mail service with Webmail, file-based book manag
 
 The frontend `main` is live, but these features depend on backend commits after `e5dda0e9` that are not deployed: book reports (`a109e4f3` needs `96ab298b`; submitting currently fails), ranked feed full-text search (`c3383333` needs `9ff20757`, `30d4365e`; falls back to timeline search and the relevance toggle has no effect), and client error reporting (`76842e12` needs `1d6ce3c8`; stops silently on 404).
 
-The backend deploy changes the schema: `feed_fulltext_search.go` creates `pg_trgm` (skipped without privilege), the `atoman_feed_search_document_v1` function and a trigram index on `feed_items` via `CREATE INDEX CONCURRENTLY` (about 360k rows on 2026-11-03; build time not measured), and AutoMigrate creates `client_error_daily`. Check backup freshness and measure the index build on a production data copy before activating per `docs/operations/production-runtime.md`.
+The backend deploy changes the schema: `feed_fulltext_search.go` creates `pg_trgm` (skipped without privilege), the `atoman_feed_search_document_v2` function and a trigram index on `feed_items` via `CREATE INDEX CONCURRENTLY`. The index only covers `title + summary + author` (not the three large TOAST HTML columns), so RSS cron updates don't pay GIN maintenance overhead — measured 2.5× write slowdown dropped back to baseline. About 406k rows on 2026-11-17; expected index ~200–300 MB, build ~5–10 minutes. AutoMigrate creates `client_error_daily`. Check backup freshness and measure the index build on a production data copy before activating per `docs/operations/production-runtime.md`.
 
 ### Known limitations
 

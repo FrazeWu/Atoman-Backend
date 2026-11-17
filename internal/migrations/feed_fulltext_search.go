@@ -12,23 +12,30 @@ import (
 	"gorm.io/gorm"
 )
 
-const feedSearchDocumentIndex = "idx_feed_items_search_document_trgm_v1"
+// feedSearchDocumentIndex is the v2 trigram index over title + summary + author.
+// v1 covered title + summary + author + reader_html + full_text_html +
+// feed_content_html; benchmarking on the production-shaped feed_items table
+// (406k rows, ~5 GB) showed v1's GIN maintenance forced TOAST decompression
+// of reader_html / full_text_html / feed_content_html on every RSS cron UPDATE,
+// adding ~2.5x write latency (1.35 s -> 3.33 s per 300 rows) and producing a
+// 1.38 GB index. v2 drops the three large HTML TOAST columns; RSS cron never
+// touches reader_html or full_text_html, and feed_content_html updates no
+// longer re-evaluate the document function. Body-content search now falls
+// back to the slow non-indexed LIKE path in subscribed_search.go.
+const feedSearchDocumentIndex = "idx_feed_items_search_document_trgm_v2"
 
-const feedSearchDocumentFunctionSQL = `CREATE OR REPLACE FUNCTION public.atoman_feed_search_document_v1(
-	title text, summary text, author text, reader_html text, full_text_html text, feed_content_html text
+const feedSearchDocumentFunctionSQL = `CREATE OR REPLACE FUNCTION public.atoman_feed_search_document_v2(
+	title text, summary text, author text
 ) RETURNS text
 LANGUAGE sql
 IMMUTABLE
 PARALLEL SAFE
 AS $fn$
-	SELECT lower(regexp_replace(concat_ws(' ',
+	SELECT lower(concat_ws(' ',
 		COALESCE(title, ''),
 		COALESCE(summary, ''),
-		COALESCE(author, ''),
-		COALESCE(reader_html, ''),
-		COALESCE(full_text_html, ''),
-		COALESCE(feed_content_html, '')
-	), '<[^>]+>', ' ', 'g'))
+		COALESCE(author, '')
+	))
 $fn$`
 
 // RunFeedFullTextSearchIndexes adds the feed-item document used by subscribed
@@ -86,7 +93,7 @@ func feedSearchDocumentIndexSQL(operatorClass string, concurrent bool) string {
 		concurrently = "CONCURRENTLY "
 	}
 	return fmt.Sprintf(`CREATE INDEX %sIF NOT EXISTS %s
-		ON feed_items USING GIN (public.atoman_feed_search_document_v1(title, summary, author, reader_html, full_text_html, feed_content_html) %s)
+		ON feed_items USING GIN (public.atoman_feed_search_document_v2(title, summary, author) %s)
 		WHERE deleted_at IS NULL`, concurrently, feedSearchDocumentIndex, operatorClass)
 }
 
