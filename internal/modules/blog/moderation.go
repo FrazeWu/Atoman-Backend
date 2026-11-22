@@ -33,6 +33,12 @@ type blogPostModerationInput struct {
 }
 
 // reportBlogPost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/reports [post]
+// reportBlogPost godoc
 // @Summary 举报博客文章
 // @Tags blog
 // @Accept json
@@ -94,6 +100,12 @@ func (h *Handler) reportBlogPost(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, report)
 }
 
+// appealBlogPost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/appeals [post]
 // appealBlogPost godoc
 // @Summary 申诉被隐藏的博客文章
 // @Tags blog

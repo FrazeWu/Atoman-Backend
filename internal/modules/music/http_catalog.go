@@ -291,6 +291,12 @@ func (h *Handler) createArtist(c *gin.Context) {
 }
 
 // getArtist godoc
+// @Summary music 接口
+// @Tags music
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/music/artists/{p} [get]
+// getArtist godoc
 // @Summary GET /music/artists/{artistId}
 // @Tags music
 // @Success 200 {object} map[string]interface{}
@@ -595,6 +601,12 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	httpx.List(c, albums, page, pageSize, total)
 }
 
+// getAlbum godoc
+// @Summary music 接口
+// @Tags music
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/music/albums/{p} [get]
 // getAlbum godoc
 // @Summary 获取专辑详情
 // @Tags music

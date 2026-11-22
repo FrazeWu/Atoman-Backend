@@ -109,6 +109,12 @@ func (h *Handler) createBlogRecommendationFeedback(c *gin.Context) {
 }
 
 // deleteBlogRecommendationFeedback godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/recommendation-feedback/{p} [delete]
+// deleteBlogRecommendationFeedback godoc
 // @Summary 恢复被隐藏的博客推荐
 // @Tags blog
 // @Security BearerAuth

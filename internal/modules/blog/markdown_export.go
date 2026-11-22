@@ -24,6 +24,12 @@ import (
 )
 
 // exportMarkdownPost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/export [get]
+// exportMarkdownPost godoc
 // @Summary 导出文章 Markdown 备份
 // @Description 返回当前文章版本及已验证站内资源的 ZIP 备份。仅作者或管理员可导出。
 // @Tags blog

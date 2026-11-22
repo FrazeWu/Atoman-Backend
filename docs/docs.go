@@ -458,6 +458,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "admin",
                     "comment-admin"
                 ],
                 "summary": "审核评论或举报",
@@ -469,6 +470,90 @@ const docTemplate = `{
                         "in": "path",
                         "required": true
                     },
+                    {
+                        "description": "审核动作",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comment.ModerateInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/comments/{p}/moderation": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin",
+                    "comment-admin"
+                ],
+                "summary": "审核评论或举报",
+                "parameters": [
                     {
                         "description": "审核动作",
                         "name": "body",
@@ -4868,6 +4953,7 @@ const docTemplate = `{
                 ],
                 "description": "收藏会迁移到默认收藏夹。",
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "删除收藏夹",
@@ -4885,6 +4971,46 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/bookmark-folders/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "收藏会迁移到默认收藏夹。",
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "删除收藏夹",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -5002,6 +5128,7 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "取消文章收藏",
@@ -5019,6 +5146,45 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/bookmarks/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "取消文章收藏",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -5120,9 +5286,82 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/blog/channels/ensure-default": {
+            "post": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/channels/slug/{p}": {
+            "get": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/channels/slug/{p}/collections": {
+            "get": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/blog/channels/{id}": {
             "get": {
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "GET /blog/channels/{id}",
@@ -5152,6 +5391,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "blog",
                     "studio"
@@ -5212,6 +5452,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "studio"
                 ],
@@ -5259,6 +5500,7 @@ const docTemplate = `{
         "/api/v1/blog/channels/{id}/collections": {
             "get": {
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "blog 接口",
@@ -5292,6 +5534,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "blog",
                     "blog",
@@ -5344,6 +5587,142 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/blog/channels/{p}": {
+            "get": {
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "GET /blog/channels/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/channels/{p}/collections": {
+            "get": {
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/collections": {
+            "get": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/blog/collections/{id}": {
             "put": {
                 "security": [
@@ -5358,6 +5737,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "studio"
                 ],
@@ -5420,6 +5800,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "blog",
                     "blog",
@@ -5467,6 +5848,98 @@ const docTemplate = `{
                         "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/collections/{p}": {
+            "get": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/collections/{p}/posts/order": {
+            "put": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -5562,6 +6035,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "查询 Markdown 导入预览",
@@ -5614,6 +6088,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "确认 Markdown 导入",
@@ -5625,6 +6100,119 @@ const docTemplate = `{
                         "in": "path",
                         "required": true
                     },
+                    {
+                        "description": "确认内容",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.markdownImportConfirmInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.MarkdownImportDetails"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/imports/markdown/{p}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "查询 Markdown 导入预览",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.MarkdownImportDetails"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/imports/markdown/{p}/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "将已由当前作者创建的 canonical 草稿关联到导入任务。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "确认 Markdown 导入",
+                "parameters": [
                     {
                         "description": "确认内容",
                         "name": "input",
@@ -5898,6 +6486,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "获取文章详情",
@@ -5917,6 +6506,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/blog.BlogContentDTO"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
@@ -5933,6 +6529,7 @@ const docTemplate = `{
             },
             "put": {
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "PUT /blog/posts/{id}",
@@ -5951,6 +6548,7 @@ const docTemplate = `{
             },
             "delete": {
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "blog 接口",
@@ -5986,6 +6584,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "申诉被隐藏的博客文章",
@@ -6008,10 +6607,24 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/model.BlogPostAppeal"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -6032,6 +6645,7 @@ const docTemplate = `{
                     "application/zip"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "导出文章 Markdown 备份",
@@ -6081,6 +6695,7 @@ const docTemplate = `{
         "/api/v1/blog/posts/{id}/likes/count": {
             "get": {
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "GET /blog/posts/{id}/likes/count",
@@ -6104,6 +6719,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "获取文章公共标签",
@@ -6125,6 +6741,13 @@ const docTemplate = `{
                                 "$ref": "#/definitions/blog.PublicBlogTagDTO"
                             }
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     }
                 }
             },
@@ -6144,6 +6767,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "为文章添加公共标签",
@@ -6166,10 +6790,24 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/blog.PublicBlogTagDTO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -6186,6 +6824,7 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "撤回文章公共标签",
@@ -6206,8 +6845,22 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "204": {
                         "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     }
                 }
             }
@@ -6230,6 +6883,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog",
                     "blog"
                 ],
@@ -6298,6 +6952,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "清除文章评分",
@@ -6345,6 +7000,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "获取文章相关推荐",
@@ -6380,6 +7036,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
@@ -6409,6 +7072,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "举报博客文章",
@@ -6431,10 +7095,24 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/model.BlogPostReport"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -6454,6 +7132,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "获取文章版本历史",
@@ -6475,6 +7154,13 @@ const docTemplate = `{
                                 "$ref": "#/definitions/blog.BlogContentVersionDTO"
                             }
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     }
                 }
             }
@@ -6493,6 +7179,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "恢复文章版本",
@@ -6517,6 +7204,743 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/blog.BlogContentDTO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}": {
+            "get": {
+                "description": "返回指定文章；未发布文章（草稿或定时发布）仅作者本人可查看。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "获取文章详情",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.BlogContentDTO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "PUT /blog/posts/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/appeals": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "申诉被隐藏的博客文章",
+                "parameters": [
+                    {
+                        "description": "申诉信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.blogPostAppealInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.BlogPostAppeal"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/export": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回当前文章版本及已验证站内资源的 ZIP 备份。仅作者或管理员可导出。",
+                "produces": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "导出文章 Markdown 备份",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/likes/count": {
+            "get": {
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "GET /blog/posts/{id}/likes/count",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/pin": {
+            "post": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/public-tags": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "获取文章公共标签",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/blog.PublicBlogTagDTO"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "为文章添加公共标签",
+                "parameters": [
+                    {
+                        "description": "公共标签",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.publicBlogTagInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/blog.PublicBlogTagDTO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/public-tags/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "撤回文章公共标签",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/publish": {
+            "post": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/rating": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "创建或更新当前用户对文章的 1-10 分评分，每半颗星对应 1 分。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog",
+                    "blog"
+                ],
+                "summary": "设置文章评分",
+                "parameters": [
+                    {
+                        "description": "文章评分",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.postRatingInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.PostRatingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "清除文章评分",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.PostRatingSummary"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/related": {
+            "get": {
+                "description": "按当前文章的频道和作者优先返回可阅读的公开文章。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "获取文章相关推荐",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 6,
+                        "description": "返回数量上限",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/blog.RecommendationItemDTO"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/reports": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "举报博客文章",
+                "parameters": [
+                    {
+                        "description": "举报信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.blogPostReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.BlogPostReport"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/unpin": {
+            "post": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/unpublish": {
+            "post": {
+                "tags": [
+                    "blog"
+                ],
+                "summary": "blog 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "获取文章版本历史",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/blog.BlogContentVersionDTO"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{p}/versions/{p}/restore": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "恢复文章版本",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "版本号",
+                        "name": "version",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.BlogContentDTO"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -6642,6 +8066,7 @@ const docTemplate = `{
                     }
                 ],
                 "tags": [
+                    "blog",
                     "blog"
                 ],
                 "summary": "恢复被隐藏的博客推荐",
@@ -6655,8 +8080,58 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "204": {
                         "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/recommendation-feedback/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog",
+                    "blog"
+                ],
+                "summary": "恢复被隐藏的博客推荐",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
                     }
                 }
             }
@@ -10391,6 +11866,7 @@ const docTemplate = `{
         "/api/v1/comments/{comment_id}": {
             "delete": {
                 "tags": [
+                    "short-notes",
                     "comments",
                     "comments"
                 ],
@@ -10424,6 +11900,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "comments",
                     "comments"
                 ],
                 "summary": "编辑评论",
@@ -10501,6 +11978,7 @@ const docTemplate = `{
             "put": {
                 "tags": [
                     "short-notes",
+                    "short-notes",
                     "comments",
                     "comments"
                 ],
@@ -10524,6 +12002,7 @@ const docTemplate = `{
             },
             "delete": {
                 "tags": [
+                    "short-notes",
                     "short-notes",
                     "comments",
                     "comments"
@@ -10564,6 +12043,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "comments",
                     "comments"
                 ],
                 "summary": "举报评论",
@@ -10637,12 +12117,400 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/comments/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments",
+                    "comments"
+                ],
+                "summary": "删除评论",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments",
+                    "comments"
+                ],
+                "summary": "编辑评论",
+                "parameters": [
+                    {
+                        "description": "评论内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comment.EditCommentInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.CommentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/comments/{p}/like": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments",
+                    "comments"
+                ],
+                "summary": "点赞评论",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments",
+                    "comments"
+                ],
+                "summary": "取消点赞评论",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/comments/{p}/replies": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments",
+                    "comments"
+                ],
+                "summary": "获取楼中楼回复",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量，最多50",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ReplyListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/comments/{p}/report": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments",
+                    "comments"
+                ],
+                "summary": "举报评论",
+                "parameters": [
+                    {
+                        "description": "举报信息",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comment.ReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/comments/{root_comment_id}/replies": {
             "get": {
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
+                    "comments",
                     "comments"
                 ],
                 "summary": "获取楼中楼回复",
@@ -10682,6 +12550,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
@@ -10698,6 +12573,30 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/content/continue": {
+            "get": {
+                "tags": [
+                    "content"
+                ],
+                "summary": "content 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -10723,8 +12622,78 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/content/notification-preferences": {
+            "get": {
+                "tags": [
+                    "content"
+                ],
+                "summary": "content 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "content"
+                ],
+                "summary": "content 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/content/progress": {
             "put": {
+                "tags": [
+                    "content"
+                ],
+                "summary": "content 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/content/progress/{p}/{p}": {
+            "get": {
                 "tags": [
                     "content"
                 ],
@@ -10761,6 +12730,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "content",
                     "content",
                     "lifecycle"
                 ],
@@ -10807,6 +12777,97 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/content/{p}/{p}/schedule": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "content",
+                    "content",
+                    "lifecycle"
+                ],
+                "summary": "查询定时发布状态",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/lifecycle.BlogScheduleStatus"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "content"
+                ],
+                "summary": "content 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "content"
+                ],
+                "summary": "content 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -13504,6 +15565,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "feed",
                     "feed"
                 ],
                 "summary": "设置订阅文章评分",
@@ -13566,6 +15628,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "feed",
                     "feed"
                 ],
                 "summary": "清除订阅文章评分",
@@ -13578,6 +15641,112 @@ const docTemplate = `{
                         "required": true
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.FeedItemRatingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/items/{p}/rating": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "为 RSS 订阅文章提交或更新 0.5 至 5 星评分，分值使用 1 至 10 的半星单位。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed",
+                    "feed"
+                ],
+                "summary": "设置订阅文章评分",
+                "parameters": [
+                    {
+                        "description": "订阅文章评分",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.FeedItemRatingInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.FeedItemRatingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "清除当前用户对 RSS 订阅文章的评分。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed",
+                    "feed"
+                ],
+                "summary": "清除订阅文章评分",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -16639,6 +18808,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum"
                 ],
                 "summary": "删除论坛分类权限",
@@ -16651,6 +18821,59 @@ const docTemplate = `{
                         "required": true
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/category-permissions/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "删除指定分类权限关系，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum"
+                ],
+                "summary": "删除论坛分类权限",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -16997,6 +19220,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum"
                 ],
                 "summary": "更新论坛用户组",
@@ -17077,6 +19301,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum"
                 ],
                 "summary": "删除论坛用户组",
@@ -17144,6 +19369,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum"
                 ],
                 "summary": "添加论坛用户组成员",
@@ -17216,6 +19442,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum"
                 ],
                 "summary": "移除论坛用户组成员",
@@ -17235,6 +19462,252 @@ const docTemplate = `{
                         "required": true
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/groups/{p}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "更新指定论坛用户组，仅管理员可访问。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum"
+                ],
+                "summary": "更新论坛用户组",
+                "parameters": [
+                    {
+                        "description": "用户组信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumGroupInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumGroupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "删除指定论坛用户组及其权限关系，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum"
+                ],
+                "summary": "删除论坛用户组",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/groups/{p}/members/{p}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "将用户加入指定论坛用户组，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum"
+                ],
+                "summary": "添加论坛用户组成员",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "将用户从指定论坛用户组移除，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum"
+                ],
+                "summary": "移除论坛用户组成员",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -17400,6 +19873,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum-moderation"
                 ],
                 "summary": "更新论坛版主分配",
@@ -17474,6 +19948,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum-moderation"
                 ],
                 "summary": "删除论坛版主分配",
@@ -17487,6 +19962,144 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "204": {
+                        "description": "No Content",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/moderation/moderators/{p}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "更新指定论坛版主分配的分类范围和权限位，仅管理员可访问。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum-moderation"
+                ],
+                "summary": "更新论坛版主分配",
+                "parameters": [
+                    {
+                        "description": "版主分配输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/forum_moderation.ModeratorAssignmentInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.ForumModeratorAssignment"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "删除指定论坛版主分配，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum-moderation"
+                ],
+                "summary": "删除论坛版主分配",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "204": {
                         "description": "No Content",
                         "schema": {
@@ -17581,6 +20194,78 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/moderation/reports/{p}/resolve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "标记举报为已处理并记录处理备注。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum-moderation"
+                ],
+                "summary": "处理论坛举报",
+                "parameters": [
+                    {
+                        "description": "处理备注",
+                        "name": "input",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumResolveReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -17757,6 +20442,92 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/forum/moderation/users/{p}/actions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "对指定用户执行警告、禁言、解除禁言、封禁或解除封禁，仅管理员和站点所有者可访问。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum",
+                    "forum-moderation"
+                ],
+                "summary": "执行论坛用户管理操作",
+                "parameters": [
+                    {
+                        "description": "管理操作",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumUserActionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumUserActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/forum/moderation/users/{userID}/actions": {
             "post": {
                 "security": [
@@ -17775,6 +20546,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum-moderation"
                 ],
                 "summary": "执行论坛用户管理操作",
@@ -17797,6 +20569,13 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
@@ -17860,6 +20639,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "forum",
                     "forum-moderation"
                 ],
                 "summary": "处理论坛举报",
@@ -17969,9 +20749,31 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/forum/topics/{p}/like": {
+            "post": {
+                "tags": [
+                    "forum",
+                    "forum"
+                ],
+                "summary": "POST /forum/topics/{topicID}/like",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
         "/api/v1/forum/topics/{topicID}/like": {
             "post": {
                 "tags": [
+                    "forum",
                     "forum"
                 ],
                 "summary": "POST /forum/topics/{topicID}/like",
@@ -18177,6 +20979,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "content",
                     "content",
                     "lifecycle"
                 ],
@@ -18912,6 +21715,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "music",
                     "music"
                 ],
                 "summary": "获取专辑详情",
@@ -18929,6 +21733,13 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/model.Album"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "404": {
@@ -19398,6 +22209,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/albums/{p}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music",
+                    "music"
+                ],
+                "summary": "获取专辑详情",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.Album"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/artists": {
             "post": {
                 "security": [
@@ -19455,6 +22300,7 @@ const docTemplate = `{
         "/api/v1/music/artists/{artistId}": {
             "get": {
                 "tags": [
+                    "music",
                     "music"
                 ],
                 "summary": "GET /music/artists/{artistId}",
@@ -19509,6 +22355,27 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/artists/{p}": {
+            "get": {
+                "tags": [
+                    "music",
+                    "music"
+                ],
+                "summary": "GET /music/artists/{artistId}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
                     }
                 }
             }
@@ -22102,6 +24969,152 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/songs/{p}": {
+            "get": {
+                "description": "合并前的歌曲 ID 解析到规范歌曲，响应 song.id 为规范 ID。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music",
+                    "music"
+                ],
+                "summary": "获取歌曲详情",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/songs/{p}/lyrics": {
+            "get": {
+                "description": "匿名用户可读取当前歌词、逐行翻译和公开注释。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music",
+                    "music-lyrics"
+                ],
+                "summary": "获取歌曲歌词",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "登录用户可基于当前版本更新原文、翻译、时间轴或原子导入 LRC；每次成功更新都会生成历史版本。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music",
+                    "music-lyrics"
+                ],
+                "summary": "保存歌曲歌词",
+                "parameters": [
+                    {
+                        "description": "歌词内容",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.SaveLyricsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/songs/{songId}": {
             "get": {
                 "description": "合并前的歌曲 ID 解析到规范歌曲，响应 song.id 为规范 ID。",
@@ -22109,6 +25122,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "music",
                     "music"
                 ],
                 "summary": "获取歌曲详情",
@@ -22121,7 +25135,22 @@ const docTemplate = `{
                         "required": true
                     }
                 ],
-                "responses": {}
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
             }
         },
         "/api/v1/music/songs/{songId}/apple-preview": {
@@ -22288,6 +25317,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "music",
                     "music-lyrics"
                 ],
                 "summary": "获取歌曲歌词",
@@ -22311,6 +25341,13 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "404": {
@@ -22344,6 +25381,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "music",
                     "music-lyrics"
                 ],
                 "summary": "保存歌曲歌词",
@@ -24064,6 +27102,32 @@ const docTemplate = `{
         "/api/v1/notifications/{id}/read": {
             "put": {
                 "tags": [
+                    "notifications",
+                    "notifications"
+                ],
+                "summary": "notifications 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/notifications/{p}/read": {
+            "put": {
+                "tags": [
+                    "notifications",
                     "notifications"
                 ],
                 "summary": "notifications 接口",
@@ -25764,6 +28828,7 @@ const docTemplate = `{
             },
             "put": {
                 "tags": [
+                    "short-notes",
                     "short-notes"
                 ],
                 "summary": "PUT /short-notes/{id}",
@@ -25782,6 +28847,7 @@ const docTemplate = `{
             },
             "delete": {
                 "tags": [
+                    "short-notes",
                     "comments",
                     "comments"
                 ],
@@ -25803,6 +28869,7 @@ const docTemplate = `{
         "/api/v1/short-notes/{id}/like": {
             "post": {
                 "tags": [
+                    "short-notes",
                     "short-notes",
                     "comments",
                     "comments"
@@ -25827,6 +28894,7 @@ const docTemplate = `{
             },
             "delete": {
                 "tags": [
+                    "short-notes",
                     "short-notes",
                     "comments",
                     "comments"
@@ -25854,10 +28922,169 @@ const docTemplate = `{
             "put": {
                 "tags": [
                     "short-notes",
+                    "short-notes",
                     "comments",
                     "comments"
                 ],
                 "summary": "comments 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/short-notes/{p}": {
+            "get": {
+                "tags": [
+                    "short-notes"
+                ],
+                "summary": "short-notes 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "short-notes",
+                    "short-notes"
+                ],
+                "summary": "PUT /short-notes/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "short-notes",
+                    "comments",
+                    "comments"
+                ],
+                "summary": "DELETE /short-notes/{id}",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    }
+                }
+            }
+        },
+        "/api/v1/short-notes/{p}/like": {
+            "post": {
+                "tags": [
+                    "short-notes",
+                    "short-notes",
+                    "comments",
+                    "comments"
+                ],
+                "summary": "comments 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "short-notes"
+                ],
+                "summary": "short-notes 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/short-notes/{p}/vote": {
+            "put": {
+                "tags": [
+                    "short-notes"
+                ],
+                "summary": "short-notes 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "short-notes"
+                ],
+                "summary": "short-notes 接口",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -26878,6 +30105,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "studio"
                 ],
@@ -26934,6 +30162,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "blog",
                     "studio"
@@ -26947,6 +30176,110 @@ const docTemplate = `{
                         "in": "path",
                         "required": true
                     },
+                    {
+                        "description": "频道信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.UpdateChannelInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/studio.ChannelSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/channels/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "blog",
+                    "studio"
+                ],
+                "summary": "删除空创作频道",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "blog",
+                    "blog",
+                    "studio"
+                ],
+                "summary": "更新创作频道",
+                "parameters": [
                     {
                         "description": "频道信息",
                         "name": "input",
@@ -27008,6 +30341,7 @@ const docTemplate = `{
         "/api/v1/studio/collections/{id}": {
             "patch": {
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "studio 接口",
@@ -27040,6 +30374,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "搜索统一合集候选内容",
@@ -27101,6 +30436,7 @@ const docTemplate = `{
                 ],
                 "tags": [
                     "studio",
+                    "studio",
                     "studio"
                 ],
                 "summary": "获取统一合集成员",
@@ -27156,6 +30492,7 @@ const docTemplate = `{
                 ],
                 "tags": [
                     "studio",
+                    "studio",
                     "studio"
                 ],
                 "summary": "获取统一合集成员",
@@ -27210,6 +30547,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "加入或移动统一合集成员",
@@ -27275,6 +30613,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "移除统一合集成员",
@@ -27320,6 +30659,305 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/collections/{p}": {
+            "delete": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "studio 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "studio 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/collections/{p}/candidates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "搜索统一合集候选内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "合集 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索内容标题",
+                        "name": "q",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/studio.StudioCollectionContentCandidate"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/collections/{p}/contents": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio",
+                    "studio"
+                ],
+                "summary": "获取统一合集成员",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/studio.StudioCollectionContentItem"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/collections/{p}/contents/order": {
+            "put": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "studio 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/collections/{p}/contents/{p}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "加入或移动统一合集成员",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "移除统一合集成员",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/contents": {
+            "get": {
+                "tags": [
+                    "studio"
+                ],
+                "summary": "studio 接口",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -27436,6 +31074,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "删除目标行动",
@@ -27503,6 +31142,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "更新目标行动",
@@ -27514,6 +31154,131 @@ const docTemplate = `{
                         "in": "path",
                         "required": true
                     },
+                    {
+                        "description": "目标行动",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.UpdateStudioGoalActionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/studio.StudioGoalAction"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/goals/actions/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "删除目标行动",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "更新目标行动",
+                "parameters": [
                     {
                         "description": "目标行动",
                         "name": "input",
@@ -27640,6 +31405,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "创建经营目标",
@@ -27662,6 +31428,13 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
@@ -27715,6 +31488,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "提交经营目标周期复盘",
@@ -27737,6 +31511,165 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/studio.StudioGoalCycle"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/goals/cycles/{p}/goals": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "创建经营目标",
+                "parameters": [
+                    {
+                        "description": "经营目标",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.CreateStudioGoalInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/studio.StudioGoal"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/goals/cycles/{p}/review": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "提交经营目标周期复盘",
+                "parameters": [
+                    {
+                        "description": "周期复盘",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.CreateStudioGoalReviewInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
@@ -27790,6 +31723,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "更新经营目标",
@@ -27865,6 +31799,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "创建目标行动",
@@ -27887,6 +31822,158 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/studio.StudioGoalAction"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/goals/{p}": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "更新经营目标",
+                "parameters": [
+                    {
+                        "description": "经营目标",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.UpdateStudioGoalInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/studio.StudioGoal"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/goals/{p}/actions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "创建目标行动",
+                "parameters": [
+                    {
+                        "description": "目标行动",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.CreateStudioGoalActionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
@@ -28039,6 +32126,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "删除回复模板",
@@ -28051,6 +32139,58 @@ const docTemplate = `{
                         "required": true
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/reply-templates/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "删除回复模板",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -28183,6 +32323,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "获取创作数据",
@@ -28268,6 +32409,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "blog",
                     "studio"
@@ -28337,6 +32479,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "blog",
                     "blog",
@@ -28412,6 +32555,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "删除模块合集",
@@ -28479,6 +32623,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "blog",
                     "studio"
                 ],
@@ -28555,6 +32700,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "调整合集内容顺序",
@@ -28636,6 +32782,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "获取创作内容",
@@ -28740,6 +32887,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "批量确认历史内容合集归属",
@@ -28823,6 +32971,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "确认历史内容合集归属",
@@ -28910,6 +33059,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "记录内容分享",
@@ -28979,6 +33129,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "获取创作互动",
@@ -29099,6 +33250,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "批量更新互动处理状态",
@@ -29182,6 +33334,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "更新互动处理状态",
@@ -29269,6 +33422,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "获取创作设置",
@@ -29332,6 +33486,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
+                    "studio",
                     "studio"
                 ],
                 "summary": "保存创作设置",
@@ -29348,6 +33503,1011 @@ const docTemplate = `{
                         "in": "path",
                         "required": true
                     },
+                    {
+                        "description": "创作设置",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.SettingsInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/studio.SettingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/analytics": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "获取创作数据",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            7,
+                            28,
+                            90
+                        ],
+                        "type": "integer",
+                        "description": "统计天数",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "统一合集 UUID",
+                        "name": "collection_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "内容公开 UUID",
+                        "name": "content_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/studio.AnalyticsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/collections": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "blog",
+                    "blog",
+                    "studio"
+                ],
+                "summary": "获取模块合集",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.Collection"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "blog",
+                    "blog",
+                    "blog",
+                    "studio"
+                ],
+                "summary": "创建模块合集",
+                "parameters": [
+                    {
+                        "description": "合集信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.CreateCollectionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.Collection"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/collections/{p}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "删除模块合集",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "blog",
+                    "studio"
+                ],
+                "summary": "更新模块合集",
+                "parameters": [
+                    {
+                        "description": "合集信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.UpdateCollectionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.Collection"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/collections/{p}/contents/order": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "调整合集内容顺序",
+                "parameters": [
+                    {
+                        "description": "完整内容顺序",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.reorderCollectionContentsInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/contents": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "获取创作内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "发布状态",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "可见性",
+                        "name": "visibility",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "合集 UUID",
+                        "name": "collection_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/studio.StudioContentItem"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/contents/collections/resolve": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "批量确认历史内容合集归属",
+                "parameters": [
+                    {
+                        "description": "确认的候选合集",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.resolveCollectionConflictsInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/contents/{p}/collection": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "确认历史内容合集归属",
+                "parameters": [
+                    {
+                        "description": "确认的候选合集",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.resolveCollectionConflictInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/contents/{p}/share": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "记录内容分享",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/studio.ShareResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/interactions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "获取创作互动",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "仅未回复",
+                        "name": "unreplied",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "仅时间锚点评论",
+                        "name": "anchored",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "按处理状态筛选",
+                        "name": "handled",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "normal",
+                            "high"
+                        ],
+                        "type": "string",
+                        "description": "优先级",
+                        "name": "priority",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "内容公开 UUID",
+                        "name": "content_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "评论关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/studio.StudioInteractionItem"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/interactions/states": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "批量更新互动处理状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "批量处理状态",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.BatchInteractionStateInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/interactions/{p}/state": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "更新互动处理状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "处理状态",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.UpdateInteractionStateInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{p}/settings": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "获取创作设置",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/studio.SettingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio",
+                    "studio"
+                ],
+                "summary": "保存创作设置",
+                "parameters": [
                     {
                         "description": "创作设置",
                         "name": "input",

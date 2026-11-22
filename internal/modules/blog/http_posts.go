@@ -234,6 +234,12 @@ func (h *Handler) listRecommendedPosts(c *gin.Context) {
 }
 
 // listRelatedPosts godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/related [get]
+// listRelatedPosts godoc
 // @Summary 获取文章相关推荐
 // @Description 按当前文章的频道和作者优先返回可阅读的公开文章。
 // @Tags blog
@@ -260,6 +266,12 @@ func (h *Handler) listRelatedPosts(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, items)
 }
 
+// getPost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p} [get]
 // getPost godoc
 // @Summary 获取文章详情
 // @Description 返回指定文章；未发布文章（草稿或定时发布）仅作者本人可查看。
@@ -472,6 +484,12 @@ func (h *Handler) createPost(c *gin.Context) {
 }
 
 // listPostVersions godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/versions [get]
+// listPostVersions godoc
 // @Summary 获取文章版本历史
 // @Tags blog
 // @Produce json
@@ -499,6 +517,12 @@ func (h *Handler) listPostVersions(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, versions)
 }
 
+// restorePostVersion godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/versions/{p}/restore [post]
 // restorePostVersion godoc
 // @Summary 恢复文章版本
 // @Tags blog
@@ -543,6 +567,12 @@ func (h *Handler) restorePostVersion(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, postDTOs[0])
 }
 
+// updatePost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p} [put]
 // updatePost godoc
 // @Summary PUT /blog/posts/{id}
 // @Tags blog
@@ -752,6 +782,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 // @Tags blog
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p} [delete]
+// deletePost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
 // @Router /api/v1/blog/posts/{id} [delete]
 func (h *Handler) deletePost(c *gin.Context) {
 	user, ok := authctx.Current(c)
@@ -831,8 +867,20 @@ func (h *Handler) deletePost(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 
+// publishPost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/publish [post]
 func (h *Handler) publishPost(c *gin.Context) { h.updatePostStatus(c, "published") }
 
+// unpublishPost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/unpublish [post]
 func (h *Handler) unpublishPost(c *gin.Context) { h.updatePostStatus(c, "draft") }
 
 func cleanupBlogContentRelations(tx *gorm.DB, contentID uuid.UUID) error {
@@ -924,10 +972,28 @@ func cleanupBlogContentRelations(tx *gorm.DB, contentID uuid.UUID) error {
 	return nil
 }
 
+// pinPost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/pin [post]
 func (h *Handler) pinPost(c *gin.Context) { h.updatePostPin(c, true) }
 
+// unpinPost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/unpin [post]
 func (h *Handler) unpinPost(c *gin.Context) { h.updatePostPin(c, false) }
 
+// reorderCollectionPosts godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/collections/{p}/posts/order [put]
 func (h *Handler) reorderCollectionPosts(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

@@ -38,6 +38,12 @@ type publicBlogTagCount struct {
 }
 
 // getPublicBlogTags godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/public-tags [get]
+// getPublicBlogTags godoc
 // @Summary 获取文章公共标签
 // @Tags blog
 // @Produce json
@@ -83,6 +89,12 @@ func (h *Handler) getPublicBlogTags(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, items)
 }
 
+// createPublicBlogTag godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/public-tags [post]
 // createPublicBlogTag godoc
 // @Summary 为文章添加公共标签
 // @Tags blog
@@ -148,6 +160,12 @@ func (h *Handler) createPublicBlogTag(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, PublicBlogTagDTO{ID: row.ID, Name: row.Name, Count: 1, ViewerAdded: true, CreatedAt: row.CreatedAt})
 }
 
+// deletePublicBlogTag godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/public-tags/{p} [delete]
 // deletePublicBlogTag godoc
 // @Summary 撤回文章公共标签
 // @Tags blog

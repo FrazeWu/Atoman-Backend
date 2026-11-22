@@ -118,6 +118,12 @@ func (h *Handler) listUserActions(c *gin.Context) {
 }
 
 // applyUserAction godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/moderation/users/{p}/actions [post]
+// applyUserAction godoc
 // @Summary 执行论坛用户管理操作
 // @Description 对指定用户执行警告、禁言、解除禁言、封禁或解除封禁，仅管理员和站点所有者可访问。
 // @Tags forum-moderation
@@ -290,6 +296,12 @@ func (h *Handler) reviewCategoryRequestLegacy(c *gin.Context) {
 }
 
 // resolveReport godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/moderation/reports/{p}/resolve [post]
+// resolveReport godoc
 // @Summary 处理论坛举报
 // @Description 标记举报为已处理并记录处理备注。
 // @Tags forum-moderation
@@ -436,6 +448,12 @@ func (h *Handler) createModeratorAssignment(c *gin.Context) {
 }
 
 // updateModeratorAssignment godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/moderation/moderators/{p} [put]
+// updateModeratorAssignment godoc
 // @Summary 更新论坛版主分配
 // @Description 更新指定论坛版主分配的分类范围和权限位，仅管理员可访问。
 // @Tags forum-moderation
@@ -474,6 +492,12 @@ func (h *Handler) updateModeratorAssignment(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, assignment)
 }
 
+// deleteModeratorAssignment godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/moderation/moderators/{p} [delete]
 // deleteModeratorAssignment godoc
 // @Summary 删除论坛版主分配
 // @Description 删除指定论坛版主分配，仅管理员可访问。

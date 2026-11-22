@@ -62,6 +62,12 @@ func (h *Handler) createGroup(c *gin.Context) {
 }
 
 // updateGroup godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/groups/{p} [put]
+// updateGroup godoc
 // @Summary 更新论坛用户组
 // @Description 更新指定论坛用户组，仅管理员可访问。
 // @Tags forum
@@ -98,6 +104,12 @@ func (h *Handler) updateGroup(c *gin.Context) {
 }
 
 // deleteGroup godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/groups/{p} [delete]
+// deleteGroup godoc
 // @Summary 删除论坛用户组
 // @Description 删除指定论坛用户组及其权限关系，仅管理员可访问。
 // @Tags forum
@@ -124,6 +136,12 @@ func (h *Handler) deleteGroup(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
 }
 
+// addGroupMember godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/groups/{p}/members/{p} [put]
 // addGroupMember godoc
 // @Summary 添加论坛用户组成员
 // @Description 将用户加入指定论坛用户组，仅管理员可访问。
@@ -152,6 +170,12 @@ func (h *Handler) addGroupMember(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
 }
 
+// removeGroupMember godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/groups/{p}/members/{p} [delete]
 // removeGroupMember godoc
 // @Summary 移除论坛用户组成员
 // @Description 将用户从指定论坛用户组移除，仅管理员可访问。
@@ -241,6 +265,12 @@ func (h *Handler) putCategoryPermission(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, permission)
 }
 
+// deleteCategoryPermission godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/category-permissions/{p} [delete]
 // deleteCategoryPermission godoc
 // @Summary 删除论坛分类权限
 // @Description 删除指定分类权限关系，仅管理员可访问。

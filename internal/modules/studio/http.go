@@ -79,6 +79,12 @@ type resolveCollectionConflictsInput struct {
 }
 
 // resolveCollectionConflicts godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/contents/collections/resolve [put]
+// resolveCollectionConflicts godoc
 // @Summary 批量确认历史内容合集归属
 // @Tags studio
 // @Accept json
@@ -105,6 +111,12 @@ func (h *Handler) resolveCollectionConflicts(c *gin.Context) {
 	respond(c, http.StatusOK, gin.H{"resolved": true}, h.service.ResolveCollectionConflicts(user, module, input.Items))
 }
 
+// resolveCollectionConflict godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/contents/{p}/collection [put]
 // resolveCollectionConflict godoc
 // @Summary 确认历史内容合集归属
 // @Tags studio
@@ -142,6 +154,12 @@ func (h *Handler) resolveCollectionConflict(c *gin.Context) {
 }
 
 // reorderCollectionContents godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/collections/{p}/contents/order [put]
+// reorderCollectionContents godoc
 // @Summary 调整合集内容顺序
 // @Tags studio
 // @Accept json
@@ -172,6 +190,12 @@ func (h *Handler) reorderCollectionContents(c *gin.Context) {
 	respond(c, http.StatusOK, gin.H{"reordered": true}, h.service.ReorderCollectionContents(user, module, collectionID, input.ContentIDs))
 }
 
+// getAnalytics godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/analytics [get]
 // getAnalytics godoc
 // @Summary 获取创作数据
 // @Tags studio
@@ -219,6 +243,12 @@ func (h *Handler) getAnalytics(c *gin.Context) {
 	respond(c, http.StatusOK, analytics, err)
 }
 
+// listInteractions godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/interactions [get]
 // listInteractions godoc
 // @Summary 获取创作互动
 // @Tags studio
@@ -282,6 +312,12 @@ func (h *Handler) listInteractions(c *gin.Context) {
 }
 
 // getSettings godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/settings [get]
+// getSettings godoc
 // @Summary 获取创作设置
 // @Tags studio
 // @Produce json
@@ -306,6 +342,12 @@ func (h *Handler) getSettings(c *gin.Context) {
 	respond(c, http.StatusOK, settings, err)
 }
 
+// patchSettings godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/settings [patch]
 // patchSettings godoc
 // @Summary 保存创作设置
 // @Tags studio
@@ -332,6 +374,12 @@ func (h *Handler) patchSettings(c *gin.Context) {
 	respond(c, http.StatusOK, settings, err)
 }
 
+// shareContent godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/contents/{p}/share [post]
 // shareContent godoc
 // @Summary 记录内容分享
 // @Tags studio
@@ -386,6 +434,12 @@ func (h *Handler) getDashboard(c *gin.Context) {
 	respond(c, http.StatusOK, dashboard, err)
 }
 
+// listContents godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/contents [get]
 // listContents godoc
 // @Summary 获取创作内容
 // @Tags studio
@@ -528,6 +582,12 @@ func (h *Handler) createChannel(c *gin.Context) {
 }
 
 // updateChannel godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/channels/{p} [patch]
+// updateChannel godoc
 // @Summary PUT /blog/channels/{id}
 // @Tags blog
 // @Success 200 {object} map[string]interface{}
@@ -586,6 +646,12 @@ func (h *Handler) updateChannel(c *gin.Context) {
 }
 
 // deleteChannel godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/channels/{p} [delete]
+// deleteChannel godoc
 // @Summary blog 接口
 // @Tags blog
 // @Success 200 {object} map[string]interface{}
@@ -630,6 +696,12 @@ func (h *Handler) deleteChannel(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Channel deleted"})
 }
 
+// listUnifiedContents godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/contents [get]
 func (h *Handler) listUnifiedContents(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -673,6 +745,12 @@ func (h *Handler) listUnifiedCollections(c *gin.Context) {
 	respond(c, http.StatusOK, collections, serviceErr)
 }
 
+// listCollections godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/collections [get]
 // createCollection godoc
 // @Summary POST /blog/channels/{id}/collections
 // @Tags blog
@@ -722,6 +800,12 @@ func (h *Handler) listCollections(c *gin.Context) {
 }
 
 // createCollection godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/collections [post]
+// createCollection godoc
 // @Summary blog 接口
 // @Tags blog
 // @Success 200 {object} map[string]interface{}
@@ -764,6 +848,12 @@ func (h *Handler) createCollection(c *gin.Context) {
 	respond(c, http.StatusCreated, collection, err)
 }
 
+// updateCollection godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/collections/{p} [patch]
 // updateCollection godoc
 // @Summary blog 接口
 // @Tags blog
@@ -813,6 +903,12 @@ func (h *Handler) updateCollection(c *gin.Context) {
 	respond(c, http.StatusOK, collection, err)
 }
 
+// deleteCollection godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/collections/{p} [delete]
 // deleteCollection godoc
 // @Summary 删除模块合集
 // @Tags studio

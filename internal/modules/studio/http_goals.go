@@ -59,6 +59,12 @@ func (h *Handler) createGoalCycle(c *gin.Context) {
 }
 
 // createGoal godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/goals/cycles/{p}/goals [post]
+// createGoal godoc
 // @Summary 创建经营目标
 // @Tags studio
 // @Accept json
@@ -90,6 +96,12 @@ func (h *Handler) createGoal(c *gin.Context) {
 	respond(c, http.StatusCreated, response, err)
 }
 
+// updateGoal godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/goals/{p} [patch]
 // updateGoal godoc
 // @Summary 更新经营目标
 // @Tags studio
@@ -123,6 +135,12 @@ func (h *Handler) updateGoal(c *gin.Context) {
 }
 
 // createGoalAction godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/goals/{p}/actions [post]
+// createGoalAction godoc
 // @Summary 创建目标行动
 // @Tags studio
 // @Accept json
@@ -154,6 +172,12 @@ func (h *Handler) createGoalAction(c *gin.Context) {
 	respond(c, http.StatusCreated, response, err)
 }
 
+// updateGoalAction godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/goals/actions/{p} [patch]
 // updateGoalAction godoc
 // @Summary 更新目标行动
 // @Tags studio
@@ -187,6 +211,12 @@ func (h *Handler) updateGoalAction(c *gin.Context) {
 }
 
 // deleteGoalAction godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/goals/actions/{p} [delete]
+// deleteGoalAction godoc
 // @Summary 删除目标行动
 // @Tags studio
 // @Produce json
@@ -215,6 +245,12 @@ func (h *Handler) deleteGoalAction(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
+// reviewGoalCycle godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/goals/cycles/{p}/review [post]
 // reviewGoalCycle godoc
 // @Summary 提交经营目标周期复盘
 // @Tags studio

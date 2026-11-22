@@ -628,6 +628,12 @@ func (h *Handler) recordContentFeedback(c *gin.Context) {
 }
 
 // setFeedItemRating godoc
+// @Summary feed 接口
+// @Tags feed
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/feed/items/{p}/rating [put]
+// setFeedItemRating godoc
 // @Summary 设置订阅文章评分
 // @Description 为 RSS 订阅文章提交或更新 0.5 至 5 星评分，分值使用 1 至 10 的半星单位。
 // @Tags feed
@@ -666,6 +672,12 @@ func (h *Handler) setFeedItemRating(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, summary)
 }
 
+// deleteFeedItemRating godoc
+// @Summary feed 接口
+// @Tags feed
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/feed/items/{p}/rating [delete]
 // deleteFeedItemRating godoc
 // @Summary 清除订阅文章评分
 // @Description 清除当前用户对 RSS 订阅文章的评分。

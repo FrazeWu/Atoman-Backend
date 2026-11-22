@@ -15,6 +15,12 @@ import (
 )
 
 // getPostLikesCount godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/likes/count [get]
+// getPostLikesCount godoc
 // @Summary GET /blog/posts/{id}/likes/count
 // @Tags blog
 // @Success 200 {object} map[string]interface{}
@@ -129,6 +135,12 @@ func (h *Handler) toggleLike(c *gin.Context, isLike bool) {
 // @Tags blog
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/rating [put]
+// setPostRating godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
 // @Router /api/v1/blog/posts/{id}/rating [put]
 // setPostRating godoc
 // @Summary 设置文章评分
@@ -182,6 +194,12 @@ func (h *Handler) setPostRating(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, summary)
 }
 
+// deletePostRating godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{p}/rating [delete]
 // deletePostRating godoc
 // @Summary 清除文章评分
 // @Tags blog
@@ -293,6 +311,12 @@ func (h *Handler) createBookmark(c *gin.Context) {
 }
 
 // deleteBookmark godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/bookmarks/{p} [delete]
+// deleteBookmark godoc
 // @Summary 取消文章收藏
 // @Tags blog
 // @Param id path string true "收藏 UUID"
@@ -373,6 +397,12 @@ func (h *Handler) createBookmarkFolder(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, folder)
 }
 
+// deleteBookmarkFolder godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/bookmark-folders/{p} [delete]
 // deleteBookmarkFolder godoc
 // @Summary 删除收藏夹
 // @Description 收藏会迁移到默认收藏夹。

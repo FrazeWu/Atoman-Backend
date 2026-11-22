@@ -275,6 +275,12 @@ func (h *Handler) getUnreadCount(c *gin.Context) {
 // @Tags notifications
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/notifications/{p}/read [put]
+// markRead godoc
+// @Summary notifications 接口
+// @Tags notifications
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
 // @Router /api/v1/notifications/{id}/read [put]
 func (h *Handler) markRead(c *gin.Context) {
 	user, ok := authctx.Current(c)

@@ -379,6 +379,12 @@ func (h *Handler) createSongAudioReplacement(c *gin.Context) {
 }
 
 // getSongDetail godoc
+// @Summary music 接口
+// @Tags music
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/music/songs/{p} [get]
+// getSongDetail godoc
 // @Summary 获取歌曲详情
 // @Description 合并前的歌曲 ID 解析到规范歌曲，响应 song.id 为规范 ID。
 // @Tags music

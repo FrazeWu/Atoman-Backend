@@ -120,6 +120,12 @@ type MusicLyricsErrorBody struct {
 }
 
 // getSongLyrics godoc
+// @Summary music 接口
+// @Tags music
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/music/songs/{p}/lyrics [get]
+// getSongLyrics godoc
 // @Summary 获取歌曲歌词
 // @Description 匿名用户可读取当前歌词、逐行翻译和公开注释。
 // @Tags music-lyrics
@@ -145,6 +151,12 @@ func (h *Handler) getSongLyrics(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, lyrics)
 }
 
+// saveSongLyrics godoc
+// @Summary music 接口
+// @Tags music
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/music/songs/{p}/lyrics [put]
 // saveSongLyrics godoc
 // @Summary 保存歌曲歌词
 // @Description 登录用户可基于当前版本更新原文、翻译、时间轴或原子导入 LRC；每次成功更新都会生成历史版本。

@@ -19,6 +19,12 @@ type markdownImportConfirmInput struct {
 }
 
 // getMarkdownImport godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/imports/markdown/{p} [get]
+// getMarkdownImport godoc
 // @Summary 查询 Markdown 导入预览
 // @Tags blog
 // @Produce json
@@ -48,6 +54,12 @@ func (h *Handler) getMarkdownImport(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, details)
 }
 
+// confirmMarkdownImport godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/imports/markdown/{p}/confirm [post]
 // confirmMarkdownImport godoc
 // @Summary 确认 Markdown 导入
 // @Description 将已由当前作者创建的 canonical 草稿关联到导入任务。

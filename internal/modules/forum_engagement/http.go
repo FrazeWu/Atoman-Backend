@@ -22,6 +22,12 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 }
 
 // toggleTopicLike godoc
+// @Summary forum 接口
+// @Tags forum
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/forum/topics/{p}/like [post]
+// toggleTopicLike godoc
 // @Summary POST /forum/topics/{topicID}/like
 // @Tags forum
 // @Success 200 {object} map[string]interface{}

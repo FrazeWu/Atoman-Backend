@@ -9,6 +9,12 @@ import (
 )
 
 // listUnifiedCollectionCandidates godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/collections/{p}/candidates [get]
+// listUnifiedCollectionCandidates godoc
 // @Summary 搜索统一合集候选内容
 // @Tags studio
 // @Produce json
@@ -33,6 +39,12 @@ func (h *Handler) listUnifiedCollectionCandidates(c *gin.Context) {
 	respond(c, http.StatusOK, items, err)
 }
 
+// addUnifiedCollectionContent godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/collections/{p}/contents/{p} [put]
 // addUnifiedCollectionContent godoc
 // @Summary 加入或移动统一合集成员
 // @Tags studio
@@ -62,6 +74,12 @@ func (h *Handler) addUnifiedCollectionContent(c *gin.Context) {
 	respond(c, http.StatusOK, gin.H{"moved": true}, h.service.AddUnifiedCollectionContent(user, collectionID, contentID))
 }
 
+// removeUnifiedCollectionContent godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/collections/{p}/contents/{p} [delete]
 // removeUnifiedCollectionContent godoc
 // @Summary 移除统一合集成员
 // @Tags studio
@@ -139,6 +157,12 @@ func (h *Handler) createReplyTemplate(c *gin.Context) {
 }
 
 // deleteReplyTemplate godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/reply-templates/{p} [delete]
+// deleteReplyTemplate godoc
 // @Summary 删除回复模板
 // @Tags studio
 // @Produce json
@@ -166,6 +190,12 @@ func (h *Handler) deleteReplyTemplate(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
+// updateInteractionState godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/interactions/{p}/state [put]
 // updateInteractionState godoc
 // @Summary 更新互动处理状态
 // @Tags studio
@@ -202,6 +232,12 @@ func (h *Handler) updateInteractionState(c *gin.Context) {
 	respond(c, http.StatusOK, gin.H{"updated": true}, h.service.UpdateInteractionState(user, module, channelID, commentID, input))
 }
 
+// setInteractionsHandled godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{p}/interactions/states [put]
 // setInteractionsHandled godoc
 // @Summary 批量更新互动处理状态
 // @Tags studio

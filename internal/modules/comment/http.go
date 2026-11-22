@@ -156,6 +156,12 @@ func (h *HTTP) list(c *gin.Context) {
 }
 
 // listReplies godoc
+// @Summary comments 接口
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/comments/{p}/replies [get]
+// listReplies godoc
 // @Summary 获取楼中楼回复
 // @Tags comments
 // @Produce json
@@ -233,6 +239,12 @@ func (h *HTTP) create(c *gin.Context) {
 }
 
 // edit godoc
+// @Summary comments 接口
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/comments/{p} [patch]
+// edit godoc
 // @Summary 编辑评论
 // @Tags comments
 // @Accept json
@@ -270,6 +282,12 @@ func (h *HTTP) edit(c *gin.Context) {
 }
 
 // delete godoc
+// @Summary comments 接口
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/comments/{p} [delete]
+// delete godoc
 // @Summary 删除评论
 // @Tags comments
 // @Produce json
@@ -287,6 +305,12 @@ func (h *HTTP) delete(c *gin.Context) {
 }
 
 // like godoc
+// @Summary comments 接口
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/comments/{p}/like [put]
+// like godoc
 // @Summary 点赞评论
 // @Tags comments
 // @Produce json
@@ -303,6 +327,12 @@ func (h *HTTP) like(c *gin.Context) {
 	h.commentAction(c, func(user authctx.CurrentUser, id uuid.UUID) error { return h.service.Like(user, id) })
 }
 
+// unlike godoc
+// @Summary comments 接口
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/comments/{p}/like [delete]
 // unlike godoc
 // @Summary 取消点赞评论
 // @Tags comments
@@ -332,6 +362,12 @@ func (h *HTTP) commentAction(c *gin.Context, action func(authctx.CurrentUser, uu
 	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
 }
 
+// report godoc
+// @Summary comments 接口
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/comments/{p}/report [put]
 // report godoc
 // @Summary 举报评论
 // @Tags comments
@@ -472,6 +508,12 @@ func (h *HTTP) listReports(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, result)
 }
 
+// moderate godoc
+// @Summary admin 接口
+// @Tags admin
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/admin/comments/{p}/moderation [put]
 // moderate godoc
 // @Summary 审核评论或举报
 // @Tags comment-admin

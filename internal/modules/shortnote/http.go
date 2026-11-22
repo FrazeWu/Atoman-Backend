@@ -60,6 +60,12 @@ func (h *Handler) list(c *gin.Context) {
 	httpx.List(c, items, page, pageSize, total)
 }
 
+// get godoc
+// @Summary short-notes 接口
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{p} [get]
 func (h *Handler) get(c *gin.Context) {
 	user, _ := authctx.Current(c)
 	note, err := h.service.Get(noteID(c), user.ID)
@@ -90,6 +96,12 @@ func (h *Handler) create(c *gin.Context) {
 }
 
 // update godoc
+// @Summary short-notes 接口
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{p} [put]
+// update godoc
 // @Summary PUT /short-notes/{id}
 // @Tags short-notes
 // @Success 200 {object} map[string]interface{}
@@ -114,6 +126,12 @@ func (h *Handler) update(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, note)
 }
 
+// delete godoc
+// @Summary short-notes 接口
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{p} [delete]
 // delete godoc
 // @Summary DELETE /comments/{comment_id}
 // @Tags comments
@@ -172,6 +190,12 @@ func (h *Handler) delete(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 
+// like godoc
+// @Summary short-notes 接口
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{p}/like [post]
 // setVote godoc
 // @Summary short-notes 接口
 // @Tags short-notes
@@ -196,7 +220,14 @@ func (h *Handler) delete(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} map[string]interface{}
 // @Router /api/v1/short-notes/{id}/like [post]
-func (h *Handler) like(c *gin.Context)   { h.toggleLike(c, true) }
+func (h *Handler) like(c *gin.Context) { h.toggleLike(c, true) }
+
+// unlike godoc
+// @Summary short-notes 接口
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{p}/like [delete]
 func (h *Handler) unlike(c *gin.Context) { h.toggleLike(c, false) }
 
 func (h *Handler) toggleLike(c *gin.Context, liked bool) {
@@ -218,6 +249,12 @@ func (h *Handler) toggleLike(c *gin.Context, liked bool) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 
+// setVote godoc
+// @Summary short-notes 接口
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{p}/vote [put]
 func (h *Handler) setVote(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -237,6 +274,12 @@ func (h *Handler) setVote(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, note)
 }
 
+// clearVote godoc
+// @Summary short-notes 接口
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{p}/vote [delete]
 func (h *Handler) clearVote(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

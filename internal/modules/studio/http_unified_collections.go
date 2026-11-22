@@ -38,6 +38,12 @@ func (h *Handler) createUnifiedCollection(c *gin.Context) {
 // @Tags studio
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/collections/{p} [patch]
+// updateUnifiedCollection godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
 // @Router /api/v1/studio/collections/{id} [patch]
 func (h *Handler) updateUnifiedCollection(c *gin.Context) {
 	user, ok := currentUser(c)
@@ -63,6 +69,12 @@ func (h *Handler) updateUnifiedCollection(c *gin.Context) {
 // @Failure 401 "Unauthorized"
 // @Router /api/v1/studio/collections/{id}/contents [get]
 
+// listUnifiedCollectionContents godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/collections/{p}/contents [get]
 // reorderUnifiedCollectionContents godoc
 // @Summary PUT /studio/collections/{id}/contents/order
 // @Tags studio
@@ -99,6 +111,12 @@ func (h *Handler) listUnifiedCollectionContents(c *gin.Context) {
 	respond(c, http.StatusOK, items, err)
 }
 
+// reorderUnifiedCollectionContents godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/collections/{p}/contents/order [put]
 func (h *Handler) reorderUnifiedCollectionContents(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -131,6 +149,12 @@ func (h *Handler) reorderUnifiedCollectionContents(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"reordered": true})
 }
 
+// deleteUnifiedCollection godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/collections/{p} [delete]
 func (h *Handler) deleteUnifiedCollection(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {

@@ -91,6 +91,12 @@ func (h *Handler) saveProgress(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, progress)
 }
 
+// getProgress godoc
+// @Summary content 接口
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/content/progress/{p}/{p} [get]
 func (h *Handler) getProgress(c *gin.Context) {
 	// listNotificationPreferences godoc
 	// @Summary GET /content/notification-preferences
@@ -129,6 +135,12 @@ func (h *Handler) getProgress(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, progress)
 }
 
+// listContinue godoc
+// @Summary content 接口
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/content/continue [get]
 func (h *Handler) listContinue(c *gin.Context) {
 	user, _ := authctx.Current(c)
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))
@@ -146,6 +158,12 @@ func (h *Handler) listContinue(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, items)
 }
 
+// listNotificationPreferences godoc
+// @Summary content 接口
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/content/notification-preferences [get]
 func (h *Handler) listNotificationPreferences(c *gin.Context) {
 	// getSchedule godoc
 	// @Summary GET /content/{module}/{id}/schedule
@@ -162,6 +180,12 @@ func (h *Handler) listNotificationPreferences(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, items)
 }
 
+// saveNotificationPreference godoc
+// @Summary content 接口
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/content/notification-preferences [put]
 func (h *Handler) saveNotificationPreference(c *gin.Context) {
 	var input NotificationPreferenceInput
 	if !httpx.BindRequiredJSON(c, &input) {
@@ -182,6 +206,12 @@ func (h *Handler) saveNotificationPreference(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, item)
 }
 
+// getSchedule godoc
+// @Summary content 接口
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/content/{p}/{p}/schedule [get]
 // cancelSchedule godoc
 // @Summary DELETE /content/{module}/{id}/schedule
 // @Tags content
@@ -225,6 +255,12 @@ func (h *Handler) getSchedule(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, status)
 }
 
+// scheduleContent godoc
+// @Summary content 接口
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/content/{p}/{p}/schedule [post]
 func (h *Handler) scheduleContent(c *gin.Context) {
 	contentID, ok := pathUUID(c, "id")
 	if !ok {
@@ -245,6 +281,12 @@ func (h *Handler) scheduleContent(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, result)
 }
 
+// cancelSchedule godoc
+// @Summary content 接口
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/content/{p}/{p}/schedule [delete]
 func (h *Handler) cancelSchedule(c *gin.Context) {
 	contentID, ok := pathUUID(c, "id")
 	if !ok {

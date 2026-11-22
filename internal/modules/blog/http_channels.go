@@ -31,6 +31,12 @@ func (h *Handler) listChannels(c *gin.Context) {
 }
 
 // getChannel godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/{p} [get]
+// getChannel godoc
 // @Summary GET /blog/channels/{id}
 // @Tags blog
 // @Success 200 {object} map[string]interface{}
@@ -56,6 +62,12 @@ func (h *Handler) getChannel(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, channelResponseFromModel(channel))
 }
 
+// getChannelCollections godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/{p}/collections [get]
 // getChannelCollections godoc
 // @Summary blog 接口
 // @Tags blog
@@ -100,6 +112,12 @@ func (h *Handler) getChannelCollections(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, collections)
 }
 
+// getChannelBySlug godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/slug/{p} [get]
 func (h *Handler) getChannelBySlug(c *gin.Context) {
 	channel, err := h.service.GetChannelBySlug(c.Param("slug"))
 	if err != nil {
@@ -128,6 +146,12 @@ func (h *Handler) getChannelBySlug(c *gin.Context) {
 // @Failure 401 "Unauthorized"
 // @Router /api/v1/blog/collections [get]
 
+// getChannelCollectionsBySlug godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/slug/{p}/collections [get]
 func (h *Handler) getChannelCollectionsBySlug(c *gin.Context) {
 	// ensureDefaultChannel godoc
 	// @Summary POST /blog/channels/ensure-default
@@ -155,6 +179,12 @@ func (h *Handler) getChannelCollectionsBySlug(c *gin.Context) {
 	// @Router /api/v1/blog/channels/ensure-default [post]
 }
 
+// getCollection godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/collections/{p} [get]
 func (h *Handler) getCollection(c *gin.Context) {
 	collectionID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -169,6 +199,12 @@ func (h *Handler) getCollection(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, collection)
 }
 
+// listUserCollections godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/collections [get]
 func (h *Handler) listUserCollections(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -183,6 +219,12 @@ func (h *Handler) listUserCollections(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, collections)
 }
 
+// ensureDefaultChannel godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/ensure-default [post]
 func (h *Handler) ensureDefaultChannel(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -216,6 +258,12 @@ func (h *Handler) createChannel(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, channelResponseFromModel(channel))
 }
 
+// updateChannel godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/{p} [put]
 func (h *Handler) updateChannel(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -240,6 +288,12 @@ func (h *Handler) updateChannel(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, channelResponseFromModel(channel))
 }
 
+// deleteChannel godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/{p} [delete]
 func (h *Handler) deleteChannel(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -258,6 +312,12 @@ func (h *Handler) deleteChannel(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Channel deleted"})
 }
 
+// createCollection godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/{p}/collections [post]
 func (h *Handler) createCollection(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -282,6 +342,12 @@ func (h *Handler) createCollection(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, collection)
 }
 
+// updateCollection godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/collections/{p} [put]
 func (h *Handler) updateCollection(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -306,6 +372,12 @@ func (h *Handler) updateCollection(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, collection)
 }
 
+// deleteCollection godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/collections/{p} [delete]
 func (h *Handler) deleteCollection(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
