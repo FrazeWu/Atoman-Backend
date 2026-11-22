@@ -56,6 +56,12 @@ func (h *Handler) getChannel(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, channelResponseFromModel(channel))
 }
 
+// getChannelCollections godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/{id}/collections [get]
 func (h *Handler) getChannelCollections(c *gin.Context) {
 	channelID, err := uuid.Parse(c.Param("id"))
 	// getChannelBySlug godoc
@@ -76,6 +82,12 @@ func (h *Handler) getChannelCollections(c *gin.Context) {
 	}
 	collections, err := h.service.ListCollectionsByChannel(channelID)
 	if err != nil {
+		// getChannelBySlug godoc
+		// @Summary blog 接口
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/blog/channels/slug/{slug} [get]
 		// getCollection godoc
 		// @Summary GET /blog/collections/{id}
 		// @Tags blog
@@ -92,11 +104,23 @@ func (h *Handler) getChannelBySlug(c *gin.Context) {
 	channel, err := h.service.GetChannelBySlug(c.Param("slug"))
 	if err != nil {
 		httpx.Error(c, err)
+		// getChannelCollectionsBySlug godoc
+		// @Summary blog 接口
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/blog/channels/slug/{slug}/collections [get]
 		return
 	}
 	httpx.OK(c, http.StatusOK, channelResponseFromModel(channel))
 }
 
+// getCollection godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/collections/{id} [get]
 // listUserCollections godoc
 // @Summary GET /blog/collections
 // @Tags blog
@@ -115,8 +139,20 @@ func (h *Handler) getChannelCollectionsBySlug(c *gin.Context) {
 	if err != nil {
 		httpx.Error(c, err)
 		return
+		// listUserCollections godoc
+		// @Summary blog 接口
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/blog/collections [get]
 	}
 	httpx.OK(c, http.StatusOK, collections)
+	// ensureDefaultChannel godoc
+	// @Summary blog 接口
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 {object} map[string]interface{}
+	// @Router /api/v1/blog/channels/ensure-default [post]
 }
 
 func (h *Handler) getCollection(c *gin.Context) {

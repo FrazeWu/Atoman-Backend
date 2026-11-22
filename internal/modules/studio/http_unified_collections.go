@@ -33,6 +33,12 @@ func (h *Handler) createUnifiedCollection(c *gin.Context) {
 	respond(c, http.StatusCreated, collection, err)
 }
 
+// updateUnifiedCollection godoc
+// @Summary studio 接口
+// @Tags studio
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/collections/{id} [patch]
 func (h *Handler) updateUnifiedCollection(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -81,6 +87,12 @@ func (h *Handler) listUnifiedCollectionContents(c *gin.Context) {
 	}
 	id, ok := uuidParam(c, "id")
 	if !ok {
+		// reorderUnifiedCollectionContents godoc
+		// @Summary studio 接口
+		// @Tags studio
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/studio/collections/{id}/contents/order [put]
 		return
 	}
 	items, err := h.service.ListUnifiedCollectionContents(user, id)
@@ -107,6 +119,12 @@ func (h *Handler) reorderUnifiedCollectionContents(c *gin.Context) {
 		return
 	}
 	if err := h.service.ReorderUnifiedCollectionContents(user, id, input.ContentIDs); err != nil {
+		// deleteUnifiedCollection godoc
+		// @Summary studio 接口
+		// @Tags studio
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/studio/collections/{id} [delete]
 		httpx.Error(c, err)
 		return
 	}

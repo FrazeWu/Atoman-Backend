@@ -14510,6 +14510,40 @@ paths:
       - blog
       - studio
   /api/v1/blog/channels/{id}:
+    delete:
+      parameters:
+      - description: 频道 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除空创作频道
+      tags:
+      - blog
+      - studio
     get:
       responses:
         "200":
@@ -14564,22 +14598,43 @@ paths:
       - blog
       - studio
   /api/v1/blog/channels/{id}/collections:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: blog 接口
+      tags:
+      - blog
     post:
+      consumes:
+      - application/json
       parameters:
-      - description: 频道 UUID
-        in: query
-        name: channel_id
+      - description: 合集信息
+        in: body
+        name: input
         required: true
-        type: string
+        schema:
+          $ref: '#/definitions/studio.CreateCollectionInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/model.Collection'
-            type: array
+            additionalProperties: true
+            type: object
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Collection'
         "400":
           description: Bad Request
           schema:
@@ -14594,8 +14649,9 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
-      summary: 获取模块合集
+      summary: 创建模块合集
       tags:
+      - blog
       - blog
       - blog
       - studio
@@ -14639,6 +14695,47 @@ paths:
       summary: 创建模块合集
       tags:
       - blog
+      - blog
+      - blog
+      - studio
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 合集信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.UpdateCollectionInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Collection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新模块合集
+      tags:
       - blog
       - studio
   /api/v1/blog/digest:
@@ -14767,6 +14864,39 @@ paths:
       summary: 确认 Markdown 导入
       tags:
       - blog
+  /api/v1/blog/likes:
+    delete:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: blog 接口
+      tags:
+      - blog
+      - blog
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: blog 接口
+      tags:
+      - blog
+      - blog
   /api/v1/blog/posts:
     get:
       description: 返回已发布文章，可按用户、频道或合集筛选。
@@ -14848,6 +14978,21 @@ paths:
       tags:
       - blog
   /api/v1/blog/posts/{id}:
+    delete:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: blog 接口
+      tags:
+      - blog
     get:
       description: 返回指定文章；未发布文章（草稿或定时发布）仅作者本人可查看。
       parameters:
@@ -15111,6 +15256,7 @@ paths:
       - CookieAuth: []
       summary: 设置文章评分
       tags:
+      - blog
       - blog
   /api/v1/blog/posts/{id}/related:
     get:
@@ -17719,76 +17865,38 @@ paths:
       - comments
   /api/v1/comments/{comment_id}/like:
     delete:
-      parameters:
-      - description: 评论 UUID
-        in: path
-        name: comment_id
-        required: true
-        type: string
-      produces:
-      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/comment.ActionResponse'
+            additionalProperties: true
+            type: object
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 取消点赞评论
+            additionalProperties: true
+            type: object
+      summary: comments 接口
       tags:
+      - short-notes
+      - comments
       - comments
     put:
-      parameters:
-      - description: 评论 UUID
-        in: path
-        name: comment_id
-        required: true
-        type: string
-      produces:
-      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/comment.ActionResponse'
+            additionalProperties: true
+            type: object
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/comment.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 点赞评论
+            additionalProperties: true
+            type: object
+      summary: comments 接口
       tags:
+      - short-notes
+      - comments
       - comments
   /api/v1/comments/{comment_id}/report:
     put:
@@ -17943,6 +18051,22 @@ paths:
         "401":
           description: Unauthorized
       summary: POST /content/events
+      tags:
+      - content
+  /api/v1/content/progress:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: content 接口
       tags:
       - content
   /api/v1/debate/topics:
@@ -26129,6 +26253,22 @@ paths:
       summary: 获取通知列表
       tags:
       - notifications
+  /api/v1/notifications/{id}/read:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: notifications 接口
+      tags:
+      - notifications
   /api/v1/notifications/mutes:
     post:
       consumes:
@@ -27403,6 +27543,59 @@ paths:
       summary: PUT /short-notes/{id}
       tags:
       - short-notes
+  /api/v1/short-notes/{id}/like:
+    delete:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: comments 接口
+      tags:
+      - short-notes
+      - comments
+      - comments
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: comments 接口
+      tags:
+      - short-notes
+      - comments
+      - comments
+  /api/v1/short-notes/{id}/vote:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: comments 接口
+      tags:
+      - short-notes
+      - comments
+      - comments
   /api/v1/site/access:
     get:
       produces:
@@ -28087,6 +28280,7 @@ paths:
       tags:
       - blog
       - blog
+      - blog
       - studio
   /api/v1/studio/{module}/collections/{id}:
     delete:
@@ -28178,6 +28372,7 @@ paths:
       - BearerAuth: []
       summary: 更新模块合集
       tags:
+      - blog
       - studio
   /api/v1/studio/{module}/collections/{id}/contents/order:
     put:
@@ -28868,6 +29063,7 @@ paths:
       - BearerAuth: []
       summary: 删除空创作频道
       tags:
+      - blog
       - studio
     patch:
       consumes:
@@ -28921,6 +29117,22 @@ paths:
         "401":
           description: Unauthorized
       summary: POST /studio/collections
+      tags:
+      - studio
+  /api/v1/studio/collections/{id}:
+    patch:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      summary: studio 接口
       tags:
       - studio
   /api/v1/studio/collections/{id}/candidates:

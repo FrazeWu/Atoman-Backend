@@ -172,6 +172,30 @@ func (h *Handler) delete(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 
+// setVote godoc
+// @Summary short-notes 接口
+// @Tags short-notes
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{id}/vote [put]
+// unlike godoc
+// @Summary comments 接口
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/comments/{comment_id}/like [delete]
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{id}/like [delete]
+// like godoc
+// @Summary comments 接口
+// @Tags comments
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/comments/{comment_id}/like [put]
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/short-notes/{id}/like [post]
 func (h *Handler) like(c *gin.Context)   { h.toggleLike(c, true) }
 func (h *Handler) unlike(c *gin.Context) { h.toggleLike(c, false) }
 
@@ -183,6 +207,12 @@ func (h *Handler) toggleLike(c *gin.Context, liked bool) {
 	}
 	if err := h.service.ToggleLike(user, noteID(c), liked); err != nil {
 		httpx.Error(c, err)
+		// clearVote godoc
+		// @Summary short-notes 接口
+		// @Tags short-notes
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/short-notes/{id}/vote [delete]
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})

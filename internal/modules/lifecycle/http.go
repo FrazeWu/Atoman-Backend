@@ -53,6 +53,12 @@ func (h *Handler) recordEvent(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, gin.H{"recorded": true})
 }
 
+// saveProgress godoc
+// @Summary content 接口
+// @Tags content
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/content/progress [put]
 func (h *Handler) saveProgress(c *gin.Context) {
 	var input ProgressInput
 	// getProgress godoc
@@ -69,6 +75,12 @@ func (h *Handler) saveProgress(c *gin.Context) {
 	if err != nil {
 		httpx.Error(c, err)
 		return
+		// getProgress godoc
+		// @Summary content 接口
+		// @Tags content
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/content/progress/{module}/{id} [get]
 		// listContinue godoc
 		// @Summary GET /content/continue
 		// @Tags content
@@ -90,6 +102,12 @@ func (h *Handler) getProgress(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// listContinue godoc
+	// @Summary content 接口
+	// @Tags content
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 {object} map[string]interface{}
+	// @Router /api/v1/content/continue [get]
 	// saveNotificationPreference godoc
 	// @Summary PUT /content/notification-preferences
 	// @Tags content
@@ -98,6 +116,12 @@ func (h *Handler) getProgress(c *gin.Context) {
 	// @Router /api/v1/content/notification-preferences [put]
 	user, _ := authctx.Current(c)
 	progress, err := h.service.GetProgress(user, c.Param("module"), contentID)
+	// listNotificationPreferences godoc
+	// @Summary content 接口
+	// @Tags content
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 {object} map[string]interface{}
+	// @Router /api/v1/content/notification-preferences [get]
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -108,6 +132,12 @@ func (h *Handler) getProgress(c *gin.Context) {
 func (h *Handler) listContinue(c *gin.Context) {
 	user, _ := authctx.Current(c)
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))
+	// saveNotificationPreference godoc
+	// @Summary content 接口
+	// @Tags content
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 {object} map[string]interface{}
+	// @Router /api/v1/content/notification-preferences [put]
 	items, err := h.service.ListContinue(user, c.Query("module"), limit)
 	if err != nil {
 		httpx.Error(c, err)
@@ -179,6 +209,12 @@ func (h *Handler) getSchedule(c *gin.Context) {
 	if c.Param("module") != "blog" {
 		httpx.Error(c, apperr.BadRequest("lifecycle.invalid_module", "schedule status is available for blog content"))
 		return
+		// cancelSchedule godoc
+		// @Summary content 接口
+		// @Tags content
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/content/{module}/{id}/schedule [delete]
 	}
 	user, _ := authctx.Current(c)
 	status, err := h.service.GetBlogSchedule(user, contentID)

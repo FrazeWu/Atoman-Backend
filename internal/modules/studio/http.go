@@ -586,6 +586,12 @@ func (h *Handler) updateChannel(c *gin.Context) {
 }
 
 // deleteChannel godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/{id} [delete]
+// deleteChannel godoc
 // @Summary 删除空创作频道
 // @Tags studio
 // @Produce json
@@ -612,6 +618,12 @@ func (h *Handler) deleteChannel(c *gin.Context) {
 		return
 	}
 	if err := h.service.DeleteChannel(user, id); err != nil {
+		// listUnifiedContents godoc
+		// @Summary studio 接口
+		// @Tags studio
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/studio/contents [get]
 		httpx.Error(c, err)
 		return
 	}
@@ -709,6 +721,12 @@ func (h *Handler) listCollections(c *gin.Context) {
 	respond(c, http.StatusOK, collections, serviceErr)
 }
 
+// createCollection godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/channels/{id}/collections [post]
 // deleteCollection godoc
 // @Summary DELETE /blog/collections/{id}
 // @Tags blog
@@ -747,6 +765,15 @@ func (h *Handler) createCollection(c *gin.Context) {
 }
 
 // updateCollection godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/collections/{id} [put]
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/studio/{module}/collections/{id} [patch]
+// updateCollection godoc
 // @Summary 更新模块合集
 // @Tags studio
 // @Accept json
@@ -768,6 +795,15 @@ func (h *Handler) updateCollection(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
+		// deleteCollection godoc
+		// @Summary blog 接口
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/blog/collections/{id} [delete]
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/studio/{module}/collections/{id} [delete]
 	}
 	var input UpdateCollectionInput
 	if !httpx.BindRequiredJSON(c, &input) {

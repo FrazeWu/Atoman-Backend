@@ -72,6 +72,18 @@ func (h *Handler) getPostLikesCount(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"count": count})
 }
 
+// deleteLike godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/likes [delete]
+// createLike godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/likes [post]
 func (h *Handler) createLike(c *gin.Context) {
 	h.toggleLike(c, true)
 }
@@ -113,6 +125,12 @@ func (h *Handler) toggleLike(c *gin.Context, isLike bool) {
 }
 
 // setPostRating godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{id}/rating [put]
+// setPostRating godoc
 // @Summary 设置文章评分
 // @Description 创建或更新当前用户对文章的 1-10 分评分，每半颗星对应 1 分。
 // @Tags blog
@@ -152,6 +170,12 @@ func (h *Handler) setPostRating(c *gin.Context) {
 	}
 	summary, err := h.service.SetPostRating(user, postID, req.Score)
 	if err != nil {
+		// deletePostRating godoc
+		// @Summary blog 接口
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/blog/posts/{id}/rating [delete]
 		httpx.Error(c, err)
 		return
 	}
@@ -246,6 +270,12 @@ func (h *Handler) listBookmarks(c *gin.Context) {
 func (h *Handler) createBookmark(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
+		// deleteBookmark godoc
+		// @Summary blog 接口
+		// @Tags blog
+		// @Success 200 {object} map[string]interface{}
+		// @Failure 401 {object} map[string]interface{}
+		// @Router /api/v1/blog/bookmarks/{id} [delete]
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}

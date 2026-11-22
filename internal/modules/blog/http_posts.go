@@ -747,6 +747,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, postDTOs[0])
 }
 
+// deletePost godoc
+// @Summary blog 接口
+// @Tags blog
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Router /api/v1/blog/posts/{id} [delete]
 func (h *Handler) deletePost(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -807,6 +813,18 @@ func (h *Handler) deletePost(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	// unpublishPost godoc
+	// @Summary blog 接口
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 {object} map[string]interface{}
+	// @Router /api/v1/blog/posts/{id}/unpublish [post]
+	// publishPost godoc
+	// @Summary blog 接口
+	// @Tags blog
+	// @Success 200 {object} map[string]interface{}
+	// @Failure 401 {object} map[string]interface{}
+	// @Router /api/v1/blog/posts/{id}/publish [post]
 	if isPublicPostState(post.Status, post.Visibility) {
 		indexnow.NotifyPaths(seoPostPath(post.ID))
 	}
@@ -870,6 +888,24 @@ func cleanupBlogContentRelations(tx *gorm.DB, contentID uuid.UUID) error {
 		}
 		if len(commentIDs) > 0 {
 			for _, item := range []any{&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}} {
+				// reorderCollectionPosts godoc
+				// @Summary blog 接口
+				// @Tags blog
+				// @Success 200 {object} map[string]interface{}
+				// @Failure 401 {object} map[string]interface{}
+				// @Router /api/v1/blog/collections/{id}/posts/order [put]
+				// unpinPost godoc
+				// @Summary blog 接口
+				// @Tags blog
+				// @Success 200 {object} map[string]interface{}
+				// @Failure 401 {object} map[string]interface{}
+				// @Router /api/v1/blog/posts/{id}/unpin [post]
+				// pinPost godoc
+				// @Summary blog 接口
+				// @Tags blog
+				// @Success 200 {object} map[string]interface{}
+				// @Failure 401 {object} map[string]interface{}
+				// @Router /api/v1/blog/posts/{id}/pin [post]
 				if err := tx.Where("comment_id IN ?", commentIDs).Delete(item).Error; err != nil {
 					return err
 				}

@@ -24,6 +24,7 @@ func GetFeedPreferences(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"data": pref})
 	}
 }
+
 // UpdateFeedPreferences godoc
 // @Summary 更新订阅阅读偏好
 // @Tags feed
@@ -51,6 +52,7 @@ func UpdateFeedPreferences(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(200, gin.H{"data": pref})
 	}
 }
+
 // BatchSubscribeFeedSources godoc
 // @Summary 批量订阅来源
 // @Tags feed
