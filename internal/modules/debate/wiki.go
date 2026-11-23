@@ -109,7 +109,7 @@ func (s *Service) GetRevision(debateID, revisionID uuid.UUID) (DebateRevisionDTO
 	if err != nil {
 		return DebateRevisionDTO{}, err
 	}
-	result.References, err = s.referenceDTOs(refs)
+	result.References, err = s.referenceDTOs(revision.ID, refs)
 	if err != nil {
 		return DebateRevisionDTO{}, err
 	}

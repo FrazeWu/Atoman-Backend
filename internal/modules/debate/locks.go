@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/apperr"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -32,7 +33,13 @@ func parseDebateReferences(content string) ([]debateReferenceToken, error) {
 		if match[6] >= 0 {
 			stance = content[match[6]:match[7]]
 		}
-		if err != nil || kind != "debate" || (stance != model.DebateRelationSupport && stance != model.DebateRelationOppose) {
+		if kind != "debate" {
+			if err == nil && stance == "" && reference.IsSupportedResourceType(kind) {
+				continue
+			}
+			return nil, fmt.Errorf("invalid debate reference %q", raw)
+		}
+		if err != nil || (stance != model.DebateRelationSupport && stance != model.DebateRelationOppose) {
 			return nil, fmt.Errorf("invalid debate reference %q", raw)
 		}
 		refs = append(refs, debateReferenceToken{Raw: raw, ResourceID: id, Stance: stance,

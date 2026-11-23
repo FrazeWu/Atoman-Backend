@@ -500,3 +500,112 @@ func captureLockedDebateIDs(t *testing.T, db *gorm.DB) *[]uuid.UUID {
 	t.Cleanup(func() { _ = db.Callback().Query().Remove(callback) })
 	return &locked
 }
+
+func TestDebateContentCitationsAndValidation(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	prior := createDebateForTest(t, ctx, "前置命题", "先决内容")
+	setConclusionForTest(t, ctx.db, prior.ID, model.DebateVoteYes)
+
+	publishedAt := time.Date(2026, 11, 22, 8, 0, 0, 0, time.UTC)
+	feed := model.FeedSource{SourceType: "external_rss", Provider: "rss", Hash: "debate-feed-hash", Title: "Tech Daily"}
+	require.NoError(t, ctx.db.Create(&feed).Error)
+	article := model.FeedItem{
+		FeedSourceID: feed.ID,
+		GUID:         "debate-article-guid",
+		Title:        "核心报告",
+		Summary:      "<p>摘要正文</p>",
+		PublishedAt:  publishedAt,
+		FetchedAt:    publishedAt,
+	}
+	require.NoError(t, ctx.db.Create(&article).Error)
+	articleRaw := "@article:" + article.ID.String()
+	debateRaw := "@debate:" + prior.ID.String() + ":support"
+	content := "依据 " + articleRaw + " 并支持 " + debateRaw
+
+	created := createDebateForTest(t, ctx, "引用检验辩题", content)
+	require.Len(t, created.References, 2)
+	require.Equal(t, "article", created.References[0].Target.Type)
+	require.Nil(t, created.References[0].Relation)
+	require.True(t, created.References[0].Target.Available)
+	require.Equal(t, "核心报告", created.References[0].Target.Label)
+	require.Equal(t, "摘要正文", created.References[0].Target.Excerpt)
+	require.Equal(t, "Tech Daily", created.References[0].Target.SourceName)
+	require.NotNil(t, created.References[0].Target.PublishedAt)
+
+	require.Equal(t, "debate", created.References[1].Target.Type)
+	require.NotNil(t, created.References[1].Relation)
+	require.Equal(t, model.DebateRelationSupport, created.References[1].Relation.Stance)
+
+	rev, err := ctx.service.GetRevision(created.ID, *created.CurrentRevisionID)
+	require.NoError(t, err)
+	require.Len(t, rev.References, 2)
+	require.Equal(t, "article", rev.References[0].Target.Type)
+	require.Nil(t, rev.References[0].Relation)
+	require.Equal(t, "核心报告", rev.References[0].Target.Label)
+
+	relationID := rev.References[1].Relation.ID
+	require.NoError(t, ctx.db.Model(&model.DebateRelation{}).Where("id = ?", relationID).Update("status", model.DebateRelationStale).Error)
+	setConclusionForTest(t, ctx.db, prior.ID, model.DebateVoteNo)
+	reconfirmed, err := ctx.service.ReconfirmReference(ctx.editor, created.ID, relationID, ReconfirmReferenceRequest{
+		BaseRevisionID: *created.CurrentRevisionID,
+		EditSummary:    "reconfirm with citation",
+	})
+	require.NoError(t, err)
+	require.Len(t, reconfirmed.References, 2)
+	require.Equal(t, "article", reconfirmed.References[0].Target.Type)
+	require.Nil(t, reconfirmed.References[0].Relation)
+	require.Equal(t, model.DebateRelationActive, reconfirmed.References[1].Relation.State)
+
+	require.NoError(t, ctx.db.Delete(&model.FeedItem{}, "id = ?", article.ID).Error)
+	afterDelete, err := ctx.service.GetDebate(created.ID)
+	require.NoError(t, err)
+	require.Len(t, afterDelete.References, 2)
+	require.Equal(t, "article", afterDelete.References[0].Target.Type)
+	require.False(t, afterDelete.References[0].Target.Available)
+
+	edited, err := ctx.service.SaveWiki(ctx.editor, created.ID, SaveWikiRequest{
+		Title:          "引用检验辩题",
+		Description:    "summary",
+		Content:        content + "（保留失效引用）",
+		Tags:           []string{"tag"},
+		BaseRevisionID: *reconfirmed.CurrentRevisionID,
+		EditSummary:    "keep unavailable article ref",
+	})
+	require.NoError(t, err)
+	require.Len(t, edited.References, 2)
+	require.False(t, edited.References[0].Target.Available)
+
+	reverted, err := ctx.service.RevertRevision(ctx.editor, created.ID, *created.CurrentRevisionID, RevertRevisionRequest{
+		BaseRevisionID: *edited.CurrentRevisionID,
+		EditSummary:    "revert to v1",
+	})
+	require.NoError(t, err)
+	require.Len(t, reverted.References, 2)
+	require.False(t, reverted.References[0].Target.Available)
+
+	_, err = ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{
+		Title:   "缺失引用",
+		Content: "@article:" + uuid.NewString(),
+	})
+	requireAppError(t, err, "debate.reference_unavailable", 400)
+
+	otherArticle := model.FeedItem{
+		FeedSourceID: feed.ID,
+		GUID:         "debate-title-article",
+		Title:        "标题检验文章",
+		PublishedAt:  publishedAt,
+		FetchedAt:    publishedAt,
+	}
+	require.NoError(t, ctx.db.Create(&otherArticle).Error)
+	_, err = ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{
+		Title:   "禁止在标题引用 @article:" + otherArticle.ID.String(),
+		Content: "正文无引用",
+	})
+	requireAppError(t, err, "debate.title_reference", 400)
+
+	_, err = ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{
+		Title:   "缺少立场",
+		Content: "@debate:" + prior.ID.String(),
+	})
+	requireAppError(t, err, "debate.reference_invalid", 400)
+}

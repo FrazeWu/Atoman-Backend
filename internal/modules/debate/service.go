@@ -7,6 +7,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/indexnow"
@@ -29,13 +30,19 @@ const (
 )
 
 type Service struct {
-	db        *gorm.DB
-	repo      *Repo
-	resources *resourceref.Registry
+	db         *gorm.DB
+	repo       *Repo
+	resources  *resourceref.Registry
+	references *reference.Service
 }
 
 func NewService(db *gorm.DB, _ ...*comment.Service) *Service {
-	return &Service{db: db, repo: NewRepo(db), resources: NewResourceRegistry(db)}
+	return &Service{
+		db:         db,
+		repo:       NewRepo(db),
+		resources:  NewResourceRegistry(db),
+		references: reference.NewService(db),
+	}
 }
 
 func (s *Service) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error) {

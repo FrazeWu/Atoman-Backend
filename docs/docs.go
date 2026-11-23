@@ -41897,6 +41897,9 @@ const docTemplate = `{
                 "available": {
                     "type": "boolean"
                 },
+                "excerpt": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -41907,6 +41910,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "source_name": {
                     "type": "string"
                 },
                 "subtitle": {
@@ -53583,6 +53592,9 @@ const docTemplate = `{
                 "end": {
                     "type": "integer"
                 },
+                "excerpt": {
+                    "type": "string"
+                },
                 "field": {
                     "type": "string"
                 },
@@ -53596,6 +53608,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "source_name": {
                     "type": "string"
                 },
                 "start": {
@@ -53632,6 +53650,9 @@ const docTemplate = `{
                 "cover_url": {
                     "type": "string"
                 },
+                "excerpt": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -53642,6 +53663,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "source_name": {
                     "type": "string"
                 },
                 "subtitle": {
@@ -54483,6 +54510,12 @@ const docTemplate = `{
                 },
                 "media_attachment": {
                     "$ref": "#/definitions/shortnote.MediaAttachmentDTO"
+                },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.ResolvedReference"
+                    }
                 },
                 "updated_at": {
                     "type": "string"

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 
 	"github.com/google/uuid"
 )
@@ -40,6 +41,10 @@ func (s *Service) dtoBatch(notes []model.ShortNote, viewerID uuid.UUID) ([]NoteD
 	if err != nil {
 		return nil, err
 	}
+	referencesByNote, err := s.batchReferences(ids, viewerID)
+	if err != nil {
+		return nil, err
+	}
 
 	result := make([]NoteDTO, 0, len(notes))
 	for _, note := range notes {
@@ -52,15 +57,32 @@ func (s *Service) dtoBatch(notes []model.ShortNote, viewerID uuid.UUID) ([]NoteD
 		if note.MediaAttachmentType != nil && note.MediaAttachmentID != nil {
 			key = noteAttachmentKey{typeName: *note.MediaAttachmentType, id: *note.MediaAttachmentID}
 		}
+		refs := referencesByNote[note.ID]
+		if refs == nil {
+			refs = []reference.ResolvedReference{}
+		}
 		result = append(result, NoteDTO{
 			ID: note.ID, UserID: note.UserID, User: model.PublicUserFromUser(note.User),
 			Content: note.Content, Media: media, MediaAttachment: attachments[key],
 			LikesCount: counts.likes, DislikesCount: counts.dislikes, VoteScore: counts.likes - counts.dislikes,
 			ViewerVote: counts.viewer, CommentsCount: commentCounts[note.ID], Liked: counts.viewer == "up",
 			Edited: note.UpdatedAt.After(note.CreatedAt), CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt,
+			References: refs,
 		})
 	}
 	return result, nil
+}
+
+func (s *Service) batchReferences(noteIDs []uuid.UUID, viewerID uuid.UUID) (map[uuid.UUID][]reference.ResolvedReference, error) {
+	if len(noteIDs) == 0 || !model.HasTableCached(s.db, &model.ContentReference{}) {
+		return map[uuid.UUID][]reference.ResolvedReference{}, nil
+	}
+	var rows []model.ContentReference
+	if err := s.db.Where("source_type = ? AND source_id IN ? AND source_field = ?", "short_note", noteIDs, "content").
+		Order("start_offset ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return s.references.ResolveStoredRows(s.db, reference.Viewer{UserID: viewerID}, rows)
 }
 
 func (s *Service) batchVoteCounts(noteIDs []uuid.UUID, viewerID uuid.UUID) (map[uuid.UUID]voteCounts, error) {

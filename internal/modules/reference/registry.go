@@ -3,7 +3,9 @@ package reference
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 	contentmodule "atoman/internal/modules/content"
@@ -51,11 +53,16 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 	switch targetType {
 	case "post":
 		var row struct {
-			ID      uuid.UUID `gorm:"column:id"`
-			Title   string    `gorm:"column:title"`
-			Author  uuid.UUID `gorm:"column:author_id"`
-			Status  string    `gorm:"column:status"`
-			Visible string    `gorm:"column:visibility"`
+			ID          uuid.UUID  `gorm:"column:id"`
+			Title       string     `gorm:"column:title"`
+			Summary     string     `gorm:"column:summary"`
+			Content     string     `gorm:"column:content"`
+			AuthorID    *uuid.UUID `gorm:"column:author_id"`
+			ChannelID   *uuid.UUID `gorm:"column:channel_id"`
+			PublishedAt *time.Time `gorm:"column:published_at"`
+			CreatedAt   time.Time  `gorm:"column:created_at"`
+			Status      string     `gorm:"column:status"`
+			Visible     string     `gorm:"column:visibility"`
 		}
 		query := r.db.Table("content_entries").Where("content_entries.kind = ? AND content_entries.status = ? AND content_entries.deleted_at IS NULL", "blog", "published")
 		ownerColumn := "content_entries.author_id"
@@ -67,10 +74,14 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 			} else {
 				query = query.Where("posts.visibility = ? OR "+ownerColumn+" = ?", "public", viewer.UserID)
 			}
-			if err := query.Select("posts.id, posts.title, posts.status, posts.visibility").First(&row, "posts.id = ?", id).Error; err != nil {
+			if err := query.Select("posts.id, posts.title, posts.summary, posts.content, posts.user_id AS author_id, posts.channel_id, posts.published_at, posts.created_at, posts.status, posts.visibility").First(&row, "posts.id = ?", id).Error; err != nil {
 				return Target{}, targetError(err)
 			}
-			return target(targetType, row.ID, row.Title, "blog", "/post/"+row.ID.String()), nil
+			t := target(targetType, row.ID, row.Title, "blog", "/post/"+row.ID.String())
+			t.Excerpt = firstReferenceExcerpt(160, row.Summary, row.Content)
+			t.SourceName = r.postSourceName(row.ChannelID, row.AuthorID)
+			t.PublishedAt = timePtrOrFallback(row.PublishedAt, row.CreatedAt)
+			return t, nil
 		}
 		if !contentmodule.CurrentMediaSchema(r.db).ContentEntryAuthor {
 			query = query.Joins("LEFT JOIN posts AS legacy_posts ON legacy_posts.id = content_entries.id AND legacy_posts.deleted_at IS NULL")
@@ -81,28 +92,64 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		} else {
 			query = query.Where("content_entries.visibility = ? OR "+ownerColumn+" = ?", "public", viewer.UserID)
 		}
-		if err := query.Select("content_entries.id, content_entries.title, content_entries.status, content_entries.visibility").First(&row, "content_entries.id = ?", id).Error; err != nil {
+		if err := query.Select("content_entries.id, content_entries.title, content_entries.summary, "+ownerColumn+" AS author_id, content_entries.channel_id, content_entries.published_at, content_entries.created_at, content_entries.status, content_entries.visibility").First(&row, "content_entries.id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
-		return target(targetType, row.ID, row.Title, "blog", "/post/"+row.ID.String()), nil
+		t := target(targetType, row.ID, row.Title, "blog", "/post/"+row.ID.String())
+		t.Excerpt = referenceExcerpt(row.Summary, 160)
+		if t.Excerpt == "" && model.HasTableCached(r.db, &model.ContentBlogExtension{}) {
+			var ext struct {
+				Content string `gorm:"column:content"`
+			}
+			if err := r.db.Table("content_blog_extensions").Select("content").Where("content_id = ?", row.ID).Limit(1).Scan(&ext).Error; err == nil {
+				t.Excerpt = referenceExcerpt(ext.Content, 160)
+			}
+		}
+		t.SourceName = r.postSourceName(row.ChannelID, row.AuthorID)
+		t.PublishedAt = timePtrOrFallback(row.PublishedAt, row.CreatedAt)
+		return t, nil
 	case "short_note":
 		var row model.ShortNote
-		if err := r.db.First(&row, "short_notes.id = ?", id).Error; err != nil {
+		if err := r.db.Preload("User").First(&row, "short_notes.id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
-		return target(targetType, row.ID, row.Content, "blog", "/posts/notes/"+row.ID.String()), nil
+		t := target(targetType, row.ID, row.Content, "blog", "/posts/notes/"+row.ID.String())
+		t.SourceName = publicUserDisplayName(row.User)
+		t.Excerpt = referenceExcerpt(row.Content, 160)
+		t.PublishedAt = nonZeroTimePtr(row.CreatedAt)
+		return t, nil
 	case "thread":
 		var row model.ForumTopic
-		if err := r.visibleForumTopics(r.db.Model(&model.ForumTopic{}), viewer).First(&row, "forum_topics.id = ?", id).Error; err != nil {
+		if err := r.visibleForumTopics(r.db.Model(&model.ForumTopic{}), viewer).Preload("User").Preload("Category").First(&row, "forum_topics.id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
-		return target(targetType, row.ID, row.Title, "forum", "/topic/"+row.ID.String()), nil
+		t := target(targetType, row.ID, row.Title, "forum", "/topic/"+row.ID.String())
+		categoryName := ""
+		if row.Category != nil {
+			categoryName = strings.TrimSpace(row.Category.Name)
+		}
+		authorName := publicUserDisplayName(row.User)
+		switch {
+		case categoryName != "" && authorName != "":
+			t.SourceName = categoryName + " · " + authorName
+		case categoryName != "":
+			t.SourceName = categoryName
+		default:
+			t.SourceName = authorName
+		}
+		t.Excerpt = referenceExcerpt(row.Content, 160)
+		t.PublishedAt = nonZeroTimePtr(row.CreatedAt)
+		return t, nil
 	case "debate":
 		var row model.Debate
-		if err := r.db.First(&row, "id = ?", id).Error; err != nil {
+		if err := r.db.Preload("User").First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
-		return target(targetType, row.ID, row.Title, "debate", "/"+row.ID.String()), nil
+		t := target(targetType, row.ID, row.Title, "debate", "/"+row.ID.String())
+		t.SourceName = publicUserDisplayName(row.User)
+		t.Excerpt = firstReferenceExcerpt(160, row.Description, row.Content)
+		t.PublishedAt = nonZeroTimePtr(row.CreatedAt)
+		return t, nil
 	case "feed":
 		var row model.FeedSource
 		if err := r.db.Where("hidden = ?", false).First(&row, "id = ?", id).Error; err != nil {
@@ -111,10 +158,21 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		return target(targetType, row.ID, row.Title, "feed", "/?source_id="+row.ID.String()), nil
 	case "article":
 		var row model.FeedItem
-		if err := r.db.Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id AND feed_sources.deleted_at IS NULL AND feed_sources.hidden = ?", false).First(&row, "feed_items.id = ?", id).Error; err != nil {
+		if err := r.db.Preload("FeedSource").Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id AND feed_sources.deleted_at IS NULL AND feed_sources.hidden = ?", false).First(&row, "feed_items.id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
-		return target(targetType, row.ID, row.Title, "feed", "/item/"+row.ID.String()), nil
+		t := target(targetType, row.ID, row.Title, "feed", "/item/"+row.ID.String())
+		if row.FeedSource != nil && strings.TrimSpace(row.FeedSource.Title) != "" {
+			t.SourceName = strings.TrimSpace(row.FeedSource.Title)
+		} else {
+			t.SourceName = strings.TrimSpace(row.Author)
+		}
+		t.Excerpt = firstReferenceExcerpt(160, row.Summary, row.ReaderHTML, row.FeedContentHTML)
+		t.PublishedAt = nonZeroTimePtr(row.PublishedAt)
+		if t.PublishedAt == nil {
+			t.PublishedAt = nonZeroTimePtr(row.FetchedAt)
+		}
+		return t, nil
 	case "artist":
 		var row model.Artist
 		query := visibleMusicWikiEntries(r.db.Model(&model.Artist{}), viewer, "created_by").Where("redirect_to IS NULL")
@@ -180,7 +238,15 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		if err := query.First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
-		return target(targetType, row.ID, row.Title, "timeline", "/?event="+row.ID.String()), nil
+		t := target(targetType, row.ID, row.Title, "timeline", "/?event="+row.ID.String())
+		if strings.TrimSpace(row.Source) != "" {
+			t.SourceName = strings.TrimSpace(row.Source)
+		} else {
+			t.SourceName = strings.TrimSpace(row.Location)
+		}
+		t.Excerpt = firstReferenceExcerpt(160, row.Description, row.Content)
+		t.PublishedAt = nonZeroTimePtr(row.EventDate)
+		return t, nil
 	case "channel":
 		var row model.Channel
 		if err := visibleBlogChannels(r.db, r.db, viewer).First(&row, "channels.id = ?", id).Error; err != nil {
@@ -792,6 +858,9 @@ func visibleBlogChannels(db *gorm.DB, query *gorm.DB, viewer Viewer) *gorm.DB {
 }
 
 func (r *Registry) visibleForumTopics(query *gorm.DB, viewer Viewer) *gorm.DB {
+	if !model.HasTableCached(r.db, &model.ForumCategoryPermission{}) {
+		return query
+	}
 	if viewer.UserID != uuid.Nil {
 		var user model.User
 		if err := r.db.Select("role").First(&user, "uuid = ?", viewer.UserID).Error; err == nil && (user.Role == "admin" || user.Role == "owner") {
@@ -940,4 +1009,74 @@ func truncatedLabel(content string) string {
 		return string(runes)
 	}
 	return fmt.Sprintf("%s...", string(runes[:60]))
+}
+
+var referenceHTMLTagPattern = regexp.MustCompile(`<[^>]*>`)
+
+func referenceExcerpt(raw string, maxRunes int) string {
+	cleaned := strings.Join(strings.Fields(referenceHTMLTagPattern.ReplaceAllString(raw, " ")), " ")
+	if cleaned == "" {
+		return ""
+	}
+	if maxRunes <= 0 {
+		maxRunes = 160
+	}
+	runes := []rune(cleaned)
+	if len(runes) <= maxRunes {
+		return cleaned
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "…"
+}
+
+func firstReferenceExcerpt(maxRunes int, candidates ...string) string {
+	for _, candidate := range candidates {
+		if excerpt := referenceExcerpt(candidate, maxRunes); excerpt != "" {
+			return excerpt
+		}
+	}
+	return ""
+}
+
+func publicUserDisplayName(user *model.User) string {
+	if user == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(user.DisplayName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(user.Username)
+}
+
+func nonZeroTimePtr(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	copyValue := value
+	return &copyValue
+}
+
+func timePtrOrFallback(primary *time.Time, fallback time.Time) *time.Time {
+	if primary != nil && !primary.IsZero() {
+		copyValue := *primary
+		return &copyValue
+	}
+	return nonZeroTimePtr(fallback)
+}
+
+func (r *Registry) postSourceName(channelID, authorID *uuid.UUID) string {
+	if channelID != nil && *channelID != uuid.Nil && model.HasTableCached(r.db, &model.Channel{}) {
+		var channel model.Channel
+		if err := r.db.Select("name").First(&channel, "id = ?", *channelID).Error; err == nil {
+			if name := strings.TrimSpace(channel.Name); name != "" {
+				return name
+			}
+		}
+	}
+	if authorID != nil && *authorID != uuid.Nil && model.HasTableCached(r.db, &model.User{}) {
+		var user model.User
+		if err := r.db.Select("display_name, username").First(&user, "uuid = ?", *authorID).Error; err == nil {
+			return publicUserDisplayName(&user)
+		}
+	}
+	return ""
 }
