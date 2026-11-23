@@ -893,6 +893,22 @@ type DebateGraphResponse struct {
 	Data debate.DebateGraph `json:"data"`
 }
 
+type DebateEntryResponse struct {
+	Data debate.DebateEntryDTO `json:"data"`
+}
+
+type DebateEntryListResponse struct {
+	Data []debate.DebateEntryDTO `json:"data"`
+}
+
+type DebateChallengeResponse struct {
+	Data debate.DebateChallengeDTO `json:"data"`
+}
+
+type DebateChallengeListResponse struct {
+	Data []debate.DebateChallengeDTO `json:"data"`
+}
+
 type TimelineProposalResponse struct {
 	Data service.TimelineProposal `json:"data"`
 }

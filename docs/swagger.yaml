@@ -2039,6 +2039,30 @@ definitions:
       username:
         type: string
     type: object
+  debate.CreateChallengeRequest:
+    properties:
+      rationale:
+        type: string
+      reason_code:
+        type: string
+      target_id:
+        type: string
+      target_type:
+        type: string
+    type: object
+  debate.CreateDebateEntryRequest:
+    properties:
+      content:
+        type: string
+      entry_type:
+        type: string
+      parent_id:
+        type: string
+      stance:
+        type: string
+      title:
+        type: string
+    type: object
   debate.CreateDebateRequest:
     properties:
       content:
@@ -2051,6 +2075,64 @@ definitions:
         type: array
       title:
         type: string
+    type: object
+  debate.DebateChallengeDTO:
+    properties:
+      created_at:
+        type: string
+      created_by:
+        type: string
+      creator:
+        $ref: '#/definitions/model.PublicUserDTO'
+      current_user_vote:
+        type: string
+      debate_id:
+        type: string
+      dismiss_votes:
+        type: integer
+      id:
+        type: string
+      min_votes:
+        type: integer
+      rationale:
+        type: string
+      reason_code:
+        type: string
+      references:
+        items:
+          $ref: '#/definitions/reference.ResolvedReference'
+        type: array
+      resolved_at:
+        type: string
+      status:
+        type: string
+      target_id:
+        type: string
+      target_label:
+        type: string
+      target_preview:
+        type: string
+      target_type:
+        type: string
+      threshold_percent:
+        type: integer
+      updated_at:
+        type: string
+      uphold_votes:
+        type: integer
+    type: object
+  debate.DebateChallengeSummaryDTO:
+    properties:
+      dismiss_votes:
+        type: integer
+      id:
+        type: string
+      reason_code:
+        type: string
+      status:
+        type: string
+      uphold_votes:
+        type: integer
     type: object
   debate.DebateDTO:
     properties:
@@ -2072,6 +2154,8 @@ definitions:
         items:
           $ref: '#/definitions/debate.DebateReferenceDTO'
         type: array
+      stats:
+        $ref: '#/definitions/debate.DebateStatsDTO'
       status:
         type: string
       tags:
@@ -2088,6 +2172,41 @@ definitions:
         type: string
       view_count:
         type: integer
+    type: object
+  debate.DebateEntryDTO:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: string
+      debate_id:
+        type: string
+      entry_type:
+        type: string
+      id:
+        type: string
+      open_challenge:
+        $ref: '#/definitions/debate.DebateChallengeSummaryDTO'
+      parent_id:
+        type: string
+      references:
+        items:
+          $ref: '#/definitions/reference.ResolvedReference'
+        type: array
+      rejected_challenge_id:
+        type: string
+      stance:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.PublicUserDTO'
+      user_id:
+        type: string
     type: object
   debate.DebateGraph:
     properties:
@@ -2157,6 +2276,8 @@ definitions:
         type: string
       id:
         type: string
+      stats:
+        $ref: '#/definitions/debate.DebateStatsDTO'
       status:
         type: string
       tags:
@@ -2174,8 +2295,23 @@ definitions:
       view_count:
         type: integer
     type: object
+  debate.DebateReferenceChallengeDTO:
+    properties:
+      dismiss_votes:
+        type: integer
+      id:
+        type: string
+      reason_code:
+        type: string
+      status:
+        type: string
+      uphold_votes:
+        type: integer
+    type: object
   debate.DebateReferenceDTO:
     properties:
+      challenge:
+        $ref: '#/definitions/debate.DebateReferenceChallengeDTO'
       end:
         type: integer
       field:
@@ -2269,6 +2405,25 @@ definitions:
       title:
         type: string
     type: object
+  debate.DebateStatsDTO:
+    properties:
+      active_evidence_count:
+        type: integer
+      claim_count:
+        type: integer
+      evidence_insufficient:
+        type: integer
+      evidence_partial:
+        type: integer
+      evidence_sufficient:
+        type: integer
+      evidence_weak:
+        type: boolean
+      rebuttal_count:
+        type: integer
+      vote_count:
+        type: integer
+    type: object
   debate.ProtectionRequest:
     properties:
       expires_at:
@@ -2327,18 +2482,55 @@ definitions:
       title:
         type: string
     type: object
+  debate.UpdateDebateEntryRequest:
+    properties:
+      content:
+        type: string
+      stance:
+        type: string
+      title:
+        type: string
+    type: object
+  debate.VoteChallengeRequest:
+    properties:
+      decision:
+        type: string
+    type: object
   debate_voting.VoteStats:
     properties:
+      active_evidence_count:
+        type: integer
+      conclusion_min_votes:
+        type: integer
+      conclusion_threshold_percent:
+        type: integer
       current_direction:
+        type: string
+      current_user_evidence_vote:
         type: string
       current_user_vote:
         type: string
+      evidence_insufficient:
+        type: integer
+      evidence_partial:
+        type: integer
+      evidence_sufficient:
+        type: integer
+      evidence_total:
+        type: integer
+      evidence_weak:
+        type: boolean
       no_votes:
         type: integer
       total_votes:
         type: integer
       yes_votes:
         type: integer
+    type: object
+  debate_voting.evidenceVoteRequest:
+    properties:
+      rating:
+        type: string
     type: object
   debate_voting.voteRequest:
     properties:
@@ -4087,12 +4279,36 @@ definitions:
     - file_name
     - file_size
     type: object
+  handlers.DebateChallengeListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/debate.DebateChallengeDTO'
+        type: array
+    type: object
+  handlers.DebateChallengeResponse:
+    properties:
+      data:
+        $ref: '#/definitions/debate.DebateChallengeDTO'
+    type: object
   handlers.DebateConclusionListResponse:
     properties:
       data:
         items:
           $ref: '#/definitions/model.DebateConclusionEvent'
         type: array
+    type: object
+  handlers.DebateEntryListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/debate.DebateEntryDTO'
+        type: array
+    type: object
+  handlers.DebateEntryResponse:
+    properties:
+      data:
+        $ref: '#/definitions/debate.DebateEntryDTO'
     type: object
   handlers.DebateGraphResponse:
     properties:
@@ -6501,12 +6717,22 @@ definitions:
     type: object
   model.DebateConclusionEvent:
     properties:
+      active_evidence_count:
+        type: integer
       created_at:
         type: string
       debate_id:
         type: string
       direction:
         type: string
+      evidence_insufficient:
+        type: integer
+      evidence_partial:
+        type: integer
+      evidence_sufficient:
+        type: integer
+      evidence_weak:
+        type: boolean
       id:
         type: string
       no_votes:
@@ -10387,6 +10613,24 @@ definitions:
       uuid:
         type: string
     type: object
+  service.SiteAccessDebateSettings:
+    properties:
+      challenge_min_votes:
+        type: integer
+      conclusion_min_votes:
+        type: integer
+      conclusion_threshold_percent:
+        type: integer
+    type: object
+  service.SiteAccessDebateSettingsInput:
+    properties:
+      challenge_min_votes:
+        type: integer
+      conclusion_min_votes:
+        type: integer
+      conclusion_threshold_percent:
+        type: integer
+    type: object
   service.SiteAccessFeedSettings:
     properties:
       allow_add_source:
@@ -10489,6 +10733,8 @@ definitions:
     type: object
   service.SiteAccessSettings:
     properties:
+      debate:
+        $ref: '#/definitions/service.SiteAccessDebateSettings'
       feed:
         $ref: '#/definitions/service.SiteAccessFeedSettings'
       forum:
@@ -10496,6 +10742,8 @@ definitions:
     type: object
   service.SiteAccessSettingsInput:
     properties:
+      debate:
+        $ref: '#/definitions/service.SiteAccessDebateSettingsInput'
       feed:
         $ref: '#/definitions/service.SiteAccessFeedSettingsInput'
       forum:
@@ -19549,6 +19797,112 @@ paths:
       summary: Archive a debate topic
       tags:
       - Debate
+  /api/v1/debate/topics/{id}/challenges:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Filter by status
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateChallengeListResponse'
+      summary: List community challenges on debate citations or evidence
+      tags:
+      - Debate
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Challenge
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.CreateChallengeRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.DebateChallengeResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a challenge against a debate citation or evidence entry
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/challenges/{challengeID}/vote:
+    delete:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Challenge ID
+        in: path
+        name: challengeID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateChallengeResponse'
+      security:
+      - BearerAuth: []
+      summary: Withdraw a vote on an open debate challenge
+      tags:
+      - Debate
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Challenge ID
+        in: path
+        name: challengeID
+        required: true
+        type: string
+      - description: Vote
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.VoteChallengeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateChallengeResponse'
+      security:
+      - BearerAuth: []
+      summary: Vote on an open debate challenge
+      tags:
+      - Debate
   /api/v1/debate/topics/{id}/conclusions:
     get:
       parameters:
@@ -19565,6 +19919,155 @@ paths:
           schema:
             $ref: '#/definitions/handlers.DebateConclusionListResponse'
       summary: List immutable debate conclusion events
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/entries:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateEntryListResponse'
+      summary: List structured debate entries
+      tags:
+      - Debate
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Entry
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.CreateDebateEntryRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.DebateEntryResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a structured debate entry
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/entries/{entryID}:
+    delete:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Entry ID
+        in: path
+        name: entryID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateMessageResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a structured debate entry
+      tags:
+      - Debate
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Entry ID
+        in: path
+        name: entryID
+        required: true
+        type: string
+      - description: Entry
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.UpdateDebateEntryRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateEntryResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a structured debate entry
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/evidence-vote:
+    delete:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateVoteResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete the current user's evidence sufficiency rating
+      tags:
+      - Debate
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Evidence rating
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate_voting.evidenceVoteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateVoteResponse'
+      security:
+      - BearerAuth: []
+      summary: Set the current user's evidence sufficiency rating
       tags:
       - Debate
   /api/v1/debate/topics/{id}/protection:

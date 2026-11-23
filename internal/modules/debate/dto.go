@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 
 	"github.com/google/uuid"
 )
@@ -49,13 +50,14 @@ type ProtectionRequest struct {
 }
 
 type DebateReferenceDTO struct {
-	ID       uuid.UUID                   `json:"id"`
-	Field    string                      `json:"field"`
-	Start    int                         `json:"start"`
-	End      int                         `json:"end"`
-	Raw      string                      `json:"raw"`
-	Target   DebateReferenceTargetDTO    `json:"target"`
-	Relation *DebateReferenceRelationDTO `json:"relation,omitempty"`
+	ID        uuid.UUID                    `json:"id"`
+	Field     string                       `json:"field"`
+	Start     int                          `json:"start"`
+	End       int                          `json:"end"`
+	Raw       string                       `json:"raw"`
+	Target    DebateReferenceTargetDTO     `json:"target"`
+	Relation  *DebateReferenceRelationDTO  `json:"relation,omitempty"`
+	Challenge *DebateReferenceChallengeDTO `json:"challenge,omitempty"`
 
 	// Kept for internal Go callers while the JSON contract uses Target and Relation.
 	ResourceID uuid.UUID  `json:"-"`
@@ -63,6 +65,25 @@ type DebateReferenceDTO struct {
 	Qualifier  string     `json:"-"`
 	State      string     `json:"-"`
 	RelationID *uuid.UUID `json:"-"`
+}
+
+type DebateReferenceChallengeDTO struct {
+	ID           uuid.UUID `json:"id"`
+	Status       string    `json:"status"`
+	ReasonCode   string    `json:"reason_code"`
+	UpholdVotes  int       `json:"uphold_votes"`
+	DismissVotes int       `json:"dismiss_votes"`
+}
+
+type DebateStatsDTO struct {
+	ClaimCount           int  `json:"claim_count"`
+	ActiveEvidenceCount  int  `json:"active_evidence_count"`
+	RebuttalCount        int  `json:"rebuttal_count"`
+	VoteCount            int  `json:"vote_count"`
+	EvidenceSufficient   int  `json:"evidence_sufficient"`
+	EvidencePartial      int  `json:"evidence_partial"`
+	EvidenceInsufficient int  `json:"evidence_insufficient"`
+	EvidenceWeak         bool `json:"evidence_weak"`
 }
 
 type DebateReferenceTargetDTO struct {
@@ -90,11 +111,87 @@ type DebateDTO struct {
 	model.Debate
 	User       *model.PublicUserDTO `json:"user,omitempty"`
 	References []DebateReferenceDTO `json:"references"`
+	Stats      *DebateStatsDTO      `json:"stats,omitempty"`
 }
 
 type DebateListItemDTO struct {
 	model.Debate
-	User *model.PublicUserDTO `json:"user,omitempty"`
+	User  *model.PublicUserDTO `json:"user,omitempty"`
+	Stats *DebateStatsDTO      `json:"stats,omitempty"`
+}
+
+type CreateDebateEntryRequest struct {
+	ParentID  *uuid.UUID `json:"parent_id"`
+	EntryType string     `json:"entry_type"`
+	Stance    string     `json:"stance"`
+	Title     string     `json:"title"`
+	Content   string     `json:"content"`
+}
+
+type UpdateDebateEntryRequest struct {
+	Stance  string `json:"stance"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+type DebateChallengeSummaryDTO struct {
+	ID           uuid.UUID `json:"id"`
+	Status       string    `json:"status"`
+	ReasonCode   string    `json:"reason_code"`
+	UpholdVotes  int       `json:"uphold_votes"`
+	DismissVotes int       `json:"dismiss_votes"`
+}
+
+type DebateEntryDTO struct {
+	ID                  uuid.UUID                     `json:"id"`
+	DebateID            uuid.UUID                     `json:"debate_id"`
+	ParentID            *uuid.UUID                    `json:"parent_id,omitempty"`
+	UserID              uuid.UUID                     `json:"user_id"`
+	User                *model.PublicUserDTO          `json:"user,omitempty"`
+	EntryType           string                        `json:"entry_type"`
+	Stance              string                        `json:"stance"`
+	Title               string                        `json:"title"`
+	Content             string                        `json:"content"`
+	Status              string                        `json:"status"`
+	RejectedChallengeID *uuid.UUID                    `json:"rejected_challenge_id,omitempty"`
+	References          []reference.ResolvedReference `json:"references"`
+	OpenChallenge       *DebateChallengeSummaryDTO    `json:"open_challenge,omitempty"`
+	CreatedAt           time.Time                     `json:"created_at"`
+	UpdatedAt           time.Time                     `json:"updated_at"`
+}
+
+type CreateChallengeRequest struct {
+	TargetType string    `json:"target_type"`
+	TargetID   uuid.UUID `json:"target_id"`
+	ReasonCode string    `json:"reason_code"`
+	Rationale  string    `json:"rationale"`
+}
+
+type VoteChallengeRequest struct {
+	Decision string `json:"decision"`
+}
+
+type DebateChallengeDTO struct {
+	ID               uuid.UUID                     `json:"id"`
+	DebateID         uuid.UUID                     `json:"debate_id"`
+	TargetType       string                        `json:"target_type"`
+	TargetID         uuid.UUID                     `json:"target_id"`
+	TargetLabel      string                        `json:"target_label,omitempty"`
+	TargetPreview    string                        `json:"target_preview,omitempty"`
+	CreatedBy        uuid.UUID                     `json:"created_by"`
+	Creator          *model.PublicUserDTO          `json:"creator,omitempty"`
+	ReasonCode       string                        `json:"reason_code"`
+	Rationale        string                        `json:"rationale"`
+	References       []reference.ResolvedReference `json:"references"`
+	Status           string                        `json:"status"`
+	UpholdVotes      int                           `json:"uphold_votes"`
+	DismissVotes     int                           `json:"dismiss_votes"`
+	CurrentUserVote  string                        `json:"current_user_vote,omitempty"`
+	MinVotes         int                           `json:"min_votes"`
+	ThresholdPercent int                           `json:"threshold_percent"`
+	ResolvedAt       *time.Time                    `json:"resolved_at,omitempty"`
+	CreatedAt        time.Time                     `json:"created_at"`
+	UpdatedAt        time.Time                     `json:"updated_at"`
 }
 
 type DebateGraphNodeDTO struct {

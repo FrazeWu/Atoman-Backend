@@ -603,9 +603,93 @@ func TestDebateContentCitationsAndValidation(t *testing.T) {
 	})
 	requireAppError(t, err, "debate.title_reference", 400)
 
-	_, err = ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{
-		Title:   "缺少立场",
+	plain, err := ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{
+		Title:   "纯背景引用",
 		Content: "@debate:" + prior.ID.String(),
 	})
+	require.NoError(t, err)
+	require.Len(t, plain.References, 1)
+	require.Nil(t, plain.References[0].Relation)
+	require.Equal(t, "debate", plain.References[0].Target.Type)
+	require.True(t, plain.References[0].Target.Available)
+	graph, err := ctx.service.GetDebateGraph(plain.ID, "graph", 1)
+	require.NoError(t, err)
+	require.Empty(t, graph.Relations)
+
+	_, err = ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{
+		Title:   "无效立场",
+		Content: "@debate:" + prior.ID.String() + ":neutral",
+	})
 	requireAppError(t, err, "debate.reference_invalid", 400)
+}
+
+func TestBareDebateReferenceRejectsSelfAndArchivedDebate(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	self := createDebateForTest(t, ctx, "Self", "Body")
+	archived := createDebateForTest(t, ctx, "Archived", "Body")
+	require.NoError(t, ctx.db.Model(&model.Debate{}).Where("id = ?", archived.ID).Update("status", model.DebateStatusArchived).Error)
+
+	_, err := ctx.service.SaveWiki(ctx.owner, self.ID, SaveWikiRequest{
+		Title:          self.Title,
+		Description:    self.Description,
+		Content:        "@debate:" + self.ID.String(),
+		Tags:           self.Tags,
+		EditSummary:    "self ref",
+		BaseRevisionID: *self.CurrentRevisionID,
+	})
+	requireAppError(t, err, "debate.reference_self", 400)
+
+	_, err = ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{
+		Title:   "Archived Bare Ref",
+		Content: "@debate:" + archived.ID.String(),
+	})
+	requireAppError(t, err, "debate.reference_unavailable", 400)
+}
+
+func TestDebateDetailAndListIncludeStructuredStats(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	require.NoError(t, ctx.db.AutoMigrate(&model.DebateEntry{}, &model.DebateEvidenceVote{}, &model.DebateChallenge{}))
+	d1 := createDebateForTest(t, ctx, "With Stats", "Body 1")
+	d2 := createDebateForTest(t, ctx, "Empty Stats", "Body 2")
+
+	entries := []model.DebateEntry{
+		{DebateID: d1.ID, UserID: ctx.owner.ID, EntryType: model.DebateEntryTypeClaim, Stance: model.DebateEntryStanceSupport, Content: "Claim 1", Status: model.DebateEntryStatusActive},
+		{DebateID: d1.ID, UserID: ctx.owner.ID, EntryType: model.DebateEntryTypeClaim, Stance: model.DebateEntryStanceOppose, Content: "Claim 2", Status: model.DebateEntryStatusActive},
+		{DebateID: d1.ID, UserID: ctx.owner.ID, EntryType: model.DebateEntryTypeEvidence, Stance: model.DebateEntryStanceSupport, Content: "Ev active 1", Status: model.DebateEntryStatusActive},
+		{DebateID: d1.ID, UserID: ctx.owner.ID, EntryType: model.DebateEntryTypeEvidence, Stance: model.DebateEntryStanceOppose, Content: "Ev active 2", Status: model.DebateEntryStatusActive},
+		{DebateID: d1.ID, UserID: ctx.owner.ID, EntryType: model.DebateEntryTypeEvidence, Stance: model.DebateEntryStanceSupport, Content: "Ev rejected", Status: model.DebateEntryStatusRejected},
+		{DebateID: d1.ID, UserID: ctx.owner.ID, EntryType: model.DebateEntryTypeRebuttal, Stance: model.DebateEntryStanceOppose, Content: "Rebuttal 1", Status: model.DebateEntryStatusActive},
+	}
+	require.NoError(t, ctx.db.Create(&entries).Error)
+	evVote := model.DebateEvidenceVote{DebateID: d1.ID, UserID: ctx.owner.ID, Rating: model.DebateEvidenceRatingSufficient}
+	require.NoError(t, ctx.db.Create(&evVote).Error)
+
+	detail, err := ctx.service.GetDebate(d1.ID)
+	require.NoError(t, err)
+	require.NotNil(t, detail.Stats)
+	require.Equal(t, 2, detail.Stats.ClaimCount)
+	require.Equal(t, 2, detail.Stats.ActiveEvidenceCount)
+	require.Equal(t, 1, detail.Stats.RebuttalCount)
+	require.Equal(t, 1, detail.Stats.EvidenceSufficient)
+	require.False(t, detail.Stats.EvidenceWeak)
+
+	rawList, _, err := ctx.service.ListDebates(ListDebatesQuery{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	dtoItems := make([]DebateListItemDTO, len(rawList))
+	for i := range rawList {
+		dtoItems[i] = DebateListItemDTO{Debate: rawList[i]}
+	}
+	list, err := ctx.service.AttachListStats(dtoItems)
+	require.NoError(t, err)
+	byID := make(map[uuid.UUID]DebateListItemDTO, len(list))
+	for _, item := range list {
+		byID[item.ID] = item
+	}
+	require.NotNil(t, byID[d1.ID].Stats)
+	require.Equal(t, 2, byID[d1.ID].Stats.ActiveEvidenceCount)
+	require.False(t, byID[d1.ID].Stats.EvidenceWeak)
+	require.NotNil(t, byID[d2.ID].Stats)
+	require.Equal(t, 0, byID[d2.ID].Stats.ClaimCount)
+	require.Equal(t, 0, byID[d2.ID].Stats.ActiveEvidenceCount)
+	require.True(t, byID[d2.ID].Stats.EvidenceWeak)
 }
