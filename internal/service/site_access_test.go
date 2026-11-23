@@ -154,3 +154,65 @@ func TestSaveInputRejectsMissingRevisionForExistingSetting(t *testing.T) {
 		t.Fatalf("save without revision error = %v, want ErrSiteAccessConflict", err)
 	}
 }
+
+func testIntPtr(v int) *int { return &v }
+
+func TestDebateSettingsDefaultsPersistenceBoundsAndFallback(t *testing.T) {
+	dbNoTable := testdb.Open(t)
+	fallback := NewSiteAccessService(dbNoTable).LoadDebateSettings()
+	if fallback.ConclusionMinVotes != DefaultDebateConclusionMinVotes ||
+		fallback.ConclusionThresholdPercent != DefaultDebateConclusionThresholdPct ||
+		fallback.ChallengeMinVotes != DefaultDebateChallengeMinVotes {
+		t.Fatalf("unexpected fallback debate settings without table: %+v", fallback)
+	}
+
+	db := testdb.Open(t)
+	if err := db.AutoMigrate(&model.SiteSetting{}); err != nil {
+		t.Fatalf("migrate site settings: %v", err)
+	}
+	svc := NewSiteAccessService(db)
+	matrix, err := svc.Load()
+	if err != nil {
+		t.Fatalf("load site access: %v", err)
+	}
+	if matrix.Settings.Debate.ConclusionMinVotes != 5 ||
+		matrix.Settings.Debate.ConclusionThresholdPercent != 75 ||
+		matrix.Settings.Debate.ChallengeMinVotes != 5 {
+		t.Fatalf("unexpected default debate settings: %+v", matrix.Settings.Debate)
+	}
+
+	input := matrix.ToInput()
+	input.Settings.Debate = &SiteAccessDebateSettingsInput{
+		ConclusionMinVotes:         testIntPtr(8),
+		ConclusionThresholdPercent: testIntPtr(80),
+		ChallengeMinVotes:          testIntPtr(6),
+	}
+	if err := svc.SaveInput(input); err != nil {
+		t.Fatalf("save valid debate settings: %v", err)
+	}
+	loaded := svc.LoadDebateSettings()
+	if loaded.ConclusionMinVotes != 8 || loaded.ConclusionThresholdPercent != 80 || loaded.ChallengeMinVotes != 6 {
+		t.Fatalf("unexpected persisted debate settings: %+v", loaded)
+	}
+
+	reloaded, err := svc.Load()
+	if err != nil {
+		t.Fatalf("reload matrix: %v", err)
+	}
+	invalidCases := []SiteAccessDebateSettingsInput{
+		{ConclusionMinVotes: testIntPtr(2)},
+		{ConclusionMinVotes: testIntPtr(101)},
+		{ConclusionThresholdPercent: testIntPtr(50)},
+		{ConclusionThresholdPercent: testIntPtr(96)},
+		{ChallengeMinVotes: testIntPtr(2)},
+		{ChallengeMinVotes: testIntPtr(101)},
+	}
+	for _, bad := range invalidCases {
+		badInput := reloaded.ToInput()
+		badCopy := bad
+		badInput.Settings.Debate = &badCopy
+		if err := svc.SaveInput(badInput); err == nil {
+			t.Fatalf("expected validation error for %+v", bad)
+		}
+	}
+}

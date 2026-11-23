@@ -31,6 +31,14 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	topics.POST("/:id/references/:relationID/reconfirm", h.reconfirm)
 	topics.PUT("/:id/protection", h.putProtection)
 	topics.DELETE("/:id/protection", h.deleteProtection)
+	topics.GET("/:id/entries", h.listEntries)
+	topics.POST("/:id/entries", middleware.RequireSiteFeature(service.db, "debate", "argument.create"), h.createEntry)
+	topics.PUT("/:id/entries/:entryID", h.updateEntry)
+	topics.DELETE("/:id/entries/:entryID", h.deleteEntry)
+	topics.GET("/:id/challenges", h.listChallenges)
+	topics.POST("/:id/challenges", h.createChallenge)
+	topics.PUT("/:id/challenges/:challengeID/vote", h.voteChallenge)
+	topics.DELETE("/:id/challenges/:challengeID/vote", h.deleteChallengeVote)
 	group.GET("/debates/:id/relations", h.graph)
 }
 
@@ -55,6 +63,11 @@ func (h *Handler) list(c *gin.Context) {
 	publicItems := make([]DebateListItemDTO, 0, len(items))
 	for _, item := range items {
 		publicItems = append(publicItems, DebateListItemDTO{Debate: item, User: model.PublicUserFromUser(item.User)})
+	}
+	publicItems, err = h.service.AttachListStats(publicItems)
+	if err != nil {
+		httpx.Error(c, err)
+		return
 	}
 	httpx.List(c, publicItems, page, pageSize, total)
 }
@@ -376,6 +389,225 @@ func (h *Handler) graph(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, graph)
+}
+
+// listEntries godoc
+// @Summary List structured debate entries
+// @Tags Debate
+// @Produce json
+// @Param id path string true "Debate ID"
+// @Success 200 {object} handlers.DebateEntryListResponse
+// @Router /api/v1/debate/topics/{id}/entries [get]
+func (h *Handler) listEntries(c *gin.Context) {
+	id, ok := httpx.UUIDParam(c, "id")
+	if !ok {
+		return
+	}
+	items, err := h.service.ListEntries(id)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
+}
+
+// createEntry godoc
+// @Summary Create a structured debate entry
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param body body CreateDebateEntryRequest true "Entry"
+// @Success 201 {object} handlers.DebateEntryResponse
+// @Router /api/v1/debate/topics/{id}/entries [post]
+func (h *Handler) createEntry(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, ok := httpx.UUIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var req CreateDebateEntryRequest
+	if !httpx.BindRequiredJSON(c, &req) {
+		return
+	}
+	item, err := h.service.CreateEntry(user, id, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, item)
+}
+
+// updateEntry godoc
+// @Summary Update a structured debate entry
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param entryID path string true "Entry ID"
+// @Param body body UpdateDebateEntryRequest true "Entry"
+// @Success 200 {object} handlers.DebateEntryResponse
+// @Router /api/v1/debate/topics/{id}/entries/{entryID} [put]
+func (h *Handler) updateEntry(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, entryID, ok := parseTwoIDs(c, "id", "entryID")
+	if !ok {
+		return
+	}
+	var req UpdateDebateEntryRequest
+	if !httpx.BindRequiredJSON(c, &req) {
+		return
+	}
+	item, err := h.service.UpdateEntry(user, id, entryID, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
+}
+
+// deleteEntry godoc
+// @Summary Delete a structured debate entry
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param entryID path string true "Entry ID"
+// @Success 200 {object} handlers.DebateMessageResponse
+// @Router /api/v1/debate/topics/{id}/entries/{entryID} [delete]
+func (h *Handler) deleteEntry(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, entryID, ok := parseTwoIDs(c, "id", "entryID")
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteEntry(user, id, entryID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "Entry deleted"})
+}
+
+// listChallenges godoc
+// @Summary List community challenges on debate citations or evidence
+// @Tags Debate
+// @Produce json
+// @Param id path string true "Debate ID"
+// @Param status query string false "Filter by status"
+// @Success 200 {object} handlers.DebateChallengeListResponse
+// @Router /api/v1/debate/topics/{id}/challenges [get]
+func (h *Handler) listChallenges(c *gin.Context) {
+	id, ok := httpx.UUIDParam(c, "id")
+	if !ok {
+		return
+	}
+	user, _ := authctx.Current(c)
+	items, err := h.service.ListChallenges(user, id, c.Query("status"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
+}
+
+// createChallenge godoc
+// @Summary Create a challenge against a debate citation or evidence entry
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param body body CreateChallengeRequest true "Challenge"
+// @Success 201 {object} handlers.DebateChallengeResponse
+// @Router /api/v1/debate/topics/{id}/challenges [post]
+func (h *Handler) createChallenge(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, ok := httpx.UUIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var req CreateChallengeRequest
+	if !httpx.BindRequiredJSON(c, &req) {
+		return
+	}
+	item, err := h.service.CreateChallenge(user, id, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, item)
+}
+
+// voteChallenge godoc
+// @Summary Vote on an open debate challenge
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param challengeID path string true "Challenge ID"
+// @Param body body VoteChallengeRequest true "Vote"
+// @Success 200 {object} handlers.DebateChallengeResponse
+// @Router /api/v1/debate/topics/{id}/challenges/{challengeID}/vote [put]
+func (h *Handler) voteChallenge(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, challengeID, ok := parseTwoIDs(c, "id", "challengeID")
+	if !ok {
+		return
+	}
+	var req VoteChallengeRequest
+	if !httpx.BindRequiredJSON(c, &req) {
+		return
+	}
+	item, err := h.service.VoteChallenge(user, id, challengeID, req.Decision)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
+}
+
+// deleteChallengeVote godoc
+// @Summary Withdraw a vote on an open debate challenge
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param challengeID path string true "Challenge ID"
+// @Success 200 {object} handlers.DebateChallengeResponse
+// @Router /api/v1/debate/topics/{id}/challenges/{challengeID}/vote [delete]
+func (h *Handler) deleteChallengeVote(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, challengeID, ok := parseTwoIDs(c, "id", "challengeID")
+	if !ok {
+		return
+	}
+	item, err := h.service.DeleteChallengeVote(user, id, challengeID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
 }
 
 func requireCurrentUser(c *gin.Context) (authctx.CurrentUser, bool) {

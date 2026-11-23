@@ -18,6 +18,14 @@ const SiteAccessPayloadVersion = 1
 const (
 	SiteAccessFeedFullTextModeDisabled  = "disabled"
 	SiteAccessFeedFullTextModePerSource = "per_source"
+
+	DefaultDebateConclusionMinVotes     = 5
+	DefaultDebateConclusionThresholdPct = 75
+	DefaultDebateChallengeMinVotes      = 5
+	minDebateVotesBound                 = 3
+	maxDebateVotesBound                 = 100
+	minDebateThresholdPercentBound      = 51
+	maxDebateThresholdPercentBound      = 95
 )
 
 var ErrInvalidSiteAccessPayload = errors.New("invalid_site_access_payload")
@@ -37,8 +45,15 @@ type SiteAccessModule struct {
 }
 
 type SiteAccessSettings struct {
-	Feed  SiteAccessFeedSettings  `json:"feed"`
-	Forum SiteAccessForumSettings `json:"forum"`
+	Feed   SiteAccessFeedSettings   `json:"feed"`
+	Forum  SiteAccessForumSettings  `json:"forum"`
+	Debate SiteAccessDebateSettings `json:"debate"`
+}
+
+type SiteAccessDebateSettings struct {
+	ConclusionMinVotes         int `json:"conclusion_min_votes"`
+	ConclusionThresholdPercent int `json:"conclusion_threshold_percent"`
+	ChallengeMinVotes          int `json:"challenge_min_votes"`
 }
 
 type SiteAccessFeedSettings struct {
@@ -73,8 +88,15 @@ type SiteAccessModuleInput struct {
 }
 
 type SiteAccessSettingsInput struct {
-	Feed  *SiteAccessFeedSettingsInput  `json:"feed"`
-	Forum *SiteAccessForumSettingsInput `json:"forum"`
+	Feed   *SiteAccessFeedSettingsInput   `json:"feed"`
+	Forum  *SiteAccessForumSettingsInput  `json:"forum"`
+	Debate *SiteAccessDebateSettingsInput `json:"debate"`
+}
+
+type SiteAccessDebateSettingsInput struct {
+	ConclusionMinVotes         *int `json:"conclusion_min_votes"`
+	ConclusionThresholdPercent *int `json:"conclusion_threshold_percent"`
+	ChallengeMinVotes          *int `json:"challenge_min_votes"`
 }
 
 type SiteAccessFeedSettingsInput struct {
@@ -142,6 +164,11 @@ func DefaultSiteAccessMatrix() SiteAccessMatrix {
 					PinTopic:              true,
 					LockTopic:             true,
 				},
+			},
+			Debate: SiteAccessDebateSettings{
+				ConclusionMinVotes:         DefaultDebateConclusionMinVotes,
+				ConclusionThresholdPercent: DefaultDebateConclusionThresholdPct,
+				ChallengeMinVotes:          DefaultDebateChallengeMinVotes,
 			},
 		},
 	}
@@ -300,6 +327,28 @@ func (s *SiteAccessService) PublicMatrix() (SiteAccessMatrix, error) {
 	return s.Load()
 }
 
+func (s *SiteAccessService) LoadDebateSettings() SiteAccessDebateSettings {
+	defaults := DefaultSiteAccessMatrix().Settings.Debate
+	if s == nil || s.db == nil || !model.HasTableCached(s.db, &model.SiteSetting{}) {
+		return defaults
+	}
+	matrix, err := s.Load()
+	if err != nil {
+		return defaults
+	}
+	settings := matrix.Settings.Debate
+	if settings.ConclusionMinVotes < minDebateVotesBound || settings.ConclusionMinVotes > maxDebateVotesBound {
+		settings.ConclusionMinVotes = defaults.ConclusionMinVotes
+	}
+	if settings.ConclusionThresholdPercent < minDebateThresholdPercentBound || settings.ConclusionThresholdPercent > maxDebateThresholdPercentBound {
+		settings.ConclusionThresholdPercent = defaults.ConclusionThresholdPercent
+	}
+	if settings.ChallengeMinVotes < minDebateVotesBound || settings.ChallengeMinVotes > maxDebateVotesBound {
+		settings.ChallengeMinVotes = defaults.ChallengeMinVotes
+	}
+	return settings
+}
+
 func (s *SiteAccessService) IsModuleEnabled(module string) (bool, error) {
 	matrix, err := s.Load()
 	if err != nil {
@@ -348,6 +397,9 @@ func (m SiteAccessMatrix) ToInput() SiteAccessMatrixInput {
 	reviewCategoryRequest := m.Settings.Forum.ModeratorPermissions.ReviewCategoryRequest
 	pinTopic := m.Settings.Forum.ModeratorPermissions.PinTopic
 	lockTopic := m.Settings.Forum.ModeratorPermissions.LockTopic
+	conclusionMinVotes := m.Settings.Debate.ConclusionMinVotes
+	conclusionThresholdPercent := m.Settings.Debate.ConclusionThresholdPercent
+	challengeMinVotes := m.Settings.Debate.ChallengeMinVotes
 
 	return SiteAccessMatrixInput{
 		Version: m.Version,
@@ -365,6 +417,11 @@ func (m SiteAccessMatrix) ToInput() SiteAccessMatrixInput {
 					PinTopic:              &pinTopic,
 					LockTopic:             &lockTopic,
 				},
+			},
+			Debate: &SiteAccessDebateSettingsInput{
+				ConclusionMinVotes:         &conclusionMinVotes,
+				ConclusionThresholdPercent: &conclusionThresholdPercent,
+				ChallengeMinVotes:          &challengeMinVotes,
 			},
 		},
 		Revision:  m.Revision,
@@ -559,6 +616,18 @@ func applySettingsInput(base *SiteAccessMatrix, input *SiteAccessSettingsInput) 
 		}
 	}
 
+	if input.Debate != nil {
+		if input.Debate.ConclusionMinVotes != nil {
+			base.Settings.Debate.ConclusionMinVotes = *input.Debate.ConclusionMinVotes
+		}
+		if input.Debate.ConclusionThresholdPercent != nil {
+			base.Settings.Debate.ConclusionThresholdPercent = *input.Debate.ConclusionThresholdPercent
+		}
+		if input.Debate.ChallengeMinVotes != nil {
+			base.Settings.Debate.ChallengeMinVotes = *input.Debate.ChallengeMinVotes
+		}
+	}
+
 	return nil
 }
 
@@ -635,6 +704,17 @@ func validateSettingsInput(input *SiteAccessSettingsInput) error {
 			return fmt.Errorf("%w: invalid feed full_text_mode %q", ErrInvalidSiteAccessPayload, *input.Feed.FullTextMode)
 		}
 	}
+	if input.Debate != nil {
+		if input.Debate.ConclusionMinVotes != nil && (*input.Debate.ConclusionMinVotes < minDebateVotesBound || *input.Debate.ConclusionMinVotes > maxDebateVotesBound) {
+			return fmt.Errorf("%w: invalid debate conclusion_min_votes %d", ErrInvalidSiteAccessPayload, *input.Debate.ConclusionMinVotes)
+		}
+		if input.Debate.ConclusionThresholdPercent != nil && (*input.Debate.ConclusionThresholdPercent < minDebateThresholdPercentBound || *input.Debate.ConclusionThresholdPercent > maxDebateThresholdPercentBound) {
+			return fmt.Errorf("%w: invalid debate conclusion_threshold_percent %d", ErrInvalidSiteAccessPayload, *input.Debate.ConclusionThresholdPercent)
+		}
+		if input.Debate.ChallengeMinVotes != nil && (*input.Debate.ChallengeMinVotes < minDebateVotesBound || *input.Debate.ChallengeMinVotes > maxDebateVotesBound) {
+			return fmt.Errorf("%w: invalid debate challenge_min_votes %d", ErrInvalidSiteAccessPayload, *input.Debate.ChallengeMinVotes)
+		}
+	}
 	return nil
 }
 
@@ -659,6 +739,15 @@ func validateSiteAccess(matrix SiteAccessMatrix) error {
 	if matrix.Settings.Feed.FullTextMode != SiteAccessFeedFullTextModeDisabled &&
 		matrix.Settings.Feed.FullTextMode != SiteAccessFeedFullTextModePerSource {
 		return fmt.Errorf("%w: invalid feed full_text_mode %q", ErrInvalidSiteAccessPayload, matrix.Settings.Feed.FullTextMode)
+	}
+	if matrix.Settings.Debate.ConclusionMinVotes < minDebateVotesBound || matrix.Settings.Debate.ConclusionMinVotes > maxDebateVotesBound {
+		return fmt.Errorf("%w: invalid debate conclusion_min_votes %d", ErrInvalidSiteAccessPayload, matrix.Settings.Debate.ConclusionMinVotes)
+	}
+	if matrix.Settings.Debate.ConclusionThresholdPercent < minDebateThresholdPercentBound || matrix.Settings.Debate.ConclusionThresholdPercent > maxDebateThresholdPercentBound {
+		return fmt.Errorf("%w: invalid debate conclusion_threshold_percent %d", ErrInvalidSiteAccessPayload, matrix.Settings.Debate.ConclusionThresholdPercent)
+	}
+	if matrix.Settings.Debate.ChallengeMinVotes < minDebateVotesBound || matrix.Settings.Debate.ChallengeMinVotes > maxDebateVotesBound {
+		return fmt.Errorf("%w: invalid debate challenge_min_votes %d", ErrInvalidSiteAccessPayload, matrix.Settings.Debate.ChallengeMinVotes)
 	}
 
 	return nil

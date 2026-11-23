@@ -513,7 +513,8 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.Video{}, &model.VideoBookmark{}, &model.VideoRecommendationFeedback{}, &model.VideoProcessingJob{}, &model.VideoImportSession{}, &model.VideoTag{},
 		&model.VideoCollection{}, &model.VideoTagRelation{}, &model.PodcastEpisode{}, &model.PodcastEpisodeBookmark{},
 		&model.Debate{}, &model.DebateConclusionEvent{}, &model.DebateRevisionReference{},
-		&model.DebateRelation{}, &model.DebateVote{}, &model.DiscussionTarget{}, &model.CommentEntry{},
+		&model.DebateRelation{}, &model.DebateVote{}, &model.DebateEntry{}, &model.DebateEvidenceVote{},
+		&model.DebateChallenge{}, &model.DebateChallengeVote{}, &model.DiscussionTarget{}, &model.CommentEntry{},
 		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{},
 		&model.CommentTimeAnchor{}, &model.CommentPublishRecord{}, &model.ContentReference{},
 		&model.TimelineEvent{}, &model.TimelinePerson{}, &model.PersonLocation{},
@@ -546,6 +547,7 @@ func MigrateSchema(db *gorm.DB) error {
 		{"music match state migration", migrations.RunMusicMatchStateMigration},
 		{"feed subscription management migration", migrations.RunFeedSubscriptionManagementMigration},
 		{"reputation indexes migration", migrations.RunReputationIndexes},
+		{"debate structured migration", migrations.RunDebateStructuredMigration},
 	}
 	for _, step := range steps {
 		if err := step.run(db); err != nil {

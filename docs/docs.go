@@ -13052,6 +13052,173 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/debate/topics/{id}/challenges": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "List community challenges on debate citations or evidence",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateChallengeListResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Create a challenge against a debate citation or evidence entry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Challenge",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.CreateChallengeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateChallengeResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate/topics/{id}/challenges/{challengeID}/vote": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Vote on an open debate challenge",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Challenge ID",
+                        "name": "challengeID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Vote",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.VoteChallengeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateChallengeResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Withdraw a vote on an open debate challenge",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Challenge ID",
+                        "name": "challengeID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateChallengeResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/debate/topics/{id}/conclusions": {
             "get": {
                 "produces": [
@@ -13075,6 +13242,243 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.DebateConclusionListResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate/topics/{id}/entries": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "List structured debate entries",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateEntryListResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Create a structured debate entry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Entry",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.CreateDebateEntryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateEntryResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate/topics/{id}/entries/{entryID}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Update a structured debate entry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Entry ID",
+                        "name": "entryID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Entry",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.UpdateDebateEntryRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateEntryResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Delete a structured debate entry",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Entry ID",
+                        "name": "entryID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateMessageResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate/topics/{id}/evidence-vote": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Set the current user's evidence sufficiency rating",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Evidence rating",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate_voting.evidenceVoteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateVoteResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Delete the current user's evidence sufficiency rating",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateVoteResponse"
                         }
                     }
                 }
@@ -41640,6 +42044,43 @@ const docTemplate = `{
                 }
             }
         },
+        "debate.CreateChallengeRequest": {
+            "type": "object",
+            "properties": {
+                "rationale": {
+                    "type": "string"
+                },
+                "reason_code": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "debate.CreateDebateEntryRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "entry_type": {
+                    "type": "string"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "stance": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "debate.CreateDebateRequest": {
             "type": "object",
             "properties": {
@@ -41657,6 +42098,94 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                }
+            }
+        },
+        "debate.DebateChallengeDTO": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "creator": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "current_user_vote": {
+                    "type": "string"
+                },
+                "debate_id": {
+                    "type": "string"
+                },
+                "dismiss_votes": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "min_votes": {
+                    "type": "integer"
+                },
+                "rationale": {
+                    "type": "string"
+                },
+                "reason_code": {
+                    "type": "string"
+                },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.ResolvedReference"
+                    }
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_label": {
+                    "type": "string"
+                },
+                "target_preview": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string"
+                },
+                "threshold_percent": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uphold_votes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "debate.DebateChallengeSummaryDTO": {
+            "type": "object",
+            "properties": {
+                "dismiss_votes": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason_code": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "uphold_votes": {
+                    "type": "integer"
                 }
             }
         },
@@ -41690,6 +42219,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/debate.DebateReferenceDTO"
                     }
                 },
+                "stats": {
+                    "$ref": "#/definitions/debate.DebateStatsDTO"
+                },
                 "status": {
                     "type": "string"
                 },
@@ -41713,6 +42245,59 @@ const docTemplate = `{
                 },
                 "view_count": {
                     "type": "integer"
+                }
+            }
+        },
+        "debate.DebateEntryDTO": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "debate_id": {
+                    "type": "string"
+                },
+                "entry_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "open_challenge": {
+                    "$ref": "#/definitions/debate.DebateChallengeSummaryDTO"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.ResolvedReference"
+                    }
+                },
+                "rejected_challenge_id": {
+                    "type": "string"
+                },
+                "stance": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.PublicUserDTO"
+                },
+                "user_id": {
+                    "type": "string"
                 }
             }
         },
@@ -41819,6 +42404,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "stats": {
+                    "$ref": "#/definitions/debate.DebateStatsDTO"
+                },
                 "status": {
                     "type": "string"
                 },
@@ -41845,9 +42433,32 @@ const docTemplate = `{
                 }
             }
         },
+        "debate.DebateReferenceChallengeDTO": {
+            "type": "object",
+            "properties": {
+                "dismiss_votes": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason_code": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "uphold_votes": {
+                    "type": "integer"
+                }
+            }
+        },
         "debate.DebateReferenceDTO": {
             "type": "object",
             "properties": {
+                "challenge": {
+                    "$ref": "#/definitions/debate.DebateReferenceChallengeDTO"
+                },
                 "end": {
                     "type": "integer"
                 },
@@ -41990,6 +42601,35 @@ const docTemplate = `{
                 }
             }
         },
+        "debate.DebateStatsDTO": {
+            "type": "object",
+            "properties": {
+                "active_evidence_count": {
+                    "type": "integer"
+                },
+                "claim_count": {
+                    "type": "integer"
+                },
+                "evidence_insufficient": {
+                    "type": "integer"
+                },
+                "evidence_partial": {
+                    "type": "integer"
+                },
+                "evidence_sufficient": {
+                    "type": "integer"
+                },
+                "evidence_weak": {
+                    "type": "boolean"
+                },
+                "rebuttal_count": {
+                    "type": "integer"
+                },
+                "vote_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "debate.ProtectionRequest": {
             "type": "object",
             "properties": {
@@ -42079,14 +42719,63 @@ const docTemplate = `{
                 }
             }
         },
+        "debate.UpdateDebateEntryRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "stance": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "debate.VoteChallengeRequest": {
+            "type": "object",
+            "properties": {
+                "decision": {
+                    "type": "string"
+                }
+            }
+        },
         "debate_voting.VoteStats": {
             "type": "object",
             "properties": {
+                "active_evidence_count": {
+                    "type": "integer"
+                },
+                "conclusion_min_votes": {
+                    "type": "integer"
+                },
+                "conclusion_threshold_percent": {
+                    "type": "integer"
+                },
                 "current_direction": {
+                    "type": "string"
+                },
+                "current_user_evidence_vote": {
                     "type": "string"
                 },
                 "current_user_vote": {
                     "type": "string"
+                },
+                "evidence_insufficient": {
+                    "type": "integer"
+                },
+                "evidence_partial": {
+                    "type": "integer"
+                },
+                "evidence_sufficient": {
+                    "type": "integer"
+                },
+                "evidence_total": {
+                    "type": "integer"
+                },
+                "evidence_weak": {
+                    "type": "boolean"
                 },
                 "no_votes": {
                     "type": "integer"
@@ -42096,6 +42785,14 @@ const docTemplate = `{
                 },
                 "yes_votes": {
                     "type": "integer"
+                }
+            }
+        },
+        "debate_voting.evidenceVoteRequest": {
+            "type": "object",
+            "properties": {
+                "rating": {
+                    "type": "string"
                 }
             }
         },
@@ -44710,6 +45407,25 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.DebateChallengeListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/debate.DebateChallengeDTO"
+                    }
+                }
+            }
+        },
+        "handlers.DebateChallengeResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/debate.DebateChallengeDTO"
+                }
+            }
+        },
         "handlers.DebateConclusionListResponse": {
             "type": "object",
             "properties": {
@@ -44718,6 +45434,25 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/model.DebateConclusionEvent"
                     }
+                }
+            }
+        },
+        "handlers.DebateEntryListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/debate.DebateEntryDTO"
+                    }
+                }
+            }
+        },
+        "handlers.DebateEntryResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/debate.DebateEntryDTO"
                 }
             }
         },
@@ -48307,6 +49042,9 @@ const docTemplate = `{
         "model.DebateConclusionEvent": {
             "type": "object",
             "properties": {
+                "active_evidence_count": {
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -48315,6 +49053,18 @@ const docTemplate = `{
                 },
                 "direction": {
                     "type": "string"
+                },
+                "evidence_insufficient": {
+                    "type": "integer"
+                },
+                "evidence_partial": {
+                    "type": "integer"
+                },
+                "evidence_sufficient": {
+                    "type": "integer"
+                },
+                "evidence_weak": {
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "string"
@@ -54190,6 +54940,34 @@ const docTemplate = `{
                 }
             }
         },
+        "service.SiteAccessDebateSettings": {
+            "type": "object",
+            "properties": {
+                "challenge_min_votes": {
+                    "type": "integer"
+                },
+                "conclusion_min_votes": {
+                    "type": "integer"
+                },
+                "conclusion_threshold_percent": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.SiteAccessDebateSettingsInput": {
+            "type": "object",
+            "properties": {
+                "challenge_min_votes": {
+                    "type": "integer"
+                },
+                "conclusion_min_votes": {
+                    "type": "integer"
+                },
+                "conclusion_threshold_percent": {
+                    "type": "integer"
+                }
+            }
+        },
         "service.SiteAccessFeedSettings": {
             "type": "object",
             "properties": {
@@ -54348,6 +55126,9 @@ const docTemplate = `{
         "service.SiteAccessSettings": {
             "type": "object",
             "properties": {
+                "debate": {
+                    "$ref": "#/definitions/service.SiteAccessDebateSettings"
+                },
                 "feed": {
                     "$ref": "#/definitions/service.SiteAccessFeedSettings"
                 },
@@ -54359,6 +55140,9 @@ const docTemplate = `{
         "service.SiteAccessSettingsInput": {
             "type": "object",
             "properties": {
+                "debate": {
+                    "$ref": "#/definitions/service.SiteAccessDebateSettingsInput"
+                },
                 "feed": {
                     "$ref": "#/definitions/service.SiteAccessFeedSettingsInput"
                 },

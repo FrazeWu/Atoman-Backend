@@ -45,7 +45,11 @@ func TestConclusionThresholdTable(t *testing.T) {
 		yes, no int
 		want    string
 	}{
-		{yes: 7, no: 2, want: ""},
+		{yes: 3, no: 1, want: ""},
+		{yes: 4, no: 0, want: ""},
+		{yes: 4, no: 1, want: model.DebateVoteYes},
+		{yes: 3, no: 2, want: ""},
+		{yes: 1, no: 4, want: model.DebateVoteNo},
 		{yes: 7, no: 3, want: ""},
 		{yes: 8, no: 2, want: model.DebateVoteYes},
 		{yes: 9, no: 3, want: ""},

@@ -128,6 +128,8 @@ func (s *Service) projectReferences(tx *gorm.DB, user authctx.CurrentUser, debat
 				return nil, err
 			}
 			relation = &created
+		} else if relation.Status == model.DebateRelationRejected {
+			group.state = model.DebateRelationRejected
 		} else {
 			updates := map[string]any{"stance": group.stance, "target_revision_id": revision.ID, "status": group.state}
 			if group.state == model.DebateRelationActive {
@@ -202,6 +204,9 @@ func projectNonRelationReferences(tx *gorm.DB, debate model.Debate, revisionID, 
 		if err != nil {
 			return apperr.BadRequest("debate.reference_invalid", "Content contains an invalid resource reference")
 		}
+		if item.TargetType == "debate" && targetID == debate.ID {
+			return apperr.BadRequest("debate.reference_self", "A debate cannot reference itself")
+		}
 		key := targetKey{kind: item.TargetType, id: targetID}
 		if _, ok := validated[key]; !ok {
 			_, resolveErr := registry.Resolve(reference.Viewer{}, item.TargetType, targetID)
@@ -212,6 +217,19 @@ func projectNonRelationReferences(tx *gorm.DB, debate model.Debate, revisionID, 
 					}
 				} else {
 					return resolveErr
+				}
+			} else if item.TargetType == "debate" {
+				if _, keep := inherited[key]; !keep {
+					var targetDebate model.Debate
+					if err := tx.Select("status").First(&targetDebate, "id = ?", targetID).Error; err != nil {
+						if errors.Is(err, gorm.ErrRecordNotFound) {
+							return apperr.BadRequest("debate.reference_unavailable", "Referenced resource is unavailable")
+						}
+						return err
+					}
+					if targetDebate.Status != model.DebateStatusActive {
+						return apperr.BadRequest("debate.reference_unavailable", "Referenced resource is unavailable")
+					}
 				}
 			}
 			validated[key] = struct{}{}
@@ -237,7 +255,7 @@ func (s *Service) resolveRevisionReference(tx *gorm.DB, _ authctx.CurrentUser, d
 		Raw: parsed.Raw, Kind: "debate", ResourceID: parsed.ResourceID,
 		Qualifier: parsed.Stance, Occurrence: occurrence, State: model.DebateRelationActive,
 	}
-	if base != nil && (base.State == model.DebateRelationStale || base.State == model.DebateRelationUnavailable) {
+	if base != nil && (base.State == model.DebateRelationStale || base.State == model.DebateRelationUnavailable || base.State == model.DebateRelationRejected) {
 		result.Title, result.State, result.RelationID = base.Title, base.State, base.RelationID
 		{
 			projection := &relationProjection{sourceID: parsed.ResourceID, stance: parsed.Stance, state: base.State}
@@ -269,6 +287,11 @@ func (s *Service) resolveRevisionReference(tx *gorm.DB, _ authctx.CurrentUser, d
 
 func (s *Service) attachCurrentReferences(debate model.Debate) (DebateDTO, error) {
 	result := DebateDTO{Debate: debate, User: model.PublicUserFromUser(debate.User), References: []DebateReferenceDTO{}}
+	if statsByID, err := BuildDebateStats(s.db, []uuid.UUID{debate.ID}); err != nil {
+		return DebateDTO{}, err
+	} else if stats, ok := statsByID[debate.ID]; ok {
+		result.Stats = &stats
+	}
 	if debate.CurrentRevisionID == nil {
 		return result, nil
 	}
@@ -276,7 +299,7 @@ func (s *Service) attachCurrentReferences(debate model.Debate) (DebateDTO, error
 	if err != nil {
 		return DebateDTO{}, err
 	}
-	result.References, err = s.referenceDTOs(*debate.CurrentRevisionID, refs)
+	result.References, err = s.referenceDTOs(debate.ID, *debate.CurrentRevisionID, refs)
 	if err != nil {
 		return DebateDTO{}, err
 	}
@@ -290,7 +313,7 @@ func (s *Service) referenceService() *reference.Service {
 	return reference.NewService(s.db)
 }
 
-func (s *Service) referenceDTOs(revisionID uuid.UUID, refs []model.DebateRevisionReference) ([]DebateReferenceDTO, error) {
+func (s *Service) referenceDTOs(debateID, revisionID uuid.UUID, refs []model.DebateRevisionReference) ([]DebateReferenceDTO, error) {
 	ids := make([]uuid.UUID, 0, len(refs))
 	for _, ref := range refs {
 		ids = append(ids, ref.ContentReferenceID)
@@ -305,6 +328,12 @@ func (s *Service) referenceDTOs(revisionID uuid.UUID, refs []model.DebateRevisio
 			rows[row.ID] = row
 		}
 	}
+
+	relationChallenges, referenceChallengesByRowID, referenceChallengesByTarget, err := s.loadReferenceChallenges(debateID)
+	if err != nil {
+		return nil, err
+	}
+
 	registry := reference.NewRegistry(s.db)
 	result := make([]DebateReferenceDTO, 0, len(refs))
 	for _, ref := range refs {
@@ -340,6 +369,15 @@ func (s *Service) referenceDTOs(revisionID uuid.UUID, refs []model.DebateRevisio
 					item.Relation.ConclusionDirection = event.Direction
 				}
 			}
+			if ch, ok := relationChallenges[*ref.RelationID]; ok {
+				copyCh := ch
+				item.Challenge = &copyCh
+				if ch.Status == model.DebateChallengeStatusUpheld && item.Relation != nil {
+					item.Relation.State = model.DebateRelationRejected
+					item.State = model.DebateRelationRejected
+					item.Target.Available = false
+				}
+			}
 		}
 		result = append(result, item)
 	}
@@ -368,7 +406,7 @@ func (s *Service) referenceDTOs(revisionID uuid.UUID, refs []model.DebateRevisio
 				break
 			}
 			res := resolvedList[i]
-			result = append(result, DebateReferenceDTO{
+			item := DebateReferenceDTO{
 				ID:    row.ID,
 				Field: row.SourceField,
 				Start: res.Start,
@@ -389,7 +427,18 @@ func (s *Service) referenceDTOs(revisionID uuid.UUID, refs []model.DebateRevisio
 				Relation:   nil,
 				ResourceID: res.TargetID,
 				Title:      res.Label,
-			})
+			}
+			if ch, ok := referenceChallengesByRowID[row.ID]; ok {
+				copyCh := ch
+				item.Challenge = &copyCh
+			} else if ch, ok := referenceChallengesByTarget[referenceTargetKey{kind: row.TargetType, id: row.TargetID}]; ok {
+				copyCh := ch
+				item.Challenge = &copyCh
+			}
+			if item.Challenge != nil && item.Challenge.Status == model.DebateChallengeStatusUpheld {
+				item.State = model.DebateRelationRejected
+			}
+			result = append(result, item)
 		}
 	}
 
@@ -403,6 +452,83 @@ func (s *Service) referenceDTOs(revisionID uuid.UUID, refs []model.DebateRevisio
 		return result[i].ID.String() < result[j].ID.String()
 	})
 	return result, nil
+}
+
+type referenceTargetKey struct {
+	kind string
+	id   uuid.UUID
+}
+
+func (s *Service) loadReferenceChallenges(debateID uuid.UUID) (
+	map[uuid.UUID]DebateReferenceChallengeDTO,
+	map[uuid.UUID]DebateReferenceChallengeDTO,
+	map[referenceTargetKey]DebateReferenceChallengeDTO,
+	error,
+) {
+	relationChallenges := map[uuid.UUID]DebateReferenceChallengeDTO{}
+	refByRowID := map[uuid.UUID]DebateReferenceChallengeDTO{}
+	refByTarget := map[referenceTargetKey]DebateReferenceChallengeDTO{}
+
+	if debateID == uuid.Nil || !model.HasTableCached(s.db, &model.DebateChallenge{}) {
+		return relationChallenges, refByRowID, refByTarget, nil
+	}
+
+	var challenges []model.DebateChallenge
+	if err := s.db.Where(
+		"debate_id = ? AND target_type IN ? AND status IN ?",
+		debateID,
+		[]string{model.DebateChallengeTargetRelation, model.DebateChallengeTargetReference},
+		[]string{model.DebateChallengeStatusOpen, model.DebateChallengeStatusUpheld},
+	).Order("created_at DESC, id DESC").Find(&challenges).Error; err != nil {
+		return nil, nil, nil, err
+	}
+
+	refRowIDs := make([]uuid.UUID, 0)
+	for _, ch := range challenges {
+		summary := DebateReferenceChallengeDTO{
+			ID:           ch.ID,
+			Status:       ch.Status,
+			ReasonCode:   ch.ReasonCode,
+			UpholdVotes:  ch.UpholdVotes,
+			DismissVotes: ch.DismissVotes,
+		}
+		if ch.TargetType == model.DebateChallengeTargetRelation {
+			if existing, exists := relationChallenges[ch.TargetID]; !exists || summary.Status == model.DebateChallengeStatusUpheld && existing.Status != model.DebateChallengeStatusUpheld {
+				relationChallenges[ch.TargetID] = summary
+			}
+			continue
+		}
+		if existing, exists := refByRowID[ch.TargetID]; !exists || summary.Status == model.DebateChallengeStatusUpheld && existing.Status != model.DebateChallengeStatusUpheld {
+			refByRowID[ch.TargetID] = summary
+		}
+		refRowIDs = append(refRowIDs, ch.TargetID)
+	}
+
+	if len(refRowIDs) > 0 && model.HasTableCached(s.db, &model.ContentReference{}) {
+		var challengedRows []model.ContentReference
+		if err := s.db.Where("id IN ?", refRowIDs).Find(&challengedRows).Error; err != nil {
+			return nil, nil, nil, err
+		}
+		rowTargetByID := make(map[uuid.UUID]referenceTargetKey, len(challengedRows))
+		for _, row := range challengedRows {
+			rowTargetByID[row.ID] = referenceTargetKey{kind: row.TargetType, id: row.TargetID}
+		}
+		for _, ch := range challenges {
+			if ch.TargetType != model.DebateChallengeTargetReference {
+				continue
+			}
+			key, ok := rowTargetByID[ch.TargetID]
+			if !ok {
+				continue
+			}
+			summary := refByRowID[ch.TargetID]
+			if existing, exists := refByTarget[key]; !exists || summary.Status == model.DebateChallengeStatusUpheld && existing.Status != model.DebateChallengeStatusUpheld {
+				refByTarget[key] = summary
+			}
+		}
+	}
+
+	return relationChallenges, refByRowID, refByTarget, nil
 }
 
 func effectiveRevisionReferences(db *gorm.DB, revisionID uuid.UUID) ([]model.DebateRevisionReference, error) {

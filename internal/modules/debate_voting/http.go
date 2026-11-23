@@ -14,6 +14,10 @@ type voteRequest struct {
 	Direction string `json:"direction"`
 }
 
+type evidenceVoteRequest struct {
+	Rating string `json:"rating"`
+}
+
 type Handler struct{ service *Service }
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
@@ -21,6 +25,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/debate/topics/:id/votes", h.getVotes)
 	group.PUT("/debate/topics/:id/vote", h.setVote)
 	group.DELETE("/debate/topics/:id/vote", h.deleteVote)
+	group.PUT("/debate/topics/:id/evidence-vote", h.setEvidenceVote)
+	group.DELETE("/debate/topics/:id/evidence-vote", h.deleteEvidenceVote)
 	group.GET("/debate/topics/:id/conclusions", h.listConclusions)
 }
 
@@ -95,6 +101,63 @@ func (h *Handler) deleteVote(c *gin.Context) {
 		return
 	}
 	stats, err := h.service.DeleteVote(user, id)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, stats)
+}
+
+// setEvidenceVote godoc
+// @Summary Set the current user's evidence sufficiency rating
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param body body evidenceVoteRequest true "Evidence rating"
+// @Success 200 {object} handlers.DebateVoteResponse
+// @Router /api/v1/debate/topics/{id}/evidence-vote [put]
+func (h *Handler) setEvidenceVote(c *gin.Context) {
+	user, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	id, ok := httpx.UUIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var req evidenceVoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	stats, err := h.service.SetEvidenceVote(user, id, req.Rating)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, stats)
+}
+
+// deleteEvidenceVote godoc
+// @Summary Delete the current user's evidence sufficiency rating
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Success 200 {object} handlers.DebateVoteResponse
+// @Router /api/v1/debate/topics/{id}/evidence-vote [delete]
+func (h *Handler) deleteEvidenceVote(c *gin.Context) {
+	user, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	id, ok := httpx.UUIDParam(c, "id")
+	if !ok {
+		return
+	}
+	stats, err := h.service.DeleteEvidenceVote(user, id)
 	if err != nil {
 		httpx.Error(c, err)
 		return
