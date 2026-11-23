@@ -27,13 +27,13 @@ func contentRatingUpsertConflict(score int) clause.OnConflict {
 }
 
 func contentRatingSummaryForContent(db *gorm.DB, contentID uuid.UUID, viewerID *uuid.UUID) (contentRatingSummary, error) {
-	if !db.Migrator().HasTable(&model.PostRating{}) {
-		return contentRatingSummary{}, nil
-	}
 	var summary contentRatingSummary
 	if err := db.Model(&model.PostRating{}).
 		Select("COALESCE(AVG(score), 0) AS rating_score, COUNT(*) AS rating_count").
 		Where("content_id = ?", contentID).Scan(&summary).Error; err != nil {
+		if !db.Migrator().HasTable(&model.PostRating{}) {
+			return contentRatingSummary{}, nil
+		}
 		return contentRatingSummary{}, err
 	}
 	summary.RatingScore = ratingpolicy.RoundAverage(summary.RatingScore)

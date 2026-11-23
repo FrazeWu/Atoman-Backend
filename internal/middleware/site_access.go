@@ -23,11 +23,6 @@ type siteAccessPayload struct {
 
 func RequireSiteFeature(db *gorm.DB, module, feature string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !db.Migrator().HasTable(&model.SiteSetting{}) {
-			c.Next()
-			return
-		}
-
 		var setting model.SiteSetting
 		err := db.First(&setting, "key = ?", "site.module_access").Error
 		if err == gorm.ErrRecordNotFound {
@@ -35,6 +30,10 @@ func RequireSiteFeature(db *gorm.DB, module, feature string) gin.HandlerFunc {
 			return
 		}
 		if err != nil {
+			if !db.Migrator().HasTable(&model.SiteSetting{}) {
+				c.Next()
+				return
+			}
 			httpx.Error(c, apperr.Internal(err))
 			c.Abort()
 			return
