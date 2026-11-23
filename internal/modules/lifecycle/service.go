@@ -830,7 +830,7 @@ func (s *Service) dispatchPublication(event model.ContentPublicationEvent) error
 		return nil
 	}
 
-	hasFollows := s.db.Migrator().HasTable(&model.Follow{})
+	hasFollows := model.HasTableCached(s.db, &model.Follow{})
 	cursor := uuid.Nil
 	for {
 		owned, err := s.renewPublicationLease(event)

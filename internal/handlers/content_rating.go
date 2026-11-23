@@ -31,7 +31,7 @@ func contentRatingSummaryForContent(db *gorm.DB, contentID uuid.UUID, viewerID *
 	if err := db.Model(&model.PostRating{}).
 		Select("COALESCE(AVG(score), 0) AS rating_score, COUNT(*) AS rating_count").
 		Where("content_id = ?", contentID).Scan(&summary).Error; err != nil {
-		if !db.Migrator().HasTable(&model.PostRating{}) {
+		if !model.HasTableCached(db, &model.PostRating{}) {
 			return contentRatingSummary{}, nil
 		}
 		return contentRatingSummary{}, err

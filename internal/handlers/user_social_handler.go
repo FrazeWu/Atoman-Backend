@@ -271,7 +271,7 @@ func GetUserFollowers(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch follower channels"})
 			return
 		}
-		if len(channelIDs) > 0 && db.Migrator().HasTable(&model.Subscription{}) && db.Migrator().HasTable(&model.FeedSource{}) {
+		if len(channelIDs) > 0 && model.HasTableCached(db, &model.Subscription{}) && model.HasTableCached(db, &model.FeedSource{}) {
 			var subscriberIDs []uuid.UUID
 			err := db.Table("subscriptions").
 				Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
@@ -324,7 +324,7 @@ func GetUserFollowing(db *gorm.DB) gin.HandlerFunc {
 		for _, user := range loadPublicRelationUsers(db, followingIDs) {
 			items = append(items, user)
 		}
-		if db.Migrator().HasTable(&model.Subscription{}) && db.Migrator().HasTable(&model.FeedSource{}) {
+		if model.HasTableCached(db, &model.Subscription{}) && model.HasTableCached(db, &model.FeedSource{}) {
 			var subscriptions []model.Subscription
 			if err := db.Preload("FeedSource").Where("user_id = ?", targetID).Find(&subscriptions).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch channel subscriptions"})
@@ -407,7 +407,7 @@ func countUniqueRelationUsers(db *gorm.DB, userID uuid.UUID, followers bool) int
 	for _, id := range followIDs {
 		ids[id] = struct{}{}
 	}
-	if !db.Migrator().HasTable(&model.Subscription{}) || !db.Migrator().HasTable(&model.FeedSource{}) || !db.Migrator().HasTable(&model.Channel{}) {
+	if !model.HasTableCached(db, &model.Subscription{}) || !model.HasTableCached(db, &model.FeedSource{}) || !model.HasTableCached(db, &model.Channel{}) {
 		return int64(len(ids))
 	}
 	var subscriptionIDs []uuid.UUID
