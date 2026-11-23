@@ -41894,6 +41894,9 @@
                 "available": {
                     "type": "boolean"
                 },
+                "excerpt": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -41904,6 +41907,12 @@
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "source_name": {
                     "type": "string"
                 },
                 "subtitle": {
@@ -53580,6 +53589,9 @@
                 "end": {
                     "type": "integer"
                 },
+                "excerpt": {
+                    "type": "string"
+                },
                 "field": {
                     "type": "string"
                 },
@@ -53593,6 +53605,12 @@
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "source_name": {
                     "type": "string"
                 },
                 "start": {
@@ -53629,6 +53647,9 @@
                 "cover_url": {
                     "type": "string"
                 },
+                "excerpt": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -53639,6 +53660,12 @@
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "source_name": {
                     "type": "string"
                 },
                 "subtitle": {
@@ -54480,6 +54507,12 @@
                 },
                 "media_attachment": {
                     "$ref": "#/definitions/shortnote.MediaAttachmentDTO"
+                },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.ResolvedReference"
+                    }
                 },
                 "updated_at": {
                     "type": "string"

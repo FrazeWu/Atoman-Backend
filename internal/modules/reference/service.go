@@ -161,11 +161,7 @@ func (s *Service) ResolvePreview(viewer Viewer, content string) ([]ResolvedRefer
 			return nil, err
 		}
 		resolved.TargetID = target.ID
-		resolved.Label = target.Label
-		resolved.Subtitle = target.Subtitle
-		resolved.Module = target.Module
-		resolved.Path = target.Path
-		resolved.Available = true
+		assignTargetMetadata(&resolved, target)
 		result = append(result, resolved)
 	}
 	return result, nil
@@ -261,6 +257,9 @@ func (s *Service) BackfillAvailable(tx *gorm.DB, source Source, fields []Field) 
 }
 
 func (s *Service) ResolveStoredRows(db *gorm.DB, viewer Viewer, rows []model.ContentReference) (map[uuid.UUID][]ResolvedReference, error) {
+	if len(rows) == 0 {
+		return map[uuid.UUID][]ResolvedReference{}, nil
+	}
 	registry := NewRegistry(db)
 	result := make(map[uuid.UUID][]ResolvedReference)
 	for _, row := range rows {
@@ -284,11 +283,7 @@ func (s *Service) ResolveStoredRows(db *gorm.DB, viewer Viewer, rows []model.Con
 			}
 			return nil, err
 		}
-		item.Label = target.Label
-		item.Subtitle = target.Subtitle
-		item.Module = target.Module
-		item.Path = target.Path
-		item.Available = true
+		assignTargetMetadata(&item, target)
 		result[row.SourceID] = append(result[row.SourceID], item)
 	}
 	return result, nil
@@ -307,12 +302,24 @@ func resolveStrictTarget(registry *Registry, viewer Viewer, item ParsedReference
 	return target, id, err
 }
 
+func assignTargetMetadata(dst *ResolvedReference, target Target) {
+	dst.Label = target.Label
+	dst.Subtitle = target.Subtitle
+	dst.Excerpt = target.Excerpt
+	dst.SourceName = target.SourceName
+	dst.PublishedAt = target.PublishedAt
+	dst.Module = target.Module
+	dst.Path = target.Path
+	dst.Available = true
+}
+
 func resolvedFromParsed(item ParsedReference, target Target, field string) ResolvedReference {
-	return ResolvedReference{
+	resolved := ResolvedReference{
 		Kind: item.Kind, TargetType: item.TargetType, TargetID: target.ID,
-		Field: field, Start: item.Start, End: item.End, Label: target.Label, Subtitle: target.Subtitle,
-		Module: target.Module, Path: target.Path, Available: true,
+		Field: field, Start: item.Start, End: item.End,
 	}
+	assignTargetMetadata(&resolved, target)
+	return resolved
 }
 
 func userTargetSet(rows []model.ContentReference) map[uuid.UUID]struct{} {

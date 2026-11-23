@@ -863,3 +863,107 @@ func TestShortNoteMediaAttachmentEnrichedMetadata(t *testing.T) {
 		t.Errorf("expected subtitle '周杰伦 · 2005 · 1 首曲目', got %q", attAlbum.Subtitle)
 	}
 }
+
+func TestShortNoteReferencesIncludeEnrichedMetadataAndUnavailablePlaceholders(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{})
+
+	artist := model.Artist{Name: "测试音乐人", LifecycleStatus: "active"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	song := model.Song{
+		Title:           "附带单曲",
+		AudioURL:        "https://example.com/song.mp3",
+		Artists:         []model.Artist{artist},
+		LifecycleStatus: "active",
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	feed := model.FeedSource{SourceType: "external_rss", Provider: "rss", Hash: "sn-feed-hash", Title: "工程周刊"}
+	if err := db.Create(&feed).Error; err != nil {
+		t.Fatalf("create feed: %v", err)
+	}
+	publishedAt := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
+	article := model.FeedItem{
+		FeedSourceID: feed.ID,
+		GUID:         "sn-article-guid",
+		Title:        "深入理解检索系统",
+		Summary:      "这篇文章拆解了检索排序的评估指标。",
+		PublishedAt:  publishedAt,
+		FetchedAt:    publishedAt,
+	}
+	if err := db.Create(&article).Error; err != nil {
+		t.Fatalf("create article: %v", err)
+	}
+
+	plain := model.ShortNote{UserID: user.ID, Content: "无引用的短笺"}
+	if err := db.Create(&plain).Error; err != nil {
+		t.Fatalf("create plain short note: %v", err)
+	}
+
+	router := newShortNoteHTTPRouter(service, &user)
+	createBody, _ := json.Marshal(map[string]any{
+		"content":               "读完很有启发 @article:" + article.ID.String(),
+		"media_attachment_type": "song",
+		"media_attachment_id":   song.ID.String(),
+	})
+	createRes := shortNoteRequest(t, router, http.MethodPost, "/api/v1/short-notes", string(createBody))
+	if createRes.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", createRes.Code, createRes.Body.String())
+	}
+	var createdPayload struct {
+		Data NoteDTO `json:"data"`
+	}
+	if err := json.Unmarshal(createRes.Body.Bytes(), &createdPayload); err != nil {
+		t.Fatalf("unmarshal create payload: %v", err)
+	}
+	if len(createdPayload.Data.References) != 1 {
+		t.Fatalf("expected 1 content reference (excluding media_attachment), got %d: %#v", len(createdPayload.Data.References), createdPayload.Data.References)
+	}
+	ref := createdPayload.Data.References[0]
+	if ref.TargetType != "article" || ref.Label != "深入理解检索系统" || ref.Excerpt != "这篇文章拆解了检索排序的评估指标。" || ref.SourceName != "工程周刊" || ref.PublishedAt == nil || !ref.Available {
+		t.Fatalf("unexpected reference metadata: %#v", ref)
+	}
+
+	detailRes := shortNoteRequest(t, router, http.MethodGet, "/api/v1/short-notes/"+createdPayload.Data.ID.String(), "")
+	if detailRes.Code != http.StatusOK {
+		t.Fatalf("expected 200 on detail, got %d: %s", detailRes.Code, detailRes.Body.String())
+	}
+	var detailPayload struct {
+		Data NoteDTO `json:"data"`
+	}
+	if err := json.Unmarshal(detailRes.Body.Bytes(), &detailPayload); err != nil {
+		t.Fatalf("unmarshal detail: %v", err)
+	}
+	if len(detailPayload.Data.References) != 1 || detailPayload.Data.References[0].Label != "深入理解检索系统" {
+		t.Fatalf("unexpected detail references: %#v", detailPayload.Data.References)
+	}
+
+	listRes := shortNoteRequest(t, router, http.MethodGet, "/api/v1/short-notes", "")
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("expected 200 on list, got %d: %s", listRes.Code, listRes.Body.String())
+	}
+	if !strings.Contains(listRes.Body.String(), `"references":[]`) {
+		t.Fatalf("expected non-nil empty references array on plain note, got %s", listRes.Body.String())
+	}
+
+	if err := db.Delete(&model.FeedItem{}, "id = ?", article.ID).Error; err != nil {
+		t.Fatalf("delete article: %v", err)
+	}
+	afterDeleteRes := shortNoteRequest(t, router, http.MethodGet, "/api/v1/short-notes/"+createdPayload.Data.ID.String(), "")
+	if afterDeleteRes.Code != http.StatusOK {
+		t.Fatalf("expected 200 after target delete, got %d: %s", afterDeleteRes.Code, afterDeleteRes.Body.String())
+	}
+	var afterDeletePayload struct {
+		Data NoteDTO `json:"data"`
+	}
+	if err := json.Unmarshal(afterDeleteRes.Body.Bytes(), &afterDeletePayload); err != nil {
+		t.Fatalf("unmarshal after delete: %v", err)
+	}
+	if len(afterDeletePayload.Data.References) != 1 || afterDeletePayload.Data.References[0].Available {
+		t.Fatalf("expected unavailable placeholder after target delete, got %#v", afterDeletePayload.Data.References)
+	}
+}

@@ -278,3 +278,81 @@ func seedReferenceRegistry(t *testing.T) (*gorm.DB, map[string]uuid.UUID) {
 		"channel": channel.ID, "collection": collection.ID, "comment": comment.ID,
 	}
 }
+
+func TestRegistryResolvesCitationMetadataForReadingAndDiscussionTypes(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{},
+		&model.ForumCategory{}, &model.ForumTopic{}, &model.ForumGroup{}, &model.ForumGroupMember{}, &model.ForumCategoryPermission{},
+		&model.Debate{}, &model.FeedSource{}, &model.FeedItem{}, &model.ShortNote{}, &model.TimelineEvent{},
+	)
+	author := model.User{Username: "alice", DisplayName: "Alice Chen", Email: "alice@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&author).Error)
+	channel := model.Channel{UserID: &author.UUID, Name: "独立评论专栏", Slug: "opinion-column"}
+	require.NoError(t, db.Create(&channel).Error)
+
+	publishedAt := time.Date(2026, 11, 18, 9, 30, 0, 0, time.UTC)
+	eventDate := time.Date(2025, 5, 1, 0, 0, 0, 0, time.UTC)
+
+	post := model.Post{
+		UserID: author.UUID, ChannelID: &channel.ID, Title: "长文章标题",
+		Summary: "<p>文章摘要<strong>重点</strong>内容</p>", Content: "正文",
+		Status: "published", Visibility: "public", PublishedAt: &publishedAt,
+	}
+	require.NoError(t, db.Create(&post).Error)
+
+	shortNote := model.ShortNote{UserID: author.UUID, Content: "短笺全文用于测试摘要回退"}
+	require.NoError(t, db.Create(&shortNote).Error)
+
+	category := model.ForumCategory{Name: "公共议题"}
+	require.NoError(t, db.Create(&category).Error)
+	thread := model.ForumTopic{UserID: author.UUID, CategoryID: category.ID, Title: "论坛讨论帖", Content: "论坛正文<p>第二句</p>"}
+	require.NoError(t, db.Create(&thread).Error)
+
+	debate := model.Debate{UserID: author.UUID, Title: "辩论命题", Description: "辩题核心摘要", Content: "辩论详述", Status: "active"}
+	require.NoError(t, db.Create(&debate).Error)
+
+	feed := model.FeedSource{SourceType: "external_rss", Provider: "rss", Hash: "rich-feed-hash", Title: "深度周报"}
+	require.NoError(t, db.Create(&feed).Error)
+	article := model.FeedItem{
+		FeedSourceID: feed.ID, GUID: "rich-article-guid", Title: "订阅精选文章",
+		ReaderHTML: "<p>第一段<strong>加粗</strong>文字</p>", PublishedAt: publishedAt, FetchedAt: publishedAt,
+	}
+	require.NoError(t, db.Create(&article).Error)
+
+	event := model.TimelineEvent{
+		UserID: author.UUID, Title: "关键时间线事件", Description: "事件背景摘要",
+		Source: "官方档案", EventDate: eventDate, IsPublic: true,
+	}
+	require.NoError(t, db.Create(&event).Error)
+
+	registry := NewRegistry(db)
+
+	cases := []struct {
+		targetType string
+		id         uuid.UUID
+		label      string
+		excerpt    string
+		sourceName string
+		hasDate    bool
+	}{
+		{"article", article.ID, "订阅精选文章", "第一段 加粗 文字", "深度周报", true},
+		{"post", post.ID, "长文章标题", "文章摘要 重点 内容", "独立评论专栏", true},
+		{"short_note", shortNote.ID, "短笺全文用于测试摘要回退", "短笺全文用于测试摘要回退", "Alice Chen", true},
+		{"thread", thread.ID, "论坛讨论帖", "论坛正文 第二句", "公共议题 · Alice Chen", true},
+		{"debate", debate.ID, "辩论命题", "辩题核心摘要", "Alice Chen", true},
+		{"event", event.ID, "关键时间线事件", "事件背景摘要", "官方档案", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.targetType, func(t *testing.T) {
+			got, err := registry.Resolve(Viewer{}, tc.targetType, tc.id)
+			require.NoError(t, err)
+			require.True(t, got.Available)
+			require.Equal(t, tc.label, got.Label)
+			require.Equal(t, tc.excerpt, got.Excerpt)
+			require.Equal(t, tc.sourceName, got.SourceName)
+			require.Equal(t, tc.hasDate, got.PublishedAt != nil)
+		})
+	}
+}

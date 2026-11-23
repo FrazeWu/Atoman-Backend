@@ -2,6 +2,7 @@ package reference
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -67,28 +68,34 @@ type Viewer struct {
 }
 
 type Target struct {
-	Type      string    `json:"type"`
-	ID        uuid.UUID `json:"id"`
-	Label     string    `json:"label"`
-	Subtitle  string    `json:"subtitle,omitempty"`
-	CoverURL  string    `json:"cover_url,omitempty"`
-	Module    string    `json:"module"`
-	Path      string    `json:"path"`
-	Available bool      `json:"available"`
+	Type        string     `json:"type"`
+	ID          uuid.UUID  `json:"id"`
+	Label       string     `json:"label"`
+	Subtitle    string     `json:"subtitle,omitempty"`
+	Excerpt     string     `json:"excerpt,omitempty"`
+	SourceName  string     `json:"source_name,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+	CoverURL    string     `json:"cover_url,omitempty"`
+	Module      string     `json:"module"`
+	Path        string     `json:"path"`
+	Available   bool       `json:"available"`
 }
 
 type ResolvedReference struct {
-	Kind       Kind      `json:"kind"`
-	TargetType string    `json:"target_type"`
-	TargetID   uuid.UUID `json:"target_id,omitempty"`
-	Field      string    `json:"field,omitempty"`
-	Start      int       `json:"start"`
-	End        int       `json:"end"`
-	Label      string    `json:"label,omitempty"`
-	Subtitle   string    `json:"subtitle,omitempty"`
-	Module     string    `json:"module,omitempty"`
-	Path       string    `json:"path,omitempty"`
-	Available  bool      `json:"available"`
+	Kind        Kind       `json:"kind"`
+	TargetType  string     `json:"target_type"`
+	TargetID    uuid.UUID  `json:"target_id,omitempty"`
+	Field       string     `json:"field,omitempty"`
+	Start       int        `json:"start"`
+	End         int        `json:"end"`
+	Label       string     `json:"label,omitempty"`
+	Subtitle    string     `json:"subtitle,omitempty"`
+	Excerpt     string     `json:"excerpt,omitempty"`
+	SourceName  string     `json:"source_name,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+	Module      string     `json:"module,omitempty"`
+	Path        string     `json:"path,omitempty"`
+	Available   bool       `json:"available"`
 }
 
 type SearchResponse struct {

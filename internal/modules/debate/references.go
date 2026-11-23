@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -160,7 +161,75 @@ func (s *Service) projectReferences(tx *gorm.DB, user authctx.CurrentUser, debat
 			return nil, err
 		}
 	}
+	if err := projectNonRelationReferences(tx, debate, revision.ID, baseRevisionID); err != nil {
+		return nil, err
+	}
 	return refs, nil
+}
+
+func projectNonRelationReferences(tx *gorm.DB, debate model.Debate, revisionID, baseRevisionID uuid.UUID) error {
+	parsed, err := reference.Parse(debate.Content)
+	if err != nil {
+		return apperr.BadRequest("debate.reference_invalid", "Content contains an invalid resource reference")
+	}
+	if len(parsed) == 0 {
+		return nil
+	}
+	type targetKey struct {
+		kind string
+		id   uuid.UUID
+	}
+	inherited := make(map[targetKey]struct{})
+	if baseRevisionID != uuid.Nil {
+		var priorRows []model.ContentReference
+		if err := tx.Where("source_type = ? AND source_id = ? AND source_field = ?", "debate_revision", baseRevisionID, "content").
+			Find(&priorRows).Error; err != nil {
+			return err
+		}
+		for _, row := range priorRows {
+			inherited[targetKey{kind: row.TargetType, id: row.TargetID}] = struct{}{}
+		}
+	}
+
+	registry := reference.NewRegistry(tx)
+	validated := make(map[targetKey]struct{})
+	rows := make([]model.ContentReference, 0, len(parsed))
+	for _, item := range parsed {
+		if item.Kind != reference.KindResource {
+			continue
+		}
+		targetID, err := uuid.Parse(item.Identifier)
+		if err != nil {
+			return apperr.BadRequest("debate.reference_invalid", "Content contains an invalid resource reference")
+		}
+		key := targetKey{kind: item.TargetType, id: targetID}
+		if _, ok := validated[key]; !ok {
+			_, resolveErr := registry.Resolve(reference.Viewer{}, item.TargetType, targetID)
+			if resolveErr != nil {
+				if errors.Is(resolveErr, reference.ErrTargetUnavailable) {
+					if _, keep := inherited[key]; !keep {
+						return apperr.BadRequest("debate.reference_unavailable", "Referenced resource is unavailable")
+					}
+				} else {
+					return resolveErr
+				}
+			}
+			validated[key] = struct{}{}
+		}
+		rows = append(rows, model.ContentReference{
+			SourceType:  "debate_revision",
+			SourceID:    revisionID,
+			SourceField: "content",
+			TargetType:  item.TargetType,
+			TargetID:    targetID,
+			StartOffset: item.Start,
+			EndOffset:   item.End,
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error
 }
 
 func (s *Service) resolveRevisionReference(tx *gorm.DB, _ authctx.CurrentUser, debate model.Debate, parsed debateReferenceToken, occurrence int, base *model.DebateRevisionReference, lockedDebates map[uuid.UUID]model.Debate) (model.DebateRevisionReference, *relationProjection, error) {
@@ -207,14 +276,21 @@ func (s *Service) attachCurrentReferences(debate model.Debate) (DebateDTO, error
 	if err != nil {
 		return DebateDTO{}, err
 	}
-	result.References, err = s.referenceDTOs(refs)
+	result.References, err = s.referenceDTOs(*debate.CurrentRevisionID, refs)
 	if err != nil {
 		return DebateDTO{}, err
 	}
 	return result, nil
 }
 
-func (s *Service) referenceDTOs(refs []model.DebateRevisionReference) ([]DebateReferenceDTO, error) {
+func (s *Service) referenceService() *reference.Service {
+	if s.references != nil {
+		return s.references
+	}
+	return reference.NewService(s.db)
+}
+
+func (s *Service) referenceDTOs(revisionID uuid.UUID, refs []model.DebateRevisionReference) ([]DebateReferenceDTO, error) {
 	ids := make([]uuid.UUID, 0, len(refs))
 	for _, ref := range refs {
 		ids = append(ids, ref.ContentReferenceID)
@@ -229,15 +305,32 @@ func (s *Service) referenceDTOs(refs []model.DebateRevisionReference) ([]DebateR
 			rows[row.ID] = row
 		}
 	}
+	registry := reference.NewRegistry(s.db)
 	result := make([]DebateReferenceDTO, 0, len(refs))
 	for _, ref := range refs {
 		row, ok := rows[ref.ContentReferenceID]
 		if !ok {
 			return nil, gorm.ErrRecordNotFound
 		}
-		item := DebateReferenceDTO{ID: row.ID, Field: row.SourceField, Start: row.StartOffset, End: row.EndOffset, Raw: ref.Raw,
-			Target:     DebateReferenceTargetDTO{Type: row.TargetType, ID: row.TargetID, Label: ref.Title, Module: "debate", Path: "/" + row.TargetID.String(), Available: ref.State == model.DebateRelationActive},
-			ResourceID: row.TargetID, Title: ref.Title, Qualifier: ref.Qualifier, State: ref.State, RelationID: ref.RelationID}
+		target := DebateReferenceTargetDTO{
+			Type:      row.TargetType,
+			ID:        row.TargetID,
+			Label:     ref.Title,
+			Module:    "debate",
+			Path:      "/" + row.TargetID.String(),
+			Available: ref.State == model.DebateRelationActive,
+		}
+		if resolved, err := registry.Resolve(reference.Viewer{}, row.TargetType, row.TargetID); err == nil {
+			target.Subtitle = resolved.Subtitle
+			target.Excerpt = resolved.Excerpt
+			target.SourceName = resolved.SourceName
+			target.PublishedAt = resolved.PublishedAt
+		}
+		item := DebateReferenceDTO{
+			ID: row.ID, Field: row.SourceField, Start: row.StartOffset, End: row.EndOffset, Raw: ref.Raw,
+			Target:     target,
+			ResourceID: row.TargetID, Title: ref.Title, Qualifier: ref.Qualifier, State: ref.State, RelationID: ref.RelationID,
+		}
 		if ref.RelationID != nil {
 			var relation model.DebateRelation
 			if err := s.db.First(&relation, "id = ?", *ref.RelationID).Error; err == nil {
@@ -250,6 +343,65 @@ func (s *Service) referenceDTOs(refs []model.DebateRevisionReference) ([]DebateR
 		}
 		result = append(result, item)
 	}
+
+	var storedAll []model.ContentReference
+	if err := s.db.Where("source_type = ? AND source_id = ?", "debate_revision", revisionID).
+		Order("start_offset ASC, end_offset ASC, id ASC").
+		Find(&storedAll).Error; err != nil {
+		return nil, err
+	}
+	nonRelationRows := make([]model.ContentReference, 0, len(storedAll))
+	for _, row := range storedAll {
+		if _, isRelation := rows[row.ID]; isRelation {
+			continue
+		}
+		nonRelationRows = append(nonRelationRows, row)
+	}
+	if len(nonRelationRows) > 0 {
+		resolvedByRevision, err := s.referenceService().ResolveStoredRows(s.db, reference.Viewer{}, nonRelationRows)
+		if err != nil {
+			return nil, err
+		}
+		resolvedList := resolvedByRevision[revisionID]
+		for i, row := range nonRelationRows {
+			if i >= len(resolvedList) {
+				break
+			}
+			res := resolvedList[i]
+			result = append(result, DebateReferenceDTO{
+				ID:    row.ID,
+				Field: row.SourceField,
+				Start: res.Start,
+				End:   res.End,
+				Raw:   "@" + res.TargetType + ":" + res.TargetID.String(),
+				Target: DebateReferenceTargetDTO{
+					Type:        res.TargetType,
+					ID:          res.TargetID,
+					Label:       res.Label,
+					Subtitle:    res.Subtitle,
+					Excerpt:     res.Excerpt,
+					SourceName:  res.SourceName,
+					PublishedAt: res.PublishedAt,
+					Module:      res.Module,
+					Path:        res.Path,
+					Available:   res.Available,
+				},
+				Relation:   nil,
+				ResourceID: res.TargetID,
+				Title:      res.Label,
+			})
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Start != result[j].Start {
+			return result[i].Start < result[j].Start
+		}
+		if result[i].End != result[j].End {
+			return result[i].End < result[j].End
+		}
+		return result[i].ID.String() < result[j].ID.String()
+	})
 	return result, nil
 }
 
@@ -378,15 +530,11 @@ func (s *Service) ReconfirmReference(user authctx.CurrentUser, debateID, relatio
 		if err != nil {
 			return err
 		}
-		oldReferenceIDs := make([]uuid.UUID, 0, len(baseRefs))
-		for _, ref := range baseRefs {
-			oldReferenceIDs = append(oldReferenceIDs, ref.ContentReferenceID)
-		}
 		var oldContentRefs []model.ContentReference
-		if len(oldReferenceIDs) > 0 {
-			if err := tx.Where("id IN ?", oldReferenceIDs).Find(&oldContentRefs).Error; err != nil {
-				return err
-			}
+		if err := tx.Where("source_type = ? AND source_id = ?", "debate_revision", current.ID).
+			Order("start_offset ASC, end_offset ASC, id ASC").
+			Find(&oldContentRefs).Error; err != nil {
+			return err
 		}
 		copiedIDs := make(map[uuid.UUID]uuid.UUID, len(oldContentRefs))
 		for _, old := range oldContentRefs {

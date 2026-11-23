@@ -66,13 +66,16 @@ type DebateReferenceDTO struct {
 }
 
 type DebateReferenceTargetDTO struct {
-	Type      string    `json:"type"`
-	ID        uuid.UUID `json:"id"`
-	Label     string    `json:"label,omitempty"`
-	Subtitle  string    `json:"subtitle,omitempty"`
-	Module    string    `json:"module,omitempty"`
-	Path      string    `json:"path,omitempty"`
-	Available bool      `json:"available"`
+	Type        string     `json:"type"`
+	ID          uuid.UUID  `json:"id"`
+	Label       string     `json:"label,omitempty"`
+	Subtitle    string     `json:"subtitle,omitempty"`
+	Excerpt     string     `json:"excerpt,omitempty"`
+	SourceName  string     `json:"source_name,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+	Module      string     `json:"module,omitempty"`
+	Path        string     `json:"path,omitempty"`
+	Available   bool       `json:"available"`
 }
 
 type DebateReferenceRelationDTO struct {

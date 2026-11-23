@@ -2208,6 +2208,8 @@ definitions:
     properties:
       available:
         type: boolean
+      excerpt:
+        type: string
       id:
         type: string
       label:
@@ -2215,6 +2217,10 @@ definitions:
       module:
         type: string
       path:
+        type: string
+      published_at:
+        type: string
+      source_name:
         type: string
       subtitle:
         type: string
@@ -9988,6 +9994,8 @@ definitions:
         type: boolean
       end:
         type: integer
+      excerpt:
+        type: string
       field:
         type: string
       kind:
@@ -9997,6 +10005,10 @@ definitions:
       module:
         type: string
       path:
+        type: string
+      published_at:
+        type: string
+      source_name:
         type: string
       start:
         type: integer
@@ -10020,6 +10032,8 @@ definitions:
         type: boolean
       cover_url:
         type: string
+      excerpt:
+        type: string
       id:
         type: string
       label:
@@ -10027,6 +10041,10 @@ definitions:
       module:
         type: string
       path:
+        type: string
+      published_at:
+        type: string
+      source_name:
         type: string
       subtitle:
         type: string
@@ -10578,6 +10596,10 @@ definitions:
         type: array
       media_attachment:
         $ref: '#/definitions/shortnote.MediaAttachmentDTO'
+      references:
+        items:
+          $ref: '#/definitions/reference.ResolvedReference'
+        type: array
       updated_at:
         type: string
       user:

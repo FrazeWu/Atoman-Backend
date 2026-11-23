@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/searchlimit"
@@ -175,4 +176,44 @@ func seededReferenceService(t *testing.T) (*Service, *gorm.DB, model.User, map[s
 	actor := model.User{Username: "author", DisplayName: "Author", Email: "author@example.com", Password: "hash", IsActive: true}
 	require.NoError(t, db.Create(&actor).Error)
 	return NewService(db), db, actor, ids
+}
+
+func TestResolveStoredRowsPreservesMetadataAndUnavailablePlaceholders(t *testing.T) {
+	service, db, actor, ids := seededReferenceService(t)
+	publishedAt := time.Date(2026, 11, 20, 8, 30, 0, 0, time.UTC)
+	require.NoError(t, db.Model(&model.FeedItem{}).Where("id = ?", ids["article"]).Updates(map[string]any{
+		"summary":      "引用摘要内容",
+		"published_at": publishedAt,
+	}).Error)
+
+	sourceID := uuid.New()
+	source := Source{Type: "short_note", ID: sourceID, ActorID: actor.UUID, Audience: AudiencePublic}
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+		_, err := service.ReplacePublished(tx, source, []Field{{Name: "content", Content: "@article:" + ids["article"].String()}})
+		return err
+	}))
+
+	var rows []model.ContentReference
+	require.NoError(t, db.Where("source_id = ?", sourceID).Find(&rows).Error)
+	require.Len(t, rows, 1)
+
+	resolved, err := service.ResolveStoredRows(db, Viewer{}, rows)
+	require.NoError(t, err)
+	items := resolved[sourceID]
+	require.Len(t, items, 1)
+	require.True(t, items[0].Available)
+	require.Equal(t, "Feed Article", items[0].Label)
+	require.Equal(t, "引用摘要内容", items[0].Excerpt)
+	require.Equal(t, "External Feed", items[0].SourceName)
+	require.NotNil(t, items[0].PublishedAt)
+
+	require.NoError(t, db.Delete(&model.FeedItem{}, "id = ?", ids["article"]).Error)
+	resolvedAfterDelete, err := service.ResolveStoredRows(db, Viewer{}, rows)
+	require.NoError(t, err)
+	afterItems := resolvedAfterDelete[sourceID]
+	require.Len(t, afterItems, 1)
+	require.Equal(t, "article", afterItems[0].TargetType)
+	require.Equal(t, ids["article"], afterItems[0].TargetID)
+	require.False(t, afterItems[0].Available)
+	require.Empty(t, afterItems[0].Excerpt)
 }
