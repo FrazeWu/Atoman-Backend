@@ -125,7 +125,7 @@ func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 		if filter == "all" || filter == "processing_failed" {
 			var replacements []model.SongAudioReplacement
-			if db.Migrator().HasTable(&model.SongAudioReplacement{}) {
+			if model.HasTableCached(db, &model.SongAudioReplacement{}) {
 				if err := db.Preload("Song").Where("status = ?", "failed").Order("updated_at DESC, id ASC").Find(&replacements).Error; err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 					return

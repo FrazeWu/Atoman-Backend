@@ -119,9 +119,6 @@ func loadOrCreateUserSettings(db *gorm.DB, userID uuid.UUID) (model.UserSettings
 }
 
 func publicUserPrivacy(db *gorm.DB, userID uuid.UUID) (privateProfile, showRelations bool) {
-	if !db.Migrator().HasTable(&model.UserSettings{}) {
-		return false, false
-	}
 	var settings model.UserSettings
 	if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {
 		return false, false

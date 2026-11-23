@@ -60,7 +60,15 @@ func RegisterV1Routes(
 		// 书目总数在书目修改服务中失效，收藏、评分、阅读状态不会改变总数。
 		// 统计、阅读进度和播放上报不改变公共列表，避免每次曝光都清空缓存。
 		if c.Request.Method == http.MethodPut || c.Request.Method == http.MethodPatch || c.Request.Method == http.MethodDelete {
-			if !strings.Contains(path, "/progress") && !strings.Contains(path, "/read") && !strings.HasPrefix(path, "/api/v1/dm/") && !strings.HasPrefix(path, "/api/v1/notifications") {
+			if !strings.Contains(path, "/progress") &&
+				!strings.Contains(path, "/read") &&
+				!strings.HasPrefix(path, "/api/v1/dm/") &&
+				!strings.HasPrefix(path, "/api/v1/notifications") &&
+				!strings.HasPrefix(path, "/api/v1/mail/") &&
+				!strings.HasPrefix(path, "/api/v1/auth/") &&
+				!strings.Contains(path, "/reading-state") &&
+				!strings.Contains(path, "/annotations") &&
+				!strings.Contains(path, "/private") {
 				portalService.InvalidateHotContent()
 				feedService.InvalidateRecommendations()
 			}

@@ -91,7 +91,7 @@ type videoRecommendationFeedbackSet struct {
 
 func videoRecommendationFeedbackFor(db *gorm.DB, userID *uuid.UUID) videoRecommendationFeedbackSet {
 	set := videoRecommendationFeedbackSet{hiddenVideos: map[uuid.UUID]bool{}, reducedChannels: map[uuid.UUID]bool{}, blockedTags: map[uuid.UUID]bool{}}
-	if userID == nil || !db.Migrator().HasTable(&model.VideoRecommendationFeedback{}) {
+	if userID == nil {
 		return set
 	}
 	var rows []model.VideoRecommendationFeedback

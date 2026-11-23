@@ -26,7 +26,7 @@ type musicContributionScore struct {
 // RecordMusicRevisionContribution records the effective business result of an
 // approved music revision. It is a no-op before the reputation schema exists.
 func RecordMusicRevisionContribution(tx *gorm.DB, revision *model.Revision) error {
-	if tx == nil || revision == nil || revision.ID == uuid.Nil || !tx.Migrator().HasTable(&model.MusicContributionEvent{}) {
+	if tx == nil || revision == nil || revision.ID == uuid.Nil || !model.HasTableCached(tx, &model.MusicContributionEvent{}) {
 		return nil
 	}
 	if revision.EditType == "revert" {
@@ -55,7 +55,7 @@ func RecordMusicRevisionContribution(tx *gorm.DB, revision *model.Revision) erro
 
 // RecordMusicLyricsContribution records one non-revert lyric version.
 func RecordMusicLyricsContribution(tx *gorm.DB, version *model.MusicSongLyricVersion, wasNew, hadTranslation, hadTiming bool) error {
-	if tx == nil || version == nil || version.ID == uuid.Nil || !tx.Migrator().HasTable(&model.MusicContributionEvent{}) {
+	if tx == nil || version == nil || version.ID == uuid.Nil || !model.HasTableCached(tx, &model.MusicContributionEvent{}) {
 		return nil
 	}
 	if normalizedContributionTarget(version.Target) == "restore" {

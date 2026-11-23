@@ -248,6 +248,7 @@ func (s *SiteAccessService) updateSettingWithRevision(revision int, value string
 	if result.RowsAffected == 0 {
 		return ErrSiteAccessConflict
 	}
+	model.NotifySiteSettingChanged()
 	return nil
 }
 
