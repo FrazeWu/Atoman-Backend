@@ -23,6 +23,7 @@ const (
 	SharedBucket      = "atoman"
 	StorageEndpoint   = "http://127.0.0.1:9100"
 	LauncherSocket    = "/run/atoman-papers/uds/launcher.sock"
+	LeaseBridgeSocket = "/run/atoman-papers-queue/lease.sock"
 	SnapshotSocket    = "/run/atoman-papers-snapshot/publish.sock"
 	PDFSocket         = "/run/atoman-papers-pdf/publish.sock"
 	EnvironmentSocket = "/run/atoman-papers-environment/publish.sock"
@@ -58,11 +59,10 @@ type WorkerConfig struct {
 	DatabasePassword string `json:"database_password"`
 }
 type LauncherConfig struct {
-	DatabasePassword string            `json:"database_password"`
-	Reader           StorageCredential `json:"reader"`
-	Trust            TrustConfig       `json:"trust"`
-	RunscDigest      string            `json:"runsc_digest"`
-	HelperDigest     string            `json:"helper_digest"`
+	Reader       StorageCredential `json:"reader"`
+	Trust        TrustConfig       `json:"trust"`
+	RunscDigest  string            `json:"runsc_digest"`
+	HelperDigest string            `json:"helper_digest"`
 }
 type GatewayConfig struct {
 	Writer        StorageCredential `json:"writer"`
@@ -189,7 +189,7 @@ func loadLauncher() (LauncherConfig, error) {
 	if err := loadCredential("papers-launcher.json", &c); err != nil {
 		return c, err
 	}
-	if !validDBPassword(c.DatabasePassword) || !digestRE.MatchString(c.RunscDigest) || !digestRE.MatchString(c.HelperDigest) {
+	if !digestRE.MatchString(c.RunscDigest) || !digestRE.MatchString(c.HelperDigest) {
 		return c, ErrConfig
 	}
 	if err := c.Reader.validate("launcher-reader"); err != nil {

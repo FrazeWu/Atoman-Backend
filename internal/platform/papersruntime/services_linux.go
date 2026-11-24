@@ -65,7 +65,7 @@ func Run(ctx context.Context, role string) error {
 	}
 	switch role {
 	case "worker":
-		return runWorker(ctx)
+		return ErrConfig // queue worker is embedded in Atoman
 	case "launcher":
 		return runLauncher(ctx)
 	case "publish-release":
@@ -186,16 +186,6 @@ func runLauncher(ctx context.Context) error {
 	}
 	start, stop := context.WithTimeout(ctx, 30*time.Second)
 	defer stop()
-	db, err := queueDB(start, cfg.DatabasePassword, true)
-	if err != nil {
-		return err
-	}
-	sqlDB, _ := db.DB()
-	defer sqlDB.Close()
-	queue, err := papersqueue.NewWithDurablePDF(db, 30*time.Second)
-	if err != nil {
-		return err
-	}
 	reader, err := storageClient(cfg.Reader)
 	if err != nil {
 		return err
@@ -234,16 +224,16 @@ func runLauncher(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	workerUID, err := uid("atoman-papers-worker")
+	workerUID, err := uid("atoman")
 	if err != nil {
 		return err
 	}
-	workerGID, err := gid("atoman-papers-worker")
+	workerGID, err := gid("atoman")
 	if err != nil {
 		return err
 	}
 	launcher, err := paperslauncher.NewServer(paperslauncher.Config{
-		AllowedUID: workerUID, AllowedGID: workerGID, Executor: executor, Verify: queue.ResolveLease, LeaseCheckInterval: 2 * time.Second,
+		AllowedUID: workerUID, AllowedGID: workerGID, Executor: executor, Verify: paperslauncher.RemoteLeaseVerifier(LeaseBridgeSocket, workerUID), LeaseCheckInterval: 2 * time.Second,
 	})
 	if err != nil {
 		return err

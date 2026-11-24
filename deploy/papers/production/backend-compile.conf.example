@@ -3,3 +3,5 @@
 Environment=PAPERS_COMPILE_ENABLE=1
 SupplementaryGroups=atoman-papers-api
 LoadCredential=papers-api.json:/etc/atoman/papers/api.json
+RuntimeDirectory=atoman-papers-queue
+RuntimeDirectoryMode=0700

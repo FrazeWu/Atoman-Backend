@@ -432,7 +432,7 @@ func main() {
 
 	userHub := collab.NewUserHub()
 	collabHub := collab.NewHub()
-	paperService, paperErr := papersruntime.API(ctx, db)
+	paperService, paperQueueDone, paperErr := papersruntime.APIWithWorker(ctx, db)
 	if paperErr != nil {
 		// Never print credential/configuration values or provider responses.
 		log.Println("WARN: Papers compilation remains disabled: production startup verification failed")
@@ -449,7 +449,7 @@ func main() {
 	if err := serveUntilShutdown(ctx, server, shutdownTimeout); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)
 	}
-	if err := waitForWorkers(shutdownTimeout, paperApprovalMailDone, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, reputationWorkerDone, indexNowWorkerDone, bookProcessingWorkerDone, musicCleanupWorkerDone); err != nil {
+	if err := waitForWorkers(shutdownTimeout, paperQueueDone, paperApprovalMailDone, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, reputationWorkerDone, indexNowWorkerDone, bookProcessingWorkerDone, musicCleanupWorkerDone); err != nil {
 		log.Printf("WARN: timed out waiting for background workers to stop: %v", err)
 	}
 	log.Println("Server stopped")

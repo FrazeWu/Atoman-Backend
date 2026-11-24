@@ -17,3 +17,10 @@ func API(_ context.Context, db *gorm.DB) (*papers.Service, error) {
 	}
 	return svc, nil
 }
+
+func APIWithWorker(ctx context.Context, db *gorm.DB) (*papers.Service, <-chan struct{}, error) {
+	svc, err := API(ctx, db)
+	done := make(chan struct{})
+	close(done)
+	return svc, done, err
+}
