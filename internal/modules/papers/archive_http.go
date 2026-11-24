@@ -28,6 +28,8 @@ func archiveBusy(c *gin.Context) bool {
 // @Accept application/zip
 // @Param name query string true "Project name"
 // @Param main_file query string false "Root main TeX filename"
+// @Param exclude_confirmation query string false "Exact archive digest returned by exclusion confirmation response"
+// @Failure 409 {object} map[string]interface{}
 // @Success 201 {object} map[string]interface{}
 // @Router /api/v1/papers/projects/import [post]
 func (h *handler) importProject(c *gin.Context) {
@@ -45,7 +47,7 @@ func (h *handler) importProject(c *gin.Context) {
 		httpx.Error(c, importError("ZIP upload exceeds 5 MiB or could not be read"))
 		return
 	}
-	p, err := h.service.ImportProject(c.Request.Context(), u, c.Query("name"), c.Query("main_file"), raw)
+	p, err := h.service.ImportProject(c.Request.Context(), u, c.Query("name"), c.Query("main_file"), raw, c.Query("exclude_confirmation"))
 	if err != nil {
 		httpx.Error(c, err)
 		return

@@ -9,12 +9,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -69,7 +72,7 @@ func archiveMetadata(name string) bool {
 // Reject symlinks, encrypted or invalid streams, duplicate/case-colliding
 // names and file-directory conflicts; bound actual decompressed bytes,
 // not only ZIP central-directory declarations.
-func readImportArchive(raw []byte, requestedMain string) ([]importFile, string, error) {
+func readImportArchive(raw []byte, requestedMain string, confirmation ...string) ([]importFile, string, error) {
 	if len(raw) == 0 || len(raw) > MaxImportZIPBytes {
 		return nil, "", importError("ZIP must be no larger than 5 MiB")
 	}
@@ -77,14 +80,15 @@ func readImportArchive(raw []byte, requestedMain string) ([]importFile, string, 
 	if err != nil || len(r.File) == 0 || len(r.File) > MaxImportEntries {
 		return nil, "", importError("Invalid or oversized ZIP archive")
 	}
-	var files []importFile
+	// First validate the entire entry table, including excluded entries.
+	// An exclusion acknowledgement is not a waiver of archive safety checks.
+	var supported []*zip.File
+	var excluded []string
 	seen := map[string]bool{}
 	dirs := map[string]bool{}
-	total := 0
 	for _, entry := range r.File {
 		name := strings.TrimSuffix(entry.Name, "/")
-		// Metadata may be skipped only after basic traversal/absolute checks.
-		if name == "" || strings.ContainsAny(name, "\\\x00:") || strings.HasPrefix(name, "/") || path.Clean(name) != name || name == "." || name == ".." || strings.HasPrefix(name, "../") {
+		if name == "" || len(name) > 512 || !utf8.ValidString(name) || strings.ContainsAny(name, "\\\x00:") || strings.HasPrefix(name, "/") || path.Clean(name) != name || name == "." || name == ".." || strings.HasPrefix(name, "../") || strings.IndexFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) >= 0 {
 			return nil, "", importError("ZIP contains an unsafe path")
 		}
 		if entry.Mode()&os.ModeSymlink != 0 {
@@ -92,9 +96,6 @@ func readImportArchive(raw []byte, requestedMain string) ([]importFile, string, 
 		}
 		if archiveMetadata(name) {
 			continue
-		}
-		if !papersassets.ValidSourcePath(name) {
-			return nil, "", importError("ZIP contains an unsupported file or directory name: " + name)
 		}
 		key := strings.ToLower(name)
 		for parent := path.Dir(key); parent != "."; parent = path.Dir(parent) {
@@ -110,14 +111,35 @@ func readImportArchive(raw []byte, requestedMain string) ([]importFile, string, 
 			dirs[key] = true
 			continue
 		}
-		if !entry.Mode().IsRegular() || seen[key] || dirs[key] {
-			return nil, "", importError("ZIP contains duplicate files or non-regular entries")
+		if !entry.Mode().IsRegular() || seen[key] || dirs[key] || entry.Flags&1 != 0 {
+			return nil, "", importError("ZIP contains duplicate, encrypted or non-regular entries")
 		}
 		seen[key] = true
-		kind := papersassets.SourceKind(name)
-		if kind == "" {
-			return nil, "", importError("Unsupported source file: " + name)
+		if papersassets.SourceKind(name) == "" || !papersassets.ValidSourcePath(name) {
+			excluded = append(excluded, name)
+			continue
 		}
+		supported = append(supported, entry)
+	}
+	// A user can approve the complete list of unsupported regular files for
+	// this exact archive. Never silently drop a changed archive's entries.
+	if len(excluded) > 0 {
+		sort.Strings(excluded)
+		digest := papersassets.HashBytes(raw)
+		if len(confirmation) != 1 || confirmation[0] != digest {
+			return nil, "", apperr.New(http.StatusConflict, "papers.archive_exclusion_required",
+				"Unsupported project files require confirmation before import",
+				map[string]any{"files": excluded, "confirmation": digest})
+		}
+	}
+	if len(supported) == 0 {
+		return nil, "", importError("ZIP contains no supported source files")
+	}
+	var files []importFile
+	total := 0
+	for _, entry := range supported {
+		name := entry.Name
+		kind := papersassets.SourceKind(name)
 		if len(files) >= 64 || entry.UncompressedSize64 > uint64(papersassets.MaxSnapshotBytes-total) {
 			return nil, "", importError("Project exceeds the 64-file / 4 MiB source limit")
 		}
@@ -240,7 +262,7 @@ func readImportArchive(raw []byte, requestedMain string) ([]importFile, string, 
 	return files, main, nil
 }
 
-func (s *Service) ImportProject(ctx context.Context, user authctx.CurrentUser, name, main string, raw []byte) (model.PaperProject, error) {
+func (s *Service) ImportProject(ctx context.Context, user authctx.CurrentUser, name, main string, raw []byte, confirmation ...string) (model.PaperProject, error) {
 	var p model.PaperProject
 	if err := s.RequireAccess(user); err != nil {
 		return p, err
@@ -249,7 +271,7 @@ func (s *Service) ImportProject(ctx context.Context, user authctx.CurrentUser, n
 	if err != nil {
 		return p, err
 	}
-	files, entry, err := readImportArchive(raw, main)
+	files, entry, err := readImportArchive(raw, main, confirmation...)
 	if err != nil {
 		return p, err
 	}

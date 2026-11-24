@@ -167,3 +167,55 @@ func TestProjectArchiveHTTPRoundTripAndPermissions(t *testing.T) {
 	require.NoError(t, f.db.Model(&model.PaperAccessGrant{}).Where("user_id=?", f.owner.UUID).Update("status", "revoked").Error)
 	require.Equal(t, http.StatusForbidden, f.request("GET", exportPath, "", f.ownerToken).Code)
 }
+
+func TestArchiveExclusionRequiresExactConfirmationAndPreservesSafety(t *testing.T) {
+	main := zipFixtureEntry{"JailBound_preprintv2/main.tex", []byte("\\documentclass{article}\\begin{document}Paper\\end{document}"), 0}
+	script := zipFixtureEntry{"JailBound_preprintv2/pic/plot_asr_scaling_v2.py", []byte("print('plot')"), 0}
+	log := zipFixtureEntry{"JailBound_preprintv2/main.log", []byte("generated"), 0}
+	bib := zipFixtureEntry{"JailBound_preprintv2/refs.bib", []byte("@article{key,title={Paper}}"), 0}
+	raw := archiveFixture(t, main, script, log, bib)
+	files, _, err := readImportArchive(raw, "")
+	require.Empty(t, files)
+	e := apperr.FromError(err)
+	require.Equal(t, "papers.archive_exclusion_required", e.Code)
+	require.Equal(t, http.StatusConflict, e.HTTPStatus)
+	require.Equal(t, []string{log.path, script.path}, e.Details["files"])
+	confirmation := e.Details["confirmation"].(string)
+	require.Equal(t, papersassets.HashBytes(raw), confirmation)
+	changed := archiveFixture(t, main, script, log, bib, zipFixtureEntry{"extra.csv", []byte("extra"), 0})
+	_, _, err = readImportArchive(changed, "", confirmation)
+	require.Equal(t, "papers.archive_exclusion_required", apperr.FromError(err).Code)
+	files, entry, err := readImportArchive(raw, "", confirmation)
+	require.NoError(t, err)
+	require.Equal(t, "main.tex", entry)
+	require.Len(t, files, 2)
+	require.Equal(t, "refs.bib", files[1].Path)
+	for _, bad := range []zipFixtureEntry{
+		{"../bad.py", []byte("unsafe"), 0},
+		{"link.py", []byte("/etc/passwd"), os.ModeSymlink | 0777},
+		{script.path, []byte("duplicate"), 0},
+	} {
+		b := archiveFixture(t, main, script, bad)
+		_, _, err = readImportArchive(b, "", papersassets.HashBytes(b))
+		require.Equal(t, "papers.invalid_archive", apperr.FromError(err).Code)
+	}
+}
+func TestArchiveHTTPExclusionDoesNotCreatePartialProject(t *testing.T) {
+	f := newCompileHTTPFixture(t, true)
+	raw := archiveFixture(t, zipFixtureEntry{"main.tex", []byte("\\documentclass{article}"), 0}, zipFixtureEntry{"pic/plot.py", []byte("plot"), 0})
+	endpoint := "/api/v1/papers/projects/import?name=Confirmed"
+	first := f.request("POST", endpoint, string(raw), f.ownerToken)
+	require.Equal(t, http.StatusConflict, first.Code, first.Body.String())
+	require.Contains(t, first.Body.String(), "pic/plot.py")
+	var count int64
+	require.NoError(t, f.db.Model(&model.PaperProject{}).Where("name=? AND owner_id=?", "Confirmed", f.owner.UUID).Count(&count).Error)
+	require.Zero(t, count)
+	approved := f.request("POST", endpoint+"&exclude_confirmation="+papersassets.HashBytes(raw), string(raw), f.ownerToken)
+	require.Equal(t, http.StatusCreated, approved.Code, approved.Body.String())
+	var p model.PaperProject
+	require.NoError(t, f.db.Where("name=? AND owner_id=?", "Confirmed", f.owner.UUID).First(&p).Error)
+	files, err := f.svc.ListFiles(authctx.CurrentUser{ID: f.owner.UUID, Role: authctx.RoleUser}, p.ID)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.Equal(t, "main.tex", files[0].Path)
+}

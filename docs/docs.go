@@ -27938,11 +27938,24 @@ const docTemplate = `{
                         "description": "Root main TeX filename",
                         "name": "main_file",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact archive digest returned by exclusion confirmation response",
+                        "name": "exclude_confirmation",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "201": {
                         "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

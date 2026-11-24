@@ -29536,9 +29536,18 @@ paths:
         in: query
         name: main_file
         type: string
+      - description: Exact archive digest returned by exclusion confirmation response
+        in: query
+        name: exclude_confirmation
+        type: string
       responses:
         "201":
           description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
           schema:
             additionalProperties: true
             type: object
