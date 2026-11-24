@@ -177,3 +177,19 @@ func TestP0ExecutorRejectsUnsafeTraversalPermissions(t *testing.T) {
 	_, err = New(config)
 	require.NoError(t, err)
 }
+
+func TestImportedBinaryIsStagedByteForByte(t *testing.T) {
+	f := newFixture(t)
+	snap, err := f.store.LoadSnapshot(f.claim.Job.SnapshotDigest)
+	require.NoError(t, err)
+	snap.Files = append(snap.Files, papersassets.SourceFile{Path: "figures/plot 1.png", Kind: "binary", Content: "iVBORw0KGgoA/4A="})
+	digest, err := f.store.PublishSnapshot(snap)
+	require.NoError(t, err)
+	f.claim.Job.SnapshotDigest = digest
+	result, err := f.exec.Run(context.Background(), f.claim)
+	require.NoError(t, err)
+	require.Equal(t, paperssandbox.Completed, result.Status)
+	data, err := os.ReadFile(filepath.Join(f.root, "runs", f.claim.SandboxID, "bundle", "rootfs", "inputs", "figures", "plot 1.png"))
+	require.NoError(t, err)
+	require.Equal(t, []byte{137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 128}, data)
+}

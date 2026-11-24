@@ -11,12 +11,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -25,7 +23,6 @@ var (
 	ErrInvalid   = errors.New("papers assets: invalid manifest")
 	ErrIntegrity = errors.New("papers assets: content digest does not match")
 	digestRE     = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-	filenameRE   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./-]{0,255}$`)
 )
 
 const MaxSnapshotBytes = 4 << 20
@@ -33,6 +30,7 @@ const MaxSnapshotBytes = 4 << 20
 type SourceFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	Kind    string `json:"kind,omitempty"`
 }
 type Snapshot struct {
 	Version   int          `json:"version"`
@@ -46,30 +44,35 @@ func (s *Snapshot) Validate() error {
 		return ErrInvalid
 	}
 	seen := make(map[string]bool)
+	dirs := make(map[string]bool)
 	total := 0
 	main := false
 	for _, f := range s.Files {
-		if f.Path == "" || !filenameRE.MatchString(f.Path) || path.Clean(f.Path) != f.Path ||
-			strings.HasPrefix(f.Path, "/") || strings.HasPrefix(f.Path, ".") ||
-			strings.Contains(f.Path, "/..") || strings.Contains(f.Path, "//") ||
-			seen[f.Path] {
+		key := strings.ToLower(f.Path)
+		if !ValidSourcePath(f.Path) || seen[key] || dirs[key] {
 			return fmt.Errorf("%w: unsafe or duplicate file", ErrInvalid)
 		}
-		ext := path.Ext(f.Path)
-		switch ext {
-		case ".tex", ".bib", ".sty", ".cls", ".txt":
-		default:
-			return ErrInvalid
+		seen[key] = true
+		parts := strings.Split(key, "/")
+		for i := 1; i < len(parts); i++ {
+			dir := strings.Join(parts[:i], "/")
+			if seen[dir] {
+				return ErrInvalid
+			}
+			dirs[dir] = true
 		}
-		seen[f.Path] = true
 		if f.Path == "main.tex" {
 			main = true
 		}
 		total += len(f.Content)
-		if total > MaxSnapshotBytes || !utf8.ValidString(f.Content) || strings.ContainsRune(f.Content, 0) {
+		if total > MaxSnapshotBytes {
 			return ErrInvalid
 		}
+		if _, err := f.Bytes(); err != nil {
+			return err
+		}
 	}
+
 	if !main {
 		return fmt.Errorf("%w: main.tex is required", ErrInvalid)
 	}

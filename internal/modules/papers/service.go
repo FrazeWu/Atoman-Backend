@@ -14,6 +14,7 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/papersassets"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -127,13 +128,10 @@ func validatedPath(filename string) (string, error) {
 		path.Clean(filename) != filename || strings.HasPrefix(filename, "../") {
 		return "", apperr.BadRequest("papers.invalid_path", "Invalid project-relative path")
 	}
-	switch strings.ToLower(path.Ext(filename)) {
-	case ".tex", ".bib", ".sty", ".cls", ".md", ".txt":
-	default:
-		if path.Base(filename) != ".latexmkrc" {
-			return "", apperr.BadRequest("papers.invalid_file_type", "Unsupported text file type")
-		}
+	if papersassets.SourceKind(filename) != "text" && path.Base(filename) != ".latexmkrc" {
+		return "", apperr.BadRequest("papers.invalid_file_type", "Unsupported text file type")
 	}
+
 	return filename, nil
 }
 
@@ -354,6 +352,9 @@ func (s *Service) SaveFile(user authctx.CurrentUser, projectID, fileID uuid.UUID
 		}
 		if err != nil {
 			return err
+		}
+		if file.Kind != "text" {
+			return apperr.BadRequest("papers.binary_read_only", "Imported binary resources cannot be edited as text")
 		}
 		if file.Revision != base {
 			return apperr.Conflict("papers.revision_conflict", "File has changed")

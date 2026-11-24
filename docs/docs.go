@@ -27911,6 +27911,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/projects/import": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "从 ZIP 导入论文项目",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Root main TeX filename",
+                        "name": "main_file",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}": {
             "get": {
                 "security": [
@@ -28143,6 +28183,39 @@ const docTemplate = `{
                 ],
                 "summary": "Download a previously verified, durable, owner-scoped compile PDF",
                 "responses": {}
+            }
+        },
+        "/api/v1/papers/projects/{id}/export": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "下载当前论文项目的 ZIP 源码",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/papers/projects/{id}/files": {

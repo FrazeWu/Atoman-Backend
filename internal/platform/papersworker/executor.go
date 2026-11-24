@@ -252,7 +252,12 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 		if err != nil {
 			return err
 		}
-		if _, err = f.WriteString(file.Content); err != nil {
+		raw, decodeErr := file.Bytes()
+		if decodeErr != nil {
+			f.Close()
+			return decodeErr
+		}
+		if _, err = f.Write(raw); err != nil {
 			f.Close()
 			return err
 		}
