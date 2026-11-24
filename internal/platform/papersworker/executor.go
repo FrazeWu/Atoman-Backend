@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -161,9 +162,35 @@ func mkdirGuestPath(path string) error {
 }
 
 func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr error) {
+	phase := "validate_claim"
+	began := time.Now()
+	defer func() {
+		if stageErr != nil {
+			// Only allowlisted phase and category are logged. No user source,
+			// archive content, storage credentials or untrusted filenames.
+			category := "operation_failed"
+			switch {
+			case errors.Is(ctx.Err(), context.Canceled):
+				category = "context_canceled"
+			case errors.Is(ctx.Err(), context.DeadlineExceeded):
+				category = "deadline"
+			case errors.Is(stageErr, os.ErrPermission):
+				category = "permission"
+			case errors.Is(stageErr, unix.ENOSPC):
+				category = "disk_full"
+			case errors.Is(stageErr, papersassets.ErrIntegrity):
+				category = "integrity"
+			case errors.Is(stageErr, os.ErrExist):
+				category = "already_exists"
+			}
+			log.Printf("papers staging failed job=%s phase=%s category=%s duration_ms=%d", c.Job.ID, phase, category, time.Since(began).Milliseconds())
+		}
+	}()
+
 	if c.Kind != papersqueue.ClaimRun || !c.Valid() || !validSandboxID(c.SandboxID) {
 		return ErrInvalid
 	}
+	phase = "snapshot"
 	snapshot, err := e.cfg.Store.LoadCompileSnapshot(ctx, c.Job.SnapshotDigest)
 	if err != nil {
 		return fmt.Errorf("snapshot rejected: %w", err)
@@ -176,6 +203,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 	// through privileged Launcher configuration. Never fall back to the
 	// operator-pinned local archive if download or signature verification
 	// failed, or the job's environment identity could silently change.
+	phase = "archive_fetch"
 	archivePath := e.cfg.ArchivePath
 	if e.cfg.ArchiveFetcher != nil {
 		archivePath, err = e.cfg.ArchiveFetcher.FetchArchive(ctx, c.Job.EnvironmentDigest)
@@ -186,9 +214,11 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 			return ErrInvalid
 		}
 	}
+	phase = "archive_verify"
 	if _, err := e.cfg.Store.VerifyCompileArchive(ctx, c.Job.EnvironmentDigest, archivePath); err != nil {
 		return fmt.Errorf("environment rejected: %w", err)
 	}
+	phase = "workspace"
 	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)
 	if err := mkdirGuestPath(root); err != nil {
 		return err
@@ -217,6 +247,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 	// The tar is sourced ONLY from a pre-approved pinned image; the archive was
 	// verified byte-for-byte immediately above. Do not generalize this P0
 	// extraction path to uploads or arbitrary project ZIP files.
+	phase = "archive_extract"
 	cmd := exec.CommandContext(ctx, e.cfg.TarBinary, "--no-same-owner", "-xf", archivePath, "-C", rootfs)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -225,6 +256,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 		}
 		return fmt.Errorf("trusted offline rootfs extraction failed: %w: %s", err, string(output))
 	}
+	phase = "source_stage"
 	inputDir := filepath.Join(rootfs, "inputs")
 	if err := mkdirReal(inputDir, 0755); err != nil {
 		return err
@@ -268,6 +300,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 			return err
 		}
 	}
+	phase = "output_quota"
 	if err := os.Chown(filepath.Join(root, "output"), 65534, 65534); err != nil {
 		return err
 	}
@@ -276,6 +309,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 			return err
 		}
 	}
+	phase = "oci_config"
 	return paperssandbox.WriteP0BundleConfig(bundle, filepath.Join(root, "output"), c.SandboxID, e.cfg.Limits, paperssandbox.P0Latex)
 }
 

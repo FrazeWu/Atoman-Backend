@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -263,6 +264,16 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 				_, err := s.cfg.Verify(checkCtx, claim)
 				stop()
 				if err != nil {
+					// Do not log lease tokens, request bodies or provider error strings.
+					category := "rejected"
+					if errors.Is(err, context.DeadlineExceeded) {
+						category = "deadline"
+					}
+					var timeout net.Error
+					if errors.As(err, &timeout) && timeout.Timeout() {
+						category = "timeout"
+					}
+					log.Printf("papers lease check failed job=%s category=%s", claim.Job.ID, category)
 					cancel()
 					return
 				}
@@ -280,6 +291,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		err = s.cfg.Executor.Reap(cleanCtx, claim)
 		stop()
 		reply.Verified = err == nil
+	}
+	if req.Operation == "run" {
+		log.Printf("papers compile finished job=%s status=%s cleanup=%t sentry=%t limits=%t exit_known=%t exit=%d", claim.Job.ID, reply.Result.Status, reply.Result.CleanupVerified, reply.Result.SentryObserved, reply.Result.LimitsVerified, reply.Result.ExitKnown, reply.Result.ExitCode)
 	}
 	if err != nil {
 		reply.Error = "sandbox_operation_failed"
