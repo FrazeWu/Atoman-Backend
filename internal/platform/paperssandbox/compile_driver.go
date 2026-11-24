@@ -27,7 +27,7 @@ export openout_any=p
 latex_pass() {
     printf 'AT0MAN_LATEX_PASS=%s\n' "$1"
     cd /inputs
-    /usr/bin/pdflatex -synctex=1 -no-shell-escape -interaction=nonstopmode -halt-on-error -output-directory=/output main.tex
+    /usr/bin/pdflatex -synctex=1 -file-line-error -no-shell-escape -interaction=nonstopmode -halt-on-error -output-directory=/output main.tex
 }
 
 latex_pass 1

@@ -74,10 +74,14 @@ func (q *Queue) Complete(ctx context.Context, c Claim, result paperssandbox.Resu
 				reason = "verified_pdf_not_persisted"
 			}
 		}
+		diagnosticJSON := ""
+		if status == StatusFailed && reason == string(paperssandbox.CompileFailed) && result.ExitKnown && result.ExitCode == 1 && result.LimitsVerified && result.SentryObserved {
+			diagnosticJSON = papersassets.EncodeCompileDiagnostics(result.Diagnostics)
+		}
 		update := tx.Model(&model.PaperCompileJob{}).
 			Where("id = ? AND lease_token = ? AND lease_epoch = ? AND status = ?", job.ID, c.Token, c.Epoch, StatusRunning).
 			Updates(map[string]any{
-				"status": status, "failure_code": boundedFailureCode(reason), "pdf_digest": digest, "pdf_size": size,
+				"status": status, "failure_code": boundedFailureCode(reason), "pdf_digest": digest, "pdf_size": size, "diagnostics_json": diagnosticJSON,
 				"finished_at": now, "worker_id": "", "lease_token": nil, "updated_at": now,
 			})
 		if update.Error != nil {

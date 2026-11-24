@@ -73,18 +73,19 @@ func NewServiceWithCompile(db *gorm.DB, runtime CompileRuntime) (*Service, error
 }
 
 type CompileJobView struct {
-	ID              uuid.UUID  `json:"id"`
-	ProjectID       uuid.UUID  `json:"project_id"`
-	SourceRevision  int64      `json:"source_revision"`
-	Status          string     `json:"status"`
-	Attempts        int        `json:"attempts"`
-	MaxAttempts     int        `json:"max_attempts"`
-	CancelRequested bool       `json:"cancel_requested"`
-	PDFAvailable    bool       `json:"pdf_available"`
-	FailureCode     string     `json:"failure_code,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	ID              uuid.UUID                        `json:"id"`
+	ProjectID       uuid.UUID                        `json:"project_id"`
+	SourceRevision  int64                            `json:"source_revision"`
+	Status          string                           `json:"status"`
+	Attempts        int                              `json:"attempts"`
+	MaxAttempts     int                              `json:"max_attempts"`
+	CancelRequested bool                             `json:"cancel_requested"`
+	PDFAvailable    bool                             `json:"pdf_available"`
+	FailureCode     string                           `json:"failure_code,omitempty"`
+	Diagnostics     []papersassets.CompileDiagnostic `json:"diagnostics,omitempty"`
+	CreatedAt       time.Time                        `json:"created_at"`
+	StartedAt       *time.Time                       `json:"started_at,omitempty"`
+	FinishedAt      *time.Time                       `json:"finished_at,omitempty"`
 }
 
 func viewCompile(job model.PaperCompileJob) CompileJobView {
@@ -92,6 +93,7 @@ func viewCompile(job model.PaperCompileJob) CompileJobView {
 		ID: job.ID, ProjectID: job.ProjectID, SourceRevision: job.SourceRevision,
 		Status: job.Status, Attempts: job.Attempts, MaxAttempts: job.MaxAttempts,
 		CancelRequested: job.CancelRequested, FailureCode: job.FailureCode,
+		Diagnostics:  papersassets.DecodeCompileDiagnostics(job.DiagnosticsJSON),
 		PDFAvailable: job.Status == papersqueue.StatusSucceeded && (papersassets.PDFRef{JobID: job.ID, Epoch: job.LeaseEpoch, Digest: job.PDFDigest, Size: job.PDFSize}).Validate() == nil,
 		CreatedAt:    job.CreatedAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt,
 	}

@@ -2,6 +2,8 @@ package papersqueue
 
 import (
 	"atoman/internal/model"
+	"atoman/internal/platform/papersassets"
+	"atoman/internal/platform/paperssandbox"
 	"context"
 	"fmt"
 	"github.com/stretchr/testify/require"
@@ -71,4 +73,30 @@ func TestCompileHistoryRetainsLastVerifiedPDF(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, jobs, 11)
 	require.Equal(t, old.ID, jobs[10].ID)
+}
+
+func TestCompileDiagnosticsCommittedOnlyWithVerifiedCleanup(t *testing.T) {
+	q, db, owner, project := setupQueue(t)
+	j := submit(t, q, input(owner, project, "diagnostic-verified", PriorityManual, 2))
+	c := claim(t, q, "diagnostics-worker", ClaimRun)
+	r := success(c)
+	r.Status = paperssandbox.CompileFailed
+	r.UnderlyingStatus = paperssandbox.CompileFailed
+	r.ExitCode = 1
+	r.ArtifactVerified = false
+	r.Diagnostics = []papersassets.CompileDiagnostic{{Tool: "latex", File: "main.tex", Line: 2, Message: "Undefined control sequence."}}
+	require.NoError(t, q.Complete(context.Background(), c, r))
+	var stored model.PaperCompileJob
+	require.NoError(t, db.Where("id=?", j.ID).Take(&stored).Error)
+	require.Equal(t, StatusFailed, stored.Status)
+	require.Equal(t, r.Diagnostics, papersassets.DecodeCompileDiagnostics(stored.DiagnosticsJSON))
+	require.ErrorIs(t, q.Complete(context.Background(), c, r), ErrLeaseLost)
+	j = submit(t, q, input(owner, project, "diagnostic-unverified", PriorityManual, 2))
+	c = claim(t, q, "diagnostics-worker", ClaimRun)
+	r.JobID = c.SandboxID
+	r.CleanupVerified = false
+	require.NoError(t, q.Complete(context.Background(), c, r))
+	stored = model.PaperCompileJob{}
+	require.NoError(t, db.Where("id=?", j.ID).Take(&stored).Error)
+	require.Empty(t, stored.DiagnosticsJSON)
 }

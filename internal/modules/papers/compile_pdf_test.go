@@ -75,3 +75,25 @@ func TestCompileSourceMapOwnedExactVerifiedPDF(t *testing.T) {
 	require.NoError(t, f.db.Model(&model.PaperCompileSourceMap{}).Where("job_id=?", j.ID).Update("epoch", 2).Error)
 	require.Equal(t, http.StatusNotFound, f.request("GET", path, "", f.ownerToken).Code)
 }
+
+func TestCompileDiagnosticsArePrivateAndRevisionBound(t *testing.T) {
+	f := newCompileHTTPFixture(t, true)
+	req := f.request("POST", f.base()+"/compiles", `{"base_revision":1,"idempotency_key":"diagnostic-test"}`, f.ownerToken)
+	require.Equal(t, http.StatusAccepted, req.Code, req.Body.String())
+	j := parseJob(t, req)
+	raw := papersassets.EncodeCompileDiagnostics([]papersassets.CompileDiagnostic{{Tool: "latex", File: "main.tex", Line: 2, Message: "Undefined control sequence."}})
+	require.NotEmpty(t, raw)
+	require.NoError(t, f.db.Model(&model.PaperCompileJob{}).Where("id=?", j.ID).Updates(map[string]any{"status": "failed", "failure_code": "compile_failed", "diagnostics_json": raw}).Error)
+	path := f.base() + "/compiles/" + j.ID.String()
+	got := f.request("GET", path, "", f.ownerToken)
+	require.Equal(t, http.StatusOK, got.Code)
+	view := parseJob(t, got)
+	require.Equal(t, int64(1), view.SourceRevision)
+	require.Len(t, view.Diagnostics, 1)
+	require.Equal(t, "main.tex", view.Diagnostics[0].File)
+	require.Equal(t, 2, view.Diagnostics[0].Line)
+	require.Equal(t, "private, no-store", got.Header().Get("Cache-Control"))
+	require.Equal(t, http.StatusNotFound, f.request("GET", path, "", f.otherToken).Code)
+	require.NoError(t, f.db.Model(&model.PaperAccessGrant{}).Where("user_id=?", f.owner.UUID).Update("status", "revoked").Error)
+	require.NotEqual(t, http.StatusOK, f.request("GET", path, "", f.ownerToken).Code)
+}

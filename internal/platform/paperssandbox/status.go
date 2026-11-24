@@ -1,6 +1,7 @@
 package paperssandbox
 
 import (
+	"atoman/internal/platform/papersassets"
 	"errors"
 	"fmt"
 	"regexp"
@@ -95,7 +96,8 @@ type Result struct {
 	CleanupVerified  bool
 	PDFDigest        string
 	PDFSize          int64
-	SourceMap        []byte `json:",omitempty"`
+	SourceMap        []byte                           `json:",omitempty"`
+	Diagnostics      []papersassets.CompileDiagnostic `json:",omitempty"`
 	Events           Events
 	StartedAt        time.Time
 	FinishedAt       time.Time

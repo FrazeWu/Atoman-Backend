@@ -29,6 +29,7 @@ type PaperCompileJob struct {
 	CancelRequested   bool       `gorm:"not null;default:false"`
 	PDFDigest         string     `gorm:"type:varchar(71);not null;default:''"`
 	PDFSize           int64      `gorm:"not null;default:0"`
+	DiagnosticsJSON   string     `json:"-" gorm:"type:text;not null;default:''"`
 	FailureCode       string     `gorm:"type:varchar(64);not null;default:''"`
 	StartedAt         *time.Time
 	FinishedAt        *time.Time

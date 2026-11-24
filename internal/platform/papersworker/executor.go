@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -374,6 +375,20 @@ func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.
 			runErr = err
 		}
 	}
+	// Compiler-owned output is inspected only after verified process
+	// teardown, using fixed names and bounded no-follow file descriptors.
+	// No wrapper/host log is ever sent to an ordinary user.
+	if result.CleanupVerified && result.LimitsVerified && result.SentryObserved &&
+		result.ExitKnown && result.ExitCode == 1 &&
+		(result.Status == paperssandbox.RuntimeFailed || result.Status == paperssandbox.CompileFailed) {
+		if snapshot, err := e.cfg.Store.LoadCompileSnapshot(ctx, c.Job.SnapshotDigest); err == nil {
+			result.Diagnostics = readCompileDiagnostics(filepath.Join(root, "output"), snapshot)
+			if len(result.Diagnostics) > 0 {
+				result.Status = paperssandbox.CompileFailed
+				result.FailureDetail = string(paperssandbox.CompileFailed)
+			}
+		}
+	}
 	if e.cfg.BoundedWorkspace && result.CleanupVerified {
 		if err := removeBoundedWorkspace(root); err != nil {
 			result.CleanupVerified = false
@@ -381,10 +396,43 @@ func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.
 			result.FailureDetail = "owned output/workspace cleanup not verified"
 			result.PDFDigest, result.PDFSize = "", 0
 			result.SourceMap = nil
+			result.Diagnostics = nil
 			runErr = errors.Join(runErr, err)
 		}
 	}
 	return result, runErr
+}
+
+func readCompileDiagnostics(dir string, snapshot papersassets.Snapshot) []papersassets.CompileDiagnostic {
+	d, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil
+	}
+	defer unix.Close(d)
+	read := func(name string) string {
+		fd, err := unix.Openat(d, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return ""
+		}
+		f := os.NewFile(uintptr(fd), name)
+		defer f.Close()
+		st, err := f.Stat()
+		if err != nil || !st.Mode().IsRegular() || st.Size() < 1 || st.Size() > 128<<20 {
+			return ""
+		}
+		const limit = int64(256 << 10)
+		if st.Size() > limit {
+			if _, err = f.Seek(st.Size()-limit, io.SeekStart); err != nil {
+				return ""
+			}
+		}
+		raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+		if err != nil || int64(len(raw)) > limit {
+			return ""
+		}
+		return string(raw)
+	}
+	return papersassets.ParseCompileDiagnostics(read("main.log"), read("main.blg"), snapshot)
 }
 
 func readSourceMap(dir string, snapshot papersassets.Snapshot) []byte {
