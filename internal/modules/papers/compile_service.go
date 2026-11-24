@@ -92,7 +92,7 @@ func viewCompile(job model.PaperCompileJob) CompileJobView {
 		ID: job.ID, ProjectID: job.ProjectID, SourceRevision: job.SourceRevision,
 		Status: job.Status, Attempts: job.Attempts, MaxAttempts: job.MaxAttempts,
 		CancelRequested: job.CancelRequested, FailureCode: job.FailureCode,
-		PDFAvailable: job.Status == papersqueue.StatusSucceeded && compileDigestRE.MatchString(job.PDFDigest) && job.PDFSize >= 8 && job.PDFSize <= papersassets.MaxPDFBytes,
+		PDFAvailable: job.Status == papersqueue.StatusSucceeded && (papersassets.PDFRef{JobID: job.ID, Epoch: job.LeaseEpoch, Digest: job.PDFDigest, Size: job.PDFSize}).Validate() == nil,
 		CreatedAt:    job.CreatedAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt,
 	}
 }

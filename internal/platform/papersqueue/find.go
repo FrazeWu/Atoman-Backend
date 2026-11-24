@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/papersassets"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -44,5 +45,22 @@ func (q *Queue) ListForProject(ctx context.Context, ownerID, projectID uuid.UUID
 	err := q.db.WithContext(ctx).
 		Where("owner_id = ? AND project_id = ?", ownerID, projectID).
 		Order("created_at DESC, id DESC").Limit(limit).Find(&jobs).Error
-	return jobs, err
+	if err != nil || len(jobs) < limit {
+		return jobs, err
+	}
+	// A long sequence of failures must not hide the last usable PDF.
+	for _, j := range jobs {
+		if j.Status == StatusSucceeded && (papersassets.PDFRef{JobID: j.ID, Epoch: j.LeaseEpoch, Digest: j.PDFDigest, Size: j.PDFSize}).Validate() == nil {
+			return jobs, nil
+		}
+	}
+	var last model.PaperCompileJob
+	err = q.db.WithContext(ctx).Where("owner_id=? AND project_id=? AND status=? AND lease_epoch>0 AND pdf_size>=8 AND pdf_size<=? AND pdf_digest ~ ?", ownerID, projectID, StatusSucceeded, papersassets.MaxPDFBytes, "^sha256:[a-f0-9]{64}$").Order("created_at DESC, id DESC").Take(&last).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return jobs, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return append(jobs, last), nil
 }

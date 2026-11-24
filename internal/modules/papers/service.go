@@ -296,6 +296,9 @@ func (s *Service) CreateFile(user authctx.CurrentUser, projectID uuid.UUID, file
 	if err != nil {
 		return model.PaperFile{}, err
 	}
+	if !papersassets.ValidSourcePath(filename) || papersassets.SourceKind(filename) != "text" {
+		return model.PaperFile{}, apperr.BadRequest("papers.invalid_file_type", "Use a portable, supported LaTeX source filename")
+	}
 	if err := validateText(content); err != nil {
 		return model.PaperFile{}, err
 	}
@@ -305,18 +308,36 @@ func (s *Service) CreateFile(user authctx.CurrentUser, projectID uuid.UUID, file
 		if err != nil {
 			return err
 		}
-		var count int64
-		if err := tx.Model(&model.PaperFile{}).Where("project_id = ?", projectID).Count(&count).Error; err != nil {
+		// The same namespace and count constraints as the immutable compile
+		// snapshot: case-colliding paths and files masquerading as directories
+		// must not turn an otherwise valid project into an unbuildable one.
+		var existing []model.PaperFile
+		if err := tx.Select("id", "path").Where("project_id = ?", projectID).Find(&existing).Error; err != nil {
 			return err
 		}
-		if count >= maxFiles {
-			return apperr.Conflict("papers.file_limit", "File limit reached")
+		extra := 0
+		key := strings.ToLower(filename)
+		for _, prior := range existing {
+			if prior.ID == p.MainFileID && prior.Path != "main.tex" {
+				extra = 1
+			}
+			old := strings.ToLower(prior.Path)
+			if key == old || strings.HasPrefix(key, old+"/") || strings.HasPrefix(old, key+"/") {
+				return apperr.Conflict("papers.file_exists", "File or directory path conflicts with an existing file")
+			}
 		}
-		if err := tx.Model(&model.PaperFile{}).Where("project_id = ? AND path = ?", projectID, filename).Count(&count).Error; err != nil {
+		if extra > 0 && (key == "main.tex" || strings.HasPrefix(key, "main.tex/")) {
+			return apperr.Conflict("papers.file_exists", "main.tex is reserved for the generated compile entrypoint")
+		}
+		if len(existing)+extra >= 64 {
+			return apperr.Conflict("papers.file_limit", "Compile-compatible project limit is 64 source files, including the entrypoint")
+		}
+		var used int64
+		if err := tx.Model(&model.PaperFile{}).Where("project_id = ?", projectID).Select("COALESCE(SUM(octet_length(content)),0)").Scan(&used).Error; err != nil {
 			return err
 		}
-		if count > 0 {
-			return apperr.Conflict("papers.file_exists", "File exists")
+		if used+int64(len(content)) > papersassets.MaxSnapshotBytes {
+			return apperr.Conflict("papers.compile_source_limit", "Project exceeds the 4 MiB encoded compile-source limit")
 		}
 		file = model.PaperFile{ProjectID: projectID, Path: filename, Kind: "text", Content: content, SHA256: hashText(content), Revision: 1}
 		if err := tx.Create(&file).Error; err != nil {
@@ -325,6 +346,7 @@ func (s *Service) CreateFile(user authctx.CurrentUser, projectID uuid.UUID, file
 		if err := tx.Create(&[]model.PaperFileVersion{fileVersion(file, user.ID)}).Error; err != nil {
 			return err
 		}
+		file.ProjectHeadRevision = p.HeadRevision + 1
 		return tx.Model(&p).Updates(map[string]any{"head_revision": p.HeadRevision + 1, "updated_at": time.Now().UTC()}).Error
 	})
 	return file, err
@@ -356,11 +378,23 @@ func (s *Service) SaveFile(user authctx.CurrentUser, projectID, fileID uuid.UUID
 		if file.Kind != "text" {
 			return apperr.BadRequest("papers.binary_read_only", "Imported binary resources cannot be edited as text")
 		}
+		// Retrying an accepted save after a lost HTTP response is safe when
+		// the desired content is already stored; never overwrite other edits.
+		file.ProjectHeadRevision = p.HeadRevision
+		if file.Content == content && base <= file.Revision {
+			return nil
+		}
 		if file.Revision != base {
 			return apperr.Conflict("papers.revision_conflict", "File has changed")
 		}
-		if file.Content == content {
-			return nil
+		if len(content) > len(file.Content) {
+			var used int64
+			if err := tx.Model(&model.PaperFile{}).Where("project_id = ?", projectID).Select("COALESCE(SUM(octet_length(content)),0)").Scan(&used).Error; err != nil {
+				return err
+			}
+			if used-int64(len(file.Content))+int64(len(content)) > papersassets.MaxSnapshotBytes {
+				return apperr.Conflict("papers.compile_source_limit", "Project exceeds the 4 MiB encoded compile-source limit")
+			}
 		}
 		file.Content = content
 		file.SHA256 = hashText(content)
@@ -376,6 +410,7 @@ func (s *Service) SaveFile(user authctx.CurrentUser, projectID, fileID uuid.UUID
 		if err := tx.Create(&[]model.PaperFileVersion{fileVersion(file, user.ID)}).Error; err != nil {
 			return err
 		}
+		file.ProjectHeadRevision = p.HeadRevision + 1
 		return tx.Model(&p).Updates(map[string]any{"head_revision": p.HeadRevision + 1, "updated_at": time.Now().UTC()}).Error
 	})
 	return file, err

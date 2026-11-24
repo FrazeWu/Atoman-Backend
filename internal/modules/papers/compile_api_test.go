@@ -242,8 +242,12 @@ func TestCompileAPIRejectsUnsupportedSourceAndRevisionRace(t *testing.T) {
 	f := newCompileHTTPFixture(t, true)
 	base := f.base()
 	ownerCtx := authctx.CurrentUser{ID: f.owner.UUID, Role: authctx.RoleUser}
-	_, err := f.svc.CreateFile(ownerCtx, f.project.ID, ".latexmkrc", "# editor-only configuration")
-	require.NoError(t, err)
+	_, err := f.svc.CreateFile(ownerCtx, f.project.ID, ".latexmkrc", "# unsupported configuration")
+	require.Error(t, err)
+	// A legacy editor-only file from a prior release must still fail closed.
+	legacy := model.PaperFile{ProjectID: f.project.ID, Path: ".latexmkrc", Kind: "text", Content: "# legacy configuration", SHA256: hashText("# legacy configuration"), Revision: 1}
+	require.NoError(t, f.db.Create(&legacy).Error)
+	require.NoError(t, f.db.Model(&model.PaperProject{}).Where("id=?", f.project.ID).Update("head_revision", 2).Error)
 	reject := f.request("POST", base+"/compiles", `{"base_revision":2,"idempotency_key":"config-rejected"}`, f.ownerToken)
 	require.Equal(t, http.StatusUnprocessableEntity, reject.Code, reject.Body.String())
 	require.Equal(t, 0, f.publisher.calls)

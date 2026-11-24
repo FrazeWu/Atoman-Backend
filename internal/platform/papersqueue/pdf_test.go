@@ -3,6 +3,7 @@ package papersqueue
 import (
 	"atoman/internal/model"
 	"context"
+	"fmt"
 	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
@@ -56,4 +57,18 @@ func TestSyncMapCommitIsFencedWithSuccessfulPDF(t *testing.T) {
 	require.Equal(t, c.Epoch, m.Epoch)
 	require.Equal(t, r.SourceMap, m.Data)
 	require.ErrorIs(t, q.Complete(context.Background(), c, r), ErrLeaseLost)
+}
+
+func TestCompileHistoryRetainsLastVerifiedPDF(t *testing.T) {
+	q, db, owner, project := setupQueue(t)
+	old := submit(t, q, input(owner, project, "old-verified", PriorityManual, 2))
+	require.NoError(t, db.Model(&model.PaperCompileJob{}).Where("id=?", old.ID).Updates(map[string]any{"status": StatusSucceeded, "lease_epoch": 1, "pdf_size": 1024, "pdf_digest": "sha256:" + strings.Repeat("a", 64), "created_at": time.Now().Add(-time.Hour)}).Error)
+	for i := 0; i < 11; i++ {
+		j := submit(t, q, input(owner, project, fmt.Sprintf("failed-%d", i), PriorityManual, 2))
+		require.NoError(t, db.Model(&model.PaperCompileJob{}).Where("id=?", j.ID).Update("status", StatusFailed).Error)
+	}
+	jobs, err := q.ListForProject(context.Background(), owner, project, 10)
+	require.NoError(t, err)
+	require.Len(t, jobs, 11)
+	require.Equal(t, old.ID, jobs[10].ID)
 }

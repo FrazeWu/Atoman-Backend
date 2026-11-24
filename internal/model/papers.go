@@ -30,12 +30,13 @@ func (PaperProject) TableName() string { return "paper_projects" }
 
 type PaperFile struct {
 	Base
-	ProjectID uuid.UUID `json:"-" gorm:"type:uuid;not null;index"`
-	Path      string    `json:"path" gorm:"type:varchar(512);not null"`
-	Kind      string    `json:"kind" gorm:"type:varchar(24);not null;default:'text'"`
-	Content   string    `json:"content" gorm:"type:text;not null"`
-	SHA256    string    `json:"sha256" gorm:"type:char(64);not null"`
-	Revision  int64     `json:"revision" gorm:"not null;default:1"`
+	ProjectID           uuid.UUID `json:"-" gorm:"type:uuid;not null;index"`
+	Path                string    `json:"path" gorm:"type:varchar(512);not null"`
+	Kind                string    `json:"kind" gorm:"type:varchar(24);not null;default:'text'"`
+	Content             string    `json:"content" gorm:"type:text;not null"`
+	SHA256              string    `json:"sha256" gorm:"type:char(64);not null"`
+	Revision            int64     `json:"revision" gorm:"not null;default:1"`
+	ProjectHeadRevision int64     `json:"project_head_revision,omitempty" gorm:"-"`
 }
 
 func (PaperFile) TableName() string { return "paper_files" }

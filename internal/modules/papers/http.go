@@ -34,6 +34,11 @@ type grantInput struct {
 // endpoint checks the per-user module grant and project ownership server-side.
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &handler{service: service}
+	group.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "private, no-store")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Next()
+	})
 	group.Use(middleware.AuthMiddleware())
 	group.GET("/access", h.access)
 	group.GET("/application", h.application)
@@ -342,6 +347,7 @@ func (h *handler) createFile(c *gin.Context) {
 	if !ok {
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 7<<20)
 	var input fileInput
 	if !httpx.BindRequiredJSON(c, &input) {
 		return
@@ -410,6 +416,7 @@ func (h *handler) saveFile(c *gin.Context) {
 	if !ok {
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 7<<20)
 	var input fileInput
 	if !httpx.BindRequiredJSON(c, &input) {
 		return

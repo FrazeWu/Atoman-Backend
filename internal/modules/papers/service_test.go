@@ -54,6 +54,12 @@ func TestPapersPrivateAccessAndRevisionCAS(t *testing.T) {
 	saved, err := service.SaveFile(ownerCtx, project.ID, initial.ID, "\\section{Experiments}\n", 1)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), saved.Revision)
+	require.Equal(t, int64(2), saved.ProjectHeadRevision)
+	retry, err := service.SaveFile(ownerCtx, project.ID, initial.ID, "\\section{Experiments}\n", 1)
+	require.NoError(t, err)
+	require.Equal(t, saved.Revision, retry.Revision)
+	require.Equal(t, int64(2), retry.ProjectHeadRevision)
+
 	_, err = service.SaveFile(ownerCtx, project.ID, initial.ID, "stale replacement", 1)
 	require.Equal(t, 409, apperr.FromError(err).HTTPStatus)
 	current, err := service.GetFile(ownerCtx, project.ID, initial.ID)
@@ -70,6 +76,14 @@ func TestPapersPrivateAccessAndRevisionCAS(t *testing.T) {
 	require.Equal(t, int64(1), created.Revision)
 	_, err = service.CreateFile(ownerCtx, project.ID, "chapters/introduction.tex", "duplicate")
 	require.Equal(t, 409, apperr.FromError(err).HTTPStatus)
+	for _, collision := range []string{"CHAPTERS/Introduction.TEX", "main.tex/chapter.tex", "chapters/introduction.tex/child.tex"} {
+		_, err = service.CreateFile(ownerCtx, project.ID, collision, "")
+		require.Equal(t, 409, apperr.FromError(err).HTTPStatus, collision)
+	}
+	_, err = service.CreateFile(ownerCtx, project.ID, ".latexmkrc", "unsupported")
+	require.Equal(t, 400, apperr.FromError(err).HTTPStatus)
+	require.Equal(t, int64(3), created.ProjectHeadRevision)
+
 	for _, badPath := range []string{"../escape.tex", "/etc/passwd.tex", "./main.tex", "folder\\file.tex", "a//b.tex", "unsafe.sh"} {
 		_, err = service.CreateFile(ownerCtx, project.ID, badPath, "")
 		require.Equal(t, 400, apperr.FromError(err).HTTPStatus, badPath)
