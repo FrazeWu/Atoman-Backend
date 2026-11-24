@@ -34,6 +34,8 @@ func TestRunCreatesCoreSchema(t *testing.T) {
 		&model.FeedSource{},
 		&model.DMConversation{},
 		&model.DiscussionTarget{},
+		&model.PaperCompileJob{},
+		&model.PaperCompileSlot{},
 	} {
 		if !db.Migrator().HasTable(schemaModel) {
 			t.Fatalf("expected table for %T", schemaModel)
@@ -41,6 +43,16 @@ func TestRunCreatesCoreSchema(t *testing.T) {
 	}
 	if !db.Migrator().HasIndex("content_publication_events", "idx_content_publication_events_dispatch_candidates") {
 		t.Fatal("expected content publication dispatch candidate index")
+	}
+	if !db.Migrator().HasIndex("paper_compile_jobs", "idx_paper_compile_ready") {
+		t.Fatal("expected Papers compile priority index")
+	}
+	var slot model.PaperCompileSlot
+	if err := db.First(&slot, "id = ?", 1).Error; err != nil {
+		t.Fatalf("expected seeded global Papers compile slot: %v", err)
+	}
+	if slot.Epoch != 0 || slot.Blocked || slot.JobID != nil {
+		t.Fatalf("unexpected global compile slot state: %+v", slot)
 	}
 }
 

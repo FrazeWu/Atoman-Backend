@@ -519,6 +519,8 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.CommentTimeAnchor{}, &model.CommentPublishRecord{}, &model.ContentReference{},
 		&model.TimelineEvent{}, &model.TimelinePerson{}, &model.PersonLocation{},
 		&model.TimelineRevisionProposal{}, &model.TimelineRevision{},
+		&model.PaperAccessGrant{}, &model.PaperProject{}, &model.PaperFile{}, &model.PaperFileVersion{},
+		&model.PaperCompileJob{}, &model.PaperCompileSlot{},
 	}
 	if !db.Migrator().HasTable(&model.ForumDraft{}) {
 		models = append(models, &model.ForumDraft{})
@@ -530,6 +532,15 @@ func MigrateSchema(db *gorm.DB) error {
 		return err
 	}
 	if db.Dialector.Name() == "postgres" {
+		if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_files_project_active_path ON paper_files (project_id, path) WHERE deleted_at IS NULL`).Error; err != nil {
+			return fmt.Errorf("papers active file path index: %w", err)
+		}
+		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_paper_compile_ready ON paper_compile_jobs (priority DESC, created_at, id) WHERE status = 'queued'`).Error; err != nil {
+			return fmt.Errorf("papers compile priority index: %w", err)
+		}
+		if err := db.Exec(`INSERT INTO paper_compile_slots (id, worker_id, epoch, blocked, block_reason, updated_at) VALUES (1, '', 0, false, '', NOW()) ON CONFLICT (id) DO NOTHING`).Error; err != nil {
+			return fmt.Errorf("papers compile global slot seed: %w", err)
+		}
 		if err := db.Exec("DISCARD PLANS").Error; err != nil {
 			return fmt.Errorf("discard PostgreSQL prepared plans after schema migration: %w", err)
 		}

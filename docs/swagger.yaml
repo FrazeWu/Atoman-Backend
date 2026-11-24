@@ -10114,6 +10114,29 @@ definitions:
       data:
         $ref: '#/definitions/notification.UnreadCountsDTO'
     type: object
+  papers.fileInput:
+    properties:
+      base_revision:
+        type: integer
+      content:
+        type: string
+      path:
+        type: string
+    type: object
+  papers.grantInput:
+    properties:
+      expires_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  papers.projectInput:
+    properties:
+      base_revision:
+        type: integer
+      name:
+        type: string
+    type: object
   portal.HotArtist:
     properties:
       id:
@@ -28947,6 +28970,445 @@ paths:
       summary: 获取分类未读数
       tags:
       - notifications
+  /api/v1/papers/access:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 查询 Papers 访问资格
+      tags:
+      - papers
+  /api/v1/papers/admin/grants:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Invite
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.grantInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 管理员授予 Papers 资格
+      tags:
+      - papers
+  /api/v1/papers/admin/grants/{userId}:
+    delete:
+      parameters:
+      - description: User UUID
+        in: path
+        name: userId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 管理员撤销 Papers 资格
+      tags:
+      - papers
+  /api/v1/papers/projects:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 列出当前用户私有论文项目
+      tags:
+      - papers
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.projectInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 创建私有论文项目
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}:
+    delete:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 删除私有论文项目
+      tags:
+      - papers
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 读取私有论文项目
+      tags:
+      - papers
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Project and base revision
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.projectInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 更新论文项目名称
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/compile-capability:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Check whether the isolated LaTeX compile service is available
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/compiles:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List ten most recent compilation jobs owned by the project owner
+      tags:
+      - papers
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Enqueue compilation of one consistent project revision
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/compiles/{jobId}:
+    delete:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Request cancellation; never directly kills a sandbox
+      tags:
+      - papers
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Read sanitized compilation status for a job owned by the caller
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/compiles/{jobId}/pdf:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Download a previously verified, durable, owner-scoped compile PDF
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/files:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 列出私有项目文本文件
+      tags:
+      - papers
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Text file
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.fileInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 创建 LaTeX 文本文件
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/files/{fileId}:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File UUID
+        in: path
+        name: fileId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 读取私有项目文本内容
+      tags:
+      - papers
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File UUID
+        in: path
+        name: fileId
+        required: true
+        type: string
+      - description: Text and base revision
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.fileInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 乐观锁保存 LaTeX 文本内容
+      tags:
+      - papers
   /api/v1/podcast/bookmarks:
     get:
       produces:
