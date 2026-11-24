@@ -26,7 +26,7 @@ func p0TestDirectories(t *testing.T) (string, string) {
 }
 
 func TestWriteP0BundleConfigAndValidate(t *testing.T) {
-	for _, mode := range []P0Mode{P0Latex, P0PIDPressure} {
+	for _, mode := range []P0Mode{P0Latex, P0AcademicLatex, P0PIDPressure} {
 		t.Run(string(mode), func(t *testing.T) {
 			bundle, output := p0TestDirectories(t)
 			id := "p0-test-" + string(mode)
@@ -77,5 +77,63 @@ func TestP0BundleRejectsUnsafeLocationsAndModes(t *testing.T) {
 	}
 	if err := WriteP0BundleConfig(bundle, link, "p0-test", testLimits, P0Latex); err == nil {
 		t.Fatal("accepted symlink output directory")
+	}
+}
+
+func TestAcademicDriverRejectsTamperingAndUntrustedPaths(t *testing.T) {
+	bundle, output := p0TestDirectories(t)
+	id := "p0-test-academic"
+	if err := WriteP0BundleConfig(bundle, output, id, testLimits, P0AcademicLatex); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(bundle, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCompileDriverForSpec(bundle, raw); err != nil {
+		t.Fatal(err)
+	}
+	driver := filepath.Join(bundle, "rootfs", compileDriverGuestPath[1:])
+	if err := os.Chmod(driver, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCompileDriverForSpec(bundle, raw); err == nil {
+		t.Fatal("writable driver accepted")
+	}
+	if err := os.WriteFile(driver, []byte(compileDriver+"echo changed\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(driver, 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCompileDriverForSpec(bundle, raw); err == nil {
+		t.Fatal("tampered driver accepted")
+	}
+	if err := os.Remove(driver); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte(compileDriver), 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, driver); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCompileDriverForSpec(bundle, raw); err == nil {
+		t.Fatal("symlink driver accepted")
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{compileDriverGuestPath, "untrusted"}, {"/inputs/atoman-papers-compile-v2"}, {"/bin/sh", "-c", compileDriver}} {
+		spec["process"].(map[string]any)["args"] = args
+		changed, err := json.Marshal(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateOCISpec(changed, id, testLimits, output); err == nil {
+			t.Fatal("unapproved driver invocation accepted")
+		}
 	}
 }

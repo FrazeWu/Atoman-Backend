@@ -114,6 +114,9 @@ func validateOCISpec(raw []byte, jobID string, limits Limits, outputDir string, 
 	if len(args) == 2 && args[0] == "/inputs/p0-sandbox-probe" && args[1] == "pids" &&
 		len(allowP0PIDProbe) > 0 && allowP0PIDProbe[0] {
 		// Explicitly controlled diagnostic only, not available to Papers API.
+	} else if isCompileDriverArgs(args) {
+		// Only this literal, sealed driver path is permitted. ScopeBackend
+		// verifies its exact trusted bytes before starting the runtime.
 	} else if len(args) != 6 || args[0] != "pdflatex" ||
 		args[1] != "-no-shell-escape" || args[2] != "-interaction=nonstopmode" ||
 		args[3] != "-halt-on-error" || args[4] != "-output-directory=/output" ||

@@ -219,7 +219,10 @@ func (b *ScopeBackend) verifyBundle(jobID string) error {
 	}
 	// The P0 helper validates the live Sentry cgroup. This independent
 	// preflight strictly validates the sealed OCI file before privilege use.
-	return validateOCISpec(raw, jobID, b.cfg.Limits, filepath.Dir(b.cfg.PDFPath), b.cfg.AllowP0PIDProbe)
+	if err := validateOCISpec(raw, jobID, b.cfg.Limits, filepath.Dir(b.cfg.PDFPath), b.cfg.AllowP0PIDProbe); err != nil {
+		return err
+	}
+	return verifyCompileDriverForSpec(b.cfg.Bundle, raw)
 }
 
 // Cleanup MUST be called regardless of Execute's result. Never use a wildcard

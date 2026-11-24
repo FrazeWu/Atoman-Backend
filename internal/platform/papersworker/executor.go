@@ -215,9 +215,15 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 		}
 	}
 	phase = "archive_verify"
-	if _, err := e.cfg.Store.VerifyCompileArchive(ctx, c.Job.EnvironmentDigest, archivePath); err != nil {
+	environment, err := e.cfg.Store.VerifyCompileArchive(ctx, c.Job.EnvironmentDigest, archivePath)
+	if err != nil {
 		return fmt.Errorf("environment rejected: %w", err)
 	}
+	mode := paperssandbox.P0Latex
+	if environment == papersassets.AcademicEnvironment() {
+		mode = paperssandbox.P0AcademicLatex
+	}
+
 	phase = "workspace"
 	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)
 	if err := mkdirGuestPath(root); err != nil {
@@ -310,7 +316,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 		}
 	}
 	phase = "oci_config"
-	return paperssandbox.WriteP0BundleConfig(bundle, filepath.Join(root, "output"), c.SandboxID, e.cfg.Limits, paperssandbox.P0Latex)
+	return paperssandbox.WriteP0BundleConfig(bundle, filepath.Join(root, "output"), c.SandboxID, e.cfg.Limits, mode)
 }
 
 func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.Result, error) {
