@@ -134,3 +134,20 @@ func TestRejectInvalidUTF8Source(t *testing.T) {
 	_, err := s.PublishSnapshot(snap)
 	require.ErrorIs(t, err, ErrInvalid)
 }
+
+func TestAcademicEnvironmentExactPinAndLegacyCompatibility(t *testing.T) {
+	approved := AcademicEnvironment()
+	require.NoError(t, approved.Validate())
+	require.NoError(t, testEnv().Validate())
+	for _, change := range []func(*Environment){
+		func(e *Environment) { e.Version = 1 },
+		func(e *Environment) { e.Name = "texlive-2026-p0" },
+		func(e *Environment) { e.ImageDigest = HashBytes([]byte("different image")) },
+		func(e *Environment) { e.ArchiveDigest = HashBytes([]byte("different archive")) },
+		func(e *Environment) { e.RunscRelease = "unknown" },
+	} {
+		value := approved
+		change(&value)
+		require.ErrorIs(t, value.Validate(), ErrInvalid)
+	}
+}

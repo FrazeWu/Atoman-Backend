@@ -87,7 +87,24 @@ type Environment struct {
 	RunscRelease  string `json:"runsc_release"`
 }
 
+// AcademicEnvironment is the independently tested derived TeX Live
+// image. Its Docker configuration ID and exact normalized rootfs bytes are
+// separately pinned; it is not mislabeled as the upstream P0 image.
+// Signature verification and operator-configured environment selection are
+// still mandatory for every production job.
+func AcademicEnvironment() Environment {
+	return Environment{
+		Version: 2, Name: "texlive-2026-academic-20261124",
+		ImageDigest:   "sha256:2738e65c08d33592eb5bdc14cd46f3662c89f6f611a466b2e92f27c8b97c6173",
+		ArchiveDigest: "sha256:83f5c23b237e83a05e73ab160b4ab6e3dd0a8597ccfb941c681e7fb77207ebe7",
+		RunscRelease:  "20261019.0",
+	}
+}
+
 func (e Environment) Validate() error {
+	if e == AcademicEnvironment() {
+		return nil
+	}
 	if e.Version != 1 || e.Name != "texlive-2026-p0" ||
 		e.ImageDigest != "sha256:5613d47067c98df80d6b3206c9a731ba6e5d3eb5828fea892afd270426de4bd4" ||
 		!digestRE.MatchString(e.ArchiveDigest) || e.RunscRelease != "20261019.0" {
