@@ -65,6 +65,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.GET("/projects/:id/compiles/:jobId", h.compileStatus)
 	private.DELETE("/projects/:id/compiles/:jobId", h.cancelCompile)
 	private.GET("/projects/:id/compiles/:jobId/pdf", h.compilePDF)
+	private.GET("/projects/:id/compiles/:jobId/source-map", h.compileSourceMap)
 }
 
 func current(c *gin.Context) (authctx.CurrentUser, bool) {

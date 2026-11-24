@@ -52,3 +52,26 @@ func TestCompilePDFPrivateVerifiedOwnerOnly(t *testing.T) {
 	require.NotEqual(t, http.StatusOK, f.request("GET", path, "", f.ownerToken).Code)
 	require.Equal(t, 2, reader.calls)
 }
+
+func TestCompileSourceMapOwnedExactVerifiedPDF(t *testing.T) {
+	f := newCompileHTTPFixture(t, true)
+	require.NoError(t, f.db.AutoMigrate(&model.PaperCompileSourceMap{}))
+	f.svc.compile.Results = &testPDFReader{raw: []byte("%PDF-1.7\nsynthetic fixture")}
+	req := f.request("POST", f.base()+"/compiles", `{"base_revision":1,"idempotency_key":"source-map"}`, f.ownerToken)
+	require.Equal(t, http.StatusAccepted, req.Code, req.Body.String())
+	j := parseJob(t, req)
+	path := f.base() + "/compiles/" + j.ID.String() + "/source-map"
+	require.Equal(t, http.StatusNotFound, f.request("GET", path, "", f.ownerToken).Code)
+	digest := papersassets.HashBytes([]byte("%PDF-1.7\nsynthetic fixture"))
+	require.NoError(t, f.db.Model(&model.PaperCompileJob{}).Where("id=?", j.ID).Updates(map[string]any{"status": "succeeded", "lease_epoch": 3, "pdf_digest": digest, "pdf_size": 26}).Error)
+	require.Equal(t, http.StatusNotFound, f.request("GET", path, "", f.ownerToken).Code)
+	raw := []byte(`{"version":1,"files":["main.tex"],"points":[[0,2,1,1000,2000]]}`)
+	require.NoError(t, f.db.Create(&model.PaperCompileSourceMap{JobID: j.ID, ProjectID: f.project.ID, Epoch: 3, PDFDigest: digest, Data: raw}).Error)
+	result := f.request("GET", path, "", f.ownerToken)
+	require.Equal(t, http.StatusOK, result.Code, result.Body.String())
+	require.Equal(t, raw, result.Body.Bytes())
+	require.Equal(t, "private, no-store", result.Header().Get("Cache-Control"))
+	require.Equal(t, http.StatusNotFound, f.request("GET", path, "", f.otherToken).Code)
+	require.NoError(t, f.db.Model(&model.PaperCompileSourceMap{}).Where("job_id=?", j.ID).Update("epoch", 2).Error)
+	require.Equal(t, http.StatusNotFound, f.request("GET", path, "", f.ownerToken).Code)
+}

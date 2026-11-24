@@ -28195,6 +28195,20 @@
                 "responses": {}
             }
         },
+        "/api/v1/papers/projects/{id}/compiles/{jobId}/source-map": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Read private SyncTeX line positions for an owned verified PDF",
+                "responses": {}
+            }
+        },
         "/api/v1/papers/projects/{id}/export": {
             "get": {
                 "security": [

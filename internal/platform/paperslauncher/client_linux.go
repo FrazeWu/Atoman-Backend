@@ -80,7 +80,7 @@ func (c *Client) call(ctx context.Context, op string, claim papersqueue.Claim) (
 	if err = conn.SetReadDeadline(time.Now().Add(6 * time.Minute)); err != nil {
 		return res, transportUnknown(err)
 	}
-	limit := json.NewDecoder(&readLimited{conn: conn, max: 4096})
+	limit := json.NewDecoder(&readLimited{conn: conn, max: 600 << 10})
 	if err = limit.Decode(&res); err != nil {
 		return response{}, transportUnknown(fmt.Errorf("launcher response unavailable: %w", err))
 	}

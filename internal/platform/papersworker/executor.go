@@ -359,6 +359,12 @@ func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.
 					err = ErrInvalid
 				} else {
 					result.PDFDigest, result.PDFSize = ref.Digest, ref.Size
+					// SyncTeX is optional metadata. Read only the exact output file after
+					// verified teardown, without following links or exposing guest paths.
+					if snapshot, loadErr := e.cfg.Store.LoadCompileSnapshot(ctx, c.Job.SnapshotDigest); loadErr == nil {
+						result.SourceMap = readSourceMap(filepath.Join(root, "output"), snapshot)
+					}
+
 				}
 			}
 		}
@@ -374,10 +380,34 @@ func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.
 			result.Status = paperssandbox.CleanupFailed
 			result.FailureDetail = "owned output/workspace cleanup not verified"
 			result.PDFDigest, result.PDFSize = "", 0
+			result.SourceMap = nil
 			runErr = errors.Join(runErr, err)
 		}
 	}
 	return result, runErr
+}
+
+func readSourceMap(dir string, snapshot papersassets.Snapshot) []byte {
+	d, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil
+	}
+	defer unix.Close(d)
+	fd, err := unix.Openat(d, "main.synctex.gz", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil
+	}
+	f := os.NewFile(uintptr(fd), "main.synctex.gz")
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() || st.Size() < 1 || st.Size() > 8<<20 {
+		return nil
+	}
+	raw, err := papersassets.ParseSyncTeX(f, snapshot)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func openResultPDF(dir string) (*os.File, error) {

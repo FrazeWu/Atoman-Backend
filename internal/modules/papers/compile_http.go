@@ -160,3 +160,30 @@ func (h *handler) compilePDF(c *gin.Context) {
 	c.Header("Content-Security-Policy", "sandbox; default-src 'none'")
 	c.Data(http.StatusOK, "application/pdf", raw)
 }
+
+// @Summary Read private SyncTeX line positions for an owned verified PDF
+// @Tags papers
+// @Security BearerAuth
+// @Router /api/v1/papers/projects/{id}/compiles/{jobId}/source-map [get]
+func (h *handler) compileSourceMap(c *gin.Context) {
+	user, ok := current(c)
+	if !ok {
+		return
+	}
+	project, ok := projectID(c)
+	if !ok {
+		return
+	}
+	job, ok := httpx.UUIDParam(c, "jobId")
+	if !ok {
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	raw, err := h.service.CompileSourceMap(c.Request.Context(), user, project, job)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.Data(http.StatusOK, "application/json", raw)
+}

@@ -520,7 +520,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.TimelineEvent{}, &model.TimelinePerson{}, &model.PersonLocation{},
 		&model.TimelineRevisionProposal{}, &model.TimelineRevision{},
 		&model.PaperAccessGrant{}, &model.PaperAccessApplication{}, &model.PaperProject{}, &model.PaperFile{}, &model.PaperFileVersion{},
-		&model.PaperCompileJob{}, &model.PaperCompileSlot{},
+		&model.PaperCompileJob{}, &model.PaperCompileSlot{}, &model.PaperCompileSourceMap{},
 	}
 	if !db.Migrator().HasTable(&model.ForumDraft{}) {
 		models = append(models, &model.ForumDraft{})

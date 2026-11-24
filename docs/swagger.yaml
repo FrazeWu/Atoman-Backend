@@ -29354,6 +29354,14 @@ paths:
       summary: Download a previously verified, durable, owner-scoped compile PDF
       tags:
       - papers
+  /api/v1/papers/projects/{id}/compiles/{jobId}/source-map:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Read private SyncTeX line positions for an owned verified PDF
+      tags:
+      - papers
   /api/v1/papers/projects/{id}/export:
     get:
       parameters:

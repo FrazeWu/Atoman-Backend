@@ -86,6 +86,16 @@ func (q *Queue) Complete(ctx context.Context, c Claim, result paperssandbox.Resu
 		if update.RowsAffected != 1 {
 			return ErrLeaseLost
 		}
+		if status == StatusSucceeded && digest != "" && papersassets.ValidateSourceMap(result.SourceMap) == nil {
+			if err := tx.Create(&model.PaperCompileSourceMap{JobID: job.ID, ProjectID: job.ProjectID, Epoch: c.Epoch, PDFDigest: digest, Data: result.SourceMap, CreatedAt: now}).Error; err != nil {
+				return err
+			}
+			// The editor only offers recent successful results. Keep ten per project
+			// to bound optional index storage while retaining PDF history.
+			if err := tx.Exec("DELETE FROM paper_compile_source_maps WHERE project_id=? AND job_id NOT IN (SELECT job_id FROM paper_compile_source_maps WHERE project_id=? ORDER BY created_at DESC, job_id DESC LIMIT 10)", job.ProjectID, job.ProjectID).Error; err != nil {
+				return err
+			}
+		}
 		return releaseSlot(tx, c.Epoch, c.Token, now)
 	})
 }

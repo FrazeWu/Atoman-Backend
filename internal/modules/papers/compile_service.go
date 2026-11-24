@@ -355,3 +355,38 @@ func (s *Service) CompilePDF(ctx context.Context, user authctx.CurrentUser, proj
 	}
 	return raw, nil
 }
+
+// CompileSourceMap returns only project-owned metadata bound to a successful
+// immutable PDF and its fencing epoch. Old results can lack a map.
+func (s *Service) CompileSourceMap(ctx context.Context, user authctx.CurrentUser, projectID, jobID uuid.UUID) ([]byte, error) {
+	if _, err := s.GetProject(user, projectID); err != nil {
+		return nil, err
+	}
+	if s.compile == nil || !s.compile.valid() {
+		return nil, compileUnavailable()
+	}
+	job, err := s.compile.Jobs.Get(ctx, user.ID, jobID)
+	if err != nil {
+		return nil, compileBackendError(err)
+	}
+	ref := papersassets.PDFRef{JobID: job.ID, Epoch: job.LeaseEpoch, Digest: job.PDFDigest, Size: job.PDFSize}
+	missing := apperr.NotFound("papers.source_map_unavailable", "Recompile to generate a source map")
+	if job.ProjectID != projectID || job.Status != papersqueue.StatusSucceeded || ref.Validate() != nil {
+		return nil, missing
+	}
+	var m model.PaperCompileSourceMap
+	err = s.db.WithContext(ctx).Where("job_id=? AND project_id=? AND epoch=? AND pdf_digest=?", jobID, projectID, job.LeaseEpoch, job.PDFDigest).Take(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, missing
+	}
+	if err != nil {
+		return nil, apperr.Internal(err)
+	}
+	if papersassets.ValidateSourceMap(m.Data) != nil {
+		return nil, missing
+	}
+	if _, err = s.GetProject(user, projectID); err != nil {
+		return nil, err
+	}
+	return m.Data, nil
+}

@@ -54,3 +54,16 @@ type PaperCompileSlot struct {
 }
 
 func (PaperCompileSlot) TableName() string { return "paper_compile_slots" }
+
+// PaperCompileSourceMap is private, bounded metadata from one successfully
+// fenced PDF result. It is not part of the queue's lease/claim payload.
+type PaperCompileSourceMap struct {
+	JobID     uuid.UUID `gorm:"type:uuid;primaryKey"`
+	ProjectID uuid.UUID `gorm:"type:uuid;not null;index"`
+	Epoch     int64     `gorm:"not null"`
+	PDFDigest string    `gorm:"type:varchar(71);not null"`
+	Data      []byte    `gorm:"type:bytea;not null"`
+	CreatedAt time.Time
+}
+
+func (PaperCompileSourceMap) TableName() string { return "paper_compile_source_maps" }
