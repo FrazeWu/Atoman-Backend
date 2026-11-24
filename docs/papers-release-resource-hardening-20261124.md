@@ -27,6 +27,12 @@
   production signed archive distribution path. No production credentials
   were used.
 
+- Real PID exhaustion recovery regression completed successfully: the
+  sandbox reported resource_exhausted_pids with a verified pids.max event,
+  no valid artifact, and verified cleanup; the immediately following actual
+  LaTeX job succeeded. The isolated harness exited 0 and removed all its
+  owned processes, mounts, and files.
+
 ## Remaining production gates
 
 The production compile feature must remain disabled until all live recovery
