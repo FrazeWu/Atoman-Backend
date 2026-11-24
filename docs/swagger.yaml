@@ -10114,6 +10114,30 @@ definitions:
       data:
         $ref: '#/definitions/notification.UnreadCountsDTO'
     type: object
+  papers.FileChange:
+    properties:
+      action:
+        type: string
+      base_revision:
+        type: integer
+      file_id:
+        type: string
+      path:
+        type: string
+      uploads:
+        items:
+          $ref: '#/definitions/papers.FileUpload'
+        type: array
+    type: object
+  papers.FileUpload:
+    properties:
+      content:
+        type: string
+      kind:
+        type: string
+      path:
+        type: string
+    type: object
   papers.applyInput:
     properties:
       reason:
@@ -29530,6 +29554,61 @@ paths:
       summary: 乐观锁保存 LaTeX 文本内容
       tags:
       - papers
+  /api/v1/papers/projects/{id}/files/manage:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Project revision and file operation
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.FileChange'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 原子上传或管理论文项目文件
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/restore:
+    post:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 恢复已删除的私有论文
+      tags:
+      - papers
   /api/v1/papers/projects/import:
     post:
       consumes:
@@ -29562,6 +29641,21 @@ paths:
       security:
       - BearerAuth: []
       summary: 从 ZIP 导入论文项目
+      tags:
+      - papers
+  /api/v1/papers/projects/trash:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 查询我的论文回收站
       tags:
       - papers
   /api/v1/podcast/bookmarks:

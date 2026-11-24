@@ -27961,6 +27961,31 @@
                 }
             }
         },
+        "/api/v1/papers/projects/trash": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "查询我的论文回收站",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}": {
             "get": {
                 "security": [
@@ -28348,6 +28373,59 @@
                 }
             }
         },
+        "/api/v1/papers/projects/{id}/files/manage": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "原子上传或管理论文项目文件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Project revision and file operation",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/papers.FileChange"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}/files/{fileId}": {
             "get": {
                 "security": [
@@ -28460,6 +28538,40 @@
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/papers/projects/{id}/restore": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "恢复已删除的私有论文",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -55093,6 +55205,43 @@
             "properties": {
                 "data": {
                     "$ref": "#/definitions/notification.UnreadCountsDTO"
+                }
+            }
+        },
+        "papers.FileChange": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "base_revision": {
+                    "type": "integer"
+                },
+                "file_id": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "uploads": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/papers.FileUpload"
+                    }
+                }
+            }
+        },
+        "papers.FileUpload": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
                 }
             }
         },

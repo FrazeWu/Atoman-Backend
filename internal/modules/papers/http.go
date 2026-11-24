@@ -52,6 +52,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private := group.Group("")
 	private.Use(h.requireInvite)
 	private.GET("/projects", h.projects)
+	private.GET("/projects/trash", h.trashedProjects)
+	private.POST("/projects/:id/restore", h.restoreProject)
 	private.POST("/projects", h.createProject)
 	private.POST("/projects/import", h.importProject)
 	private.GET("/projects/:id/export", h.exportProject)
@@ -60,6 +62,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.DELETE("/projects/:id", h.deleteProject)
 	private.GET("/projects/:id/files", h.files)
 	private.POST("/projects/:id/files", h.createFile)
+	private.POST("/projects/:id/files/manage", h.manageFiles)
 	private.GET("/projects/:id/files/:fileId", h.file)
 	private.PUT("/projects/:id/files/:fileId", h.saveFile)
 	// These routes are deliberately fail-closed in production: NewService(db)
@@ -427,4 +430,79 @@ func (h *handler) saveFile(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, file)
+}
+
+// @Summary 原子上传或管理论文项目文件
+// @Tags papers
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param id path string true "Project UUID"
+// @Param input body FileChange true "Project revision and file operation"
+// @Success 200 {object} map[string]interface{}
+// @Failure 409 {object} map[string]interface{}
+// @Router /api/v1/papers/projects/{id}/files/manage [post]
+func (h *handler) manageFiles(c *gin.Context) {
+	user, ok := current(c)
+	if !ok {
+		return
+	}
+	id, ok := projectID(c)
+	if !ok {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<20)
+	var input FileChange
+	if !httpx.BindRequiredJSON(c, &input) {
+		return
+	}
+	result, err := h.service.ManageFiles(user, id, input)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, result)
+}
+
+// @Summary 查询我的论文回收站
+// @Tags papers
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/papers/projects/trash [get]
+func (h *handler) trashedProjects(c *gin.Context) {
+	user, ok := current(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.ListTrashedProjects(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, result)
+}
+
+// @Summary 恢复已删除的私有论文
+// @Tags papers
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Project UUID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/papers/projects/{id}/restore [post]
+func (h *handler) restoreProject(c *gin.Context) {
+	user, ok := current(c)
+	if !ok {
+		return
+	}
+	id, ok := projectID(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.RestoreProject(user, id)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, result)
 }
