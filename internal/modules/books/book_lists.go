@@ -11,6 +11,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/indexnow"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -269,9 +270,10 @@ func (s *Service) PublishBookList(ctx context.Context, user authctx.CurrentUser,
 		if _, err := normalizeBookListSnapshot(tx, snapshot); err != nil {
 			return err
 		}
+		wasPublic := list.Visibility == "public" && list.PublishedAt != nil
 		var previous BookListSnapshot
 		// Do not expose a diff against a previously private publication.
-		if list.Visibility == "public" && list.PublishedAt != nil {
+		if wasPublic {
 			if err := json.Unmarshal([]byte(list.PublishedJSON), &previous); err != nil {
 				return err
 			}
@@ -283,7 +285,10 @@ func (s *Service) PublishBookList(ctx context.Context, user authctx.CurrentUser,
 			return err
 		}
 		result, err = bookListDraftDTO(list)
-		return err
+		if err != nil {
+			return err
+		}
+		return indexnow.EnqueuePathsTx(tx, bookListIndexPaths(listID, wasPublic, input.Visibility == "public")...)
 	})
 	return result, err
 }
@@ -300,10 +305,14 @@ func (s *Service) WithdrawBookList(ctx context.Context, user authctx.CurrentUser
 		if list.Version != baseVersion {
 			return bookListVersionConflict(list)
 		}
+		wasPublic := list.Visibility == "public" && list.PublishedAt != nil
 		updates := map[string]any{"visibility": "private", "version": list.Version + 1}
 		if remove {
 			updates["deleted_at"] = time.Now().UTC()
 		}
-		return tx.Model(&list).Updates(updates).Error
+		if err := tx.Model(&list).Updates(updates).Error; err != nil {
+			return err
+		}
+		return indexnow.EnqueuePathsTx(tx, bookListIndexPaths(listID, wasPublic, false)...)
 	})
 }

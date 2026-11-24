@@ -23,7 +23,11 @@ const (
 // Re-enqueueing a URL increments Revision: an in-flight acknowledgement must
 // never delete a newer change to the same URL.
 func (w *Worker) enqueueDurable(paths []string) error {
-	if w.db == nil {
+	return w.enqueueDurableOn(w.db, paths)
+}
+
+func (w *Worker) enqueueDurableOn(db *gorm.DB, paths []string) error {
+	if db == nil {
 		return errors.New("IndexNow durable queue requires PostgreSQL")
 	}
 	urls, err := w.submitter.normalizeURLs(paths)
@@ -41,7 +45,7 @@ func (w *Worker) enqueueDurable(paths []string) error {
 	if len(items) == 0 {
 		return nil
 	}
-	return w.db.Clauses(clause.OnConflict{
+	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "url"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			"revision":        gorm.Expr("indexnow_submissions.revision + 1"),

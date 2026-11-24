@@ -178,6 +178,31 @@ func StartWorker(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	return done
 }
 
+// DurableEnabled lets publication hooks avoid additional reads when IndexNow is disabled.
+func DurableEnabled() bool {
+	worker := activeWorker.Load()
+	return worker != nil && worker.db != nil
+}
+
+// EnqueuePathsTx persists notifications using the caller's transaction. The
+// worker polls committed rows, so a rollback can never submit a private or
+// unsuccessful publication. No external HTTP request runs in this transaction.
+// The volatile queue cannot provide this guarantee and is intentionally skipped.
+func EnqueuePathsTx(tx *gorm.DB, paths ...string) error {
+	worker := activeWorker.Load()
+	if worker == nil || worker.db == nil || len(paths) == 0 {
+		return nil
+	}
+	for len(paths) > 0 {
+		size := min(len(paths), 500)
+		if err := worker.enqueueDurableOn(tx, paths[:size]); err != nil {
+			return err
+		}
+		paths = paths[size:]
+	}
+	return nil
+}
+
 func NotifyPaths(paths ...string) {
 	worker := activeWorker.Load()
 	if worker == nil {

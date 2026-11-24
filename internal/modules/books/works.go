@@ -92,8 +92,10 @@ func appendBookWikiRevision(tx *gorm.DB, entityType string, entityID, editorID u
 			return revision, err
 		}
 	}
-	err = tx.Create(&revision).Error
-	return revision, err
+	if err := tx.Create(&revision).Error; err != nil {
+		return revision, err
+	}
+	return revision, enqueueBookWikiIndexNow(tx, entityType, entityID, editType)
 }
 
 func resolveBookAuthors(tx *gorm.DB, userID uuid.UUID, ids []uuid.UUID, names []string) ([]uuid.UUID, error) {
