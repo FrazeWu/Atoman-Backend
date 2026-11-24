@@ -12,6 +12,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/indexnow"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -142,6 +143,29 @@ func HandleMusicRevisionApplied(tx *gorm.DB, revision *model.Revision) error {
 	}
 	if err := RecordMusicRevisionContribution(tx, revision); err != nil {
 		return err
+	}
+	if isWikiMusicEntity(revision.ContentType) && indexnow.DurableEnabled() {
+		state, err := loadMusicEntryState(tx, revision.ContentType, revision.ContentID, false)
+		if err != nil {
+			return err
+		}
+		// The anonymous catalogue admits only active entries. Draft revisions
+		// remain private even when their edit has already been approved.
+		if state.LifecycleStatus == model.MusicLifecycleActive {
+			paths := []string{"/music", "/music/" + state.EntityType + "s", "/music/" + state.EntityType + "/" + state.EntityID.String()}
+			if state.EntityType == "song" && state.AlbumID != nil {
+				var count int64
+				if err := tx.Model(&model.Album{}).Where("id = ? AND lifecycle_status = ?", *state.AlbumID, model.MusicLifecycleActive).Count(&count).Error; err != nil {
+					return err
+				}
+				if count == 1 {
+					paths = append(paths, "/music/album/"+state.AlbumID.String())
+				}
+			}
+			if err := indexnow.EnqueuePathsTx(tx, paths...); err != nil {
+				return err
+			}
+		}
 	}
 	if revision.EditType == "creation" || !isWikiMusicEntity(revision.ContentType) {
 		return nil

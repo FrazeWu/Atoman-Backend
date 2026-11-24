@@ -9,6 +9,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/indexnow"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -52,6 +53,18 @@ func validateMusicArchiveInput(entityType, reason string) error {
 		return apperr.BadRequest("validation.invalid_request", "invalid archive entity type")
 	}
 	return nil
+}
+
+// The archive snapshot is restricted to entries that were actually public.
+func enqueueMusicArchiveIndexNow(tx *gorm.DB, entityType string, id uuid.UUID, songs []musicArchivedSongSnapshot) error {
+	paths := []string{"/music", "/music/" + entityType + "s", "/music/" + entityType + "/" + id.String()}
+	if len(songs) > 0 {
+		paths = append(paths, "/music/songs")
+		for _, song := range songs {
+			paths = append(paths, "/music/song/"+song.ID.String())
+		}
+	}
+	return indexnow.EnqueuePathsTx(tx, paths...)
 }
 
 // ArchiveMusicEntry hides catalog entries without deleting audio or edit history.
@@ -108,7 +121,10 @@ func (s *Service) ArchiveMusicEntry(user authctx.CurrentUser, entityType string,
 		if err != nil {
 			return err
 		}
-		return tx.Create(&model.AuditLog{ActorID: &user.ID, Action: "music.archive", EntityType: entityType, EntityID: &id, Reason: strings.TrimSpace(reason), Metadata: string(metadata)}).Error
+		if err := tx.Create(&model.AuditLog{ActorID: &user.ID, Action: "music.archive", EntityType: entityType, EntityID: &id, Reason: strings.TrimSpace(reason), Metadata: string(metadata)}).Error; err != nil {
+			return err
+		}
+		return enqueueMusicArchiveIndexNow(tx, entityType, id, snapshot.SongIDs)
 	})
 }
 
@@ -196,6 +212,7 @@ func (s *Service) RestoreArchivedMusicEntry(user authctx.CurrentUser, entityType
 		if log.Metadata == "" || json.Unmarshal([]byte(log.Metadata), &snapshot) != nil || snapshot.SongIDs == nil {
 			return apperr.Conflict("music.restore_missing_archive_history", "Legacy archive lacks a safe restoration snapshot")
 		}
+		restoredSongs := []musicArchivedSongSnapshot{}
 		switch entityType {
 		case "album":
 			var album model.Album
@@ -209,9 +226,13 @@ func (s *Service) RestoreArchivedMusicEntry(user authctx.CurrentUser, entityType
 				return err
 			}
 			for _, song := range snapshot.SongIDs {
-				if err := tx.Model(&model.Song{}).Where("id = ? AND album_id = ? AND lifecycle_status = ?", song.ID, id, model.MusicLifecycleRetired).
-					Updates(map[string]any{"lifecycle_status": model.MusicLifecycleActive, "status": song.Status}).Error; err != nil {
-					return err
+				result := tx.Model(&model.Song{}).Where("id = ? AND album_id = ? AND lifecycle_status = ?", song.ID, id, model.MusicLifecycleRetired).
+					Updates(map[string]any{"lifecycle_status": model.MusicLifecycleActive, "status": song.Status})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected > 0 {
+					restoredSongs = append(restoredSongs, song)
 				}
 			}
 		case "song":
@@ -235,6 +256,9 @@ func (s *Service) RestoreArchivedMusicEntry(user authctx.CurrentUser, entityType
 				return err
 			}
 		}
-		return tx.Create(&model.AuditLog{ActorID: &user.ID, Action: "music.restore", EntityType: entityType, EntityID: &id, Reason: strings.TrimSpace(reason)}).Error
+		if err := tx.Create(&model.AuditLog{ActorID: &user.ID, Action: "music.restore", EntityType: entityType, EntityID: &id, Reason: strings.TrimSpace(reason)}).Error; err != nil {
+			return err
+		}
+		return enqueueMusicArchiveIndexNow(tx, entityType, id, restoredSongs)
 	})
 }
