@@ -1,4 +1,7 @@
 # Install as an atoman-backend.service drop-in ONLY after acceptance.
+[Unit]
+Wants=atoman-papers-snapshot.service atoman-papers-launcher.service
+After=atoman-papers-snapshot.service atoman-papers-launcher.service
 [Service]
 Environment=PAPERS_COMPILE_ENABLE=1
 SupplementaryGroups=atoman-papers-api
