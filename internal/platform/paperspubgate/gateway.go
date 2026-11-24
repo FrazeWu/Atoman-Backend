@@ -60,14 +60,15 @@ type Backend interface {
 }
 
 type Gateway struct {
-	backend       Backend
-	bucket        string
-	tmp           string
-	available     func(string) (uint64, error)
-	authorizedUID uint32
-	pdfOnly       bool
-	snapshotOnly  bool
-	slots         chan struct{}
+	backend         Backend
+	bucket          string
+	tmp             string
+	available       func(string) (uint64, error)
+	authorizedUID   uint32
+	pdfOnly         bool
+	snapshotOnly    bool
+	environmentOnly bool
+	slots           chan struct{}
 }
 
 func New(backend Backend, bucket, tmp string, authorizedUID uint32) (*Gateway, error) {
@@ -107,6 +108,17 @@ func NewSnapshotGateway(backend Backend, bucket, tmp string, authorizedUID uint3
 		return nil, err
 	}
 	g.snapshotOnly = true
+	return g, nil
+}
+
+// NewEnvironmentGateway permits only operator-approved offline release
+// publication. It cannot publish user source snapshots or PDF results.
+func NewEnvironmentGateway(backend Backend, bucket, tmp string, authorizedUID uint32) (*Gateway, error) {
+	g, err := New(backend, bucket, tmp, authorizedUID)
+	if err != nil {
+		return nil, err
+	}
+	g.environmentOnly = true
 	return g, nil
 }
 
@@ -162,7 +174,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if (kind == "pdf-results") != g.pdfOnly ||
-		(g.snapshotOnly && kind != "snapshots" && kind != "_probes") {
+		(g.snapshotOnly && kind != "snapshots" && kind != "_probes") ||
+		(g.environmentOnly && kind != "environments" && kind != "trusted-releases" && kind != "trusted-archives" && kind != "_probes") {
 		http.Error(w, "publication role not authorized", http.StatusForbidden)
 		return
 	}

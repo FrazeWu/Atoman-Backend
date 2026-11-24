@@ -1,0 +1,47 @@
+[Unit]
+ConditionPathExists=/etc/atoman/papers/SECURITY_REVIEW_APPROVED
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+Description=Atoman Papers privileged pinned gVisor launcher
+After=atoman-papers-pdf.service
+Requires=atoman-papers-pdf.service
+
+[Service]
+Type=exec
+User=root
+Group=root
+UMask=0077
+Environment=PAPERS_SERVICE_ENABLE=1
+LoadCredential=papers-launcher.json:/etc/atoman/papers/launcher.json
+RuntimeDirectory=atoman-papers
+RuntimeDirectoryMode=0711
+RuntimeDirectoryPreserve=restart
+StateDirectory=atoman-papers
+StateDirectoryMode=0711
+ExecStartPre=/usr/bin/install -d -m 0710 -o root -g atoman-papers-worker /run/atoman-papers/uds
+ExecStartPre=/usr/bin/install -d -m 0710 -o root -g 65534 /var/lib/atoman-papers/runs
+ExecStartPre=/usr/bin/install -d -m 0700 -o root -g root /var/lib/atoman-papers/trusted-cache
+ExecStart=/opt/atoman/papers/bin/papers-service launcher
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=50
+NoNewPrivileges=yes
+# A separate, live-tested privileged launcher profile is required: runsc
+# and output quota mounts must be visible to the recovery process after
+# service restart. Do not add private mount namespaces without validating
+# orphan cleanup in that exact profile.
+PrivateMounts=no
+PrivateTmp=no
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+MemoryMax=1536M
+TasksMax=384
+LimitNOFILE=4096
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

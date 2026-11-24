@@ -1,0 +1,5 @@
+# Install as an atoman-backend.service drop-in ONLY after acceptance.
+[Service]
+Environment=PAPERS_COMPILE_ENABLE=1
+SupplementaryGroups=atoman-papers-api
+LoadCredential=papers-api.json:/etc/atoman/papers/api.json

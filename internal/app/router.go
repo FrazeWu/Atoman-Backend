@@ -47,6 +47,7 @@ func RegisterV1Routes(
 	s3Client *s3.S3,
 	userHub *collab.UserHub,
 	collabHub *collab.Hub,
+	paperServices ...*papers.Service,
 ) {
 	portalService := portal.NewService(db)
 	bookService := books.NewService(db).WithS3(s3Client)
@@ -149,7 +150,11 @@ func RegisterV1Routes(
 	reputation.RegisterRoutes(group.Group("/reputation"), reputation.NewService(db))
 	portal.RegisterRoutes(group.Group("/portal"), portalService)
 	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
-	papers.RegisterRoutes(group.Group("/papers"), papers.NewService(db))
+	paperService := papers.NewService(db)
+	if len(paperServices) == 1 && paperServices[0] != nil {
+		paperService = paperServices[0]
+	}
+	papers.RegisterRoutes(group.Group("/papers"), paperService)
 	lifecycle.RegisterRoutes(group.Group("/content"), lifecycle.NewService(db))
 	user_theme.RegisterRoutes(group, user_theme.NewHandler(user_theme.NewService(db)))
 	timeline.RegisterRoutes(r, db)

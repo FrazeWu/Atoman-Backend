@@ -36,6 +36,7 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/platform/indexnow"
+	"atoman/internal/platform/papersruntime"
 	"atoman/internal/platform/redisx"
 	"atoman/internal/service"
 	"atoman/internal/storage"
@@ -429,7 +430,12 @@ func main() {
 
 	userHub := collab.NewUserHub()
 	collabHub := collab.NewHub()
-	app.RegisterV1Routes(r, db, emailService, s3Client, userHub, collabHub)
+	paperService, paperErr := papersruntime.API(ctx, db)
+	if paperErr != nil {
+		// Never print credential/configuration values or provider responses.
+		log.Println("WARN: Papers compilation remains disabled: production startup verification failed")
+	}
+	app.RegisterV1Routes(r, db, emailService, s3Client, userHub, collabHub, paperService)
 
 	// 404 handler - must be last
 	r.NoRoute(func(c *gin.Context) {
