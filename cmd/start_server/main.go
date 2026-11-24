@@ -32,6 +32,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/modules/books"
 	"atoman/internal/modules/lifecycle"
+	"atoman/internal/modules/papers"
 	"atoman/internal/modules/reputation"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
@@ -393,6 +394,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	paperApprovalMailDone := papers.StartApprovalMailWorker(ctx, db, emailService)
 	rssCronDone := service.StartRSSCron(ctx, db)
 	fullTextWorkerDone := service.StartFullTextWorker(ctx, db)
 	indexNowWorkerDone := indexnow.StartWorker(ctx, db)
@@ -447,7 +449,7 @@ func main() {
 	if err := serveUntilShutdown(ctx, server, shutdownTimeout); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)
 	}
-	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, reputationWorkerDone, indexNowWorkerDone, bookProcessingWorkerDone, musicCleanupWorkerDone); err != nil {
+	if err := waitForWorkers(shutdownTimeout, paperApprovalMailDone, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, reputationWorkerDone, indexNowWorkerDone, bookProcessingWorkerDone, musicCleanupWorkerDone); err != nil {
 		log.Printf("WARN: timed out waiting for background workers to stop: %v", err)
 	}
 	log.Println("Server stopped")

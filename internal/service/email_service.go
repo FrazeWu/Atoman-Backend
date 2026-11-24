@@ -348,3 +348,36 @@ func (s *EmailService) buildVerificationEmail(code, purpose string) string {
 //    FROM_EMAIL=your-domain@resend.dev (or noreply@yourdomain.com)
 //
 // Free tier: 3,000 emails/month, 100 emails/day
+
+// SendPapersApproval sends only the fixed account-approval notice. Do not
+// accept arbitrary HTML/recipient fields from the review endpoint.
+func (s *EmailService) SendPapersApproval(ctx context.Context, to, idempotencyKey string) error {
+	if s == nil || s.resendAPIKey == "" || s.fromEmail == "" || to == "" || strings.ContainsAny(to, "\r\n") || !strings.HasPrefix(idempotencyKey, "papers-approval-") {
+		return fmt.Errorf("Papers approval mail transport is not configured")
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"from": s.fromEmail, "to": []string{to}, "subject": "Atoman Papers 使用申请已通过",
+		"html": "<p>你的 Atoman Papers 使用申请已通过。现在可以登录 Atoman，创建并管理自己的 LaTeX 论文项目。</p><p><a href=\"https://www.atoman.org/papers\">打开 Atoman Papers</a></p><p>本邮件由 Atoman 自动发送。</p>",
+	})
+	if err != nil {
+		return err
+	}
+	bounded, cancel := context.WithTimeout(ctx, emailRequestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(bounded, "POST", "https://api.resend.com/emails", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.resendAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", idempotencyKey)
+	resp, err := emailHTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("Papers approval mail transport failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("Papers approval mail provider returned %d", resp.StatusCode)
+	}
+	return nil
+}

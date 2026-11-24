@@ -36,7 +36,11 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &handler{service: service}
 	group.Use(middleware.AuthMiddleware())
 	group.GET("/access", h.access)
+	group.GET("/application", h.application)
+	group.POST("/application", h.apply)
 	admin := group.Group("/admin")
+	admin.GET("/applications", h.applications)
+	admin.POST("/applications/:id/review", h.reviewApplication)
 	admin.POST("/grants", h.grant)
 	admin.DELETE("/grants/:userId", h.revoke)
 

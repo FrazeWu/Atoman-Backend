@@ -1,5 +1,5 @@
 [Unit]
-ConditionPathExists=/etc/atoman/papers/SECURITY_REVIEW_APPROVED
+ConditionPathExists=/etc/atoman/papers/PRIVATE_STORAGE_APPROVED
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60

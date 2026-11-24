@@ -10114,6 +10114,11 @@ definitions:
       data:
         $ref: '#/definitions/notification.UnreadCountsDTO'
     type: object
+  papers.applyInput:
+    properties:
+      reason:
+        type: string
+    type: object
   papers.fileInput:
     properties:
       base_revision:
@@ -10135,6 +10140,13 @@ definitions:
       base_revision:
         type: integer
       name:
+        type: string
+    type: object
+  papers.reviewInput:
+    properties:
+      decision:
+        type: string
+      note:
         type: string
     type: object
   portal.HotArtist:
@@ -28995,6 +29007,53 @@ paths:
       summary: 查询 Papers 访问资格
       tags:
       - papers
+  /api/v1/papers/admin/applications:
+    get:
+      parameters:
+      - description: Status
+        in: query
+        name: status
+        type: string
+      - description: Page
+        in: query
+        name: page
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 管理员查看 Papers 申请列表
+      tags:
+      - papers
+  /api/v1/papers/admin/applications/{id}/review:
+    post:
+      parameters:
+      - description: Application UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Review
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.reviewInput'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 管理员审核 Papers 使用申请
+      tags:
+      - papers
   /api/v1/papers/admin/grants:
     post:
       consumes:
@@ -29055,6 +29114,40 @@ paths:
       security:
       - BearerAuth: []
       summary: 管理员撤销 Papers 资格
+      tags:
+      - papers
+  /api/v1/papers/application:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 查看当前用户的 Papers 申请
+      tags:
+      - papers
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Application
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.applyInput'
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 提交 Papers 使用申请
       tags:
       - papers
   /api/v1/papers/projects:

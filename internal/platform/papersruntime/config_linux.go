@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"path/filepath"
@@ -87,6 +88,42 @@ func validDBPassword(s string) bool {
 	return len(s) >= 32 && len(s) <= 256 && strings.TrimSpace(s) == s
 }
 
+// systemd LoadCredential grants the service a private read-only tmpfs
+// credential mount. Its root:root 0440 files are not ordinary group-readable
+// configuration files; only the named service's protected mount is accepted.
+func systemdCredential(dir, name string, owner *syscall.Stat_t, mode os.FileMode) bool {
+	if owner.Uid != 0 || owner.Gid != 0 || mode.Perm() != 0440 || filepath.Dir(dir) != "/run/credentials" {
+		return false
+	}
+	units := map[string]string{
+		"papers-api.json":                 "atoman-backend.service",
+		"papers-worker.json":              "atoman-papers-worker.service",
+		"papers-launcher.json":            "atoman-papers-launcher.service",
+		"papers-snapshot-gateway.json":    "atoman-papers-snapshot.service",
+		"papers-pdf-gateway.json":         "atoman-papers-pdf.service",
+		"papers-environment-gateway.json": "atoman-papers-environment.service",
+		"papers-publisher.json":           "atoman-papers-publisher.service",
+	}
+	if units[name] != filepath.Base(dir) {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil || resolved != dir {
+		return false
+	}
+	st, err := os.Lstat(dir)
+	if err != nil {
+		return false
+	}
+	d, ok := st.Sys().(*syscall.Stat_t)
+	if !ok || !st.IsDir() || d.Uid != 0 || d.Gid != 0 || st.Mode().Perm() != 0550 {
+		return false
+	}
+	var fs unix.Statfs_t
+	flags := int64(unix.ST_RDONLY | unix.ST_NOSUID | unix.ST_NODEV | unix.ST_NOEXEC)
+	return unix.Statfs(dir, &fs) == nil && fs.Type == unix.TMPFS_MAGIC && int64(fs.Flags)&flags == flags
+}
+
 func readCredential(dir, name string, out any) error {
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir || filepath.Base(name) != name || !strings.HasSuffix(name, ".json") {
 		return ErrConfig
@@ -98,7 +135,7 @@ func readCredential(dir, name string, out any) error {
 		return ErrConfig
 	}
 	owner, ok := st.Sys().(*syscall.Stat_t)
-	if !ok || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 ||
+	if !ok || !st.Mode().IsRegular() || (st.Mode().Perm()&0077 != 0 && !systemdCredential(dir, name, owner, st.Mode())) ||
 		(owner.Uid != 0 && owner.Uid != uint32(os.Geteuid())) || st.Size() < 2 || st.Size() > 16384 {
 		return ErrConfig
 	}

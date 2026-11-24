@@ -519,7 +519,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.CommentTimeAnchor{}, &model.CommentPublishRecord{}, &model.ContentReference{},
 		&model.TimelineEvent{}, &model.TimelinePerson{}, &model.PersonLocation{},
 		&model.TimelineRevisionProposal{}, &model.TimelineRevision{},
-		&model.PaperAccessGrant{}, &model.PaperProject{}, &model.PaperFile{}, &model.PaperFileVersion{},
+		&model.PaperAccessGrant{}, &model.PaperAccessApplication{}, &model.PaperProject{}, &model.PaperFile{}, &model.PaperFileVersion{},
 		&model.PaperCompileJob{}, &model.PaperCompileSlot{},
 	}
 	if !db.Migrator().HasTable(&model.ForumDraft{}) {

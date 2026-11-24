@@ -27592,6 +27592,82 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/admin/applications": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "管理员查看 Papers 申请列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Status",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page",
+                        "name": "page",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/papers/admin/applications/{id}/review": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "管理员审核 Papers 使用申请",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Application UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Review",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/papers.reviewInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/admin/grants": {
             "post": {
                 "security": [
@@ -27681,6 +27757,62 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/papers/application": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "查看当前用户的 Papers 申请",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "提交 Papers 使用申请",
+                "parameters": [
+                    {
+                        "description": "Application",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/papers.applyInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -54867,6 +54999,14 @@ const docTemplate = `{
                 }
             }
         },
+        "papers.applyInput": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "papers.fileInput": {
             "type": "object",
             "properties": {
@@ -54899,6 +55039,17 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "papers.reviewInput": {
+            "type": "object",
+            "properties": {
+                "decision": {
+                    "type": "string"
+                },
+                "note": {
                     "type": "string"
                 }
             }
