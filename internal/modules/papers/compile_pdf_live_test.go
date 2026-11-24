@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"atoman/internal/platform/paperspubgate"
 	"atoman/internal/platform/papersqueue"
 	"atoman/internal/platform/paperssandbox"
+	"atoman/internal/platform/papersworker"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -63,7 +65,8 @@ func TestP0RealPDFStorageAndAuthenticatedDownload(t *testing.T) {
 	require.NoError(t, err)
 	reader, err := papersassets.NewS3ConditionalAPI(readClient)
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	live := os.Getenv("PAPERS_P0_LIVE_PDF_CONFIRM") == "1"
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	probe, err := papersassets.NewPrivateS3Registry(writer, bucket, "atoman-public")
 	require.NoError(t, err)
@@ -89,35 +92,108 @@ func TestP0RealPDFStorageAndAuthenticatedDownload(t *testing.T) {
 	require.NoError(t, err)
 	results, err := papersassets.NewPDFRegistry(reader, bucket, "atoman-public")
 	require.NoError(t, err)
-	raw, err := os.ReadFile(os.Getenv("PAPERS_P0_PDF_FIXTURE"))
-	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(string(raw), "%PDF-"))
-	require.Greater(t, len(raw), 1024)
-	fixture, err := os.Open(os.Getenv("PAPERS_P0_PDF_FIXTURE"))
-	require.NoError(t, err)
-	defer fixture.Close()
+	var raw []byte
+	var fixture *os.File
+	if !live {
+		raw, err = os.ReadFile(os.Getenv("PAPERS_P0_PDF_FIXTURE"))
+		require.NoError(t, err)
+		require.True(t, strings.HasPrefix(string(raw), "%PDF-"))
+		require.Greater(t, len(raw), 1024)
+		fixture, err = os.Open(os.Getenv("PAPERS_P0_PDF_FIXTURE"))
+		require.NoError(t, err)
+		defer fixture.Close()
+	}
 
 	f := newCompileHTTPFixture(t, true)
 	q, err := papersqueue.NewWithDurablePDF(f.db, 30*time.Second)
 	require.NoError(t, err)
 	f.svc.compile.Jobs = q
 	f.svc.compile.Results = results
+	var executor *papersworker.Executor
+	workroot := ""
+	if live {
+		// Only the explicitly isolated local rootfs harness may supply these
+		// operator-pinned paths. No application or HTTP request can select them.
+		require.Zero(t, os.Geteuid())
+		workroot = os.Getenv("PAPERS_P0_LIVE_WORKROOT")
+		baseDir := filepath.Dir(workroot)
+		require.True(t, strings.HasPrefix(baseDir, "/var/tmp/atoman-papers-pdf-test."))
+		require.Equal(t, "runs", filepath.Base(workroot))
+		imagePrep := filepath.Join(baseDir, "image-prep")
+		require.NoError(t, os.Mkdir(imagePrep, 0700))
+		archive := filepath.Join(imagePrep, "normalized-rootfs.tar")
+		normal, err := papersassets.NormalizeTrustedDockerExport(ctx, filepath.Join(baseDir, "texlive-rootfs.tar"), archive)
+		require.NoError(t, err)
+		require.Greater(t, normal.SizeBytes, int64(1<<20))
+		hash, err := papersassets.HashFile(archive)
+		require.NoError(t, err)
+		env := papersassets.Environment{Version: 1, Name: "texlive-2026-p0", ImageDigest: "sha256:5613d47067c98df80d6b3206c9a731ba6e5d3eb5828fea892afd270426de4bd4", ArchiveDigest: hash, RunscRelease: "20261019.0"}
+		digest, err := f.publisher.store.PublishEnvironment(env)
+		require.NoError(t, err)
+		// Existing local P0 release fixture; real archive bytes are independently
+		// checked by the executor. Signed remote release path has its own suite.
+		f.svc.compile.EnvironmentDigest = digest
+		f.svc.compile.Release = testRelease{envDigest: digest}
+		tool := func(name string) string {
+			path, e := exec.LookPath(name)
+			require.NoError(t, e)
+			require.True(t, filepath.IsAbs(path))
+			return path
+		}
+		helper, err := filepath.Abs("../../../scripts/papers/p0-cgroup-scope-exec.sh")
+		require.NoError(t, err)
+		executor, err = papersworker.New(papersworker.Config{
+			WorkRoot: workroot, Store: f.publisher.store, ArchivePath: archive,
+			PDFPublisher: publisher, BoundedWorkspace: true,
+			RunscBinary: filepath.Join(baseDir, "bin", "runsc"), ScopeHelper: helper,
+			SystemdRunBinary: tool("systemd-run"), SystemctlBinary: tool("systemctl"), MountpointBinary: tool("mountpoint"),
+			FindmntBinary: tool("findmnt"), UmountBinary: tool("umount"), TarBinary: tool("tar"),
+			Limits:  paperssandbox.Limits{MemoryMaxBytes: 768 << 20, PIDsMax: 256, CPUQuotaMicros: 100000, CPUPeriodMicros: 100000},
+			Timeout: 2 * time.Minute, WrapperMemory: "1024M", WrapperCPUQuota: "100%", WrapperTasksMax: 256,
+		})
+		require.NoError(t, err)
+	}
 	base := f.base()
 	req := f.request("POST", base+"/compiles", `{"base_revision":1,"idempotency_key":"real-pdf-storage"}`, f.ownerToken)
 	require.Equal(t, http.StatusAccepted, req.Code, req.Body.String())
 	job := parseJob(t, req)
-	claim, ok, err := q.ClaimNext(ctx, "isolated-pdf-acceptance")
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, job.ID, claim.Job.ID)
 	path := base + "/compiles/" + job.ID.String() + "/pdf"
 	require.Equal(t, http.StatusNotFound, f.request("GET", path, "", f.ownerToken).Code)
-	ref, err := publisher.PublishPDF(ctx, job.ID, claim.Epoch, fixture)
-	require.NoError(t, err)
-	replay, err := publisher.PublishPDF(ctx, job.ID, claim.Epoch, fixture)
-	require.NoError(t, err)
-	require.Equal(t, ref, replay)
-	key := fmt.Sprintf("papers/immutable/v1/pdf-results/%s/%d/%s.pdf", job.ID, claim.Epoch, strings.TrimPrefix(ref.Digest, "sha256:"))
+	var ref papersassets.PDFRef
+	if live {
+		runner := papersqueue.Runner{Queue: q, Executor: executor}
+		worked, err := runner.Step(ctx, "isolated-live-pdf-acceptance")
+		require.NoError(t, err)
+		require.True(t, worked)
+		stored, err := q.Get(ctx, f.owner.UUID, job.ID)
+		require.NoError(t, err)
+		require.Equal(t, papersqueue.StatusSucceeded, stored.Status, stored.FailureCode)
+		ref = papersassets.PDFRef{JobID: stored.ID, Epoch: stored.LeaseEpoch, Digest: stored.PDFDigest, Size: stored.PDFSize}
+		require.NoError(t, ref.Validate())
+		raw, err = results.LoadPDF(ctx, ref)
+		require.NoError(t, err)
+		require.Greater(t, len(raw), 1024)
+		entries, err := os.ReadDir(workroot)
+		require.NoError(t, err)
+		require.Empty(t, entries, "successful real compile must remove the quota mount and workspace")
+		t.Logf("LIVE_QUEUE_GVISOR_PDF_GATEWAY_PASS bytes=%d", len(raw))
+	} else {
+		claim, ok, err := q.ClaimNext(ctx, "isolated-pdf-acceptance")
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, job.ID, claim.Job.ID)
+		ref, err = publisher.PublishPDF(ctx, job.ID, claim.Epoch, fixture)
+		require.NoError(t, err)
+		replay, err := publisher.PublishPDF(ctx, job.ID, claim.Epoch, fixture)
+		require.NoError(t, err)
+		require.Equal(t, ref, replay)
+		// The earlier fixture-only path deliberately uses synthetic evidence.
+		result := paperssandbox.Result{JobID: claim.SandboxID, Status: paperssandbox.Completed, UnderlyingStatus: paperssandbox.Completed,
+			ExitKnown: true, ExitCode: 0, SentryObserved: true, LimitsVerified: true, ArtifactVerified: true, CleanupVerified: true,
+			PDFDigest: ref.Digest, PDFSize: ref.Size}
+		require.NoError(t, q.Complete(ctx, claim, result))
+	}
+	key := fmt.Sprintf("papers/immutable/v1/pdf-results/%s/%d/%s.pdf", job.ID, ref.Epoch, strings.TrimPrefix(ref.Digest, "sha256:"))
 	denied, err := reader.AnonymousReadDenied(ctx, bucket, key)
 	require.NoError(t, err)
 	require.True(t, denied)
@@ -126,14 +202,6 @@ func TestP0RealPDFStorageAndAuthenticatedDownload(t *testing.T) {
 	require.Error(t, err)
 	_, err = readClient.DeleteObjectWithContext(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
 	require.Error(t, err)
-	// The fixture was compiled separately; this acceptance exercises the real
-	// fenced queue commit, immutable publication, and authenticated HTTP read.
-	result := paperssandbox.Result{
-		JobID: claim.SandboxID, Status: paperssandbox.Completed, UnderlyingStatus: paperssandbox.Completed,
-		ExitKnown: true, ExitCode: 0, SentryObserved: true, LimitsVerified: true, ArtifactVerified: true, CleanupVerified: true,
-		PDFDigest: ref.Digest, PDFSize: ref.Size,
-	}
-	require.NoError(t, q.Complete(ctx, claim, result))
 	status := parseJob(t, f.request("GET", base+"/compiles/"+job.ID.String(), "", f.ownerToken))
 	require.Equal(t, papersqueue.StatusSucceeded, status.Status)
 	require.True(t, status.PDFAvailable)

@@ -109,6 +109,8 @@ func compileBackendError(err error) error {
 		return apperr.Conflict("papers.idempotency_conflict", "Idempotency key was already used for different inputs")
 	case errors.Is(err, papersqueue.ErrInvalid):
 		return apperr.Conflict("papers.compile_revision_conflict", "The project changed or the compile request is invalid")
+	case errors.Is(err, papersqueue.ErrQuota):
+		return apperr.New(http.StatusTooManyRequests, "papers.compile_quota_exceeded", "Compile quota reached. Finish pending jobs or try again later.", nil)
 	case errors.Is(err, papersqueue.ErrNotReady), errors.Is(err, papersqueue.ErrBlocked):
 		return apperr.New(http.StatusServiceUnavailable, "papers.compile_queue_unavailable", "Compile queue unavailable", nil)
 	default:
@@ -212,6 +214,15 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 			return CompileJobView{}, apperr.Conflict("papers.idempotency_conflict", "Key was already accepted for a different compile")
 		}
 		return viewCompile(previous), nil
+	}
+	// Early quota rejection avoids unnecessary immutable source publications.
+	// The actual queue enforces the same rule again inside its transaction.
+	if admission, ok := s.compile.Jobs.(interface {
+		CheckAdmission(context.Context, uuid.UUID) error
+	}); ok {
+		if err := admission.CheckAdmission(ctx, user.ID); err != nil {
+			return CompileJobView{}, compileBackendError(err)
+		}
 	}
 	snapshot, err := s.ownedSnapshot(ctx, user, projectID, baseRevision)
 	if err != nil {

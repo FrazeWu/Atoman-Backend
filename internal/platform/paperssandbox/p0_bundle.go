@@ -93,7 +93,7 @@ func WriteP0BundleConfig(bundle, outputDir, jobID string, limits Limits, mode P0
 			map[string]any{"destination": "/dev/pts", "type": "devpts", "source": "devpts", "options": []string{"nosuid", "noexec"}},
 			map[string]any{"destination": "/sys", "type": "sysfs", "source": "sysfs", "options": []string{"ro", "nosuid", "noexec", "nodev"}},
 			map[string]any{"destination": "/tmp", "type": "tmpfs", "source": "tmpfs", "options": []string{"nosuid", "nodev", "mode=1777", "size=67108864"}},
-			map[string]any{"destination": "/output", "type": "bind", "source": outputDir, "options": []string{"rbind", "rw", "nosuid", "nodev"}},
+			map[string]any{"destination": "/output", "type": "bind", "source": outputDir, "options": []string{"rbind", "rw", "nosuid", "nodev", "noexec"}},
 		},
 	}
 	raw, err := json.MarshalIndent(obj, "", "  ")

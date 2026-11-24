@@ -8,12 +8,23 @@ root="$(mktemp -d /var/tmp/atoman-papers-pdf-test.XXXXXXXX)"
 suffix="$(od -An -N5 -tx1 /dev/urandom | tr -d ' \n')"
 tex_name="papers-pdf-fixture-$suffix"
 minio_id=''
+export_id=''
 cleanup(){
  local rc=$?
  trap - EXIT INT TERM
  set +e
  docker rm -f "$tex_name" >/dev/null 2>&1 || true
  if [[ -n "$minio_id" ]];then docker rm -f "$minio_id" >/dev/null 2>&1 || rc=1;fi
+ if [[ -n "$export_id" ]];then docker rm -f "$export_id" >/dev/null 2>&1 || rc=1;fi
+ # Never delete a directory that could still contain a live sandbox/mount.
+ if [[ -d "$root/runs" ]] && [[ -n "$(find "$root/runs" -mindepth 1 -maxdepth 1 -print -quit)" ]];then
+   echo "Preserving test-owned incomplete sandbox for inspection: $root" >&2
+   exit 1
+ fi
+ if awk -v p="$root" '$5==p || index($5,p"/")==1 {found=1} END{exit !found}' /proc/self/mountinfo;then
+   echo "Preserving test-owned mount: $root" >&2
+   exit 1
+ fi
  case "$root" in /var/tmp/atoman-papers-pdf-test.*) rm -rf -- "$root";; *) rc=1;;esac
  echo 'ISOLATED_PDF_TEST_CLEANUP'
  exit "$rc"
@@ -25,6 +36,27 @@ cd "$(dirname "$0")/../.."
 readonly tex='texlive/texlive@sha256:5613d47067c98df80d6b3206c9a731ba6e5d3eb5828fea892afd270426de4bd4'
 readonly image='minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e'
 docker image inspect "$tex" "$image" >/dev/null
+if [[ "${PAPERS_P0_LIVE_PDF_CONFIRM:-}" == 1 ]];then
+ [[ "$(id -u)" == 0 ]] || exit 2
+ [[ "$(df -Pk /var/tmp | awk 'NR==2{print $4}')" -ge 15728640 ]] || exit 2
+ chgrp 65534 "$root"
+ chmod 0710 "$root"
+ mkdir -m 0700 "$root/bin" "$root/runs"
+ chgrp 65534 "$root/runs"
+ chmod 0710 "$root/runs"
+ readonly runtime_url="https://storage.googleapis.com/gvisor/releases/release/20261019.0/x86_64/gvisor.tar.zstd"
+ readonly runtime_digest="bcbf431b2f9a039f6ab23bfe23986031130c0f149294978cedfd46910901deba0737d8642c848f597ed4b5c72324885db4d75ee86a1f6a90915fbe1f2f2eb915"
+ curl -fsSL --retry 2 --connect-timeout 15 --max-time 180 "$runtime_url" -o "$root/gvisor.tar.zstd"
+ printf '%s  %s\n' "$runtime_digest" "$root/gvisor.tar.zstd" | sha512sum -c -
+ tar --zstd -xf "$root/gvisor.tar.zstd" -C "$root/bin"
+ "$root/bin/runsc" --version | head -2
+ export_id="$(docker create --label atoman.test=isolated "$tex" /bin/sh)"
+ docker export "$export_id" >"$root/texlive-rootfs.tar"
+ docker rm "$export_id" >/dev/null
+ export_id=''
+ export PAPERS_P0_LIVE_WORKROOT="$root/runs"
+ echo LIVE_PINNED_IMAGE_AND_RUNTIME_READY
+fi
 timeout 60 docker run --rm --name "$tex_name" --network none --read-only --user 65534:65534 --cap-drop ALL --security-opt no-new-privileges --memory 512m --memory-swap 512m --cpus 1 --pids-limit 128 --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,mode=1777 -e HOME=/tmp -e TEXMFVAR=/tmp/texmf-var -e TEXMFCONFIG=/tmp/texmf-config --entrypoint /bin/sh "$tex" -c 'set -eu; cd /tmp; printf "%s\n" "\\documentclass{article}" "\\begin{document}" "Atoman Papers acceptance fixture. Test formula: \$E=mc^2\$." "\\end{document}" >main.tex; pdflatex -no-shell-escape -interaction=nonstopmode -halt-on-error main.tex >&2; cat main.pdf' >"$root/fixture.pdf"
 test "$(head -c 5 "$root/fixture.pdf")" = '%PDF-'
 export PAPERS_P0_PDF_FIXTURE="$root/fixture.pdf"

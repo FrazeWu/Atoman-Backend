@@ -35,6 +35,7 @@ type Config struct {
 	ArchivePath      string                    // trusted operator-pinned Docker export .tar
 	ArchiveFetcher   ArchiveFetcher            // optional P0 signed-release cache
 	PDFPublisher     papersassets.PDFPublisher // separately scoped private result gateway
+	BoundedWorkspace bool                      // mandatory when publishing persistent PDF results
 	RunscBinary      string
 	ScopeHelper      string
 	SystemdRunBinary string
@@ -84,17 +85,35 @@ func New(cfg Config) (*Executor, error) {
 			return nil, fmt.Errorf("%w: group traversal only for sandbox GID 65534", ErrInvalid)
 		}
 	}
+	if cfg.PDFPublisher != nil {
+		cfg.BoundedWorkspace = true
+	}
+	if cfg.BoundedWorkspace {
+		if os.Geteuid() != 0 {
+			return nil, ErrInvalid
+		}
+		if err := validateOwnedRoot(cfg.WorkRoot); err != nil {
+			return nil, err
+		}
+	}
 	return &Executor{cfg: cfg}, nil
 }
 
-func (e *Executor) backend(sandboxID string) (*paperssandbox.ScopeBackend, error) {
+func validSandboxID(sandboxID string) bool {
 	if len(sandboxID) != 27 || !strings.HasPrefix(sandboxID, "pc-") {
-		return nil, ErrInvalid
+		return false
 	}
 	for _, ch := range sandboxID[3:] {
 		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
-			return nil, ErrInvalid
+			return false
 		}
+	}
+	return true
+}
+
+func (e *Executor) backend(sandboxID string) (*paperssandbox.ScopeBackend, error) {
+	if !validSandboxID(sandboxID) {
+		return nil, ErrInvalid
 	}
 	root := filepath.Join(e.cfg.WorkRoot, sandboxID)
 	return paperssandbox.NewScopeBackend(paperssandbox.ScopeBackendOptions{
@@ -141,8 +160,8 @@ func mkdirGuestPath(path string) error {
 	return os.Chmod(path, 0710)
 }
 
-func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) error {
-	if c.Kind != papersqueue.ClaimRun || !c.Valid() {
+func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr error) {
+	if c.Kind != papersqueue.ClaimRun || !c.Valid() || !validSandboxID(c.SandboxID) {
 		return ErrInvalid
 	}
 	snapshot, err := e.cfg.Store.LoadCompileSnapshot(ctx, c.Job.SnapshotDigest)
@@ -173,6 +192,14 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) error {
 	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)
 	if err := mkdirGuestPath(root); err != nil {
 		return err
+	}
+	if e.cfg.BoundedWorkspace {
+		// This invocation exclusively created the root and has not started runsc.
+		defer func() {
+			if stageErr != nil {
+				stageErr = errors.Join(stageErr, removeBoundedWorkspace(root))
+			}
+		}()
 	}
 	bundle := filepath.Join(root, "bundle")
 	if err := mkdirGuestPath(bundle); err != nil {
@@ -239,51 +266,73 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) error {
 	if err := os.Chown(filepath.Join(root, "output"), 65534, 65534); err != nil {
 		return err
 	}
+	if e.cfg.BoundedWorkspace {
+		if err := mountBoundedOutput(root); err != nil {
+			return err
+		}
+	}
 	return paperssandbox.WriteP0BundleConfig(bundle, filepath.Join(root, "output"), c.SandboxID, e.cfg.Limits, paperssandbox.P0Latex)
 }
 
 func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.Result, error) {
-	if e == nil || c.Kind != papersqueue.ClaimRun {
+	if e == nil || c.Kind != papersqueue.ClaimRun || !c.Valid() || !validSandboxID(c.SandboxID) {
 		return paperssandbox.Result{}, ErrInvalid
 	}
+	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)
 	if err := e.stage(ctx, c); err != nil {
-		// No result is ever marked cleaned merely because staging failed. A
-		// crash while staging could have left a partially constructed sandbox.
-		return paperssandbox.Result{JobID: c.SandboxID,
-				Status: paperssandbox.IsolationFailed, UnderlyingStatus: paperssandbox.IsolationFailed},
-			fmt.Errorf("fail-closed sandbox staging: %w", err)
+		result := paperssandbox.Result{JobID: c.SandboxID, Status: paperssandbox.IsolationFailed, UnderlyingStatus: paperssandbox.IsolationFailed}
+		if e.cfg.BoundedWorkspace {
+			if _, statErr := os.Lstat(root); os.IsNotExist(statErr) {
+				clean, stop := context.WithTimeout(context.Background(), 10*time.Second)
+				result.CleanupVerified = e.verifyAbsentWorkspace(clean, c.SandboxID) == nil
+				stop()
+			}
+		}
+		return result, fmt.Errorf("fail-closed sandbox staging: %w", err)
 	}
 	backend, err := e.backend(c.SandboxID)
 	if err != nil {
 		return paperssandbox.Result{JobID: c.SandboxID}, err
 	}
-	supervisor := paperssandbox.NewSupervisor(backend)
-	result, err := supervisor.Run(ctx, paperssandbox.Job{ID: c.SandboxID, Timeout: e.cfg.Timeout})
-	if err != nil || result.Status != paperssandbox.Completed || !result.CleanupVerified || e.cfg.PDFPublisher == nil {
-		return result, err
-	}
-	// The sandbox and its scopes have been verified stopped before reading
-	// attacker-controlled output. Open the directory and file without
-	// following symlinks or blocking on a malicious FIFO.
-	f, err := openResultPDF(filepath.Join(e.cfg.WorkRoot, c.SandboxID, "output"))
-	if err == nil {
-		defer f.Close()
-		var ref papersassets.PDFRef
-		ref, err = e.cfg.PDFPublisher.PublishPDF(ctx, c.Job.ID, c.Epoch, f)
-		if err == nil {
-			if ref.Validate() != nil || ref.JobID != c.Job.ID || ref.Epoch != c.Epoch {
-				err = ErrInvalid
-			} else {
-				result.PDFDigest, result.PDFSize = ref.Digest, ref.Size
-			}
+	if e.cfg.BoundedWorkspace {
+		if err := validateQuota(root); err != nil {
+			return paperssandbox.Result{JobID: c.SandboxID, Status: paperssandbox.IsolationFailed}, err
 		}
 	}
-	if err != nil {
-		result.Status = paperssandbox.MissingArtifact
-		result.FailureDetail = "verified PDF persistence failed"
-		return result, err
+	supervisor := paperssandbox.NewSupervisor(backend)
+	result, runErr := supervisor.Run(ctx, paperssandbox.Job{ID: c.SandboxID, Timeout: e.cfg.Timeout})
+	if runErr == nil && result.Status == paperssandbox.Completed && result.CleanupVerified && e.cfg.PDFPublisher != nil {
+		// Cleanup of live processes precedes any reads of guest-owned output.
+		f, err := openResultPDF(filepath.Join(root, "output"))
+		if err == nil {
+			var ref papersassets.PDFRef
+			ref, err = e.cfg.PDFPublisher.PublishPDF(ctx, c.Job.ID, c.Epoch, f)
+			closeErr := f.Close()
+			err = errors.Join(err, closeErr)
+			if err == nil {
+				if ref.Validate() != nil || ref.JobID != c.Job.ID || ref.Epoch != c.Epoch {
+					err = ErrInvalid
+				} else {
+					result.PDFDigest, result.PDFSize = ref.Digest, ref.Size
+				}
+			}
+		}
+		if err != nil {
+			result.Status = paperssandbox.MissingArtifact
+			result.FailureDetail = "verified PDF persistence failed"
+			runErr = err
+		}
 	}
-	return result, nil
+	if e.cfg.BoundedWorkspace && result.CleanupVerified {
+		if err := removeBoundedWorkspace(root); err != nil {
+			result.CleanupVerified = false
+			result.Status = paperssandbox.CleanupFailed
+			result.FailureDetail = "owned output/workspace cleanup not verified"
+			result.PDFDigest, result.PDFSize = "", 0
+			runErr = errors.Join(runErr, err)
+		}
+	}
+	return result, runErr
 }
 
 func openResultPDF(dir string) (*os.File, error) {
@@ -309,12 +358,24 @@ func openResultPDF(dir string) (*os.File, error) {
 // on source/environment archives being available: cleanup must work even
 // after the original input was removed or corrupted.
 func (e *Executor) Reap(ctx context.Context, c papersqueue.Claim) error {
-	if e == nil || c.Kind != papersqueue.ClaimRecover || !c.Valid() {
+	if e == nil || c.Kind != papersqueue.ClaimRecover || !c.Valid() || !validSandboxID(c.SandboxID) {
 		return ErrInvalid
+	}
+	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)
+	if e.cfg.BoundedWorkspace {
+		if _, err := os.Lstat(root); os.IsNotExist(err) {
+			return e.verifyAbsentWorkspace(ctx, c.SandboxID)
+		}
 	}
 	backend, err := e.backend(c.SandboxID)
 	if err != nil {
 		return err
 	}
-	return backend.Cleanup(ctx, paperssandbox.Job{ID: c.SandboxID, Timeout: e.cfg.Timeout})
+	if err := backend.Cleanup(ctx, paperssandbox.Job{ID: c.SandboxID, Timeout: e.cfg.Timeout}); err != nil {
+		return err
+	}
+	if e.cfg.BoundedWorkspace {
+		return removeBoundedWorkspace(root)
+	}
+	return nil
 }

@@ -117,6 +117,15 @@ func (q *Queue) Submit(ctx context.Context, i SubmitInput) (model.PaperCompileJo
 		if seeded != 1 {
 			return ErrNotReady
 		}
+		// Serialize strict admission across all projects/owners. Lock order
+		// matches ClaimNext/Complete (slot before job/project). Never hold
+		// this lock while publishing objects or executing a sandbox.
+		if q.requirePDF {
+			var slot model.PaperCompileSlot
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=1").Take(&slot).Error; err != nil {
+				return err
+			}
+		}
 		var project model.PaperProject
 		lookup := tx.Clauses(clause.Locking{Strength: "SHARE"}).
 			Where("id = ? AND owner_id = ? AND deleted_at IS NULL", i.ProjectID, i.OwnerID).First(&project)
@@ -150,6 +159,11 @@ func (q *Queue) Submit(ctx context.Context, i SubmitInput) (model.PaperCompileJo
 		// valid even if the document has since advanced to a newer revision.
 		if project.HeadRevision != i.SourceRevision {
 			return fmt.Errorf("%w: changed project revision", ErrInvalid)
+		}
+		if q.requirePDF {
+			if err := checkAdmission(tx, i.OwnerID); err != nil {
+				return err
+			}
 		}
 		job = model.PaperCompileJob{
 			ID: uuid.New(), ProjectID: i.ProjectID, OwnerID: i.OwnerID, SourceRevision: i.SourceRevision,

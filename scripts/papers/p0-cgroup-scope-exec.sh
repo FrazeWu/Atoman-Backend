@@ -25,7 +25,14 @@ rc=0
 timeout --signal=TERM --kill-after=6s "$timeout_seconds" \
   "$runtime" --systemd-cgroup --root="$root/state" --platform=systrap \
   --network=none --overlay2=none \
-  run --bundle "$bundle" "$container_id" > "$log_file" 2>&1 &
+  run --bundle "$bundle" "$container_id" 2>&1 | (
+    # Drain all output but retain at most 1 MiB of guest-controlled diagnostics.
+    # Preserve pipeline/timeout exit status; never terminate TeX via SIGPIPE.
+    head -c 1048576 > "$log_file"
+    log_rc=$?
+    cat >/dev/null
+    exit "$log_rc"
+  ) &
 wait_pid=$!
 
 found=0
