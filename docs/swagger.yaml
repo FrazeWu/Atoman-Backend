@@ -29354,6 +29354,26 @@ paths:
       summary: Download a previously verified, durable, owner-scoped compile PDF
       tags:
       - papers
+  /api/v1/papers/projects/{id}/export:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/zip
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+      security:
+      - BearerAuth: []
+      summary: 下载当前论文项目的 ZIP 源码
+      tags:
+      - papers
   /api/v1/papers/projects/{id}/files:
     get:
       parameters:
@@ -29500,6 +29520,31 @@ paths:
       security:
       - BearerAuth: []
       summary: 乐观锁保存 LaTeX 文本内容
+      tags:
+      - papers
+  /api/v1/papers/projects/import:
+    post:
+      consumes:
+      - application/zip
+      parameters:
+      - description: Project name
+        in: query
+        name: name
+        required: true
+        type: string
+      - description: Root main TeX filename
+        in: query
+        name: main_file
+        type: string
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 从 ZIP 导入论文项目
       tags:
       - papers
   /api/v1/podcast/bookmarks:

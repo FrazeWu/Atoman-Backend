@@ -48,6 +48,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.Use(h.requireInvite)
 	private.GET("/projects", h.projects)
 	private.POST("/projects", h.createProject)
+	private.POST("/projects/import", h.importProject)
+	private.GET("/projects/:id/export", h.exportProject)
 	private.GET("/projects/:id", h.project)
 	private.PATCH("/projects/:id", h.renameProject)
 	private.DELETE("/projects/:id", h.deleteProject)

@@ -242,9 +242,9 @@ func TestCompileAPIRejectsUnsupportedSourceAndRevisionRace(t *testing.T) {
 	f := newCompileHTTPFixture(t, true)
 	base := f.base()
 	ownerCtx := authctx.CurrentUser{ID: f.owner.UUID, Role: authctx.RoleUser}
-	_, err := f.svc.CreateFile(ownerCtx, f.project.ID, "notes.md", "A Markdown note")
+	_, err := f.svc.CreateFile(ownerCtx, f.project.ID, ".latexmkrc", "# editor-only configuration")
 	require.NoError(t, err)
-	reject := f.request("POST", base+"/compiles", `{"base_revision":2,"idempotency_key":"md-rejected"}`, f.ownerToken)
+	reject := f.request("POST", base+"/compiles", `{"base_revision":2,"idempotency_key":"config-rejected"}`, f.ownerToken)
 	require.Equal(t, http.StatusUnprocessableEntity, reject.Code, reject.Body.String())
 	require.Equal(t, 0, f.publisher.calls)
 	// An out-of-date revision is rejected before any external S3 publication.

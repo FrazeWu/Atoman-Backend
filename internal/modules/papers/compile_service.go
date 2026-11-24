@@ -160,30 +160,38 @@ func (s *Service) ownedSnapshot(ctx context.Context, user authctx.CurrentUser, p
 			return err
 		}
 		if stats.FileCount < 1 || stats.FileCount > 64 || stats.TotalBytes > papersassets.MaxSnapshotBytes {
-			return apperr.Unprocessable("papers.compile_source_limit", "Trusted compilation supports at most 64 files and 4 MiB of source text")
+			return apperr.Unprocessable("papers.compile_source_limit", "Trusted compilation supports at most 64 files and 4 MiB of encoded source data")
 		}
 		var files []model.PaperFile
 		if err := tx.Where("project_id = ? AND deleted_at IS NULL", projectID).Order("path ASC").Find(&files).Error; err != nil {
 			return err
 		}
 		snapshot = papersassets.Snapshot{Version: 1, ProjectID: projectID, Revision: project.HeadRevision, Files: make([]papersassets.SourceFile, 0, len(files))}
-		foundMain := false
+		mainPath := ""
 		for _, f := range files {
-			if f.Kind != "text" || hashText(f.Content) != f.SHA256 {
-				return apperr.Unprocessable("papers.invalid_compile_input", "Source file is not a verified text file")
+			if (f.Kind != "text" && f.Kind != "binary") || hashText(f.Content) != f.SHA256 {
+				return apperr.Unprocessable("papers.invalid_compile_input", "Source file integrity verification failed")
 			}
-			if f.ID == project.MainFileID && f.Path == "main.tex" {
-				foundMain = true
+			kind := ""
+			if f.Kind == "binary" {
+				kind = "binary"
 			}
-			snapshot.Files = append(snapshot.Files, papersassets.SourceFile{Path: f.Path, Content: f.Content})
+			if f.ID == project.MainFileID && f.Kind == "text" {
+				mainPath = f.Path
+			}
+			snapshot.Files = append(snapshot.Files, papersassets.SourceFile{Path: f.Path, Content: f.Content, Kind: kind})
 		}
-		if !foundMain || snapshot.Validate() != nil {
-			// The editor supports Markdown/Unicode paths, but the P0 trusted
-			// snapshot format intentionally does not. Reject explicitly
-			// rather than dropping unsupported files or silently compiling.
-			return apperr.Unprocessable("papers.unsupported_compile_sources",
-				"Project includes unsupported or oversized TeX source paths/files; main.tex is required")
+		if err := addCompileEntrypoint(&snapshot, mainPath); err != nil {
+			return err
 		}
+		if snapshot.Validate() != nil {
+			return apperr.Unprocessable("papers.unsupported_compile_sources", "Project contains unsupported or oversized source files")
+		}
+		raw, err := json.Marshal(snapshot)
+		if err != nil || len(raw) > papersassets.MaxSnapshotBytes+65536 {
+			return apperr.Unprocessable("papers.compile_source_limit", "Serialized project exceeds the compile source limit")
+		}
+
 		return nil
 	})
 	return snapshot, err
