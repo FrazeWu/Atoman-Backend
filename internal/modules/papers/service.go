@@ -281,6 +281,11 @@ func (s *Service) DeleteProject(user authctx.CurrentUser, id uuid.UUID) error {
 		if err := tx.Where("project_id=?", id).Delete(&model.PaperProjectMember{}).Error; err != nil {
 			return err
 		}
+		// Invalidate collaboration epochs on project trash/restore. Accepted
+		// canonical text and immutable file versions remain available.
+		if err := tx.Where("project_id=?", id).Delete(&model.PaperCollaborativeDocument{}).Error; err != nil {
+			return err
+		}
 
 		return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "papers.project.delete", EntityType: "paper_project", EntityID: &id})
 	})

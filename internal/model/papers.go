@@ -86,3 +86,24 @@ type PaperProjectMember struct {
 }
 
 func (PaperProjectMember) TableName() string { return "paper_project_members" }
+
+// PaperCollaborativeDocument is a bounded authoritative Yjs checkpoint. Each
+// accepted text change is committed to PaperFile and PaperFileVersion in the
+// same transaction. An epoch cannot be reused after canonical history changes.
+type PaperCollaborativeDocument struct {
+	FileID       uuid.UUID `gorm:"type:uuid;primaryKey" json:"-"`
+	ProjectID    uuid.UUID `gorm:"type:uuid;not null;index" json:"-"`
+	Epoch        uuid.UUID `gorm:"type:uuid;not null;uniqueIndex" json:"-"`
+	Sequence     int64     `gorm:"not null" json:"-"`
+	FileRevision int64     `gorm:"not null" json:"-"`
+	FileSHA256   string    `gorm:"type:char(64);not null" json:"-"`
+	Path         string    `gorm:"type:varchar(512);not null" json:"-"`
+	State        []byte    `gorm:"type:bytea;not null" json:"-"`
+	StateVector  []byte    `gorm:"type:bytea;not null" json:"-"`
+	StateSHA256  string    `gorm:"type:char(64);not null" json:"-"`
+	VectorSHA256 string    `gorm:"type:char(64);not null" json:"-"`
+	CreatedAt    time.Time `json:"-"`
+	UpdatedAt    time.Time `json:"-"`
+}
+
+func (PaperCollaborativeDocument) TableName() string { return "paper_collaborative_documents" }

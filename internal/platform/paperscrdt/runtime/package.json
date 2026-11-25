@@ -1,0 +1,9 @@
+{
+  "name": "atoman-papers-crdt-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node --test engine.test.mjs"},
+  "engines": {"node": ">=20"},
+  "dependencies": {"yjs": "13.6.33"}
+}

@@ -17,7 +17,7 @@ func TestPapersPrivateAccessAndRevisionCAS(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.AuditLog{}, &model.PaperAccessGrant{},
-		&model.PaperProject{}, &model.PaperProjectMember{}, &model.PaperFile{}, &model.PaperFileVersion{},
+		&model.PaperProject{}, &model.PaperProjectMember{}, &model.PaperCollaborativeDocument{}, &model.PaperFile{}, &model.PaperFileVersion{},
 	)
 	admin := model.User{Username: "papers-admin-" + uuid.NewString(), Email: uuid.NewString() + "@example.test", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
 	owner := model.User{Username: "papers-owner-" + uuid.NewString(), Email: uuid.NewString() + "@example.test", Password: "hash", Role: authctx.RoleUser, IsActive: true}
