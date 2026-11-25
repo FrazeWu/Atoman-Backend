@@ -273,3 +273,34 @@ Y.Text and renders peer selections without copying the selected source.
 The production gateway remains disabled; reconnect, offline recovery,
 collaborative undo, compilation fencing and multi-process load acceptance
 remain outstanding.
+
+## Stage 8.5: compilation and named checkpoint coordination
+
+No new compile authorization or source-upload endpoint is introduced.
+The existing owner-only compile submission accepts the exact project
+revision obtained from the durable collaboration acknowledgement.
+Its project SHARE lock excludes concurrent canonical writes during
+snapshot construction. Publication and queue admission retain their
+existing digest and revision checks: a collaborative commit during
+publication cannot enqueue a new stale task. Previously accepted jobs
+remain bound to their immutable snapshots, even after later edits or
+project restoration. Client-local pending updates are not server inputs.
+
+Named project checkpoint creation uses the same owner-only project
+revision fence and includes only canonical accepted file versions.
+The workspace requires leaving the local collaboration panel before
+restoring an entire project. Other clients may still be connected;
+the existing restore transaction increments file revisions (including
+unchanged restored files), removes active paths not in the manifest,
+and creates the safety checkpoint atomically. Their old epochs are
+therefore rejected by collaboration reads and writes, and their live
+sockets close upon detection. Local offline drafts cannot be replayed
+into the new epoch. Compilation and snapshot creation do not silently
+flush another member's unconfirmed browser state.
+
+TestDurableCollabCompileAndSnapshotRevisionFences exercises the actual
+Yjs engine and isolated PostgreSQL, including an uncommitted concurrent
+merge in another file, publication races, owner authorization, snapshot
+rollback fencing of two document epochs and immutable compile artifacts.
+This verifies source and queue coordination, not live TeX execution
+or production deployment.
