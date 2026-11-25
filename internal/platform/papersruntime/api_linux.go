@@ -26,10 +26,24 @@ func API(ctx context.Context, db *gorm.DB) (*papers.Service, error) {
 }
 
 func APIWithWorker(ctx context.Context, db *gorm.DB) (*papers.Service, <-chan struct{}, error) {
-	if os.Getenv("PAPERS_COMPILE_ENABLE") != "1" {
-		return papers.NewService(db), closedWorker(), nil
+	var svc *papers.Service
+	var done <-chan struct{}
+	var err error
+	if os.Getenv("PAPERS_COMPILE_ENABLE") == "1" {
+		svc, done, err = newEnabledAPI(ctx, db)
+	} else {
+		svc, done = papers.NewService(db), closedWorker()
 	}
-	return newEnabledAPI(ctx, db)
+	// Independent gates: a missing or broken CRDT runtime must never
+	// disable the ordinary editor or an already verified compile worker.
+	if os.Getenv("PAPERS_COLLABORATION_ENABLE") == "1" {
+		if collaborationErr := configureApprovedCollaboration(ctx, svc); collaborationErr != nil {
+			log.Println("WARN: Papers collaboration remains disabled: production startup verification failed")
+		} else {
+			log.Println("PAPERS_COLLABORATION_READY")
+		}
+	}
+	return svc, done, err
 }
 
 func closedWorker() <-chan struct{} {

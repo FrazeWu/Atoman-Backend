@@ -34,6 +34,10 @@ func TestRunCreatesCoreSchema(t *testing.T) {
 		&model.FeedSource{},
 		&model.DMConversation{},
 		&model.DiscussionTarget{},
+		&model.PaperProjectMember{},
+		&model.PaperCollaborativeDocument{},
+		&model.PaperProjectSnapshot{},
+		&model.PaperCompileSourceMap{},
 		&model.PaperCompileJob{},
 		&model.PaperCompileSlot{},
 	} {
@@ -46,6 +50,17 @@ func TestRunCreatesCoreSchema(t *testing.T) {
 	}
 	if !db.Migrator().HasIndex("paper_compile_jobs", "idx_paper_compile_ready") {
 		t.Fatal("expected Papers compile priority index")
+	}
+	for _, column := range []string{"file_id", "project_id", "epoch", "sequence", "file_revision", "file_sha256", "path", "state", "state_vector", "state_sha256", "vector_sha256", "created_at", "updated_at"} {
+		if !db.Migrator().HasColumn(&model.PaperCollaborativeDocument{}, column) {
+			t.Fatalf("missing collaboration column %s", column)
+		}
+	}
+	if !db.Migrator().HasIndex(&model.PaperCollaborativeDocument{}, "idx_paper_collaborative_documents_epoch") {
+		t.Fatal("expected unique collaboration epoch index")
+	}
+	if !db.Migrator().HasIndex(&model.PaperCollaborativeDocument{}, "idx_paper_collaborative_documents_project_id") {
+		t.Fatal("expected collaboration project index")
 	}
 	var slot model.PaperCompileSlot
 	if err := db.First(&slot, "id = ?", 1).Error; err != nil {

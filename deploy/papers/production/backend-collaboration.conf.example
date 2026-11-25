@@ -1,0 +1,10 @@
+# Separate opt-in drop-in. Do not install before operator acceptance.
+# The root-owned CRDT_RUNTIME_APPROVED file must contain exactly the
+# approved JSON document described in the release runbook.
+[Unit]
+Wants=atoman-papers-crdt.socket
+After=atoman-papers-crdt.socket
+
+[Service]
+Environment=PAPERS_COLLABORATION_ENABLE=1
+LoadCredential=papers-crdt.json:/etc/atoman/papers/CRDT_RUNTIME_APPROVED

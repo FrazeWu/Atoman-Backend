@@ -101,6 +101,7 @@ func systemdCredential(dir, name string, owner *syscall.Stat_t, mode os.FileMode
 	}
 	units := map[string]string{
 		"papers-api.json":                 "atoman-backend.service",
+		"papers-crdt.json":                "atoman-backend.service",
 		"papers-worker.json":              "atoman-papers-worker.service",
 		"papers-launcher.json":            "atoman-papers-launcher.service",
 		"papers-snapshot-gateway.json":    "atoman-papers-snapshot.service",

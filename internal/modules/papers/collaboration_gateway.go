@@ -57,9 +57,8 @@ type collaborationGateway struct {
 	presence   *presenceRegistry
 }
 
-// ConfigureCollaboration is startup-only dependency injection. Normal
-// production composition deliberately never calls it in this stage. The
-// only supported production candidate is the isolated Unix worker.
+// configureCollaboration is startup-only dependency injection. Production
+// reaches it only through the approved isolated Unix worker startup probe.
 func (s *Service) configureCollaboration(engine collabEngine) error {
 	if s == nil || s.db == nil || engine == nil || s.collaboration != nil {
 		return paperscrdt.ErrUnavailable

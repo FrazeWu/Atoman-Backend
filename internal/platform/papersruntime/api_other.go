@@ -15,6 +15,9 @@ func API(_ context.Context, db *gorm.DB) (*papers.Service, error) {
 	if os.Getenv("PAPERS_COMPILE_ENABLE") == "1" {
 		return svc, errors.New("Papers compilation requires the approved Linux deployment")
 	}
+	if os.Getenv("PAPERS_COLLABORATION_ENABLE") == "1" {
+		return svc, errors.New("Papers collaboration requires the approved Linux deployment")
+	}
 	return svc, nil
 }
 
