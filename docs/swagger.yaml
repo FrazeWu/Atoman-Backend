@@ -10172,6 +10172,11 @@ definitions:
       user_id:
         type: string
     type: object
+  papers.memberInput:
+    properties:
+      role:
+        type: string
+    type: object
   papers.projectInput:
     properties:
       base_revision:
@@ -29688,6 +29693,86 @@ paths:
       security:
       - BearerAuth: []
       summary: 原子上传或管理论文项目文件
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/members:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List project members (owner only)
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/members/{userId}:
+    delete:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Account UUID
+        in: path
+        name: userId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke private project membership (owner only)
+      tags:
+      - papers
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Eligible account UUID
+        in: path
+        name: userId
+        required: true
+        type: string
+      - description: editor or viewer
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.memberInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Grant or change private project membership (owner only)
       tags:
       - papers
   /api/v1/papers/projects/{id}/restore:

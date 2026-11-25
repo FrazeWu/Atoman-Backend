@@ -24,6 +24,7 @@ type PaperProject struct {
 	Name         string    `json:"name" gorm:"type:varchar(160);not null"`
 	MainFileID   uuid.UUID `json:"main_file_id" gorm:"type:uuid"`
 	HeadRevision int64     `json:"head_revision" gorm:"not null;default:1"`
+	AccessRole   string    `json:"access_role,omitempty" gorm:"-"`
 }
 
 func (PaperProject) TableName() string { return "paper_projects" }
@@ -72,3 +73,16 @@ type PaperProjectSnapshot struct {
 }
 
 func (PaperProjectSnapshot) TableName() string { return "paper_project_snapshots" }
+
+// PaperProjectMember grants access to a particular private project. A member
+// must also retain a valid module-level invitation. Ownership remains on the
+// project, and is never granted through this table.
+type PaperProjectMember struct {
+	ProjectID uuid.UUID `gorm:"type:uuid;primaryKey" json:"-"`
+	UserID    uuid.UUID `gorm:"type:uuid;primaryKey;index" json:"user_id"`
+	Role      string    `gorm:"type:varchar(16);not null" json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (PaperProjectMember) TableName() string { return "paper_project_members" }

@@ -24,6 +24,9 @@ type FileVersionSummary struct {
 }
 
 func (s *Service) ListFileVersions(user authctx.CurrentUser, projectID, fileID uuid.UUID, before int64) ([]FileVersionSummary, error) {
+	if _, err := s.GetProject(user, projectID); err != nil {
+		return nil, err
+	}
 	file, err := s.GetFile(user, projectID, fileID)
 	if err != nil {
 		return nil, err
@@ -42,6 +45,9 @@ func (s *Service) ListFileVersions(user authctx.CurrentUser, projectID, fileID u
 
 func (s *Service) GetFileVersion(user authctx.CurrentUser, projectID, fileID uuid.UUID, revision int64) (model.PaperFileVersion, error) {
 	var result model.PaperFileVersion
+	if _, err := s.GetProject(user, projectID); err != nil {
+		return result, err
+	}
 	file, err := s.GetFile(user, projectID, fileID)
 	if err != nil {
 		return result, err

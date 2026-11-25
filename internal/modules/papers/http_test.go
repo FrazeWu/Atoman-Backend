@@ -21,7 +21,7 @@ import (
 func TestPapersHTTPRequiresInviteAndOwnership(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.AuditLog{}, &model.PaperAccessGrant{}, &model.PaperProject{}, &model.PaperFile{}, &model.PaperFileVersion{})
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.AuditLog{}, &model.PaperAccessGrant{}, &model.PaperProject{}, &model.PaperProjectMember{}, &model.PaperFile{}, &model.PaperFileVersion{})
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
 	admin := model.User{Username: "paper-admin", Email: uuid.NewString() + "@example.org", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}

@@ -154,8 +154,23 @@ func (s *Service) ListProjects(user authctx.CurrentUser) ([]model.PaperProject, 
 	if err := s.RequireAccess(user); err != nil {
 		return nil, err
 	}
-	var projects []model.PaperProject
-	err := s.db.Where("owner_id = ?", user.ID).Order("updated_at DESC, id DESC").Find(&projects).Error
+	// Use one statement so each listed role and visible project come from
+	// the same database snapshot. A later request rechecks authorization.
+	var rows []struct {
+		model.PaperProject
+		MemberRole string
+	}
+	err := s.db.Model(&model.PaperProject{}).
+		Select("paper_projects.*, CASE WHEN paper_projects.owner_id = ? THEN 'owner' ELSE m.role END AS member_role", user.ID).
+		Joins("LEFT JOIN paper_project_members m ON m.project_id=paper_projects.id AND m.user_id=? AND m.role IN ('editor','viewer')", user.ID).
+		Where("paper_projects.owner_id=? OR m.user_id IS NOT NULL", user.ID).
+		Order("paper_projects.updated_at DESC,paper_projects.id DESC").Find(&rows).Error
+	projects := make([]model.PaperProject, 0, len(rows))
+	for _, row := range rows {
+		p := row.PaperProject
+		p.AccessRole = row.MemberRole
+		projects = append(projects, p)
+	}
 	return projects, err
 }
 
@@ -262,32 +277,45 @@ func (s *Service) DeleteProject(user authctx.CurrentUser, id uuid.UUID) error {
 		if err := tx.Delete(&p).Error; err != nil {
 			return err
 		}
+		// Restoring a trashed project must not silently re-share it.
+		if err := tx.Where("project_id=?", id).Delete(&model.PaperProjectMember{}).Error; err != nil {
+			return err
+		}
+
 		return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "papers.project.delete", EntityType: "paper_project", EntityID: &id})
 	})
 }
 
 func (s *Service) ListFiles(user authctx.CurrentUser, projectID uuid.UUID) ([]model.PaperFile, error) {
-	if _, err := s.GetProject(user, projectID); err != nil {
+	if err := s.RequireAccess(user); err != nil {
 		return nil, err
 	}
-	var files []model.PaperFile
-	err := s.db.Select("id", "project_id", "path", "kind", "sha256", "revision", "created_at", "updated_at").
-		Where("project_id = ?", projectID).Order("path ASC").Find(&files).Error
+	files := make([]model.PaperFile, 0)
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if _, err := s.lockAccessible(tx, user, projectID, false); err != nil {
+			return err
+		}
+		return tx.Select("id", "project_id", "path", "kind", "sha256", "revision", "created_at", "updated_at").Where("project_id=?", projectID).Order("path ASC").Find(&files).Error
+	})
 	return files, err
 }
-
 func (s *Service) GetFile(user authctx.CurrentUser, projectID, fileID uuid.UUID) (model.PaperFile, error) {
-	if _, err := s.GetProject(user, projectID); err != nil {
-		return model.PaperFile{}, err
-	}
 	var file model.PaperFile
-	err := s.db.Where("id = ? AND project_id = ?", fileID, projectID).First(&file).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return file, apperr.NotFound("papers.file_not_found", "File not found")
+	if err := s.RequireAccess(user); err != nil {
+		return file, err
 	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if _, err := s.lockAccessible(tx, user, projectID, false); err != nil {
+			return err
+		}
+		err := tx.Where("id=? AND project_id=?", fileID, projectID).First(&file).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("papers.file_not_found", "File not found")
+		}
+		return err
+	})
 	return file, err
 }
-
 func (s *Service) CreateFile(user authctx.CurrentUser, projectID uuid.UUID, filename, content string) (model.PaperFile, error) {
 	if err := s.RequireAccess(user); err != nil {
 		return model.PaperFile{}, err
@@ -364,7 +392,7 @@ func (s *Service) SaveFile(user authctx.CurrentUser, projectID, fileID uuid.UUID
 	}
 	var file model.PaperFile
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		p, err := s.lockOwned(tx, user, projectID)
+		p, err := s.lockAccessible(tx, user, projectID, true)
 		if err != nil {
 			return err
 		}

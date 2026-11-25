@@ -101,7 +101,7 @@ func newCompileHTTPFixture(t *testing.T, enabled bool) *compileHTTPFixture {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.AuthSession{}, &model.AuditLog{}, &model.PaperAccessGrant{},
-		&model.PaperProject{}, &model.PaperFile{}, &model.PaperFileVersion{}, &model.PaperProjectSnapshot{},
+		&model.PaperProject{}, &model.PaperProjectMember{}, &model.PaperFile{}, &model.PaperFileVersion{}, &model.PaperProjectSnapshot{},
 		&model.PaperCompileJob{}, &model.PaperCompileSlot{})
 	require.NoError(t, db.Create(&model.PaperCompileSlot{ID: 1}).Error)
 	middleware.SetAuthDB(db)

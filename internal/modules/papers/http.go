@@ -31,7 +31,7 @@ type grantInput struct {
 
 // RegisterRoutes mounts all Papers routes behind Atoman session authentication.
 // Admin invitation management is separately role-gated, while every project
-// endpoint checks the per-user module grant and project ownership server-side.
+// endpoint checks the per-user module grant and project ownership or explicit project membership server-side.
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &handler{service: service}
 	group.Use(func(c *gin.Context) {
@@ -58,6 +58,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.POST("/projects/import", h.importProject)
 	private.GET("/projects/:id/export", h.exportProject)
 	private.GET("/projects/:id", h.project)
+	private.GET("/projects/:id/members", h.members)
+	private.PUT("/projects/:id/members/:userId", h.setMember)
+	private.DELETE("/projects/:id/members/:userId", h.removeMember)
 	private.PATCH("/projects/:id", h.renameProject)
 	private.DELETE("/projects/:id", h.deleteProject)
 	private.GET("/projects/:id/files", h.files)
@@ -246,7 +249,7 @@ func (h *handler) project(c *gin.Context) {
 	if !ok {
 		return
 	}
-	p, err := h.service.GetProject(user, id)
+	p, err := h.service.ReadProject(user, id)
 	if err != nil {
 		httpx.Error(c, err)
 		return
