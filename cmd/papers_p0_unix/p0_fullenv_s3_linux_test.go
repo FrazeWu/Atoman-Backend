@@ -34,9 +34,17 @@ func setP0TestReader(t *testing.T) (string, func()) {
 	}
 	return root, func() {}
 }
-func TestP0LauncherS3ReaderCanBeConstructedWithoutPublisherCredentials(t *testing.T) {
+func TestP0LauncherS3ReaderRequiresRootOwnedPublisherKey(t *testing.T) {
 	root, _ := setP0TestReader(t)
 	reader, cache, err := fullenvAssets(root)
+	// t.TempDir and its contents are owned by the test's effective user.
+	// A non-root CI job must verify the rejection, not weaken the real gate.
+	if os.Geteuid() != 0 {
+		require.ErrorContains(t, err, "untrusted pinned publisher key file")
+		require.Nil(t, reader)
+		require.Nil(t, cache)
+		return
+	}
 	require.NoError(t, err)
 	require.NotNil(t, reader)
 	require.NotNil(t, cache)

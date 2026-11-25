@@ -67,6 +67,11 @@ jobs:
             echo "::error title=go test failed packages::$(echo "$pkgs" | cut -c1-170)"
             exit "$rc"
           fi
+      - name: Verify root-owned Papers trust fixture
+        if: github.event_name == 'push'
+        run: |
+          go test -c -o "$RUNNER_TEMP/papers-trust.test" ./cmd/papers_p0_unix
+          sudo -n env -i PATH=/usr/bin:/bin "$RUNNER_TEMP/papers-trust.test" -test.run '^TestP0LauncherS3ReaderRequiresRootOwnedPublisherKey$' -test.v
       - name: Check reachable Go vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - run: go vet ./...
