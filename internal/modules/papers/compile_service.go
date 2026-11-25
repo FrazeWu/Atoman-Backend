@@ -55,6 +55,7 @@ type CompileRuntime struct {
 	Jobs              CompileJobs
 	Results           papersassets.PDFReader
 	EnvironmentDigest string // Operator pin; NEVER accepted from HTTP JSON.
+	EnableLuaLaTeX    bool   // Explicit reviewed runtime feature gate, never accepted from HTTP.
 }
 
 func (r *CompileRuntime) valid() bool {
@@ -76,6 +77,7 @@ type CompileJobView struct {
 	ID              uuid.UUID                        `json:"id"`
 	ProjectID       uuid.UUID                        `json:"project_id"`
 	SourceRevision  int64                            `json:"source_revision"`
+	Compiler        string                           `json:"compiler"`
 	Status          string                           `json:"status"`
 	Attempts        int                              `json:"attempts"`
 	MaxAttempts     int                              `json:"max_attempts"`
@@ -89,8 +91,9 @@ type CompileJobView struct {
 }
 
 func viewCompile(job model.PaperCompileJob) CompileJobView {
+	compiler, _ := papersassets.NormalizeCompiler(job.Compiler)
 	return CompileJobView{
-		ID: job.ID, ProjectID: job.ProjectID, SourceRevision: job.SourceRevision,
+		ID: job.ID, ProjectID: job.ProjectID, SourceRevision: job.SourceRevision, Compiler: compiler,
 		Status: job.Status, Attempts: job.Attempts, MaxAttempts: job.MaxAttempts,
 		CancelRequested: job.CancelRequested, FailureCode: job.FailureCode,
 		Diagnostics:  papersassets.DecodeCompileDiagnostics(job.DiagnosticsJSON),
@@ -127,6 +130,20 @@ func (s *Service) CompileCapability(user authctx.CurrentUser, projectID uuid.UUI
 		return false, err
 	}
 	return s.compile != nil && s.compile.valid(), nil
+}
+
+// Only advertise explicitly supported engines for the verified operator pin.
+// The academic Lua driver is separately gated until its live acceptance.
+func (s *Service) compileEngines() []string {
+	engines := []string{}
+	if s.compile == nil || !s.compile.valid() {
+		return engines
+	}
+	engines = append(engines, papersassets.CompilerPDFLaTeX)
+	if s.compile.EnableLuaLaTeX && s.compile.EnvironmentDigest == papersassets.AcademicEnvironmentDigest() {
+		engines = append(engines, papersassets.CompilerLuaLaTeX)
+	}
+	return engines
 }
 
 // ownedSnapshot reads all files consistently under a PostgreSQL SHARE lock.
@@ -199,7 +216,7 @@ func (s *Service) ownedSnapshot(ctx context.Context, user authctx.CurrentUser, p
 	return snapshot, err
 }
 
-func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, projectID uuid.UUID, baseRevision int64, key string) (CompileJobView, error) {
+func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, projectID uuid.UUID, baseRevision int64, key, requestedCompiler string) (CompileJobView, error) {
 	if err := s.RequireAccess(user); err != nil {
 		return CompileJobView{}, err
 	}
@@ -212,6 +229,19 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 	if ctx == nil || baseRevision <= 0 || !compileKeyRE.MatchString(key) {
 		return CompileJobView{}, apperr.BadRequest("papers.invalid_compile_request", "Positive base_revision and valid idempotency_key are required")
 	}
+	compiler, ok := papersassets.NormalizeCompiler(requestedCompiler)
+	if !ok {
+		return CompileJobView{}, apperr.BadRequest("papers.invalid_compiler", "Unknown compiler")
+	}
+	allowed := false
+	for _, engine := range s.compileEngines() {
+		if engine == compiler {
+			allowed = true
+		}
+	}
+	if !allowed {
+		return CompileJobView{}, apperr.BadRequest("papers.compiler_unavailable", "Compiler is not approved for the current environment")
+	}
 	// Repeated accepted HTTP requests are safe even if the project changed
 	// after the initial submission. A key cannot be reused with a new revision.
 	previous, exists, err := s.compile.Jobs.FindByIdempotencyKey(ctx, user.ID, projectID, key)
@@ -219,7 +249,8 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 		return CompileJobView{}, compileBackendError(err)
 	}
 	if exists {
-		if previous.SourceRevision != baseRevision || previous.Priority != papersqueue.PriorityManual ||
+		previousCompiler, validCompiler := papersassets.NormalizeCompiler(previous.Compiler)
+		if !validCompiler || previousCompiler != compiler || previous.SourceRevision != baseRevision || previous.Priority != papersqueue.PriorityManual ||
 			previous.EnvironmentDigest != s.compile.EnvironmentDigest {
 			return CompileJobView{}, apperr.Conflict("papers.idempotency_conflict", "Key was already accepted for a different compile")
 		}
@@ -238,6 +269,9 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 	if err != nil {
 		return CompileJobView{}, err
 	}
+	if compiler != papersassets.CompilerPDFLaTeX {
+		snapshot.Compiler = compiler
+	}
 	sort.Slice(snapshot.Files, func(i, j int) bool { return snapshot.Files[i].Path < snapshot.Files[j].Path })
 	canonicalJSON, err := json.Marshal(snapshot)
 	if err != nil {
@@ -255,6 +289,9 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 		return CompileJobView{}, apperr.New(http.StatusServiceUnavailable,
 			"papers.trusted_environment_invalid", "Approved TeX environment failed verification", nil)
 	}
+	if !release.Claim.Environment.SupportsCompiler(compiler) {
+		return CompileJobView{}, apperr.BadRequest("papers.compiler_unavailable", "Compiler is not available in the verified release")
+	}
 	pubCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	digest, err := s.compile.Publisher.PublishSnapshot(pubCtx, snapshot)
@@ -268,7 +305,7 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 	job, err := s.compile.Jobs.Submit(ctx, papersqueue.SubmitInput{
 		OwnerID: user.ID, ProjectID: projectID, SourceRevision: snapshot.Revision,
 		SnapshotDigest: digest, EnvironmentDigest: s.compile.EnvironmentDigest,
-		MainFile: "main.tex", IdempotencyKey: key, Priority: papersqueue.PriorityManual, MaxAttempts: 2,
+		MainFile: "main.tex", Compiler: compiler, IdempotencyKey: key, Priority: papersqueue.PriorityManual, MaxAttempts: 2,
 	})
 	if err != nil {
 		return CompileJobView{}, compileBackendError(err)

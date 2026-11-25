@@ -393,3 +393,21 @@ func TestRevokedInviteDuringRecoveryCannotReschedule(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, claimed)
 }
+
+func TestQueueIdempotencyIncludesCompiler(t *testing.T) {
+	q, _, owner, project := setupQueue(t)
+	ctx := context.Background()
+	i := input(owner, project, "engine-key", PriorityManual, 2)
+	job := submit(t, q, i)
+	require.Equal(t, "pdflatex", job.Compiler)
+	i.Compiler = "lualatex"
+	_, err := q.Submit(ctx, i)
+	require.ErrorIs(t, err, ErrIdempotency)
+	i.IdempotencyKey = "lua-key"
+	job = submit(t, q, i)
+	require.Equal(t, "lualatex", job.Compiler)
+	i.IdempotencyKey = "unapproved-key"
+	i.Compiler = "xelatex"
+	_, err = q.Submit(ctx, i)
+	require.ErrorIs(t, err, ErrInvalid)
+}

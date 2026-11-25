@@ -151,3 +151,23 @@ func TestAcademicEnvironmentExactPinAndLegacyCompatibility(t *testing.T) {
 		require.ErrorIs(t, value.Validate(), ErrInvalid)
 	}
 }
+
+func TestCompilerBoundToSnapshotDigestAndPinnedEnvironment(t *testing.T) {
+	s := newStore(t)
+	snap := fixtureSnapshot()
+	legacy, err := s.PublishSnapshot(snap)
+	require.NoError(t, err)
+	snap.Compiler = CompilerLuaLaTeX
+	lua, err := s.PublishSnapshot(snap)
+	require.NoError(t, err)
+	require.NotEqual(t, legacy, lua)
+	loaded, err := s.LoadSnapshot(lua)
+	require.NoError(t, err)
+	require.Equal(t, CompilerLuaLaTeX, loaded.Compiler)
+	snap.Compiler = "unknown"
+	_, err = s.PublishSnapshot(snap)
+	require.ErrorIs(t, err, ErrInvalid)
+	require.True(t, AcademicEnvironment().SupportsCompiler(CompilerLuaLaTeX))
+	require.False(t, testEnv().SupportsCompiler(CompilerLuaLaTeX))
+	require.False(t, AcademicEnvironment().SupportsCompiler("xelatex"))
+}

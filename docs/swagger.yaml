@@ -10186,6 +10186,15 @@ definitions:
       note:
         type: string
     type: object
+  papers.submitCompileInput:
+    properties:
+      base_revision:
+        type: integer
+      compiler:
+        type: string
+      idempotency_key:
+        type: string
+    type: object
   portal.HotArtist:
     properties:
       id:
@@ -29360,6 +29369,13 @@ paths:
     post:
       consumes:
       - application/json
+      parameters:
+      - description: Compile a revision with an approved compiler
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.submitCompileInput'
       produces:
       - application/json
       responses: {}

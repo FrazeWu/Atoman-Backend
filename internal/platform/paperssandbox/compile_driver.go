@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -15,6 +16,7 @@ import (
 // path below is allowed by the OCI policy. Project files, configuration,
 // bibliography data and auxiliary files are never evaluated as shell code.
 const compileDriverGuestPath = "/atoman-papers-compile-v2"
+const luaCompileDriverGuestPath = "/atoman-papers-lualatex-v1"
 const compileDriver = `#!/bin/sh
 set -eu
 umask 077
@@ -64,13 +66,36 @@ test -s /output/main.pdf
 printf 'AT0MAN_LATEX_COMPLETE=%s\n' "$pass"
 `
 
-func installCompileDriver(bundle string) error {
-	target := filepath.Join(bundle, "rootfs", compileDriverGuestPath[1:])
+// The only alternate driver is derived from trusted constants, never user
+// text. LuaLaTeX font loading requires Lua; --safer is incompatible with
+// luaotfload. Keep no-shell-escape and nosocket, and enforce the same outer
+// gVisor network, read-only filesystem, bounded output and cgroup policies.
+// This driver remains separately disabled unless an operator approves it.
+func luaCompileDriver() string {
+	driver := strings.ReplaceAll(compileDriver, "/usr/bin/pdflatex ", "/usr/bin/lualatex --nosocket ")
+	return strings.Replace(driver, "umask 077\n", "umask 077\nexport TEXMFOUTPUT=/output\nexport TEXMFCACHE=/output/texmf-cache\nexport TEXMFVAR=/output/texmf-var\nexport TEXMFCONFIG=/output/texmf-config\n/usr/bin/mkdir -p /output/texmf-cache /output/texmf-var /output/texmf-config\n", 1)
+}
+func compileDriverBody(path string) (string, bool) {
+	switch path {
+	case compileDriverGuestPath:
+		return compileDriver, true
+	case luaCompileDriverGuestPath:
+		return luaCompileDriver(), true
+	default:
+		return "", false
+	}
+}
+func installCompileDriver(bundle, guestPath string) error {
+	body, ok := compileDriverBody(guestPath)
+	if !ok {
+		return ErrInvalidJob
+	}
+	target := filepath.Join(bundle, "rootfs", guestPath[1:])
 	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err
 	}
-	if _, err = f.WriteString(compileDriver); err != nil {
+	if _, err = f.WriteString(body); err != nil {
 		f.Close()
 		return err
 	}
@@ -81,7 +106,11 @@ func installCompileDriver(bundle string) error {
 	return f.Close()
 }
 func isCompileDriverArgs(args []string) bool {
-	return len(args) == 1 && args[0] == compileDriverGuestPath
+	if len(args) != 1 {
+		return false
+	}
+	_, ok := compileDriverBody(args[0])
+	return ok
 }
 
 // Verify the exact sealed driver independently immediately before execution.
@@ -94,9 +123,10 @@ func verifyCompileDriverForSpec(bundle string, raw []byte) error {
 	if !isCompileDriverArgs(spec.Process.Args) {
 		return nil
 	}
-	target := filepath.Join(bundle, "rootfs", compileDriverGuestPath[1:])
+	bodyExpected, _ := compileDriverBody(spec.Process.Args[0])
+	target := filepath.Join(bundle, "rootfs", spec.Process.Args[0][1:])
 	st, err := os.Lstat(target)
-	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0555 || st.Size() != int64(len(compileDriver)) {
+	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm() != 0555 || st.Size() != int64(len(bodyExpected)) {
 		return fmt.Errorf("%w: unsealed compile driver", ErrInvalidJob)
 	}
 	owner, ok := st.Sys().(*syscall.Stat_t)
@@ -112,8 +142,8 @@ func verifyCompileDriverForSpec(bundle string, raw []byte) error {
 	if err != nil || !os.SameFile(st, actual) {
 		return ErrInvalidJob
 	}
-	body, err := io.ReadAll(io.LimitReader(f, int64(len(compileDriver)+1)))
-	if err != nil || !bytes.Equal(body, []byte(compileDriver)) {
+	body, err := io.ReadAll(io.LimitReader(f, int64(len(bodyExpected)+1)))
+	if err != nil || !bytes.Equal(body, []byte(bodyExpected)) {
 		return fmt.Errorf("%w: compile driver content mismatch", ErrInvalidJob)
 	}
 	return nil

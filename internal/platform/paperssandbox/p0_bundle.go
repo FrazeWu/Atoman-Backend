@@ -12,9 +12,10 @@ import (
 type P0Mode string
 
 const (
-	P0Latex         P0Mode = "latex"
-	P0AcademicLatex P0Mode = "academic-latex"
-	P0PIDPressure   P0Mode = "pids"
+	P0Latex            P0Mode = "latex"
+	P0AcademicLatex    P0Mode = "academic-latex"
+	P0AcademicLuaLatex P0Mode = "academic-lualatex"
+	P0PIDPressure      P0Mode = "pids"
 )
 
 // WriteP0BundleConfig generates a narrowly approved OCI specification.
@@ -47,14 +48,18 @@ func WriteP0BundleConfig(bundle, outputDir, jobID string, limits Limits, mode P0
 		if _, err := os.Stat(filepath.Join(bundle, "rootfs", "inputs", "main.tex")); err != nil {
 			return err
 		}
-	case P0AcademicLatex:
+	case P0AcademicLatex, P0AcademicLuaLatex:
 		if _, err := os.Stat(filepath.Join(bundle, "rootfs", "inputs", "main.tex")); err != nil {
 			return err
 		}
-		if err := installCompileDriver(bundle); err != nil {
+		guestPath := compileDriverGuestPath
+		if mode == P0AcademicLuaLatex {
+			guestPath = luaCompileDriverGuestPath
+		}
+		if err := installCompileDriver(bundle, guestPath); err != nil {
 			return err
 		}
-		args = []string{compileDriverGuestPath}
+		args = []string{guestPath}
 	case P0PIDPressure:
 		args = []string{"/inputs/p0-sandbox-probe", "pids"}
 		if _, err := os.Stat(filepath.Join(bundle, "rootfs", "inputs", "p0-sandbox-probe")); err != nil {

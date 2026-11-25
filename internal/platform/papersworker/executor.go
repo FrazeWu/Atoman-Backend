@@ -37,6 +37,7 @@ type Config struct {
 	ArchivePath      string                    // trusted operator-pinned Docker export .tar
 	ArchiveFetcher   ArchiveFetcher            // optional P0 signed-release cache
 	PDFPublisher     papersassets.PDFPublisher // separately scoped private result gateway
+	EnableLuaLaTeX   bool                      // Operator-reviewed opt-in for the exact pinned archive.
 	BoundedWorkspace bool                      // mandatory when publishing persistent PDF results
 	RunscBinary      string
 	ScopeHelper      string
@@ -196,6 +197,11 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 	if err != nil {
 		return fmt.Errorf("snapshot rejected: %w", err)
 	}
+	compiler, validCompiler := papersassets.NormalizeCompiler(snapshot.Compiler)
+	jobCompiler, validJobCompiler := papersassets.NormalizeCompiler(c.Job.Compiler)
+	if !validCompiler || !validJobCompiler || compiler != jobCompiler {
+		return fmt.Errorf("%w: compiler differs from immutable job", ErrInvalid)
+	}
 	if snapshot.ProjectID != c.Job.ProjectID || snapshot.Revision != c.Job.SourceRevision ||
 		c.Job.MainFile != "main.tex" {
 		return fmt.Errorf("%w: snapshot belongs to another job", ErrInvalid)
@@ -220,9 +226,15 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 	if err != nil {
 		return fmt.Errorf("environment rejected: %w", err)
 	}
+	if (compiler == papersassets.CompilerLuaLaTeX && !e.cfg.EnableLuaLaTeX) || !environment.SupportsCompiler(compiler) {
+		return fmt.Errorf("%w: compiler not supported by verified environment", ErrInvalid)
+	}
 	mode := paperssandbox.P0Latex
 	if environment == papersassets.AcademicEnvironment() {
 		mode = paperssandbox.P0AcademicLatex
+		if compiler == papersassets.CompilerLuaLaTeX {
+			mode = paperssandbox.P0AcademicLuaLatex
+		}
 	}
 
 	phase = "workspace"

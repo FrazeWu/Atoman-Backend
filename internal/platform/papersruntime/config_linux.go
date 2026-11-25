@@ -52,17 +52,19 @@ type TrustConfig struct {
 	RetentionDays     int64  `json:"retention_days"`
 }
 type APIConfig struct {
-	Reader StorageCredential `json:"reader"`
-	Trust  TrustConfig       `json:"trust"`
+	EnableLuaLaTeX bool              `json:"enable_lualatex,omitempty"`
+	Reader         StorageCredential `json:"reader"`
+	Trust          TrustConfig       `json:"trust"`
 }
 type WorkerConfig struct {
 	DatabasePassword string `json:"database_password"`
 }
 type LauncherConfig struct {
-	Reader       StorageCredential `json:"reader"`
-	Trust        TrustConfig       `json:"trust"`
-	RunscDigest  string            `json:"runsc_digest"`
-	HelperDigest string            `json:"helper_digest"`
+	EnableLuaLaTeX bool              `json:"enable_lualatex,omitempty"`
+	Reader         StorageCredential `json:"reader"`
+	Trust          TrustConfig       `json:"trust"`
+	RunscDigest    string            `json:"runsc_digest"`
+	HelperDigest   string            `json:"helper_digest"`
 }
 type GatewayConfig struct {
 	Writer        StorageCredential `json:"writer"`

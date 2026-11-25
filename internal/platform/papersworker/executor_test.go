@@ -193,3 +193,24 @@ func TestImportedBinaryIsStagedByteForByte(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte{137, 80, 78, 71, 13, 10, 26, 10, 0, 255, 128}, data)
 }
+
+func TestExecutorRejectsCompilerMismatchBeforeStaging(t *testing.T) {
+	f := newFixture(t)
+	f.claim.Job.Compiler = papersassets.CompilerLuaLaTeX
+	_, err := f.exec.Run(context.Background(), f.claim)
+	require.ErrorIs(t, err, ErrInvalid)
+	require.NoDirExists(t, filepath.Join(f.root, "runs", f.claim.SandboxID))
+}
+func TestExecutorRejectsLuaWithLegacyPinnedEnvironment(t *testing.T) {
+	f := newFixture(t)
+	snap, err := f.store.LoadSnapshot(f.claim.Job.SnapshotDigest)
+	require.NoError(t, err)
+	snap.Compiler = papersassets.CompilerLuaLaTeX
+	f.claim.Job.SnapshotDigest, err = f.store.PublishSnapshot(snap)
+	require.NoError(t, err)
+	f.claim.Job.Compiler = papersassets.CompilerLuaLaTeX
+	f.exec.cfg.EnableLuaLaTeX = true
+	_, err = f.exec.Run(context.Background(), f.claim)
+	require.ErrorIs(t, err, ErrInvalid)
+	require.NoDirExists(t, filepath.Join(f.root, "runs", f.claim.SandboxID))
+}

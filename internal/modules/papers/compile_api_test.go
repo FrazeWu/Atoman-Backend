@@ -57,6 +57,7 @@ func (p *localTestPublisher) PublishSnapshot(ctx context.Context, snapshot paper
 type testRelease struct {
 	envDigest string
 	failure   error
+	academic  bool
 }
 
 func (r testRelease) LoadRelease(_ context.Context, _ string) (papersassets.SignedArchiveRelease, error) {
@@ -68,6 +69,9 @@ func (r testRelease) LoadRelease(_ context.Context, _ string) (papersassets.Sign
 		ImageDigest:   "sha256:5613d47067c98df80d6b3206c9a731ba6e5d3eb5828fea892afd270426de4bd4",
 		ArchiveDigest: "sha256:" + strings.Repeat("a", 64),
 		RunscRelease:  "20261019.0",
+	}
+	if r.academic {
+		env = papersassets.AcademicEnvironment()
 	}
 	return papersassets.SignedArchiveRelease{Claim: papersassets.ArchiveClaim{
 		Version: 1, EnvironmentDigest: r.envDigest, Environment: env,
@@ -290,4 +294,36 @@ func TestCompileAPIRejectsPublisherDigestMismatch(t *testing.T) {
 	var count int64
 	require.NoError(t, f.db.Model(&model.PaperCompileJob{}).Count(&count).Error)
 	require.Zero(t, count, "a mismatched immutable source digest must never enqueue")
+}
+
+func TestCompileEngineAllowlistAndImmutableBinding(t *testing.T) {
+	f := newCompileHTTPFixture(t, true)
+	base := f.base()
+	lua := `{"base_revision":1,"idempotency_key":"lua-test","compiler":"lualatex"}`
+	unknown := `{"base_revision":1,"idempotency_key":"unknown","compiler":"/bin/sh"}`
+	require.Equal(t, http.StatusBadRequest, f.request("POST", base+"/compiles", unknown, f.ownerToken).Code)
+	require.Equal(t, http.StatusBadRequest, f.request("POST", base+"/compiles", lua, f.ownerToken).Code)
+	require.Zero(t, f.publisher.calls)
+	require.NotContains(t, f.request("GET", base+"/compile-capability", "", f.ownerToken).Body.String(), "lualatex")
+	// The exact signed pin alone is insufficient without explicit opt-in.
+	digest := papersassets.AcademicEnvironmentDigest()
+	f.svc.compile.EnvironmentDigest = digest
+	f.svc.compile.Release = testRelease{envDigest: digest, academic: true}
+	require.Equal(t, http.StatusBadRequest, f.request("POST", base+"/compiles", lua, f.ownerToken).Code)
+	f.svc.compile.EnableLuaLaTeX = true
+	require.Contains(t, f.request("GET", base+"/compile-capability", "", f.ownerToken).Body.String(), "lualatex")
+	out := f.request("POST", base+"/compiles", lua, f.ownerToken)
+	require.Equal(t, http.StatusAccepted, out.Code, out.Body.String())
+	view := parseJob(t, out)
+	require.Equal(t, papersassets.CompilerLuaLaTeX, view.Compiler)
+	job, found, err := f.queue.FindByIdempotencyKey(context.Background(), f.owner.UUID, f.project.ID, "lua-test")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, papersassets.CompilerLuaLaTeX, job.Compiler)
+	snapshot, err := f.publisher.store.LoadSnapshot(job.SnapshotDigest)
+	require.NoError(t, err)
+	require.Equal(t, papersassets.CompilerLuaLaTeX, snapshot.Compiler)
+	require.Equal(t, view.ID, parseJob(t, f.request("POST", base+"/compiles", lua, f.ownerToken)).ID)
+	require.Equal(t, http.StatusConflict, f.request("POST", base+"/compiles", `{"base_revision":1,"idempotency_key":"lua-test","compiler":"pdflatex"}`, f.ownerToken).Code)
+	require.Equal(t, 1, f.publisher.calls)
 }

@@ -17,6 +17,7 @@ type PaperCompileJob struct {
 	SnapshotDigest    string     `gorm:"type:varchar(71);not null"`
 	EnvironmentDigest string     `gorm:"type:varchar(71);not null"`
 	MainFile          string     `gorm:"type:varchar(512);not null"`
+	Compiler          string     `gorm:"type:varchar(16);not null;default:pdflatex"`
 	IdempotencyKey    string     `gorm:"type:varchar(96);not null;uniqueIndex:idx_paper_compile_idempotency,priority:2"`
 	Priority          int        `gorm:"not null;default:0"`
 	Status            string     `gorm:"type:varchar(24);not null;index:idx_paper_compile_dispatch,priority:2"`

@@ -26,7 +26,7 @@ func p0TestDirectories(t *testing.T) (string, string) {
 }
 
 func TestWriteP0BundleConfigAndValidate(t *testing.T) {
-	for _, mode := range []P0Mode{P0Latex, P0AcademicLatex, P0PIDPressure} {
+	for _, mode := range []P0Mode{P0Latex, P0AcademicLatex, P0AcademicLuaLatex, P0PIDPressure} {
 		t.Run(string(mode), func(t *testing.T) {
 			bundle, output := p0TestDirectories(t)
 			id := "p0-test-" + string(mode)
@@ -135,5 +135,32 @@ func TestAcademicDriverRejectsTamperingAndUntrustedPaths(t *testing.T) {
 		if err := validateOCISpec(changed, id, testLimits, output); err == nil {
 			t.Fatal("unapproved driver invocation accepted")
 		}
+	}
+}
+
+func TestLuaDriverIsFixedAndRejectsTampering(t *testing.T) {
+	bundle, output := p0TestDirectories(t)
+	if err := WriteP0BundleConfig(bundle, output, "p0-lua-driver", testLimits, P0AcademicLuaLatex); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(bundle, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = verifyCompileDriverForSpec(bundle, raw); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(bundle, "rootfs", luaCompileDriverGuestPath[1:])
+	if err = os.Chmod(target, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(target, []byte(compileDriver), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(target, 0555); err != nil {
+		t.Fatal(err)
+	}
+	if err = verifyCompileDriverForSpec(bundle, raw); err == nil {
+		t.Fatal("wrong compiler driver accepted")
 	}
 }

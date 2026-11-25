@@ -86,7 +86,7 @@ func newEnabledAPI(ctx context.Context, db *gorm.DB) (*papers.Service, <-chan st
 		return disabled, closedWorker(), ErrConfig
 	}
 	svc, err := papers.NewServiceWithCompile(db, papers.CompileRuntime{
-		Publisher: snapshots, Release: trusted, Jobs: queue, Results: results, EnvironmentDigest: cfg.Trust.EnvironmentDigest,
+		Publisher: snapshots, Release: trusted, Jobs: queue, Results: results, EnvironmentDigest: cfg.Trust.EnvironmentDigest, EnableLuaLaTeX: cfg.EnableLuaLaTeX,
 	})
 	if err != nil {
 		return disabled, closedWorker(), err

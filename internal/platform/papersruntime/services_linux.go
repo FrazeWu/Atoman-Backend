@@ -215,7 +215,7 @@ func runLauncher(ctx context.Context) error {
 	}
 	executor, err := papersworker.New(papersworker.Config{
 		WorkRoot: WorkRoot, Store: assets, ArchiveFetcher: assets, ArchivePath: filepath.Join(ArchiveCache, "never-fallback.tar"),
-		PDFPublisher: publisher, BoundedWorkspace: true,
+		PDFPublisher: publisher, BoundedWorkspace: true, EnableLuaLaTeX: cfg.EnableLuaLaTeX,
 		RunscBinary: RunscPath, ScopeHelper: ScopeHelper, SystemdRunBinary: "/usr/bin/systemd-run", SystemctlBinary: "/usr/bin/systemctl",
 		MountpointBinary: "/usr/bin/mountpoint", FindmntBinary: "/usr/bin/findmnt", UmountBinary: "/usr/bin/umount", TarBinary: "/usr/bin/tar",
 		Limits:  paperssandbox.Limits{MemoryMaxBytes: 768 << 20, PIDsMax: 256, CPUQuotaMicros: 100000, CPUPeriodMicros: 100000},

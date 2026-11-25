@@ -28180,6 +28180,17 @@ const docTemplate = `{
                     "papers"
                 ],
                 "summary": "Enqueue compilation of one consistent project revision",
+                "parameters": [
+                    {
+                        "description": "Compile a revision with an approved compiler",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/papers.submitCompileInput"
+                        }
+                    }
+                ],
                 "responses": {}
             }
         },
@@ -55414,6 +55425,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "note": {
+                    "type": "string"
+                }
+            }
+        },
+        "papers.submitCompileInput": {
+            "type": "object",
+            "properties": {
+                "base_revision": {
+                    "type": "integer"
+                },
+                "compiler": {
+                    "type": "string"
+                },
+                "idempotency_key": {
                     "type": "string"
                 }
             }

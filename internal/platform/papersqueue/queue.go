@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/papersassets"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -74,12 +75,16 @@ type SubmitInput struct {
 	SnapshotDigest    string
 	EnvironmentDigest string
 	MainFile          string
+	Compiler          string
 	IdempotencyKey    string
 	Priority          int
 	MaxAttempts       int
 }
 
 func (i SubmitInput) validate() error {
+	if _, ok := papersassets.NormalizeCompiler(i.Compiler); !ok {
+		return ErrInvalid
+	}
 	if i.OwnerID == uuid.Nil || i.ProjectID == uuid.Nil || i.SourceRevision <= 0 ||
 		!digestPattern.MatchString(i.SnapshotDigest) || !digestPattern.MatchString(i.EnvironmentDigest) ||
 		i.MainFile != "main.tex" || !idempotencyPattern.MatchString(i.IdempotencyKey) ||
@@ -94,7 +99,7 @@ func matching(existing model.PaperCompileJob, i SubmitInput) bool {
 		existing.SourceRevision == i.SourceRevision &&
 		existing.SnapshotDigest == i.SnapshotDigest &&
 		existing.EnvironmentDigest == i.EnvironmentDigest &&
-		existing.MainFile == i.MainFile && existing.IdempotencyKey == i.IdempotencyKey &&
+		existing.MainFile == i.MainFile && existing.Compiler == i.Compiler && existing.IdempotencyKey == i.IdempotencyKey &&
 		existing.Priority == i.Priority && existing.MaxAttempts == i.MaxAttempts
 }
 
@@ -109,6 +114,7 @@ func (q *Queue) Submit(ctx context.Context, i SubmitInput) (model.PaperCompileJo
 	if err := i.validate(); err != nil {
 		return job, err
 	}
+	i.Compiler, _ = papersassets.NormalizeCompiler(i.Compiler)
 	err := q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var seeded int64
 		if err := tx.Model(&model.PaperCompileSlot{}).Where("id = 1").Count(&seeded).Error; err != nil {
@@ -168,7 +174,7 @@ func (q *Queue) Submit(ctx context.Context, i SubmitInput) (model.PaperCompileJo
 		job = model.PaperCompileJob{
 			ID: uuid.New(), ProjectID: i.ProjectID, OwnerID: i.OwnerID, SourceRevision: i.SourceRevision,
 			SnapshotDigest: i.SnapshotDigest, EnvironmentDigest: i.EnvironmentDigest,
-			MainFile: i.MainFile, IdempotencyKey: i.IdempotencyKey, Priority: i.Priority,
+			MainFile: i.MainFile, Compiler: i.Compiler, IdempotencyKey: i.IdempotencyKey, Priority: i.Priority,
 			MaxAttempts: i.MaxAttempts, Status: StatusQueued,
 		}
 		// Unique index handles concurrent repeat submissions; DO NOTHING avoids

@@ -37,9 +37,13 @@ type Snapshot struct {
 	ProjectID uuid.UUID    `json:"project_id"`
 	Revision  int64        `json:"revision"`
 	Files     []SourceFile `json:"files"`
+	Compiler  string       `json:"compiler,omitempty"`
 }
 
 func (s *Snapshot) Validate() error {
+	if _, ok := NormalizeCompiler(s.Compiler); !ok {
+		return ErrInvalid
+	}
 	if s.Version != 1 || s.ProjectID == uuid.Nil || s.Revision <= 0 || len(s.Files) == 0 || len(s.Files) > 64 {
 		return ErrInvalid
 	}
