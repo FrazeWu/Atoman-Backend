@@ -55,3 +55,20 @@ type PaperFileVersion struct {
 }
 
 func (PaperFileVersion) TableName() string { return "paper_file_versions" }
+
+// PaperProjectSnapshot references immutable PaperFileVersion rows, including
+// binary resources. It is an owner-private checkpoint, not a compilation job.
+type PaperProjectSnapshot struct {
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
+	ProjectID      uuid.UUID `gorm:"type:uuid;not null;index" json:"-"`
+	Name           string    `gorm:"type:varchar(160);not null" json:"name"`
+	SourceRevision int64     `gorm:"not null" json:"source_revision"`
+	MainFileID     uuid.UUID `gorm:"type:uuid;not null" json:"main_file_id"`
+	Manifest       string    `gorm:"type:text;not null" json:"-"`
+	FileCount      int       `gorm:"not null" json:"file_count"`
+	SourceBytes    int64     `gorm:"not null" json:"source_bytes"`
+	Automatic      bool      `gorm:"not null;default:false" json:"automatic"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+func (PaperProjectSnapshot) TableName() string { return "paper_project_snapshots" }

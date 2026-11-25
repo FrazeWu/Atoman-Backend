@@ -10186,6 +10186,18 @@ definitions:
       note:
         type: string
     type: object
+  papers.snapshotCreateInput:
+    properties:
+      base_revision:
+        type: integer
+      name:
+        type: string
+    type: object
+  papers.snapshotRestoreInput:
+    properties:
+      base_revision:
+        type: integer
+    type: object
   papers.submitCompileInput:
     properties:
       base_revision:
@@ -29697,6 +29709,143 @@ paths:
       security:
       - BearerAuth: []
       summary: 恢复已删除的私有论文
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/snapshots:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List private project checkpoints
+      tags:
+      - papers
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Name and saved project revision
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.snapshotCreateInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create named project checkpoint
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/snapshots/{snapshotId}:
+    delete:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Checkpoint UUID
+        in: path
+        name: snapshotId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Remove checkpoint reference without deleting file history
+      tags:
+      - papers
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Checkpoint UUID
+        in: path
+        name: snapshotId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Read checkpoint file metadata
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/snapshots/{snapshotId}/restore:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Checkpoint UUID
+        in: path
+        name: snapshotId
+        required: true
+        type: string
+      - description: Saved project revision
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.snapshotRestoreInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Atomically restore checkpoint and retain a safety checkpoint
       tags:
       - papers
   /api/v1/papers/projects/import:

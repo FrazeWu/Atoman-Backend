@@ -32,6 +32,9 @@ func TestPapersSwaggerCoversPrivateProjectEndpoints(t *testing.T) {
 		"/api/v1/papers/projects/{id}/files/{fileId}":                     {"get", "put"},
 		"/api/v1/papers/projects/{id}/files/{fileId}/versions":            {"get"},
 		"/api/v1/papers/projects/{id}/files/{fileId}/versions/{revision}": {"get"},
+		"/api/v1/papers/projects/{id}/snapshots":                          {"get", "post"},
+		"/api/v1/papers/projects/{id}/snapshots/{snapshotId}":             {"get", "delete"},
+		"/api/v1/papers/projects/{id}/snapshots/{snapshotId}/restore":     {"post"},
 	}
 	for route, methods := range expected {
 		for _, method := range methods {
