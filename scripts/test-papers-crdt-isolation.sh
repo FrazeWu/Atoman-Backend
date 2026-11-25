@@ -127,5 +127,5 @@ dsn="postgres://atoman_test:atoman_test@127.0.0.1:${BASH_REMATCH[1]}/atoman_test
 runuser -u atoman -- env -i PATH=/usr/bin:/bin HOME=/nonexistent \
  TEST_POSTGRES_DSN="$dsn" TEST_DATABASE_URL="$dsn" \
  PAPERS_CRDT_TEST_SOCKET="$socket" PAPERS_CRDT_TEST_RUNTIME="$root/runtime" \
- "$root/store-tests" -test.run '^TestDurableCollab' -test.count=1 -test.v
+ "$root/store-tests" -test.run '^(TestDurableCollab|TestCollabGateway)' -test.count=1 -test.v
 echo ISOLATED_CRDT_DATABASE_TRANSACTION_VERIFIED

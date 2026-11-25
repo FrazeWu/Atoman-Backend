@@ -57,6 +57,13 @@ func allowedWebSocketOrigins() []string {
 	return origins
 }
 
+// UpgradeAuthorized shares the existing authenticated WebSocket origin,
+// buffer and subprotocol configuration. Resource-specific handlers MUST
+// authenticate and authorize the resource before invoking it.
+func UpgradeAuthorized(c *gin.Context) (*websocket.Conn, error) {
+	return upgrader.Upgrade(c.Writer, c.Request, nil)
+}
+
 // client represents a single WebSocket connection inside a room.
 type client struct {
 	conn   *websocket.Conn

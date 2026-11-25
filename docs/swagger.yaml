@@ -29600,6 +29600,55 @@ paths:
       summary: 乐观锁保存 LaTeX 文本内容
       tags:
       - papers
+  /api/v1/papers/projects/{id}/files/{fileId}/collaboration:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File UUID
+        in: path
+        name: fileId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Inspect file collaboration availability (disabled by default)
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/files/{fileId}/collaboration/ws:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File UUID
+        in: path
+        name: fileId
+        required: true
+        type: string
+      - description: Prior editing epoch; stale epochs are rejected
+        in: query
+        name: epoch
+        type: string
+      responses:
+        "101":
+          description: Switching Protocols
+      security:
+      - BearerAuth: []
+      summary: Authenticated private collaboration WebSocket (disabled by default)
+      tags:
+      - papers
   /api/v1/papers/projects/{id}/files/{fileId}/versions:
     get:
       parameters:

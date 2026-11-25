@@ -80,30 +80,55 @@ func (c *collaborationStore) ready() bool {
 	return c != nil && c.service != nil && c.service.db != nil && c.engine != nil
 }
 
-func lockCollabBase(tx *gorm.DB, s *Service, user authctx.CurrentUser, pid, fid uuid.UUID, write bool) (collabBase, error) {
-	var base collabBase
+func lockCollabAccess(tx *gorm.DB, s *Service, user authctx.CurrentUser, pid uuid.UUID, write bool) (model.PaperProject, error) {
+	var empty model.PaperProject
 	if user.ID == uuid.Nil {
-		return base, apperr.Unauthorized("Login required")
+		return empty, apperr.Unauthorized("Login required")
 	}
 	p, err := s.lockAccessible(tx, user, pid, write)
 	if err != nil {
-		return base, err
+		return empty, err
 	}
 	// Serialize module revocation against the accepted update. Expiration
 	// and the current membership are checked again at commit.
 	var grant model.PaperAccessGrant
 	err = tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("user_id=? AND status='active'", user.ID).First(&grant).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && grant.ExpiresAt != nil && !grant.ExpiresAt.After(time.Now().UTC())) {
-		return base, apperr.Forbidden("papers.invite_required", "Papers requires an active invitation")
+		return empty, apperr.Forbidden("papers.invite_required", "Papers requires an active invitation")
 	}
 	if err != nil {
-		return base, err
+		return empty, err
 	}
 	var account model.User
-	err = tx.Clauses(clause.Locking{Strength: "SHARE"}).Select("uuid").Where("uuid=? AND is_active=?", user.ID, true).First(&account).Error
+	err = tx.Clauses(clause.Locking{Strength: "SHARE"}).Select("uuid", "auth_version").Where("uuid=? AND is_active=?", user.ID, true).First(&account).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return base, apperr.Forbidden("papers.invite_required", "Active account required")
+		return empty, apperr.Forbidden("papers.invite_required", "Active account required")
 	}
+	if err != nil {
+		return empty, err
+	}
+
+	// Session-bound callers recheck expiration, revocation and auth version
+	// inside the same locked transaction as each accepted document update.
+	if sessionID, ok := tx.Statement.Context.Value(collabSessionKey{}).(uuid.UUID); ok {
+		if sessionID == uuid.Nil {
+			return empty, apperr.Unauthorized("Session expired")
+		}
+		var session model.AuthSession
+		err = tx.Clauses(clause.Locking{Strength: "SHARE"}).Select("id").Where("id=? AND user_id=? AND auth_version=? AND revoked_at IS NULL AND expires_at>?", sessionID, user.ID, account.AuthVersion, time.Now().UTC()).First(&session).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return empty, apperr.Unauthorized("Session expired")
+		}
+		if err != nil {
+			return empty, err
+		}
+	}
+	return p, nil
+}
+
+func lockCollabBase(tx *gorm.DB, s *Service, user authctx.CurrentUser, pid, fid uuid.UUID, write bool) (collabBase, error) {
+	var base collabBase
+	p, err := lockCollabAccess(tx, s, user, pid, write)
 	if err != nil {
 		return base, err
 	}

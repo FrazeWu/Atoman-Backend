@@ -30,8 +30,9 @@ const (
 const initialTex = "\\documentclass{article}\n\\begin{document}\nHello, Atoman Papers!\n\\end{document}\n"
 
 type Service struct {
-	db      *gorm.DB
-	compile *CompileRuntime // nil by default: production stays fail-closed.
+	db            *gorm.DB
+	compile       *CompileRuntime       // nil by default: production stays fail-closed.
+	collaboration *collaborationGateway // explicitly injected; normal service remains disabled.
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db} }

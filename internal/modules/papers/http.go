@@ -68,6 +68,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.POST("/projects/:id/files/manage", h.manageFiles)
 	private.GET("/projects/:id/files/:fileId", h.file)
 	private.PUT("/projects/:id/files/:fileId", h.saveFile)
+	private.GET("/projects/:id/files/:fileId/collaboration", h.collaborationCapability)
+	private.GET("/projects/:id/files/:fileId/collaboration/ws", h.collaborationSocket)
 	private.GET("/projects/:id/files/:fileId/versions", h.fileVersions)
 	private.GET("/projects/:id/files/:fileId/versions/:revision", h.fileVersion)
 	private.GET("/projects/:id/snapshots", h.projectSnapshots)

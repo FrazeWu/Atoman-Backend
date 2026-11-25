@@ -23,6 +23,8 @@ func TestPapersSwaggerCoversPrivateProjectEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := map[string][]string{
+		"/api/v1/papers/projects/{id}/files/{fileId}/collaboration":       {"get"},
+		"/api/v1/papers/projects/{id}/files/{fileId}/collaboration/ws":    {"get"},
 		"/api/v1/papers/projects/{id}/members":                            {"get"},
 		"/api/v1/papers/projects/{id}/members/{userId}":                   {"put", "delete"},
 		"/api/v1/papers/access":                                           {"get"},

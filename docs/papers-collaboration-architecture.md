@@ -182,3 +182,64 @@ and CodeMirror behavior are unchanged. The next task is the authenticated
 WebSocket gateway and browser protocol, including bounded per-user
 admission, state-vector synchronization, active revocation and stale
 epoch handling. Load and deployment tests remain required.
+
+## Stage 8.3B1: authenticated durable WebSocket gateway
+
+The gateway is opt-in through startup-only dependency injection.
+NewService and the existing production API composition do not enable it.
+The authenticated capability endpoint returns enabled=false by default,
+and the WebSocket endpoint refuses upgrades when the gateway is absent.
+No production runtime configuration or release marker is modified.
+
+The file-scoped routes use the existing Atoman session middleware,
+Papers access grant, project membership, and shared WebSocket upgrader.
+A new reusable content-free room signal registry in internal/collab
+coalesces notifications. Blog collaboration remains unchanged. A room
+key includes both project and file identifiers and is never supplied
+as an arbitrary client authorization string.
+
+Wire protocol papers-crdt-v1 uses bounded JSON WebSocket text frames.
+Initial state messages carry an epoch, monotonic checkpoint sequence,
+canonical file/project revisions, role, and base64 full Yjs update/state
+vector. The client sends a type=update frame with UUID request_id, epoch
+and base64 Yjs delta; type=sync requests a fresh authorized checkpoint.
+The server acknowledges an accepted update with a state message carrying
+the corresponding request_id only after the database transaction commits.
+Peers receive content-free internal signals and reread the authoritative
+checkpoint under their own current authorization. No uncommitted client
+update is broadcast. A retryable error includes the request_id and a
+machine-readable code; resend the same delta only within the same epoch.
+Malformed/oversized frames, stale epochs, and viewer writes terminate
+the connection. A viewer can read an existing epoch but cannot seed one.
+
+Each socket is associated with its authenticated database session ID.
+The session and current account auth_version are checked under locks
+inside the same transaction as collaboration reads and accepted writes.
+The gateway checks current role, membership, grant, session, file
+revision and epoch at every state publication and during 2-second
+metadata polling. Polling does not load the full manuscript/checkpoint
+unless a change must be sent. Role changes and expired/revoked sessions
+close the connection on detection; no claim of instantaneous revocation
+across all network buffers is made. Ordinary edits and rollback fence
+previous epochs, and reconnects explicitly naming a stale epoch fail.
+New epochs never automatically receive old pending deltas.
+
+Prototype limits: 12 connections per gateway process, 3 per account,
+6 per file, 2 simultaneous engine requests, 384 KiB incoming frame
+limit (256 KiB decoded update), one queued request per reader, 150 ms
+minimum interval between client application messages, bounded operation
+and write deadlines, ping/pong, and a 30-minute connection lifetime.
+Notification queues retain at most one signal per socket, not content.
+These limits require load and multi-process deployment review before
+public release. State messages currently contain full compact checkpoints;
+state-vector differential downloads, offline recovery UI, presence/cursors
+and CodeMirror client binding remain subsequent tasks. There is no public
+activation or claim of full Overleaf-style collaboration at this point.
+
+Test the gateway with real Yjs and isolated PostgreSQL using
+`PAPERS_CRDT_TEST_RUNTIME` as in Stage 8.2, then
+`./scripts/test-isolated.sh ./internal/modules/papers ./internal/collab -run 'TestCollab|TestRoomSignals|TestDurableCollab' -count=1`.
+The separate isolation script also exercises the same tests through the
+real restricted Unix worker. Normal production does not configure this
+gateway; deployment is blocked until client, reconnect, revocation and
+compile/restore integration acceptance gates are met.
