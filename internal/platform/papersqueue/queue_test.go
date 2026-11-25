@@ -407,7 +407,7 @@ func TestQueueIdempotencyIncludesCompiler(t *testing.T) {
 	job = submit(t, q, i)
 	require.Equal(t, "lualatex", job.Compiler)
 	i.IdempotencyKey = "unapproved-key"
-	i.Compiler = "xelatex"
+	i.Compiler = "unsupported"
 	_, err = q.Submit(ctx, i)
 	require.ErrorIs(t, err, ErrInvalid)
 }

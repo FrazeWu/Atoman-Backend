@@ -37,8 +37,9 @@ type Config struct {
 	ArchivePath      string                    // trusted operator-pinned Docker export .tar
 	ArchiveFetcher   ArchiveFetcher            // optional P0 signed-release cache
 	PDFPublisher     papersassets.PDFPublisher // separately scoped private result gateway
-	EnableLuaLaTeX   bool                      // Operator-reviewed opt-in for the exact pinned archive.
-	BoundedWorkspace bool                      // mandatory when publishing persistent PDF results
+	EnableXeLaTeX    bool
+	EnableLuaLaTeX   bool // Operator-reviewed opt-in for the exact pinned archive.
+	BoundedWorkspace bool // mandatory when publishing persistent PDF results
 	RunscBinary      string
 	ScopeHelper      string
 	SystemdRunBinary string
@@ -226,14 +227,16 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 	if err != nil {
 		return fmt.Errorf("environment rejected: %w", err)
 	}
-	if (compiler == papersassets.CompilerLuaLaTeX && !e.cfg.EnableLuaLaTeX) || !environment.SupportsCompiler(compiler) {
+	if (compiler == papersassets.CompilerLuaLaTeX && !e.cfg.EnableLuaLaTeX) || (compiler == papersassets.CompilerXeLaTeX && !e.cfg.EnableXeLaTeX) || !environment.SupportsCompiler(compiler) {
 		return fmt.Errorf("%w: compiler not supported by verified environment", ErrInvalid)
 	}
 	mode := paperssandbox.P0Latex
-	if environment == papersassets.AcademicEnvironment() {
+	if environment == papersassets.AcademicEnvironment() || environment == papersassets.AcademicCJKEnvironment() {
 		mode = paperssandbox.P0AcademicLatex
 		if compiler == papersassets.CompilerLuaLaTeX {
 			mode = paperssandbox.P0AcademicLuaLatex
+		} else if compiler == papersassets.CompilerXeLaTeX {
+			mode = paperssandbox.P0AcademicXeLatex
 		}
 	}
 

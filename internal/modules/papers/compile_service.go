@@ -55,7 +55,8 @@ type CompileRuntime struct {
 	Jobs              CompileJobs
 	Results           papersassets.PDFReader
 	EnvironmentDigest string // Operator pin; NEVER accepted from HTTP JSON.
-	EnableLuaLaTeX    bool   // Explicit reviewed runtime feature gate, never accepted from HTTP.
+	EnableXeLaTeX     bool
+	EnableLuaLaTeX    bool // Explicit reviewed runtime feature gate, never accepted from HTTP.
 }
 
 func (r *CompileRuntime) valid() bool {
@@ -140,8 +141,11 @@ func (s *Service) compileEngines() []string {
 		return engines
 	}
 	engines = append(engines, papersassets.CompilerPDFLaTeX)
-	if s.compile.EnableLuaLaTeX && s.compile.EnvironmentDigest == papersassets.AcademicEnvironmentDigest() {
+	if s.compile.EnableLuaLaTeX && (s.compile.EnvironmentDigest == papersassets.AcademicEnvironmentDigest() || s.compile.EnvironmentDigest == papersassets.AcademicCJKEnvironmentDigest()) {
 		engines = append(engines, papersassets.CompilerLuaLaTeX)
+	}
+	if s.compile.EnableXeLaTeX && s.compile.EnvironmentDigest == papersassets.AcademicCJKEnvironmentDigest() {
+		engines = append(engines, papersassets.CompilerXeLaTeX)
 	}
 	return engines
 }

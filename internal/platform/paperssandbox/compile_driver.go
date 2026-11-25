@@ -17,6 +17,7 @@ import (
 // bibliography data and auxiliary files are never evaluated as shell code.
 const compileDriverGuestPath = "/atoman-papers-compile-v2"
 const luaCompileDriverGuestPath = "/atoman-papers-lualatex-v1"
+const xeCompileDriverGuestPath = "/atoman-papers-xelatex-v1"
 const compileDriver = `#!/bin/sh
 set -eu
 umask 077
@@ -81,6 +82,8 @@ func compileDriverBody(path string) (string, bool) {
 		return compileDriver, true
 	case luaCompileDriverGuestPath:
 		return luaCompileDriver(), true
+	case xeCompileDriverGuestPath:
+		return strings.ReplaceAll(compileDriver, "/usr/bin/pdflatex ", "/usr/bin/xelatex "), true
 	default:
 		return "", false
 	}

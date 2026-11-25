@@ -58,6 +58,7 @@ type testRelease struct {
 	envDigest string
 	failure   error
 	academic  bool
+	cjk       bool
 }
 
 func (r testRelease) LoadRelease(_ context.Context, _ string) (papersassets.SignedArchiveRelease, error) {
@@ -72,6 +73,9 @@ func (r testRelease) LoadRelease(_ context.Context, _ string) (papersassets.Sign
 	}
 	if r.academic {
 		env = papersassets.AcademicEnvironment()
+	}
+	if r.cjk {
+		env = papersassets.AcademicCJKEnvironment()
 	}
 	return papersassets.SignedArchiveRelease{Claim: papersassets.ArchiveClaim{
 		Version: 1, EnvironmentDigest: r.envDigest, Environment: env,
@@ -326,4 +330,32 @@ func TestCompileEngineAllowlistAndImmutableBinding(t *testing.T) {
 	require.Equal(t, view.ID, parseJob(t, f.request("POST", base+"/compiles", lua, f.ownerToken)).ID)
 	require.Equal(t, http.StatusConflict, f.request("POST", base+"/compiles", `{"base_revision":1,"idempotency_key":"lua-test","compiler":"pdflatex"}`, f.ownerToken).Code)
 	require.Equal(t, 1, f.publisher.calls)
+}
+
+func TestXeLaTeXRequiresExactCJKPinAndExplicitOptIn(t *testing.T) {
+	f := newCompileHTTPFixture(t, true)
+	base := f.base()
+	req := `{"base_revision":1,"idempotency_key":"xe","compiler":"xelatex"}`
+	f.svc.compile.EnableXeLaTeX = true
+	f.svc.compile.EnvironmentDigest = papersassets.AcademicEnvironmentDigest()
+	f.svc.compile.Release = testRelease{envDigest: f.svc.compile.EnvironmentDigest, academic: true}
+	require.Equal(t, http.StatusBadRequest, f.request("POST", base+"/compiles", req, f.ownerToken).Code)
+	digest := papersassets.AcademicCJKEnvironmentDigest()
+	f.svc.compile.EnvironmentDigest = digest
+	f.svc.compile.Release = testRelease{envDigest: digest, cjk: true}
+	f.svc.compile.EnableXeLaTeX = false
+	require.Equal(t, http.StatusBadRequest, f.request("POST", base+"/compiles", req, f.ownerToken).Code)
+	require.NotContains(t, f.request("GET", base+"/compile-capability", "", f.ownerToken).Body.String(), "xelatex")
+	f.svc.compile.EnableXeLaTeX = true
+	require.Contains(t, f.request("GET", base+"/compile-capability", "", f.ownerToken).Body.String(), "xelatex")
+	out := f.request("POST", base+"/compiles", req, f.ownerToken)
+	require.Equal(t, http.StatusAccepted, out.Code, out.Body.String())
+	require.Equal(t, papersassets.CompilerXeLaTeX, parseJob(t, out).Compiler)
+	job, found, err := f.queue.FindByIdempotencyKey(context.Background(), f.owner.UUID, f.project.ID, "xe")
+	require.NoError(t, err)
+	require.True(t, found)
+	snap, err := f.publisher.store.LoadSnapshot(job.SnapshotDigest)
+	require.NoError(t, err)
+	require.Equal(t, papersassets.CompilerXeLaTeX, snap.Compiler)
+	require.Equal(t, http.StatusConflict, f.request("POST", base+"/compiles", `{"base_revision":1,"idempotency_key":"xe","compiler":"pdflatex"}`, f.ownerToken).Code)
 }

@@ -52,6 +52,7 @@ type TrustConfig struct {
 	RetentionDays     int64  `json:"retention_days"`
 }
 type APIConfig struct {
+	EnableXeLaTeX  bool              `json:"enable_xelatex,omitempty"`
 	EnableLuaLaTeX bool              `json:"enable_lualatex,omitempty"`
 	Reader         StorageCredential `json:"reader"`
 	Trust          TrustConfig       `json:"trust"`
@@ -60,6 +61,7 @@ type WorkerConfig struct {
 	DatabasePassword string `json:"database_password"`
 }
 type LauncherConfig struct {
+	EnableXeLaTeX  bool              `json:"enable_xelatex,omitempty"`
 	EnableLuaLaTeX bool              `json:"enable_lualatex,omitempty"`
 	Reader         StorageCredential `json:"reader"`
 	Trust          TrustConfig       `json:"trust"`

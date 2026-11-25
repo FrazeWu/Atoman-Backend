@@ -171,3 +171,16 @@ func TestCompilerBoundToSnapshotDigestAndPinnedEnvironment(t *testing.T) {
 	require.False(t, testEnv().SupportsCompiler(CompilerLuaLaTeX))
 	require.False(t, AcademicEnvironment().SupportsCompiler("xelatex"))
 }
+
+func TestAcademicCJKEnvironmentExactPin(t *testing.T) {
+	env := AcademicCJKEnvironment()
+	require.NoError(t, env.Validate())
+	require.NotEqual(t, AcademicEnvironmentDigest(), AcademicCJKEnvironmentDigest())
+	require.True(t, env.SupportsCompiler(CompilerXeLaTeX))
+	require.True(t, env.SupportsCompiler(CompilerPDFLaTeX))
+	require.True(t, env.SupportsCompiler(CompilerLuaLaTeX))
+	require.False(t, AcademicEnvironment().SupportsCompiler(CompilerXeLaTeX))
+	env.ArchiveDigest = HashBytes([]byte("unexpected archive"))
+	require.ErrorIs(t, env.Validate(), ErrInvalid)
+	require.False(t, env.SupportsCompiler(CompilerXeLaTeX))
+}

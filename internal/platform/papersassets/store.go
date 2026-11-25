@@ -106,7 +106,7 @@ func AcademicEnvironment() Environment {
 }
 
 func (e Environment) Validate() error {
-	if e == AcademicEnvironment() {
+	if e == AcademicEnvironment() || e == AcademicCJKEnvironment() {
 		return nil
 	}
 	if e.Version != 1 || e.Name != "texlive-2026-p0" ||

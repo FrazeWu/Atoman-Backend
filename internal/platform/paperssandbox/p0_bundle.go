@@ -15,6 +15,7 @@ const (
 	P0Latex            P0Mode = "latex"
 	P0AcademicLatex    P0Mode = "academic-latex"
 	P0AcademicLuaLatex P0Mode = "academic-lualatex"
+	P0AcademicXeLatex  P0Mode = "academic-xelatex"
 	P0PIDPressure      P0Mode = "pids"
 )
 
@@ -48,13 +49,15 @@ func WriteP0BundleConfig(bundle, outputDir, jobID string, limits Limits, mode P0
 		if _, err := os.Stat(filepath.Join(bundle, "rootfs", "inputs", "main.tex")); err != nil {
 			return err
 		}
-	case P0AcademicLatex, P0AcademicLuaLatex:
+	case P0AcademicLatex, P0AcademicLuaLatex, P0AcademicXeLatex:
 		if _, err := os.Stat(filepath.Join(bundle, "rootfs", "inputs", "main.tex")); err != nil {
 			return err
 		}
 		guestPath := compileDriverGuestPath
 		if mode == P0AcademicLuaLatex {
 			guestPath = luaCompileDriverGuestPath
+		} else if mode == P0AcademicXeLatex {
+			guestPath = xeCompileDriverGuestPath
 		}
 		if err := installCompileDriver(bundle, guestPath); err != nil {
 			return err

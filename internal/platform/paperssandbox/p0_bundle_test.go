@@ -26,7 +26,7 @@ func p0TestDirectories(t *testing.T) (string, string) {
 }
 
 func TestWriteP0BundleConfigAndValidate(t *testing.T) {
-	for _, mode := range []P0Mode{P0Latex, P0AcademicLatex, P0AcademicLuaLatex, P0PIDPressure} {
+	for _, mode := range []P0Mode{P0Latex, P0AcademicLatex, P0AcademicLuaLatex, P0AcademicXeLatex, P0PIDPressure} {
 		t.Run(string(mode), func(t *testing.T) {
 			bundle, output := p0TestDirectories(t)
 			id := "p0-test-" + string(mode)
