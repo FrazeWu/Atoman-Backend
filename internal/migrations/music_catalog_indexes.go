@@ -31,6 +31,9 @@ func RunMusicCatalogIndexesMigration(db *gorm.DB) error {
 				ON music_album_bookmarks (album_id) WHERE deleted_at IS NULL`},
 		{"music_artist_bookmarks", `CREATE INDEX IF NOT EXISTS idx_music_artist_bookmarks_artist
 				ON music_artist_bookmarks (artist_id) WHERE deleted_at IS NULL`},
+		// Match the public catalogue's release-date ordering in both directions.
+		{"Songs", `CREATE INDEX IF NOT EXISTS idx_music_songs_lifecycle_release
+			ON "Songs" (lifecycle_status, release_date DESC, created_at DESC) WHERE deleted_at IS NULL`},
 		{"Songs", `CREATE INDEX IF NOT EXISTS idx_music_songs_album_track
 				ON "Songs" (album_id, track_number, created_at) WHERE deleted_at IS NULL`},
 		{"Songs", `CREATE INDEX IF NOT EXISTS idx_music_songs_album_lifecycle_track

@@ -18,6 +18,7 @@ func TestRunMusicCatalogIndexesMigrationCreatesIndexes(t *testing.T) {
 		{"Albums", "idx_music_albums_created_cursor"},
 		{"music_album_bookmarks", "idx_music_album_bookmarks_user_created_cursor"},
 		{"Songs", "idx_music_songs_album_track"},
+		{"Songs", "idx_music_songs_lifecycle_release"},
 		{"music_album_import_sessions", "idx_music_import_sessions_user_status_updated"},
 		{"music_search_interactions", "idx_music_search_interactions_user_created"},
 	} {

@@ -399,22 +399,12 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 	}
 	viewer, hasViewer := currentMusicUser(c)
 	viewerPtr := musicViewer(viewer, hasViewer)
-	songID, err = resolveMusicSongID(h.service.db, songID, viewerPtr)
+	song, err := loadMusicSongDetailRow(h.service.db, songID, viewerPtr)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			err = apperr.NotFound("music.song_not_found", "Song not found")
 		}
 		httpx.Error(c, err)
-		return
-	}
-	var song model.Song
-	query := scopeVisibleMusicEntries(h.service.db, "\"Songs\"", "uploaded_by", viewerPtr, false)
-	if err := query.Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Album.Artists", visibleArtistPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).First(&song, "\"Songs\".id = ?", songID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			httpx.Error(c, apperr.NotFound("music.song_not_found", "Song not found"))
-		} else {
-			httpx.Error(c, err)
-		}
 		return
 	}
 	var links []model.SongArtist
@@ -479,6 +469,37 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		resolveAlbumMediaURLs(result.Song.Album)
 	}
 	httpx.OK(c, http.StatusOK, result)
+}
+
+// Active songs (the common detail request) can be fetched with the ordinary
+// visibility-scoped detail query once. Only a missing or merged row needs
+// legacy-ID resolution. Every canonical target still passes the same scope.
+func loadMusicSongDetailRow(db *gorm.DB, id uuid.UUID, viewer *authctx.CurrentUser) (model.Song, error) {
+	load := func(target uuid.UUID) (model.Song, error) {
+		var song model.Song
+		query := scopeVisibleMusicEntries(db, `"Songs"`, "uploaded_by", viewer, false)
+		err := query.Preload("Album", visibleAlbumPreload(viewer)).
+			Preload("Album.Artists", visibleArtistPreload(viewer)).
+			Preload("Artists", visibleArtistPreload(viewer)).
+			First(&song, `"Songs".id = ?`, target).Error
+		return song, err
+	}
+
+	song, err := load(id)
+	if err == nil && (song.LifecycleStatus != model.MusicLifecycleMerged || song.RedirectTo == nil) {
+		return song, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Song{}, err
+	}
+	canonicalID, err := resolveMusicSongID(db, id, viewer)
+	if err != nil {
+		return model.Song{}, err
+	}
+	if canonicalID == id {
+		return model.Song{}, gorm.ErrRecordNotFound
+	}
+	return load(canonicalID)
 }
 
 func resolveSongEffectiveSources(song *model.Song) {
