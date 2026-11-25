@@ -21,8 +21,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testCollabEngine(t *testing.T) *paperscrdt.Engine {
+func testCollabEngine(t *testing.T) collabEngine {
 	t.Helper()
+	if socket := os.Getenv("PAPERS_CRDT_TEST_SOCKET"); socket != "" {
+		return testIsolatedCollabEngine(t, socket)
+	}
 	runtime := os.Getenv("PAPERS_CRDT_TEST_RUNTIME")
 	if runtime == "" {
 		t.Skip("Run scripts/test-papers-crdt.sh for actual Yjs integration")

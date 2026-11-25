@@ -133,3 +133,52 @@ growth/epoch compaction, performance/load testing, and browser/production
 release gates. Do not expose the internal store via HTTP/WebSocket before
 these gates. No worker dependency, frontend code, API routes or production
 service settings are changed in stage 8.2.
+
+## Stage 8.3A: isolated runtime transport
+
+The Linux `papers-crdt-worker` command has no HTTP listener or database
+configuration. A root-owned systemd socket passes exactly one AF_UNIX
+listener via socket activation; the worker refuses root execution or a
+missing/incorrect inherited descriptor. The socket is mode 0660, group
+atoman. The worker verifies the backend account UID with SO_PEERCRED before
+reading a request, and the backend UnixClient verifies both socket-file
+ownership and the listener creator's UID. The IPC protocol accepts only
+bounded length-prefixed JSON for the existing seed, merge and read
+operations. Errors are sanitized, and the worker admits at most two
+requests at once; excess connections are closed without allocating another
+request buffer. Each request has an 8-second IPC deadline, including the
+existing 5-second decoder deadline.
+
+The candidate production service runs under DynamicUser, not the web
+backend identity. It receives no database credentials. Its release lives
+in a separately root-owned, read-only /opt/atoman-papers-crdt directory.
+The service has a private network namespace and permits AF_UNIX only,
+with IPAddressDeny=any, no capabilities or privilege escalation, a
+read-only system filesystem, 512 MiB memory, 48 tasks, one CPU's quota,
+and no access to application config/data directories or home directories.
+A read-only private /run filesystem hides the host's filesystem sockets
+while the inherited socket descriptor remains usable. Masking all of /run
+using InaccessiblePaths instead conflicts with systemd namespace setup on
+the tested VPS; do not replace the private mount with a less restrictive
+configuration.
+
+Run `./scripts/test-papers-crdt-isolation.sh` on the authorized Linux
+development host with systemd, Docker, Node, Go, and the existing atoman
+account. It builds temporary artifacts, creates a unique transient
+systemd socket/service using the actual isolation properties, verifies
+both Unix peer authorization and the filesystem/network restrictions
+from inside the actual decoder process, and exercises the PostgreSQL
+transaction store over the private Unix socket with disposable test data.
+It removes its test service, socket, database container and staged files
+on exit. This does not install or start the candidate production unit.
+
+The deploy/papers/production candidate units require the explicit
+CRDT_RUNTIME_APPROVED marker. Do not create it or install/enable the units
+until the remaining release gates are completed. The IPC worker alone
+does not authorize end users: the web backend remains the sole authority
+for account, membership, file identity, epoch, checkpoint sequence and
+canonical source. No public route is enabled, and the existing blog Hub
+and CodeMirror behavior are unchanged. The next task is the authenticated
+WebSocket gateway and browser protocol, including bounded per-user
+admission, state-vector synchronization, active revocation and stale
+epoch handling. Load and deployment tests remain required.

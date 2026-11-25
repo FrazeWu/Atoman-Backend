@@ -74,26 +74,33 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	}
 	return b.buffer.Write(p)
 }
-func (e *Engine) Run(ctx context.Context, req Request) (Checkpoint, error) {
-	var out Checkpoint
+func validateRequest(req Request) error {
 	if !validText(req.Text) || len(req.State) > MaxState || len(req.Update) > MaxUpdate {
-		return out, ErrInvalid
+		return ErrInvalid
 	}
 	switch req.Op {
 	case "seed":
 		if len(req.State) != 0 || len(req.Update) != 0 {
-			return out, ErrInvalid
+			return ErrInvalid
 		}
 	case "read":
 		if len(req.State) == 0 || len(req.Update) != 0 {
-			return out, ErrInvalid
+			return ErrInvalid
 		}
 	case "merge":
 		if len(req.State) == 0 || len(req.Update) == 0 {
-			return out, ErrInvalid
+			return ErrInvalid
 		}
 	default:
-		return out, ErrInvalid
+		return ErrInvalid
+	}
+	return nil
+}
+
+func (e *Engine) Run(ctx context.Context, req Request) (Checkpoint, error) {
+	var out Checkpoint
+	if err := validateRequest(req); err != nil {
+		return out, err
 	}
 	if e == nil || ctx == nil {
 		return out, ErrUnavailable

@@ -1,0 +1,16 @@
+[Unit]
+Description=Private Atoman Papers CRDT socket
+ConditionPathExists=/etc/atoman/papers/CRDT_RUNTIME_APPROVED
+
+[Socket]
+ListenStream=/run/atoman-papers-crdt.sock
+SocketUser=root
+SocketGroup=atoman
+SocketMode=0660
+Backlog=8
+RemoveOnStop=yes
+Accept=no
+Service=atoman-papers-crdt.service
+
+[Install]
+WantedBy=sockets.target
