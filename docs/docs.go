@@ -28549,6 +28549,101 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/projects/{id}/files/{fileId}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "查询文本文件版本历史",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "File UUID",
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Exclusive revision cursor, 50 entries per page",
+                        "name": "before",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/papers/projects/{id}/files/{fileId}/versions/{revision}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "读取指定历史源码版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "File UUID",
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "File revision",
+                        "name": "revision",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}/restore": {
             "post": {
                 "security": [
@@ -55226,6 +55321,12 @@ const docTemplate = `{
                 "path": {
                     "type": "string"
                 },
+                "replacements": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/papers.TextReplacement"
+                    }
+                },
                 "uploads": {
                     "type": "array",
                     "items": {
@@ -55244,6 +55345,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "papers.TextReplacement": {
+            "type": "object",
+            "properties": {
+                "base_revision": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "file_id": {
                     "type": "string"
                 }
             }

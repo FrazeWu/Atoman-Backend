@@ -23,13 +23,15 @@ func TestPapersSwaggerCoversPrivateProjectEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := map[string][]string{
-		"/api/v1/papers/access":                       {"get"},
-		"/api/v1/papers/admin/grants":                 {"post"},
-		"/api/v1/papers/admin/grants/{userId}":        {"delete"},
-		"/api/v1/papers/projects":                     {"get", "post"},
-		"/api/v1/papers/projects/{id}":                {"get", "patch", "delete"},
-		"/api/v1/papers/projects/{id}/files":          {"get", "post"},
-		"/api/v1/papers/projects/{id}/files/{fileId}": {"get", "put"},
+		"/api/v1/papers/access":                                           {"get"},
+		"/api/v1/papers/admin/grants":                                     {"post"},
+		"/api/v1/papers/admin/grants/{userId}":                            {"delete"},
+		"/api/v1/papers/projects":                                         {"get", "post"},
+		"/api/v1/papers/projects/{id}":                                    {"get", "patch", "delete"},
+		"/api/v1/papers/projects/{id}/files":                              {"get", "post"},
+		"/api/v1/papers/projects/{id}/files/{fileId}":                     {"get", "put"},
+		"/api/v1/papers/projects/{id}/files/{fileId}/versions":            {"get"},
+		"/api/v1/papers/projects/{id}/files/{fileId}/versions/{revision}": {"get"},
 	}
 	for route, methods := range expected {
 		for _, method := range methods {

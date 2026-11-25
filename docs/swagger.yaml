@@ -10124,6 +10124,10 @@ definitions:
         type: string
       path:
         type: string
+      replacements:
+        items:
+          $ref: '#/definitions/papers.TextReplacement'
+        type: array
       uploads:
         items:
           $ref: '#/definitions/papers.FileUpload'
@@ -10136,6 +10140,15 @@ definitions:
       kind:
         type: string
       path:
+        type: string
+    type: object
+  papers.TextReplacement:
+    properties:
+      base_revision:
+        type: integer
+      content:
+        type: string
+      file_id:
         type: string
     type: object
   papers.applyInput:
@@ -29552,6 +29565,67 @@ paths:
       security:
       - BearerAuth: []
       summary: 乐观锁保存 LaTeX 文本内容
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/files/{fileId}/versions:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File UUID
+        in: path
+        name: fileId
+        required: true
+        type: string
+      - description: Exclusive revision cursor, 50 entries per page
+        in: query
+        name: before
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 查询文本文件版本历史
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/files/{fileId}/versions/{revision}:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: File UUID
+        in: path
+        name: fileId
+        required: true
+        type: string
+      - description: File revision
+        in: path
+        name: revision
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 读取指定历史源码版本
       tags:
       - papers
   /api/v1/papers/projects/{id}/files/manage:

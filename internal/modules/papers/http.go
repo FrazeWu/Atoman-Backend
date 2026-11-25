@@ -65,6 +65,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.POST("/projects/:id/files/manage", h.manageFiles)
 	private.GET("/projects/:id/files/:fileId", h.file)
 	private.PUT("/projects/:id/files/:fileId", h.saveFile)
+	private.GET("/projects/:id/files/:fileId/versions", h.fileVersions)
+	private.GET("/projects/:id/files/:fileId/versions/:revision", h.fileVersion)
 	// These routes are deliberately fail-closed in production: NewService(db)
 	// does NOT provide the trusted publisher, signed environment or queue.
 	private.GET("/projects/:id/compile-capability", h.compileCapability)

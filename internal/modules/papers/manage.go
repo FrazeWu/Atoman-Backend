@@ -24,12 +24,18 @@ type FileUpload struct {
 	Kind    string `json:"kind"`
 	Content string `json:"content"`
 }
+type TextReplacement struct {
+	FileID       uuid.UUID `json:"file_id"`
+	BaseRevision int64     `json:"base_revision"`
+	Content      string    `json:"content"`
+}
 type FileChange struct {
-	Action       string       `json:"action"`
-	BaseRevision int64        `json:"base_revision"`
-	FileID       uuid.UUID    `json:"file_id"`
-	Path         string       `json:"path"`
-	Uploads      []FileUpload `json:"uploads"`
+	Action       string            `json:"action"`
+	BaseRevision int64             `json:"base_revision"`
+	FileID       uuid.UUID         `json:"file_id"`
+	Path         string            `json:"path"`
+	Uploads      []FileUpload      `json:"uploads"`
+	Replacements []TextReplacement `json:"replacements"`
 }
 type ManagedProject struct {
 	Project model.PaperProject `json:"project"`
@@ -159,6 +165,46 @@ func (s *Service) ManageFiles(user authctx.CurrentUser, id uuid.UUID, in FileCha
 				files = append(files, f)
 				created = append(created, f)
 			}
+		case "replace_text":
+			if len(in.Replacements) < 1 || len(in.Replacements) > 64 {
+				return apperr.BadRequest("papers.invalid_action", "Provide 1-64 unique text replacements")
+			}
+			positions := make(map[uuid.UUID]int, len(files))
+			for i, f := range files {
+				positions[f.ID] = i
+			}
+			seen := map[uuid.UUID]bool{}
+			for _, replacement := range in.Replacements {
+				i, ok := positions[replacement.FileID]
+				if !ok {
+					return apperr.NotFound("papers.file_not_found", "File not found")
+				}
+				if seen[replacement.FileID] {
+					return apperr.BadRequest("papers.invalid_action", "Duplicate replacement")
+				}
+				seen[replacement.FileID] = true
+				f := files[i]
+				if f.Kind != "text" {
+					return apperr.BadRequest("papers.binary_read_only", "Binary file cannot be edited")
+				}
+				if replacement.BaseRevision < 1 || f.Revision != replacement.BaseRevision {
+					return apperr.Conflict("papers.revision_conflict", "File has changed")
+				}
+				if err := validateText(replacement.Content); err != nil {
+					return err
+				}
+				if f.Content == replacement.Content {
+					continue
+				}
+				f.Content = replacement.Content
+				f.SHA256 = hashText(f.Content)
+				f.Revision++
+				files[i] = f
+				changed = append(changed, f)
+			}
+			if len(changed) == 0 {
+				return apperr.BadRequest("papers.invalid_action", "No source changes")
+			}
 		case "rename", "delete", "set_main":
 			if idx < 0 {
 				return apperr.NotFound("papers.file_not_found", "File not found")
@@ -203,7 +249,7 @@ func (s *Service) ManageFiles(user authctx.CurrentUser, id uuid.UUID, in FileCha
 			}
 		}
 		for _, f := range changed {
-			if err := tx.Model(&model.PaperFile{}).Where("id=? AND project_id=?", f.ID, id).Updates(map[string]any{"path": f.Path, "revision": f.Revision, "updated_at": time.Now().UTC()}).Error; err != nil {
+			if err := tx.Model(&model.PaperFile{}).Where("id=? AND project_id=?", f.ID, id).Updates(map[string]any{"path": f.Path, "content": f.Content, "sha256": f.SHA256, "revision": f.Revision, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
 			if err := tx.Create(&[]model.PaperFileVersion{fileVersion(f, user.ID)}).Error; err != nil {
