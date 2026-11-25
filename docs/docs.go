@@ -28629,6 +28629,12 @@ const docTemplate = `{
                         "description": "Prior editing epoch; stale epochs are rejected",
                         "name": "epoch",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Set to 1 to negotiate optional live presence frames",
+                        "name": "presence",
+                        "in": "query"
                     }
                 ],
                 "responses": {

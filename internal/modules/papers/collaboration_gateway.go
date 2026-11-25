@@ -54,6 +54,7 @@ type collaborationGateway struct {
 	accounts   map[uuid.UUID]int
 	rooms      map[roomKey]int
 	engineGate chan struct{}
+	presence   *presenceRegistry
 }
 
 // ConfigureCollaboration is startup-only dependency injection. Normal
@@ -63,7 +64,7 @@ func (s *Service) configureCollaboration(engine collabEngine) error {
 	if s == nil || s.db == nil || engine == nil || s.collaboration != nil {
 		return paperscrdt.ErrUnavailable
 	}
-	s.collaboration = &collaborationGateway{store: &collaborationStore{service: s, engine: engine}, signals: collab.NewRoomSignals(), accounts: make(map[uuid.UUID]int), rooms: make(map[roomKey]int), engineGate: make(chan struct{}, 2)}
+	s.collaboration = &collaborationGateway{store: &collaborationStore{service: s, engine: engine}, signals: collab.NewRoomSignals(), accounts: make(map[uuid.UUID]int), rooms: make(map[roomKey]int), engineGate: make(chan struct{}, 2), presence: newPresenceRegistry()}
 	return nil
 }
 
@@ -186,24 +187,28 @@ func (g *collaborationGateway) join(ctx context.Context, user authctx.CurrentUse
 }
 
 type collabClientFrame struct {
-	Type      string    `json:"type"`
-	RequestID uuid.UUID `json:"request_id"`
-	Epoch     uuid.UUID `json:"epoch"`
-	Update    []byte    `json:"update,omitempty"`
+	Type      string           `json:"type"`
+	RequestID uuid.UUID        `json:"request_id"`
+	Epoch     uuid.UUID        `json:"epoch"`
+	Update    []byte           `json:"update,omitempty"`
+	Selection *collabSelection `json:"selection,omitempty"`
 }
 type collabServerFrame struct {
-	Type            string     `json:"type"`
-	Protocol        string     `json:"protocol,omitempty"`
-	Epoch           uuid.UUID  `json:"epoch"`
-	RequestID       *uuid.UUID `json:"request_id,omitempty"`
-	Sequence        int64      `json:"sequence,omitempty"`
-	FileRevision    int64      `json:"file_revision,omitempty"`
-	ProjectRevision int64      `json:"project_revision,omitempty"`
-	Role            string     `json:"role,omitempty"`
-	State           []byte     `json:"state,omitempty"`
-	Vector          []byte     `json:"vector,omitempty"`
-	Code            string     `json:"code,omitempty"`
-	Retryable       bool       `json:"retryable,omitempty"`
+	Type            string       `json:"type"`
+	Protocol        string       `json:"protocol,omitempty"`
+	Epoch           uuid.UUID    `json:"epoch"`
+	RequestID       *uuid.UUID   `json:"request_id,omitempty"`
+	Sequence        int64        `json:"sequence,omitempty"`
+	FileRevision    int64        `json:"file_revision,omitempty"`
+	ProjectRevision int64        `json:"project_revision,omitempty"`
+	Role            string       `json:"role,omitempty"`
+	State           []byte       `json:"state,omitempty"`
+	Vector          []byte       `json:"vector,omitempty"`
+	Code            string       `json:"code,omitempty"`
+	Retryable       bool         `json:"retryable,omitempty"`
+	ConnectionID    *uuid.UUID   `json:"connection_id,omitempty"`
+	PresenceVersion uint64       `json:"presence_version,omitempty"`
+	Peers           []collabPeer `json:"peers,omitempty"`
 }
 
 func parseCollabFrame(raw []byte) (collabClientFrame, error) {
@@ -222,11 +227,15 @@ func parseCollabFrame(raw []byte) (collabClientFrame, error) {
 	}
 	switch f.Type {
 	case "update":
-		if len(f.Update) == 0 || len(f.Update) > paperscrdt.MaxUpdate {
+		if f.Selection != nil || len(f.Update) == 0 || len(f.Update) > paperscrdt.MaxUpdate {
 			return f, paperscrdt.ErrInvalid
 		}
 	case "sync":
-		if len(f.Update) != 0 {
+		if f.Selection != nil || len(f.Update) != 0 {
+			return f, paperscrdt.ErrInvalid
+		}
+	case "presence":
+		if len(raw) > 2048 || len(f.Update) != 0 || !f.Selection.valid() {
 			return f, paperscrdt.ErrInvalid
 		}
 	default:
@@ -266,7 +275,7 @@ func closeCollab(conn *websocket.Conn, code string) {
 
 // serve is single-writer: only its main loop sends application messages.
 // One reader and one in-flight request are bounded per admitted socket.
-func (g *collaborationGateway) serve(ctx context.Context, conn *websocket.Conn, user authctx.CurrentUser, key roomKey, state collaborationState, meta collabMeta) {
+func (g *collaborationGateway) serve(ctx context.Context, conn *websocket.Conn, user authctx.CurrentUser, key roomKey, state collaborationState, meta collabMeta, enablePresence bool) {
 	ctx, cancel := context.WithTimeout(ctx, collabSessionLifetime)
 	defer cancel()
 	defer conn.Close()
@@ -279,6 +288,37 @@ func (g *collaborationGateway) serve(ctx context.Context, conn *websocket.Conn, 
 	}
 	sentSeq, sentProject := state.Sequence, state.ProjectRevision
 	epoch, role := state.Epoch, meta.role
+	pk := presenceKey{room: key, epoch: epoch}
+	var connectionID uuid.UUID
+	var presenceVersion uint64
+	if enablePresence {
+		var ok bool
+		connectionID, ok = g.presence.join(pk, user, role)
+		if !ok {
+			closeCollab(conn, "papers.collab_limit")
+			return
+		}
+		defer func() {
+			if g.presence.leave(pk, connectionID) {
+				g.signals.Notify(key.String())
+			}
+		}()
+		g.signals.Notify(key.String())
+	}
+	sendPresence := func() bool {
+		if !enablePresence {
+			return true
+		}
+		version, peers := g.presence.snapshot(pk)
+		if version == presenceVersion {
+			return true
+		}
+		if sendCollab(conn, collabServerFrame{Type: "presence", Protocol: collabProtocol, Epoch: epoch, ConnectionID: &connectionID, PresenceVersion: version, Peers: peers}) != nil {
+			return false
+		}
+		presenceVersion = version
+		return true
+	}
 	conn.SetReadLimit(collabFrameLimit)
 	if conn.SetReadDeadline(time.Now().Add(45*time.Second)) != nil {
 		return
@@ -323,7 +363,7 @@ func (g *collaborationGateway) serve(ctx context.Context, conn *websocket.Conn, 
 			return false
 		}
 		if !force && m.sequence == sentSeq && m.projectRevision == sentProject {
-			return true
+			return sendPresence()
 		}
 		fresh, err := g.store.Read(opCtx, user, key.project, key.file, epoch)
 		if err != nil {
@@ -338,9 +378,13 @@ func (g *collaborationGateway) serve(ctx context.Context, conn *websocket.Conn, 
 			return false
 		}
 		sentSeq, sentProject = fresh.Sequence, fresh.ProjectRevision
-		return true
+		return sendPresence()
 	}
-	var lastMessage time.Time
+	var lastMessage, lastPresence time.Time
+	var presenceDrops int
+	if enablePresence && !refresh(nil, false) {
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -360,16 +404,49 @@ func (g *collaborationGateway) serve(ctx context.Context, conn *websocket.Conn, 
 				return
 			}
 		case f := <-frames:
-			// Floods cannot keep the reader or database occupied indefinitely.
+			if f.Epoch != epoch {
+				closeCollab(conn, "papers.collab_epoch_stale")
+				return
+			}
+			if f.Type == "presence" {
+				if !enablePresence {
+					closeCollab(conn, "papers.collab_invalid_update")
+					return
+				}
+				// Rate-limit ephemeral messages independently of accepted source
+				// updates. Excess cursor motion is dropped, not written to storage.
+				if !lastPresence.IsZero() && time.Since(lastPresence) < 350*time.Millisecond {
+					presenceDrops++
+					if presenceDrops > 8 {
+						closeCollab(conn, "papers.collab_rate_limit")
+						return
+					}
+					continue
+				}
+				presenceDrops = 0
+				lastPresence = time.Now()
+				opCtx, stopOp := context.WithTimeout(ctx, 5*time.Second)
+				current, err := g.store.inspect(opCtx, user, key, epoch)
+				stopOp()
+				if err != nil {
+					closeCollab(conn, collabErrorCode(err))
+					return
+				}
+				if current.role != role {
+					closeCollab(conn, "papers.collab_role_changed")
+					return
+				}
+				if g.presence.update(pk, connectionID, f.Selection) {
+					g.signals.Notify(key.String())
+				}
+				continue
+			}
+			// Presence and durable document writes have independent pacing.
 			if !lastMessage.IsZero() && time.Since(lastMessage) < 150*time.Millisecond {
 				closeCollab(conn, "papers.collab_rate_limit")
 				return
 			}
 			lastMessage = time.Now()
-			if f.Epoch != epoch {
-				closeCollab(conn, "papers.collab_epoch_stale")
-				return
-			}
 			if f.Type == "sync" {
 				if !refresh(&f.RequestID, true) {
 					return
@@ -463,7 +540,7 @@ func (h *handler) collaborationCapability(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, gin.H{"enabled": true, "protocol": collabProtocol, "role": meta.role})
+	httpx.OK(c, http.StatusOK, gin.H{"enabled": true, "protocol": collabProtocol, "role": meta.role, "presence": true})
 }
 
 // @Summary Authenticated private collaboration WebSocket (disabled by default)
@@ -472,6 +549,7 @@ func (h *handler) collaborationCapability(c *gin.Context) {
 // @Param id path string true "Project UUID"
 // @Param fileId path string true "File UUID"
 // @Param epoch query string false "Prior editing epoch; stale epochs are rejected"
+// @Param presence query string false "Set to 1 to negotiate optional live presence frames"
 // @Success 101
 // @Router /api/v1/papers/projects/{id}/files/{fileId}/collaboration/ws [get]
 func (h *handler) collaborationSocket(c *gin.Context) {
@@ -519,5 +597,5 @@ func (h *handler) collaborationSocket(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	g.serve(ctx, conn, u, key, initial, meta)
+	g.serve(ctx, conn, u, key, initial, meta, c.Query("presence") == "1")
 }

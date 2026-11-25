@@ -29641,6 +29641,10 @@ paths:
         in: query
         name: epoch
         type: string
+      - description: Set to 1 to negotiate optional live presence frames
+        in: query
+        name: presence
+        type: string
       responses:
         "101":
           description: Switching Protocols

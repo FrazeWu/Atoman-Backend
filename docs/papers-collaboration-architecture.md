@@ -243,3 +243,33 @@ The separate isolation script also exercises the same tests through the
 real restricted Unix worker. Normal production does not configure this
 gateway; deployment is blocked until client, reconnect, revocation and
 compile/restore integration acceptance gates are met.
+
+## Stage 8.3B3: authenticated ephemeral presence
+
+The capability endpoint now advertises presence=true when the gateway is
+explicitly configured. The client must negotiate presence=1 on upgrade;
+earlier clients still receive only durable document frames. The server
+creates a random connection identity and derives the account ID, username
+and project role from the authenticated context. Clients cannot supply
+identity, name, role, arbitrary display color or document content in a
+presence frame. A room is keyed by project, file and editing epoch.
+
+The bounded in-memory registry stores at most the admitted connections
+in each room. Presence snapshots carry a monotonic process-local version.
+A selection contains two opaque Yjs relative positions of at most 128
+decoded bytes apiece, or no selection when blurred. The gateway accepts
+presence frames of at most 2 KiB, rechecks the sender's session, access
+grant, membership and epoch, and publishes coalesced notifications.
+Recipients recheck current permissions and canonical epoch before receiving
+the snapshot. Cursor motion has independent pacing (350 ms), with repeated
+excess frames closing the connection, and does not create database writes,
+source revisions or compile jobs. Connections are removed on close,
+revocation detection or timeout; stale records can remain during the
+bounded polling/detection interval. Presence is not persisted or shared
+across gateway processes, and does not authorize editing.
+
+The browser resolves relative positions only against its current source
+Y.Text and renders peer selections without copying the selected source.
+The production gateway remains disabled; reconnect, offline recovery,
+collaborative undo, compilation fencing and multi-process load acceptance
+remain outstanding.

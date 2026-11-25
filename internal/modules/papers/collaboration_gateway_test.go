@@ -82,7 +82,7 @@ func TestCollabFrameBoundsAndSchema(t *testing.T) {
 		{Type: "update", Epoch: good.Epoch, RequestID: good.RequestID, Update: make([]byte, paperscrdt.MaxUpdate+1)},
 		{Type: "sync", Epoch: good.Epoch, RequestID: good.RequestID, Update: []byte{1}},
 		{Type: "sync", Epoch: uuid.Nil, RequestID: good.RequestID},
-		{Type: "presence", Epoch: good.Epoch, RequestID: good.RequestID},
+		{Type: "presence", Epoch: good.Epoch, RequestID: good.RequestID, Selection: &collabSelection{Anchor: make([]byte, maxRelativePositionBytes+1), Head: []byte{1}}},
 	} {
 		raw, _ = json.Marshal(bad)
 		_, err = parseCollabFrame(raw)
