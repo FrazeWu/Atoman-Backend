@@ -97,3 +97,48 @@ unsigned archive, or overwriting unrelated work is not an acceptable rollback.
 
 Actual production configuration, files, credentials, signing keys, services
 and database are unchanged by this task.
+
+## 8.6B capacity and ingress acceptance
+
+The current production PostgreSQL backup completion record dated
+2026-11-25T04:33:56Z records a full isolated restore of 288 tables.
+The 960,539,423-byte dump's SHA-256 was independently recomputed on the
+host and matched the recorded digest. This verifies the existing backup
+and recovery evidence, not a new restore or migration of that dump.
+The exact candidate migration passed against disposable PostgreSQL.
+A full migration rehearsal on the restored production backup remains
+a separate pre-activation requirement; do not run it concurrently with
+load acceptance or on a host without sufficient disk and memory headroom.
+
+The initial capacity test admitted twelve sockets and rejected each
+account, room and global overflow, but two of six concurrent writers
+exhausted the existing browser retry budget. The gateway now serializes
+seed/merge work by project and file before obtaining one of the two
+global decoder slots. Admission bounds the number of waiters; no
+unbounded background worker or queue is created. The reservation waits
+at most four seconds and respects cancellation; the original ten-second
+operation budget includes queue time. Database revision, epoch and
+authorization checks remain authoritative. Different rooms can proceed
+concurrently, and idle reservation state is reclaimed.
+
+The production API Nginx template previously routed Papers collaboration
+through the normal API proxy without WebSocket upgrade headers. The
+candidate adds a narrowly matched nested location under the existing
+API prefix, preserving the ordinary API and blog WebSocket paths.
+The independent loopback test uses the candidate template, an actual
+disposable Nginx process and a synthetic HTTP/WebSocket upstream. It
+verifies a 101 upgrade and frame transfer, auth/subprotocol forwarding
+and absence of upgrade forwarding on ordinary API/capability paths.
+No live configuration is reloaded; external authenticated ingress
+acceptance remains required during the controlled rollout.
+
+The corrected isolated capacity test passed on 2026-11-25: 12
+admitted connections in two rooms, all three admission overflow
+checks, two waves of six concurrent writers (2.48 s and 2.44 s
+maximum acknowledgements, zero retries), and a wave of twelve
+concurrent writers (6.47 s maximum, four aggregate retries).
+All 24 submitted synthetic deltas were present exactly once, the
+final file revisions and sequences were verified on every socket,
+and reservations/admission counts were reclaimed. These measured
+values describe this small synthetic test on the current VPS,
+not large-document or multi-process throughput guarantees.

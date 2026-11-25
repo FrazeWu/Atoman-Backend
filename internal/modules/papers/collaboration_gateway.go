@@ -54,6 +54,7 @@ type collaborationGateway struct {
 	accounts   map[uuid.UUID]int
 	rooms      map[roomKey]int
 	engineGate chan struct{}
+	roomGates  map[roomKey]*collabRoomGate
 	presence   *presenceRegistry
 }
 
@@ -63,7 +64,7 @@ func (s *Service) configureCollaboration(engine collabEngine) error {
 	if s == nil || s.db == nil || engine == nil || s.collaboration != nil {
 		return paperscrdt.ErrUnavailable
 	}
-	s.collaboration = &collaborationGateway{store: &collaborationStore{service: s, engine: engine}, signals: collab.NewRoomSignals(), accounts: make(map[uuid.UUID]int), rooms: make(map[roomKey]int), engineGate: make(chan struct{}, 2), presence: newPresenceRegistry()}
+	s.collaboration = &collaborationGateway{store: &collaborationStore{service: s, engine: engine}, signals: collab.NewRoomSignals(), accounts: make(map[uuid.UUID]int), rooms: make(map[roomKey]int), engineGate: make(chan struct{}, 2), roomGates: make(map[roomKey]*collabRoomGate), presence: newPresenceRegistry()}
 	return nil
 }
 
@@ -93,15 +94,57 @@ func (g *collaborationGateway) admit(uid uuid.UUID, key roomKey) (func(), bool) 
 		})
 	}, true
 }
-func (g *collaborationGateway) takeEngine() bool {
+
+// Room gates serialize merges of the same checkpoint before acquiring a
+// global decoder slot. Waiters are bounded by admitted sockets; no extra
+// request workers or unbounded queue are created. Different files can use
+// the two global slots independently.
+type collabRoomGate struct {
+	slot chan struct{}
+	refs int
+}
+
+func (g *collaborationGateway) reserveEngine(ctx context.Context, key roomKey) (func(), bool) {
+	wait, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	g.mu.Lock()
+	gate := g.roomGates[key]
+	if gate == nil {
+		gate = &collabRoomGate{slot: make(chan struct{}, 1)}
+		g.roomGates[key] = gate
+	}
+	gate.refs++
+	g.mu.Unlock()
+	unref := func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		gate.refs--
+		if gate.refs == 0 {
+			delete(g.roomGates, key)
+		}
+	}
+	select {
+	case gate.slot <- struct{}{}:
+	case <-wait.Done():
+		unref()
+		return nil, false
+	}
 	select {
 	case g.engineGate <- struct{}{}:
-		return true
-	default:
-		return false
+	case <-wait.Done():
+		<-gate.slot
+		unref()
+		return nil, false
 	}
+	if wait.Err() != nil {
+		<-g.engineGate
+		<-gate.slot
+		unref()
+		return nil, false
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-g.engineGate; <-gate.slot; unref() }) }, true
 }
-func (g *collaborationGateway) releaseEngine() { <-g.engineGate }
 
 // Metadata polling never loads or hashes a manuscript or large Yjs state.
 // The full state is reread under the same authorization only on changes.
@@ -164,11 +207,12 @@ func (g *collaborationGateway) join(ctx context.Context, user authctx.CurrentUse
 		}
 		out, err = base.checkpoint() // viewer cannot create an epoch
 	} else {
-		if !g.takeEngine() {
+		release, ok := g.reserveEngine(ctx, key)
+		if !ok {
 			return out, meta, collabRetry()
 		}
 		out, err = g.store.Open(ctx, user, key.project, key.file)
-		g.releaseEngine()
+		release()
 	}
 	if err != nil {
 		return out, meta, err
@@ -456,16 +500,21 @@ func (g *collaborationGateway) serve(ctx context.Context, conn *websocket.Conn, 
 				closeCollab(conn, "papers.read_only")
 				return
 			}
-			if !g.takeEngine() {
+			opCtx, stopOp := context.WithTimeout(ctx, 10*time.Second)
+			release, ok := g.reserveEngine(opCtx, key)
+			if !ok {
+				stopOp()
+				if ctx.Err() != nil {
+					return
+				}
 				if sendCollab(conn, collabServerFrame{Type: "error", Epoch: epoch, RequestID: &f.RequestID, Code: "papers.collab_retry", Retryable: true}) != nil {
 					return
 				}
 				continue
 			}
-			opCtx, stopOp := context.WithTimeout(ctx, 10*time.Second)
 			accepted, err := g.store.Apply(opCtx, user, key.project, key.file, epoch, f.Update)
 			stopOp()
-			g.releaseEngine()
+			release()
 			if err != nil {
 				code := collabErrorCode(err)
 				if terminalCollabError(code) {
