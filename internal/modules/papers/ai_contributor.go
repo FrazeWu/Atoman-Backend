@@ -63,9 +63,6 @@ func (s *Service) paperAIHistoricalChange(ctx context.Context, user authctx.Curr
 		if _, err := s.lockOwned(tx, user, pid); err != nil {
 			return err
 		}
-		if err := lockInvitationEligibility(tx, user.ID); err != nil {
-			return err
-		}
 		var event model.AuditLog
 		err := paperAIEventQuery(tx, user.ID, pid).Where("id=? AND action IN ?", eventID, []string{aiApplied, aiRolledBack}).First(&event).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {

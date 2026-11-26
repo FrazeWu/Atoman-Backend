@@ -42,6 +42,9 @@ func (s *Service) lockAccessible(tx *gorm.DB, user authctx.CurrentUser, pid uuid
 	if err != nil {
 		return p, err
 	}
+	if err := lockInvitationEligibility(tx, user.ID); err != nil {
+		return p, err
+	}
 	if p.OwnerID == user.ID {
 		p.AccessRole = RoleProjectOwner
 		return p, nil

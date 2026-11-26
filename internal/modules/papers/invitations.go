@@ -44,6 +44,12 @@ func invitationHash(token string) (string, error) {
 // Check active account and module grant under the same project lock ordering
 // as collaborative writes. Links cannot bypass module-level eligibility.
 func lockInvitationEligibility(tx *gorm.DB, uid uuid.UUID) error {
+	return lockInvitationEligibilityWithAccountLock(tx, uid, "SHARE")
+}
+
+// Grant before account is the common lock order. Project creation takes
+// UPDATE directly, instead of upgrading a shared account lock.
+func lockInvitationEligibilityWithAccountLock(tx *gorm.DB, uid uuid.UUID, accountStrength string) error {
 	var grant model.PaperAccessGrant
 	err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("user_id=? AND status='active'", uid).First(&grant).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && grant.ExpiresAt != nil && !grant.ExpiresAt.After(time.Now().UTC())) {
@@ -53,7 +59,7 @@ func lockInvitationEligibility(tx *gorm.DB, uid uuid.UUID) error {
 		return err
 	}
 	var account model.User
-	err = tx.Clauses(clause.Locking{Strength: "SHARE"}).Select("uuid").Where("uuid=? AND is_active=?", uid, true).First(&account).Error
+	err = tx.Clauses(clause.Locking{Strength: accountStrength}).Select("uuid").Where("uuid=? AND is_active=?", uid, true).First(&account).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return apperr.Forbidden("papers.invite_required", "Active account required")
 	}
@@ -79,9 +85,6 @@ func (s *Service) CreateInvitation(user authctx.CurrentUser, pid uuid.UUID, role
 	}
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		if _, err := s.lockOwned(tx, user, pid); err != nil {
-			return err
-		}
-		if err := lockInvitationEligibility(tx, user.ID); err != nil {
 			return err
 		}
 		now := time.Now().UTC()

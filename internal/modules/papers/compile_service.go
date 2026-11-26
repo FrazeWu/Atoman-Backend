@@ -166,6 +166,9 @@ func (s *Service) ownedSnapshot(ctx context.Context, user authctx.CurrentUser, p
 		if err != nil {
 			return err
 		}
+		if err := lockInvitationEligibility(tx, user.ID); err != nil {
+			return err
+		}
 		if project.HeadRevision != baseRevision {
 			return apperr.Conflict("papers.revision_conflict", "Project changed since compile request")
 		}
@@ -305,6 +308,10 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 	}
 	if !compileDigestRE.MatchString(digest) || digest != expectedDigest {
 		return CompileJobView{}, apperr.Internal(fmt.Errorf("publisher returned non-canonical or mismatched snapshot digest"))
+	}
+	// Account or invitation may have changed during external publication.
+	if _, err := s.GetProject(user, projectID); err != nil {
+		return CompileJobView{}, err
 	}
 	job, err := s.compile.Jobs.Submit(ctx, papersqueue.SubmitInput{
 		OwnerID: user.ID, ProjectID: projectID, SourceRevision: snapshot.Revision,

@@ -304,7 +304,12 @@ func (s *Service) ListTrashedProjects(user authctx.CurrentUser) ([]TrashedProjec
 		return nil, err
 	}
 	var rows []model.PaperProject
-	if err := s.db.Unscoped().Where("owner_id=? AND deleted_at IS NOT NULL", user.ID).Order("deleted_at DESC").Limit(100).Find(&rows).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockInvitationEligibility(tx, user.ID); err != nil {
+			return err
+		}
+		return tx.Unscoped().Where("owner_id=? AND deleted_at IS NOT NULL", user.ID).Order("deleted_at DESC").Limit(100).Find(&rows).Error
+	}); err != nil {
 		return nil, err
 	}
 	result := make([]TrashedProject, 0, len(rows))
@@ -319,8 +324,7 @@ func (s *Service) RestoreProject(user authctx.CurrentUser, id uuid.UUID) (model.
 		return p, err
 	}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var owner model.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("uuid").Where("uuid=?", user.ID).First(&owner).Error; err != nil {
+		if err := lockInvitationEligibilityWithAccountLock(tx, user.ID, "UPDATE"); err != nil {
 			return err
 		}
 		err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND owner_id=? AND deleted_at IS NOT NULL", id, user.ID).First(&p).Error

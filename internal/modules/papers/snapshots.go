@@ -122,22 +122,35 @@ func findProjectSnapshot(tx *gorm.DB, pid, id uuid.UUID) (model.PaperProjectSnap
 }
 
 func (s *Service) ListProjectSnapshots(user authctx.CurrentUser, pid uuid.UUID) ([]model.PaperProjectSnapshot, error) {
-	if _, err := s.GetProject(user, pid); err != nil {
+	if err := s.RequireAccess(user); err != nil {
 		return nil, err
 	}
 	rows := make([]model.PaperProjectSnapshot, 0)
-	err := s.db.Omit("manifest").Where("project_id=?", pid).Order("created_at DESC, id DESC").Limit(maxProjectSnapshots).Find(&rows).Error
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if _, err := s.lockOwnedWithStrength(tx, user, pid, "SHARE"); err != nil {
+			return err
+		}
+		return tx.Omit("manifest").Where("project_id=?", pid).Order("created_at DESC, id DESC").Limit(maxProjectSnapshots).Find(&rows).Error
+	})
 	return rows, err
 }
 func (s *Service) GetProjectSnapshot(user authctx.CurrentUser, pid, id uuid.UUID) (ProjectSnapshotDetail, error) {
-	if _, err := s.GetProject(user, pid); err != nil {
-		return ProjectSnapshotDetail{}, err
+	var out ProjectSnapshotDetail
+	if err := s.RequireAccess(user); err != nil {
+		return out, err
 	}
-	row, err := findProjectSnapshot(s.db, pid, id)
-	if err != nil {
-		return ProjectSnapshotDetail{}, err
-	}
-	return snapshotDetail(row)
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if _, err := s.lockOwnedWithStrength(tx, user, pid, "SHARE"); err != nil {
+			return err
+		}
+		row, err := findProjectSnapshot(tx, pid, id)
+		if err != nil {
+			return err
+		}
+		out, err = snapshotDetail(row)
+		return err
+	})
+	return out, err
 }
 func (s *Service) CreateProjectSnapshot(user authctx.CurrentUser, pid uuid.UUID, name string, base int64) (model.PaperProjectSnapshot, error) {
 	var out model.PaperProjectSnapshot

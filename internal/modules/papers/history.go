@@ -24,41 +24,56 @@ type FileVersionSummary struct {
 }
 
 func (s *Service) ListFileVersions(user authctx.CurrentUser, projectID, fileID uuid.UUID, before int64) ([]FileVersionSummary, error) {
-	if _, err := s.GetProject(user, projectID); err != nil {
+	if err := s.RequireAccess(user); err != nil {
 		return nil, err
-	}
-	file, err := s.GetFile(user, projectID, fileID)
-	if err != nil {
-		return nil, err
-	}
-	if file.Kind != "text" {
-		return nil, apperr.BadRequest("papers.binary_read_only", "History is available for text files")
 	}
 	rows := make([]FileVersionSummary, 0)
-	q := s.db.Model(&model.PaperFileVersion{}).Select("revision", "path", "sha256", "created_at").Where("file_id = ?", fileID)
-	if before > 0 {
-		q = q.Where("revision < ?", before)
-	}
-	err = q.Order("revision DESC").Limit(50).Scan(&rows).Error
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := s.lockHistoryFile(tx, user, projectID, fileID); err != nil {
+			return err
+		}
+		q := tx.Model(&model.PaperFileVersion{}).Select("revision", "path", "sha256", "created_at").Where("file_id = ?", fileID)
+		if before > 0 {
+			q = q.Where("revision < ?", before)
+		}
+		return q.Order("revision DESC").Limit(50).Scan(&rows).Error
+	})
 	return rows, err
+}
+
+func (s *Service) lockHistoryFile(tx *gorm.DB, user authctx.CurrentUser, projectID, fileID uuid.UUID) error {
+	if _, err := s.lockOwnedWithStrength(tx, user, projectID, "SHARE"); err != nil {
+		return err
+	}
+	var file model.PaperFile
+	err := tx.Select("id", "kind").Where("id=? AND project_id=?", fileID, projectID).First(&file).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return apperr.NotFound("papers.file_not_found", "File not found")
+	}
+	if err != nil {
+		return err
+	}
+	if file.Kind != "text" {
+		return apperr.BadRequest("papers.binary_read_only", "History is available for text files")
+	}
+	return nil
 }
 
 func (s *Service) GetFileVersion(user authctx.CurrentUser, projectID, fileID uuid.UUID, revision int64) (model.PaperFileVersion, error) {
 	var result model.PaperFileVersion
-	if _, err := s.GetProject(user, projectID); err != nil {
+	if err := s.RequireAccess(user); err != nil {
 		return result, err
 	}
-	file, err := s.GetFile(user, projectID, fileID)
-	if err != nil {
-		return result, err
-	}
-	if file.Kind != "text" {
-		return result, apperr.BadRequest("papers.binary_read_only", "History is available for text files")
-	}
-	err = s.db.Where("file_id = ? AND revision = ?", fileID, revision).First(&result).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return result, apperr.NotFound("papers.version_not_found", "Version not found")
-	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := s.lockHistoryFile(tx, user, projectID, fileID); err != nil {
+			return err
+		}
+		err := tx.Where("file_id = ? AND revision = ?", fileID, revision).First(&result).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("papers.version_not_found", "Version not found")
+		}
+		return err
+	})
 	return result, err
 }
 

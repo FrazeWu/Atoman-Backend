@@ -163,11 +163,16 @@ func (s *Service) ListProjects(user authctx.CurrentUser) ([]model.PaperProject, 
 		model.PaperProject
 		MemberRole string
 	}
-	err := s.db.Model(&model.PaperProject{}).
-		Select("paper_projects.*, CASE WHEN paper_projects.owner_id = ? THEN 'owner' ELSE m.role END AS member_role", user.ID).
-		Joins("LEFT JOIN paper_project_members m ON m.project_id=paper_projects.id AND m.user_id=? AND m.role IN ('editor','viewer')", user.ID).
-		Where("paper_projects.owner_id=? OR m.user_id IS NOT NULL", user.ID).
-		Order("paper_projects.updated_at DESC,paper_projects.id DESC").Find(&rows).Error
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockInvitationEligibility(tx, user.ID); err != nil {
+			return err
+		}
+		return tx.Model(&model.PaperProject{}).
+			Select("paper_projects.*, CASE WHEN paper_projects.owner_id = ? THEN 'owner' ELSE m.role END AS member_role", user.ID).
+			Joins("LEFT JOIN paper_project_members m ON m.project_id=paper_projects.id AND m.user_id=? AND m.role IN ('editor','viewer')", user.ID).
+			Where("paper_projects.owner_id=? OR m.user_id IS NOT NULL", user.ID).
+			Order("paper_projects.updated_at DESC,paper_projects.id DESC").Find(&rows).Error
+	})
 	projects := make([]model.PaperProject, 0, len(rows))
 	for _, row := range rows {
 		p := row.PaperProject
@@ -182,10 +187,11 @@ func (s *Service) GetProject(user authctx.CurrentUser, id uuid.UUID) (model.Pape
 		return model.PaperProject{}, err
 	}
 	var p model.PaperProject
-	err := s.db.Where("id = ? AND owner_id = ?", id, user.ID).First(&p).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return p, apperr.NotFound("papers.project_not_found", "Project not found")
-	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		p, err = s.lockOwnedWithStrength(tx, user, id, "SHARE")
+		return err
+	})
 	return p, err
 }
 
@@ -201,8 +207,7 @@ func (s *Service) CreateProject(user authctx.CurrentUser, name string) (model.Pa
 	err = s.db.Transaction(func(tx *gorm.DB) error {
 		// Serialize concurrent creations for this owner so the project limit
 		// cannot be bypassed by two overlapping requests.
-		var owner model.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("uuid").Where("uuid = ?", user.ID).First(&owner).Error; err != nil {
+		if err := lockInvitationEligibilityWithAccountLock(tx, user.ID, "UPDATE"); err != nil {
 			return err
 		}
 		var count int64
@@ -233,12 +238,19 @@ func (s *Service) CreateProject(user authctx.CurrentUser, name string) (model.Pa
 }
 
 func (s *Service) lockOwned(tx *gorm.DB, user authctx.CurrentUser, id uuid.UUID) (model.PaperProject, error) {
+	return s.lockOwnedWithStrength(tx, user, id, "UPDATE")
+}
+
+func (s *Service) lockOwnedWithStrength(tx *gorm.DB, user authctx.CurrentUser, id uuid.UUID, strength string) (model.PaperProject, error) {
 	var p model.PaperProject
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND owner_id = ?", id, user.ID).First(&p).Error
+	err := tx.Clauses(clause.Locking{Strength: strength}).Where("id = ? AND owner_id = ?", id, user.ID).First(&p).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return p, apperr.NotFound("papers.project_not_found", "Project not found")
 	}
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	return p, lockInvitationEligibility(tx, user.ID)
 }
 
 func (s *Service) RenameProject(user authctx.CurrentUser, id uuid.UUID, name string, base int64) (model.PaperProject, error) {
@@ -303,10 +315,17 @@ func (s *Service) ListFiles(user authctx.CurrentUser, projectID uuid.UUID) ([]mo
 	}
 	files := make([]model.PaperFile, 0)
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if _, err := s.lockAccessible(tx, user, projectID, false); err != nil {
+		p, err := s.lockAccessible(tx, user, projectID, false)
+		if err != nil {
 			return err
 		}
-		return tx.Select("id", "project_id", "path", "kind", "sha256", "revision", "created_at", "updated_at").Where("project_id=?", projectID).Order("path ASC").Find(&files).Error
+		if err := tx.Select("id", "project_id", "path", "kind", "sha256", "revision", "created_at", "updated_at").Where("project_id=?", projectID).Order("path ASC").Find(&files).Error; err != nil {
+			return err
+		}
+		for i := range files {
+			files[i].ProjectHeadRevision = p.HeadRevision
+		}
+		return nil
 	})
 	return files, err
 }
@@ -316,10 +335,14 @@ func (s *Service) GetFile(user authctx.CurrentUser, projectID, fileID uuid.UUID)
 		return file, err
 	}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if _, err := s.lockAccessible(tx, user, projectID, false); err != nil {
+		p, err := s.lockAccessible(tx, user, projectID, false)
+		if err != nil {
 			return err
 		}
-		err := tx.Where("id=? AND project_id=?", fileID, projectID).First(&file).Error
+		err = tx.Where("id=? AND project_id=?", fileID, projectID).First(&file).Error
+		if err == nil {
+			file.ProjectHeadRevision = p.HeadRevision
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return apperr.NotFound("papers.file_not_found", "File not found")
 		}

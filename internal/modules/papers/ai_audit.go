@@ -105,9 +105,6 @@ func (s *Service) listPaperAIActivity(user authctx.CurrentUser, pid uuid.UUID) (
 		if _, err := s.lockOwned(tx, user, pid); err != nil {
 			return err
 		}
-		if err := lockInvitationEligibility(tx, user.ID); err != nil {
-			return err
-		}
 		var rows []model.AuditLog
 		if err := paperAIEventQuery(tx, user.ID, pid).Order("created_at DESC, id DESC").Limit(50).Find(&rows).Error; err != nil {
 			return err

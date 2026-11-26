@@ -254,8 +254,25 @@ func (s *Service) checkAIOwner(ctx context.Context, user authctx.CurrentUser, pi
 		if _, err := s.lockOwned(tx, user, pid); err != nil {
 			return err
 		}
-		return lockInvitationEligibility(tx, user.ID)
+		return nil
 	})
+}
+
+// The project row is already locked. Unrelated project changes are allowed
+// for single-file requests, but changes to any transmitted file invalidate
+// the suggestion. No source is re-read or silently substituted.
+func paperAIRevisionFence(tx *gorm.DB, pid uuid.UUID, in paperAIInput) error {
+	refs := append([]paperAIContextRef{{FileID: in.FileID, Revision: in.BaseRevision}}, in.Context...)
+	for _, ref := range refs {
+		var count int64
+		if err := tx.Model(&model.PaperFile{}).Where("project_id=? AND id=? AND kind='text' AND revision=?", pid, ref.FileID, ref.Revision).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			return paperAIProjectChanged()
+		}
+	}
+	return nil
 }
 
 func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid uuid.UUID, in paperAIInput) (out paperAISuggestion, retErr error) {
@@ -293,9 +310,6 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 		if in.Task == "project" && project.HeadRevision != in.ProjectRevision {
 			return paperAIProjectChanged()
 		}
-		if err := lockInvitationEligibility(tx, user.ID); err != nil {
-			return err
-		}
 		fetch := func(id uuid.UUID, rev int64) (model.PaperFile, error) {
 			var f model.PaperFile
 			err := tx.Where("id=? AND project_id=? AND kind='text'", id, pid).First(&f).Error
@@ -313,6 +327,9 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 		target, err := fetch(in.FileID, in.BaseRevision)
 		if err != nil {
 			return err
+		}
+		if strings.Contains(target.Path, in.APIKey) {
+			return paperAIInvalid()
 		}
 		prompt.Source.Path = target.Path
 		if in.Task == "project" {
@@ -333,7 +350,7 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 				return err
 			}
 			total += len(f.Content)
-			if total > paperAIContextLimit || !paperAIValidText(f.Content, 32<<10) || strings.Contains(f.Content, in.APIKey) {
+			if total > paperAIContextLimit || !paperAIValidText(f.Content, 32<<10) || strings.Contains(f.Content, in.APIKey) || strings.Contains(f.Path, in.APIKey) {
 				return paperAIInvalid()
 			}
 			prompt.Context = append(prompt.Context, paperAIContextText{Path: f.Path, Text: f.Content})
@@ -362,11 +379,11 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 		if err != nil {
 			return err
 		}
-		if err := lockInvitationEligibility(tx, user.ID); err != nil {
-			return err
-		}
 		if in.Task == "project" && p.HeadRevision != in.ProjectRevision {
 			return paperAIProjectChanged()
+		}
+		if err := paperAIRevisionFence(tx, pid, in); err != nil {
+			return err
 		}
 		meta.ProjectRevision = p.HeadRevision
 		_, err = writePaperAIEvent(tx, user.ID, pid, aiStarted, meta)
@@ -437,11 +454,11 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 		if err != nil {
 			return err
 		}
-		if err := lockInvitationEligibility(tx, user.ID); err != nil {
-			return err
-		}
 		if in.Task == "project" && p.HeadRevision != in.ProjectRevision {
 			return paperAIProjectChanged()
+		}
+		if err := paperAIRevisionFence(tx, pid, in); err != nil {
+			return err
 		}
 		event, err := writePaperAIEvent(tx, user.ID, pid, aiProposed, finished)
 		if err != nil {

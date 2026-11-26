@@ -15,7 +15,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -276,17 +275,10 @@ func (s *Service) ImportProject(ctx context.Context, user authctx.CurrentUser, n
 		return p, err
 	}
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var owner model.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("uuid").Where("uuid=?", user.ID).First(&owner).Error; err != nil {
+		if err := lockInvitationEligibilityWithAccountLock(tx, user.ID, "UPDATE"); err != nil {
 			return err
 		}
 		var count int64
-		if err := tx.Model(&model.PaperAccessGrant{}).Where("user_id=? AND status='active' AND (expires_at IS NULL OR expires_at>?)", user.ID, time.Now().UTC()).Count(&count).Error; err != nil {
-			return err
-		}
-		if count != 1 {
-			return apperr.Forbidden("papers.invite_required", "Papers access required")
-		}
 		if err := tx.Model(&model.PaperProject{}).Where("owner_id=?", user.ID).Count(&count).Error; err != nil {
 			return err
 		}
@@ -335,6 +327,9 @@ func (s *Service) ExportProject(ctx context.Context, user authctx.CurrentUser, i
 			return apperr.NotFound("papers.project_not_found", "Project not found")
 		}
 		if err != nil {
+			return err
+		}
+		if err := lockInvitationEligibility(tx, user.ID); err != nil {
 			return err
 		}
 		name = p.Name
