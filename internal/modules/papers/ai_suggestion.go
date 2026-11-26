@@ -78,22 +78,48 @@ var aiHostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
 var aiPathPattern = regexp.MustCompile(`^(?:/[A-Za-z0-9_-]+)+$`)
 var aiModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 
-// Custom providers require an exact operator-approved HTTPS base, never
-// an arbitrary request URL. No credentials, ports, query or fragment.
+// Custom endpoints are limited to public HTTPS DNS names and a simple base
+// path. The transport independently resolves, validates and pins every IP.
+// Credentials, explicit ports, query strings and fragments are forbidden.
 func paperAIBase(raw string) (string, bool) {
 	raw = strings.TrimSuffix(strings.TrimSpace(raw), "/")
+	if len(raw) > 512 {
+		return "", false
+	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" || u.Opaque != "" || u.Port() != "" {
 		return "", false
 	}
 	host := strings.ToLower(u.Hostname())
-	if !aiHostPattern.MatchString(host) || !strings.Contains(host, ".") || u.Host != host || !aiPathPattern.MatchString(u.Path) {
+	if !aiHostPattern.MatchString(host) || !strings.Contains(host, ".") || u.Host != host || (u.Path != "" && !aiPathPattern.MatchString(u.Path)) {
+		return "", false
+	}
+	if !paperAIHostnameAllowed(host) {
 		return "", false
 	}
 	if _, err := netip.ParseAddr(host); err == nil {
 		return "", false
 	}
 	return "https://" + host + u.Path, true
+}
+func paperAIHostnameAllowed(host string) bool {
+	if len(host) > 253 {
+		return false
+	}
+	for _, part := range strings.Split(host, ".") {
+		if len(part) == 0 || len(part) > 63 || part[0] == '-' || part[len(part)-1] == '-' {
+			return false
+		}
+	}
+	for _, suffix := range []string{"localhost", "local", "internal", "localdomain", "lan", "home.arpa", "onion", "invalid", "test", "atoman.org"} {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
+			return false
+		}
+	}
+	return true
+}
+func paperAICustomBasesEnabled() bool {
+	return os.Getenv("PAPERS_AI_CUSTOM_BASE_URLS_ENABLE") != "false"
 }
 func paperAIBases() []string {
 	bases := []string{paperAIDefaultBase}
@@ -119,6 +145,9 @@ func paperAIAllowedBase(raw string) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	if paperAICustomBasesEnabled() {
+		return base, true
+	}
 	for _, allowed := range paperAIBases() {
 		if base == allowed {
 			return base, true
@@ -131,7 +160,7 @@ var aiBlockedRanges = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("192.0.0.0/24"), netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("192.88.99.0/24"),
 	netip.MustParsePrefix("198.18.0.0/15"), netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("240.0.0.0/4"),
-	netip.MustParsePrefix("2001::/23"), netip.MustParsePrefix("2001:db8::/32"), netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("192.175.48.0/24"), netip.MustParsePrefix("192.31.196.0/24"), netip.MustParsePrefix("192.52.193.0/24"), netip.MustParsePrefix("2001::/23"), netip.MustParsePrefix("2001:db8::/32"), netip.MustParsePrefix("2002::/16"),
 }
 var aiPublicV6 = netip.MustParsePrefix("2000::/3")
 
@@ -152,7 +181,7 @@ func paperAIPublicIP(ip netip.Addr) bool {
 }
 func paperAIDial(ctx context.Context, network, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
-	if err != nil || port != "443" || !aiHostPattern.MatchString(host) {
+	if err != nil || port != "443" || !aiHostPattern.MatchString(host) || !paperAIHostnameAllowed(host) {
 		return nil, errors.New("AI endpoint denied")
 	}
 	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
@@ -161,7 +190,16 @@ func paperAIDial(ctx context.Context, network, address string) (net.Conn, error)
 	}
 	// Reject the entire answer if it contains a non-public address. Connect
 	// to the checked address directly, retaining the URL host for TLS.
+	local, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, errors.New("AI endpoint denied")
+	}
 	for _, ip := range ips {
+		for _, address := range local {
+			if prefix, err := netip.ParsePrefix(address.String()); err == nil && prefix.Addr().Unmap() == ip.Unmap() {
+				return nil, errors.New("AI endpoint denied")
+			}
+		}
 		if !paperAIPublicIP(ip) {
 			return nil, errors.New("AI endpoint denied")
 		}
@@ -233,9 +271,9 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 	}
 	base, ok := paperAIAllowedBase(in.BaseURL)
 	if !ok {
-		return empty, apperr.BadRequest("papers.ai_endpoint_denied", "AI provider endpoint is not approved")
+		return empty, apperr.BadRequest("papers.ai_endpoint_denied", "AI provider endpoint must be an allowed public HTTPS base URL")
 	}
-	if !aiModelPattern.MatchString(in.Model) || len(in.APIKey) < 8 || len(in.APIKey) > 2048 || strings.ContainsAny(in.APIKey, " \t\r\n\x00") ||
+	if !aiModelPattern.MatchString(in.Model) || !paperAIValidKey(in.APIKey) || strings.Contains(base, in.APIKey) || strings.Contains(in.Model, in.APIKey) ||
 		in.FileID == uuid.Nil || in.BaseRevision <= 0 || !paperAIValidText(in.Source, paperAISourceLimit) || strings.TrimSpace(in.Source) == "" ||
 		!paperAIValidText(in.Instruction, 4000) || strings.TrimSpace(in.Instruction) == "" ||
 		(in.Task != "revise" && in.Task != "explain" && in.Task != "project") || len(in.Context) > paperAIExtraLimit ||

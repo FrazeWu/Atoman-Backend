@@ -27,7 +27,7 @@ func (h *handler) aiCapability(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, map[string]any{"enabled": paperAIEnabled(), "base_urls": paperAIBases(), "max_source_bytes": paperAISourceLimit, "max_context_bytes": paperAIContextLimit, "max_extra_files": paperAIExtraLimit, "max_history_turns": paperAIHistoryTurns, "max_history_bytes": paperAIHistoryBytes, "project_edits": true, "activity": true, "agent": paperAIIdentity(), "historical_changes": true})
+	httpx.OK(c, http.StatusOK, map[string]any{"enabled": paperAIEnabled(), "base_urls": paperAIBases(), "max_source_bytes": paperAISourceLimit, "max_context_bytes": paperAIContextLimit, "max_extra_files": paperAIExtraLimit, "max_history_turns": paperAIHistoryTurns, "max_history_bytes": paperAIHistoryBytes, "project_edits": true, "activity": true, "agent": paperAIIdentity(), "historical_changes": true, "custom_base_urls": paperAICustomBasesEnabled(), "model_discovery": true})
 }
 
 // @Summary Request a read-only AI suggestion; no automatic manuscript mutation
@@ -116,6 +116,43 @@ func (h *handler) aiHistoricalChange(c *gin.Context) {
 		return
 	}
 	out, err := h.service.paperAIHistoricalChange(c.Request.Context(), user, pid, event, fid)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, out)
+}
+
+// @Summary Discover models available for an explicitly supplied API endpoint and key
+// @Tags papers
+// @Security BearerAuth
+// @Param id path string true "Project UUID"
+// @Param input body paperAIModelsInput true "Explicit model discovery credentials; no source"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/papers/projects/{id}/ai/models [post]
+func (h *handler) aiModels(c *gin.Context) {
+	user, ok := current(c)
+	if !ok {
+		return
+	}
+	pid, ok := projectID(c)
+	if !ok {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+	var in paperAIModelsInput
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields()
+	if dec.Decode(&in) != nil {
+		httpx.Error(c, paperAIInvalid())
+		return
+	}
+	var extra any
+	if dec.Decode(&extra) != io.EOF {
+		httpx.Error(c, paperAIInvalid())
+		return
+	}
+	out, err := h.service.discoverAIModels(c.Request.Context(), user, pid, in)
 	if err != nil {
 		httpx.Error(c, err)
 		return

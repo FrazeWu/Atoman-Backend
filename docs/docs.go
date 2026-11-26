@@ -28283,6 +28283,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/projects/{id}/ai/models": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Discover models available for an explicitly supplied API endpoint and key",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Explicit model discovery credentials; no source",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/papers.paperAIModelsInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}/ai/suggestions": {
             "post": {
                 "security": [
@@ -56236,6 +56276,20 @@ const docTemplate = `{
                 },
                 "task": {
                     "type": "string"
+                }
+            }
+        },
+        "papers.paperAIModelsInput": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "base_url": {
+                    "type": "string"
+                },
+                "consent": {
+                    "type": "boolean"
                 }
             }
         },

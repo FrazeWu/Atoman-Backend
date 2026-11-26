@@ -10231,6 +10231,15 @@ definitions:
       task:
         type: string
     type: object
+  papers.paperAIModelsInput:
+    properties:
+      api_key:
+        type: string
+      base_url:
+        type: string
+      consent:
+        type: boolean
+    type: object
   papers.projectInput:
     properties:
       base_revision:
@@ -29510,6 +29519,32 @@ paths:
       security:
       - BearerAuth: []
       summary: Check whether owner-initiated AI suggestions are available
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/ai/models:
+    post:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Explicit model discovery credentials; no source
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.paperAIModelsInput'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Discover models available for an explicitly supplied API endpoint and
+        key
       tags:
       - papers
   /api/v1/papers/projects/{id}/ai/suggestions:

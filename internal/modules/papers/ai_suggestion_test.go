@@ -15,6 +15,7 @@ import (
 )
 
 func TestPaperAIEndpointPolicy(t *testing.T) {
+	t.Setenv("PAPERS_AI_CUSTOM_BASE_URLS_ENABLE", "false")
 	t.Setenv("PAPERS_AI_ALLOWED_BASE_URLS", "https://approved.example.net/v1/,http://private.example.net/v1,https://127.0.0.1/v1")
 	require.Equal(t, []string{paperAIDefaultBase, "https://approved.example.net/v1"}, paperAIBases())
 	for _, value := range []string{"http://api.openai.com/v1", "https://evil.example.net/v1", "https://api.openai.com:443/v1", "https://api.openai.com@evil.example.net/v1", "https://api.openai.com/v1?foo=bar", "https://api.openai.com/v1#secret", "https://api.openai.com/v1/../v1", "https://api.openai.com/%76%31", "https://127.0.0.1/v1", "https://[::1]/v1", "https://169.254.169.254/v1", "https://api.openai.com.evil.example/v1"} {
