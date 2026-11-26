@@ -10189,6 +10189,15 @@ definitions:
       revision:
         type: integer
     type: object
+  papers.paperAIHistoryTurn:
+    properties:
+      instruction:
+        type: string
+      reply:
+        type: string
+      task:
+        type: string
+    type: object
   papers.paperAIInput:
     properties:
       api_key:
@@ -10205,10 +10214,16 @@ definitions:
         type: array
       file_id:
         type: string
+      history:
+        items:
+          $ref: '#/definitions/papers.paperAIHistoryTurn'
+        type: array
       instruction:
         type: string
       model:
         type: string
+      project_revision:
+        type: integer
       source:
         type: string
       task:

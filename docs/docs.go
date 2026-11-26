@@ -56099,6 +56099,20 @@ const docTemplate = `{
                 }
             }
         },
+        "papers.paperAIHistoryTurn": {
+            "type": "object",
+            "properties": {
+                "instruction": {
+                    "type": "string"
+                },
+                "reply": {
+                    "type": "string"
+                },
+                "task": {
+                    "type": "string"
+                }
+            }
+        },
         "papers.paperAIInput": {
             "type": "object",
             "properties": {
@@ -56123,11 +56137,20 @@ const docTemplate = `{
                 "file_id": {
                     "type": "string"
                 },
+                "history": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/papers.paperAIHistoryTurn"
+                    }
+                },
                 "instruction": {
                     "type": "string"
                 },
                 "model": {
                     "type": "string"
+                },
+                "project_revision": {
+                    "type": "integer"
                 },
                 "source": {
                     "type": "string"
