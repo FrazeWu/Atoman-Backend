@@ -28176,6 +28176,77 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/projects/{id}/ai/capability": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Check whether owner-initiated AI suggestions are available",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/papers/projects/{id}/ai/suggestions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Request a read-only AI suggestion; no automatic manuscript mutation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Explicit user-supplied credentials and approved source",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/papers.paperAIInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}/compile-capability": {
             "get": {
                 "security": [
@@ -56013,6 +56084,55 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "papers.paperAIContextRef": {
+            "type": "object",
+            "properties": {
+                "file_id": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "integer"
+                }
+            }
+        },
+        "papers.paperAIInput": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "base_revision": {
+                    "type": "integer"
+                },
+                "base_url": {
+                    "type": "string"
+                },
+                "consent": {
+                    "type": "boolean"
+                },
+                "context": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/papers.paperAIContextRef"
+                    }
+                },
+                "file_id": {
+                    "type": "string"
+                },
+                "instruction": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "task": {
                     "type": "string"
                 }
             }

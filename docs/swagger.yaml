@@ -10182,6 +10182,38 @@ definitions:
       role:
         type: string
     type: object
+  papers.paperAIContextRef:
+    properties:
+      file_id:
+        type: string
+      revision:
+        type: integer
+    type: object
+  papers.paperAIInput:
+    properties:
+      api_key:
+        type: string
+      base_revision:
+        type: integer
+      base_url:
+        type: string
+      consent:
+        type: boolean
+      context:
+        items:
+          $ref: '#/definitions/papers.paperAIContextRef'
+        type: array
+      file_id:
+        type: string
+      instruction:
+        type: string
+      model:
+        type: string
+      source:
+        type: string
+      task:
+        type: string
+    type: object
   papers.projectInput:
     properties:
       base_revision:
@@ -29394,6 +29426,50 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新论文项目名称
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/ai/capability:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Check whether owner-initiated AI suggestions are available
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/ai/suggestions:
+    post:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Explicit user-supplied credentials and approved source
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.paperAIInput'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Request a read-only AI suggestion; no automatic manuscript mutation
       tags:
       - papers
   /api/v1/papers/projects/{id}/compile-capability:
