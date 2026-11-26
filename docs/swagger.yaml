@@ -10172,6 +10172,11 @@ definitions:
       user_id:
         type: string
     type: object
+  papers.invitationAcceptInput:
+    properties:
+      token:
+        type: string
+    type: object
   papers.memberInput:
     properties:
       role:
@@ -29213,6 +29218,30 @@ paths:
       summary: 提交 Papers 使用申请
       tags:
       - papers
+  /api/v1/papers/invitations/accept:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Opaque invitation token
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.invitationAcceptInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Accept a private project invitation (eligible authenticated account)
+      tags:
+      - papers
   /api/v1/papers/projects:
     get:
       produces:
@@ -29421,7 +29450,7 @@ paths:
       responses: {}
       security:
       - BearerAuth: []
-      summary: Download a previously verified, durable, owner-scoped compile PDF
+      summary: Download a verified PDF (members may read only the latest shared result)
       tags:
       - papers
   /api/v1/papers/projects/{id}/compiles/{jobId}/source-map:
@@ -29748,6 +29777,79 @@ paths:
       summary: 原子上传或管理论文项目文件
       tags:
       - papers
+  /api/v1/papers/projects/{id}/invitations:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List active project invitation links (owner only, no tokens)
+      tags:
+      - papers
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: editor or viewer
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.memberInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a seven-day single-redemption project invitation (owner only)
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/invitations/{invitationId}:
+    delete:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Invitation UUID
+        in: path
+        name: invitationId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Revoke an unused project invitation (owner only)
+      tags:
+      - papers
   /api/v1/papers/projects/{id}/members:
     get:
       parameters:
@@ -29847,6 +29949,14 @@ paths:
       security:
       - BearerAuth: []
       summary: 恢复已删除的私有论文
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/shared-preview:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Read only the latest verified shared project PDF metadata
       tags:
       - papers
   /api/v1/papers/projects/{id}/snapshots:

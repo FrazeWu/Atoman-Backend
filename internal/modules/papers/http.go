@@ -58,6 +58,10 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.POST("/projects/import", h.importProject)
 	private.GET("/projects/:id/export", h.exportProject)
 	private.GET("/projects/:id", h.project)
+	private.POST("/invitations/accept", h.acceptInvitation)
+	private.GET("/projects/:id/invitations", h.invitations)
+	private.POST("/projects/:id/invitations", h.createInvitation)
+	private.DELETE("/projects/:id/invitations/:invitationId", h.revokeInvitation)
 	private.GET("/projects/:id/members", h.members)
 	private.PUT("/projects/:id/members/:userId", h.setMember)
 	private.DELETE("/projects/:id/members/:userId", h.removeMember)
@@ -79,6 +83,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.POST("/projects/:id/snapshots/:snapshotId/restore", h.restoreSnapshot)
 	// These routes are deliberately fail-closed in production: NewService(db)
 	// does NOT provide the trusted publisher, signed environment or queue.
+	private.GET("/projects/:id/shared-preview", h.sharedPreview)
 	private.GET("/projects/:id/compile-capability", h.compileCapability)
 	private.POST("/projects/:id/compiles", h.submitCompile)
 	private.GET("/projects/:id/compiles", h.compileHistory)

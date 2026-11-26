@@ -97,3 +97,47 @@ func TestCompileDiagnosticsArePrivateAndRevisionBound(t *testing.T) {
 	require.NoError(t, f.db.Model(&model.PaperAccessGrant{}).Where("user_id=?", f.owner.UUID).Update("status", "revoked").Error)
 	require.NotEqual(t, http.StatusOK, f.request("GET", path, "", f.ownerToken).Code)
 }
+
+func TestLatestSharedPDFDoesNotExposeHistoryOrQueueAuthority(t *testing.T) {
+	f := newCompileHTTPFixture(t, true)
+	pdf := []byte("%PDF-1.7\nshared synthetic fixture\n%%EOF\n")
+	reader := &testPDFReader{raw: pdf}
+	f.svc.compile.Results = reader
+	base := f.base()
+	create := func(key string) CompileJobView {
+		t.Helper()
+		res := f.request("POST", base+"/compiles", `{"base_revision":1,"idempotency_key":"`+key+`"}`, f.ownerToken)
+		require.Equal(t, http.StatusAccepted, res.Code, res.Body.String())
+		job := parseJob(t, res)
+		require.NoError(t, f.db.Model(&model.PaperCompileJob{}).Where("id=?", job.ID).Updates(map[string]any{"status": "succeeded", "lease_epoch": 3, "pdf_digest": papersassets.HashBytes(pdf), "pdf_size": len(pdf), "diagnostics_json": papersassets.EncodeCompileDiagnostics([]papersassets.CompileDiagnostic{{Tool: "latex", Message: "private diagnostic"}})}).Error)
+		return job
+	}
+	old := create("shared-old")
+	latest := create("shared-new")
+	oldPath := base + "/compiles/" + old.ID.String() + "/pdf"
+	path := base + "/compiles/" + latest.ID.String() + "/pdf"
+	require.Equal(t, 404, f.request("GET", base+"/shared-preview", "", f.otherToken).Code)
+	require.Equal(t, 404, f.request("GET", path, "", f.otherToken).Code)
+	require.Zero(t, reader.calls)
+	member := base + "/members/" + f.other.UUID.String()
+	for _, role := range []string{"viewer", "editor"} {
+		require.Equal(t, 200, f.request("PUT", member, `{"role":"`+role+`"}`, f.ownerToken).Code)
+		meta := f.request("GET", base+"/shared-preview", "", f.otherToken)
+		require.Equal(t, 200, meta.Code, meta.Body.String())
+		require.Contains(t, meta.Body.String(), latest.ID.String())
+		require.NotContains(t, meta.Body.String(), old.ID.String())
+		require.NotContains(t, meta.Body.String(), "private diagnostic")
+		require.Equal(t, 404, f.request("GET", oldPath, "", f.otherToken).Code)
+		got := f.request("GET", path, "", f.otherToken)
+		require.Equal(t, 200, got.Code, got.Body.String())
+		require.Equal(t, pdf, got.Body.Bytes())
+		require.Equal(t, "private, no-store", got.Header().Get("Cache-Control"))
+		require.Equal(t, 404, f.request("GET", base+"/compiles", "", f.otherToken).Code)
+		require.Equal(t, 404, f.request("DELETE", base+"/compiles/"+latest.ID.String(), "", f.otherToken).Code)
+		require.Equal(t, 404, f.request("GET", base+"/compiles/"+latest.ID.String()+"/source-map", "", f.otherToken).Code)
+	}
+	require.Equal(t, 200, f.request("GET", oldPath, "", f.ownerToken).Code)
+	require.Equal(t, 200, f.request("DELETE", member, "", f.ownerToken).Code)
+	require.Equal(t, 404, f.request("GET", base+"/shared-preview", "", f.otherToken).Code)
+	require.Equal(t, 404, f.request("GET", path, "", f.otherToken).Code)
+}

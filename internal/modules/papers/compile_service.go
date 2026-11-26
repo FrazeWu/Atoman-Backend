@@ -363,18 +363,73 @@ func (s *Service) CancelCompile(ctx context.Context, user authctx.CurrentUser, p
 	return viewCompile(job), nil
 }
 
-// CompilePDF retrieves only an immutable, fenced result belonging to the
-// authenticated, currently invited project owner. No caller-chosen object key.
+// latestSharedPDF is deliberately narrower than compilation history: sharing
+// exposes only the latest successful verified artifact, not older outputs,
+// diagnostics, source maps, queue controls, or caller-supplied object keys.
+func (s *Service) latestSharedPDF(ctx context.Context, user authctx.CurrentUser, pid uuid.UUID) (model.PaperCompileJob, error) {
+	var job model.PaperCompileJob
+	if err := s.RequireAccess(user); err != nil {
+		return job, err
+	}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		project, err := s.lockAccessible(tx, user, pid, false)
+		if err != nil {
+			return err
+		}
+		if err := lockInvitationEligibility(tx, user.ID); err != nil {
+			return err
+		}
+		if s.compile == nil || !s.compile.valid() || s.compile.Results == nil {
+			return nil
+		}
+		err = tx.Where("owner_id=? AND project_id=? AND status=? AND lease_epoch>0 AND pdf_size>=8 AND pdf_size<=? AND pdf_digest ~ ?", project.OwnerID, pid, papersqueue.StatusSucceeded, papersassets.MaxPDFBytes, "^sha256:[a-f0-9]{64}$").Order("created_at DESC,id DESC").Take(&job).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	})
+	return job, err
+}
+
+func (s *Service) SharedPreview(ctx context.Context, user authctx.CurrentUser, pid uuid.UUID) (*CompileJobView, error) {
+	job, err := s.latestSharedPDF(ctx, user, pid)
+	if err != nil {
+		return nil, err
+	}
+	if job.ID == uuid.Nil {
+		return nil, nil
+	}
+	view := viewCompile(job)
+	view.Diagnostics = nil
+	view.FailureCode = ""
+	return &view, nil
+}
+
+// CompilePDF retrieves an immutable fenced result. Owners retain access to
+// their verified history; current project members can read only the latest
+// verified artifact. All reads recheck authorization after storage IO.
 func (s *Service) CompilePDF(ctx context.Context, user authctx.CurrentUser, projectID, jobID uuid.UUID) ([]byte, error) {
-	if _, err := s.GetProject(user, projectID); err != nil {
+	project, err := s.ReadProject(user, projectID)
+	if err != nil {
 		return nil, err
 	}
 	if s.compile == nil || !s.compile.valid() {
 		return nil, compileUnavailable()
 	}
-	job, err := s.compile.Jobs.Get(ctx, user.ID, jobID)
-	if err != nil {
-		return nil, compileBackendError(err)
+	var job model.PaperCompileJob
+	if project.AccessRole == RoleProjectOwner {
+		job, err = s.compile.Jobs.Get(ctx, user.ID, jobID)
+		if err != nil {
+			return nil, compileBackendError(err)
+		}
+	} else {
+		job, err = s.latestSharedPDF(ctx, user, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if job.ID != jobID {
+			return nil, apperr.NotFound("papers.pdf_not_available", "No shared PDF exists for this compile job")
+		}
 	}
 	if job.ProjectID != projectID {
 		return nil, apperr.NotFound("papers.compile_not_found", "Compile job not found")
@@ -392,9 +447,18 @@ func (s *Service) CompilePDF(ctx context.Context, user authctx.CurrentUser, proj
 	if err != nil || int64(len(raw)) != ref.Size || papersassets.HashBytes(raw) != ref.Digest || len(raw) < 8 || string(raw[:5]) != "%PDF-" {
 		return nil, apperr.New(http.StatusServiceUnavailable, "papers.pdf_integrity_failed", "Verified PDF could not be retrieved", nil)
 	}
-	// Recheck access after potentially slow private storage IO.
-	if _, err := s.GetProject(user, projectID); err != nil {
+	current, err := s.ReadProject(user, projectID)
+	if err != nil {
 		return nil, err
+	}
+	if current.AccessRole != RoleProjectOwner {
+		latest, err := s.latestSharedPDF(ctx, user, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if latest.ID != job.ID || latest.LeaseEpoch != ref.Epoch || latest.PDFDigest != ref.Digest || latest.PDFSize != ref.Size {
+			return nil, apperr.NotFound("papers.pdf_not_available", "Shared preview has changed")
+		}
 	}
 	return raw, nil
 }

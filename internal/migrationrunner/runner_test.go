@@ -34,7 +34,7 @@ func TestRunCreatesCoreSchema(t *testing.T) {
 		&model.FeedSource{},
 		&model.DMConversation{},
 		&model.DiscussionTarget{},
-		&model.PaperProjectMember{},
+		&model.PaperProjectMember{}, &model.PaperProjectInvitation{},
 		&model.PaperCollaborativeDocument{},
 		&model.PaperProjectSnapshot{},
 		&model.PaperCompileSourceMap{},

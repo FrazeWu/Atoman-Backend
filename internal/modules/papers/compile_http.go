@@ -134,7 +134,28 @@ func (h *handler) cancelCompile(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, job)
 }
 
-// @Summary Download a previously verified, durable, owner-scoped compile PDF
+// @Summary Read only the latest verified shared project PDF metadata
+// @Tags papers
+// @Security BearerAuth
+// @Router /api/v1/papers/projects/{id}/shared-preview [get]
+func (h *handler) sharedPreview(c *gin.Context) {
+	user, ok := current(c)
+	if !ok {
+		return
+	}
+	pid, ok := projectID(c)
+	if !ok {
+		return
+	}
+	out, err := h.service.SharedPreview(c.Request.Context(), user, pid)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, out)
+}
+
+// @Summary Download a verified PDF (members may read only the latest shared result)
 // @Tags papers
 // @Security BearerAuth
 // @Router /api/v1/papers/projects/{id}/compiles/{jobId}/pdf [get]
