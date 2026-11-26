@@ -28176,6 +28176,37 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/projects/{id}/ai/activity": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "List recent server-recorded AI activity (metadata only, owner private)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}/ai/capability": {
             "get": {
                 "security": [
@@ -55986,6 +56017,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "action": {
+                    "type": "string"
+                },
+                "ai_event_id": {
                     "type": "string"
                 },
                 "base_revision": {

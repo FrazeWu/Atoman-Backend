@@ -10118,6 +10118,8 @@ definitions:
     properties:
       action:
         type: string
+      ai_event_id:
+        type: string
       base_revision:
         type: integer
       file_id:
@@ -29441,6 +29443,25 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新论文项目名称
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/ai/activity:
+    get:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List recent server-recorded AI activity (metadata only, owner private)
       tags:
       - papers
   /api/v1/papers/projects/{id}/ai/capability:

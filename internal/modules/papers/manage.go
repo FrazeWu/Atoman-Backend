@@ -36,10 +36,12 @@ type FileChange struct {
 	Path         string            `json:"path"`
 	Uploads      []FileUpload      `json:"uploads"`
 	Replacements []TextReplacement `json:"replacements"`
+	AIEventID    *uuid.UUID        `json:"ai_event_id,omitempty"`
 }
 type ManagedProject struct {
-	Project model.PaperProject `json:"project"`
-	Files   []model.PaperFile  `json:"files"`
+	Project   model.PaperProject `json:"project"`
+	Files     []model.PaperFile  `json:"files"`
+	AIEventID *uuid.UUID         `json:"ai_event_id,omitempty"`
 }
 
 func validManagedSource(path, kind, content string) error {
@@ -138,6 +140,10 @@ func (s *Service) ManageFiles(user authctx.CurrentUser, id uuid.UUID, in FileCha
 		if err := tx.Where("project_id=?", id).Find(&files).Error; err != nil {
 			return err
 		}
+		aiMeta, err := preparePaperAIMutation(tx, user, p, files, &in)
+		if err != nil {
+			return err
+		}
 		idx := -1
 		for i, f := range files {
 			if f.ID == in.FileID {
@@ -165,7 +171,7 @@ func (s *Service) ManageFiles(user authctx.CurrentUser, id uuid.UUID, in FileCha
 				files = append(files, f)
 				created = append(created, f)
 			}
-		case "replace_text":
+		case "replace_text", "ai_apply", "ai_rollback":
 			if len(in.Replacements) < 1 || len(in.Replacements) > 64 {
 				return apperr.BadRequest("papers.invalid_action", "Provide 1-64 unique text replacements")
 			}
@@ -264,7 +270,17 @@ func (s *Service) ManageFiles(user authctx.CurrentUser, id uuid.UUID, in FileCha
 		if err := tx.Model(&p).Updates(map[string]any{"main_file_id": p.MainFileID, "head_revision": p.HeadRevision, "updated_at": time.Now().UTC()}).Error; err != nil {
 			return err
 		}
-		if err := audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "papers.files." + in.Action, EntityType: "paper_project", EntityID: &id}); err != nil {
+		if aiMeta != nil {
+			action := aiApplied
+			if in.Action == "ai_rollback" {
+				action = aiRolledBack
+			}
+			event, err := writePaperAIEvent(tx, user.ID, id, action, *aiMeta)
+			if err != nil {
+				return err
+			}
+			out.AIEventID = &event
+		} else if err := audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "papers.files." + in.Action, EntityType: "paper_project", EntityID: &id}); err != nil {
 			return err
 		}
 		// List only metadata; do not echo a project's entire private source.

@@ -84,6 +84,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	// These routes are deliberately fail-closed in production: NewService(db)
 	// does NOT provide the trusted publisher, signed environment or queue.
 	private.GET("/projects/:id/ai/capability", h.aiCapability)
+	private.GET("/projects/:id/ai/activity", h.aiActivity)
 	private.POST("/projects/:id/ai/suggestions", h.aiSuggestion)
 	private.GET("/projects/:id/shared-preview", h.sharedPreview)
 	private.GET("/projects/:id/compile-capability", h.compileCapability)

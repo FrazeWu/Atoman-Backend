@@ -181,12 +181,20 @@ func TestPaperAIProjectProposalAndAtomicApply(t *testing.T) {
 		{FileID: first.ID, BaseRevision: first.Revision, Content: "Revised source"},
 		{FileID: extra.ID, BaseRevision: extra.Revision + 1, Content: "Revised citation"},
 	}
+	require.NotNil(t, got.ProposalID)
+	var applied ManagedProject
 	apply := func(replacements []TextReplacement, status int) {
 		t.Helper()
-		raw, e := json.Marshal(FileChange{Action: "replace_text", BaseRevision: projectRevision, Replacements: replacements})
+		raw, e := json.Marshal(FileChange{Action: "ai_apply", BaseRevision: projectRevision, Replacements: replacements, AIEventID: got.ProposalID})
 		require.NoError(t, e)
 		res := f.request("POST", base+"/files/manage", string(raw), f.ownerToken)
 		require.Equal(t, status, res.Code, res.Body.String())
+		if status == 200 {
+			var env struct{ Data ManagedProject }
+			require.NoError(t, json.Unmarshal(res.Body.Bytes(), &env))
+			applied = env.Data
+			require.NotNil(t, applied.AIEventID)
+		}
 	}
 	apply(replacements, 409)
 	require.NoError(t, f.db.Where("id=?", first.ID).First(&after).Error)
@@ -201,4 +209,19 @@ func TestPaperAIProjectProposalAndAtomicApply(t *testing.T) {
 	require.NoError(t, f.db.Where("id=?", private.ID).First(&unchanged).Error)
 	require.Equal(t, "Never sent", unchanged.Content)
 	apply(replacements, 409)
+	// A later human edit of one member prevents rollback of both.
+	raw, err = json.Marshal(FileChange{Action: "replace_text", BaseRevision: applied.Project.HeadRevision, Replacements: []TextReplacement{{FileID: extra.ID, BaseRevision: extra.Revision + 1, Content: "Manual correction"}}})
+	require.NoError(t, err)
+	res = f.request("POST", base+"/files/manage", string(raw), f.ownerToken)
+	require.Equal(t, 200, res.Code, res.Body.String())
+	raw, err = json.Marshal(FileChange{Action: "ai_rollback", BaseRevision: applied.Project.HeadRevision + 1, AIEventID: applied.AIEventID})
+	require.NoError(t, err)
+	res = f.request("POST", base+"/files/manage", string(raw), f.ownerToken)
+	require.Equal(t, 409, res.Code, res.Body.String())
+	require.NoError(t, f.db.Where("id=?", first.ID).First(&after).Error)
+	require.Equal(t, "Revised source", after.Content)
+	require.Equal(t, first.Revision+1, after.Revision)
+	after = model.PaperFile{}
+	require.NoError(t, f.db.Where("id=?", extra.ID).First(&after).Error)
+	require.Equal(t, "Manual correction", after.Content)
 }

@@ -27,7 +27,7 @@ func (h *handler) aiCapability(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, map[string]any{"enabled": paperAIEnabled(), "base_urls": paperAIBases(), "max_source_bytes": paperAISourceLimit, "max_context_bytes": paperAIContextLimit, "max_extra_files": paperAIExtraLimit, "max_history_turns": paperAIHistoryTurns, "max_history_bytes": paperAIHistoryBytes, "project_edits": true})
+	httpx.OK(c, http.StatusOK, map[string]any{"enabled": paperAIEnabled(), "base_urls": paperAIBases(), "max_source_bytes": paperAISourceLimit, "max_context_bytes": paperAIContextLimit, "max_extra_files": paperAIExtraLimit, "max_history_turns": paperAIHistoryTurns, "max_history_bytes": paperAIHistoryBytes, "project_edits": true, "activity": true})
 }
 
 // @Summary Request a read-only AI suggestion; no automatic manuscript mutation
@@ -65,4 +65,27 @@ func (h *handler) aiSuggestion(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, out)
+}
+
+// @Summary List recent server-recorded AI activity (metadata only, owner private)
+// @Tags papers
+// @Security BearerAuth
+// @Param id path string true "Project UUID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/papers/projects/{id}/ai/activity [get]
+func (h *handler) aiActivity(c *gin.Context) {
+	user, ok := current(c)
+	if !ok {
+		return
+	}
+	pid, ok := projectID(c)
+	if !ok {
+		return
+	}
+	events, err := h.service.listPaperAIActivity(user, pid)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, events)
 }

@@ -68,6 +68,7 @@ type paperAISuggestion struct {
 	OutputTokens    int64                `json:"output_tokens,omitempty"`
 	ProjectRevision int64                `json:"project_revision,omitempty"`
 	Edits           []paperAIProjectEdit `json:"edits,omitempty"`
+	ProposalID      *uuid.UUID           `json:"proposal_id,omitempty"`
 }
 type paperAICaller func(context.Context, string, string, string, paperAIPrompt) (paperAISuggestion, error)
 
@@ -219,7 +220,7 @@ func (s *Service) checkAIOwner(ctx context.Context, user authctx.CurrentUser, pi
 	})
 }
 
-func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid uuid.UUID, in paperAIInput) (paperAISuggestion, error) {
+func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid uuid.UUID, in paperAIInput) (out paperAISuggestion, retErr error) {
 	var empty paperAISuggestion
 	if err := s.checkAIOwner(ctx, user, pid); err != nil {
 		return empty, err
@@ -315,6 +316,39 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 	if err := s.checkAIOwner(ctx, user, pid); err != nil {
 		return empty, err
 	}
+	// Persist only server-generated identifiers and revisions, never prompt,
+	// source, model identifiers, API credentials, or provider response bodies.
+	meta := paperAIAuditMeta{AttemptID: uuid.New(), Task: in.Task}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		p, err := s.lockOwned(tx, user, pid)
+		if err != nil {
+			return err
+		}
+		if err := lockInvitationEligibility(tx, user.ID); err != nil {
+			return err
+		}
+		if in.Task == "project" && p.HeadRevision != in.ProjectRevision {
+			return paperAIProjectChanged()
+		}
+		meta.ProjectRevision = p.HeadRevision
+		_, err = writePaperAIEvent(tx, user.ID, pid, aiStarted, meta)
+		return err
+	})
+	if err != nil {
+		return empty, err
+	}
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		// A canceled browser request can still leave a terminal metadata event.
+		// No raw upstream error strings are persisted.
+		auditCtx, done := context.WithTimeout(context.Background(), 3*time.Second)
+		defer done()
+		failed := meta
+		failed.Files = nil
+		_, _ = writePaperAIEvent(s.db.WithContext(auditCtx), user.ID, pid, aiFailed, failed)
+	}()
 	caller := s.aiCall
 	if caller == nil {
 		caller = callPaperAI
@@ -335,6 +369,13 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 	// Only the server can attach file identity/revision metadata to proposals.
 	result.ProjectRevision = 0
 	result.Edits = nil
+	result.ProposalID = nil
+	if result.InputTokens < 0 || result.InputTokens > 10000000 {
+		result.InputTokens = 0
+	}
+	if result.OutputTokens < 0 || result.OutputTokens > 10000000 {
+		result.OutputTokens = 0
+	}
 	if in.Task == "project" {
 		summary, edits, err := parsePaperAIProject(result.Text, approved)
 		if err != nil {
@@ -343,25 +384,38 @@ func (s *Service) suggestAI(ctx context.Context, user authctx.CurrentUser, pid u
 		if !paperAIProjectSecretFree(summary, edits, in.APIKey) {
 			return empty, paperAIProviderError("papers.ai_invalid_project_response")
 		}
-		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			p, err := s.lockOwned(tx, user, pid)
-			if err != nil {
-				return err
-			}
-			if err := lockInvitationEligibility(tx, user.ID); err != nil {
-				return err
-			}
-			if p.HeadRevision != in.ProjectRevision {
-				return paperAIProjectChanged()
-			}
-			return nil
-		})
-		if err != nil {
-			return empty, err
-		}
+
 		result.Text = summary
 		result.Edits = edits
 		result.ProjectRevision = in.ProjectRevision
+		meta.Files = paperAIProposalFiles(edits, approved)
+	}
+	// Commit the attestation under the same owner and head-revision fence.
+	finished := meta
+	finished.InputTokens = result.InputTokens
+	finished.OutputTokens = result.OutputTokens
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		p, err := s.lockOwned(tx, user, pid)
+		if err != nil {
+			return err
+		}
+		if err := lockInvitationEligibility(tx, user.ID); err != nil {
+			return err
+		}
+		if in.Task == "project" && p.HeadRevision != in.ProjectRevision {
+			return paperAIProjectChanged()
+		}
+		event, err := writePaperAIEvent(tx, user.ID, pid, aiProposed, finished)
+		if err != nil {
+			return err
+		}
+		if in.Task == "project" {
+			result.ProposalID = &event
+		}
+		return nil
+	})
+	if err != nil {
+		return empty, err
 	}
 	return result, nil
 }
