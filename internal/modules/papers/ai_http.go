@@ -27,7 +27,7 @@ func (h *handler) aiCapability(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, map[string]any{"enabled": paperAIEnabled(), "base_urls": paperAIBases(), "max_source_bytes": paperAISourceLimit, "max_context_bytes": paperAIContextLimit, "max_extra_files": paperAIExtraLimit, "max_history_turns": paperAIHistoryTurns, "max_history_bytes": paperAIHistoryBytes, "project_edits": true, "activity": true})
+	httpx.OK(c, http.StatusOK, map[string]any{"enabled": paperAIEnabled(), "base_urls": paperAIBases(), "max_source_bytes": paperAISourceLimit, "max_context_bytes": paperAIContextLimit, "max_extra_files": paperAIExtraLimit, "max_history_turns": paperAIHistoryTurns, "max_history_bytes": paperAIHistoryBytes, "project_edits": true, "activity": true, "agent": paperAIIdentity(), "historical_changes": true})
 }
 
 // @Summary Request a read-only AI suggestion; no automatic manuscript mutation
@@ -88,4 +88,37 @@ func (h *handler) aiActivity(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, events)
+}
+
+// @Summary Read immutable versions bound to an approved AI change
+// @Tags papers
+// @Security BearerAuth
+// @Param id path string true "Project UUID"
+// @Param eventId path string true "Applied or rolled-back AI event UUID"
+// @Param fileId path string true "File UUID"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/papers/projects/{id}/ai/activity/{eventId}/changes/{fileId} [get]
+func (h *handler) aiHistoricalChange(c *gin.Context) {
+	user, ok := current(c)
+	if !ok {
+		return
+	}
+	pid, ok := projectID(c)
+	if !ok {
+		return
+	}
+	event, ok := httpx.UUIDParam(c, "eventId")
+	if !ok {
+		return
+	}
+	fid, ok := httpx.UUIDParam(c, "fileId")
+	if !ok {
+		return
+	}
+	out, err := h.service.paperAIHistoricalChange(c.Request.Context(), user, pid, event, fid)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, out)
 }

@@ -85,6 +85,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	// does NOT provide the trusted publisher, signed environment or queue.
 	private.GET("/projects/:id/ai/capability", h.aiCapability)
 	private.GET("/projects/:id/ai/activity", h.aiActivity)
+	private.GET("/projects/:id/ai/activity/:eventId/changes/:fileId", h.aiHistoricalChange)
 	private.POST("/projects/:id/ai/suggestions", h.aiSuggestion)
 	private.GET("/projects/:id/shared-preview", h.sharedPreview)
 	private.GET("/projects/:id/compile-capability", h.compileCapability)

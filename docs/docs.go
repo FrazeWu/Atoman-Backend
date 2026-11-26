@@ -28207,6 +28207,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/projects/{id}/ai/activity/{eventId}/changes/{fileId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Read immutable versions bound to an approved AI change",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Applied or rolled-back AI event UUID",
+                        "name": "eventId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "File UUID",
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}/ai/capability": {
             "get": {
                 "security": [

@@ -41,6 +41,8 @@ type paperAIAuditMeta struct {
 	OutputTokens    int64              `json:"output_tokens,omitempty"`
 }
 type paperAIActivity struct {
+	Contributor     paperAIContributor    `json:"contributor"`
+	Decision        string                `json:"decision"`
 	ID              uuid.UUID             `json:"id"`
 	Action          string                `json:"action"`
 	CreatedAt       time.Time             `json:"created_at"`
@@ -115,7 +117,7 @@ func (s *Service) listPaperAIActivity(user authctx.CurrentUser, pid uuid.UUID) (
 			if err != nil {
 				return err
 			}
-			item := paperAIActivity{ID: row.ID, Action: row.Action, CreatedAt: row.CreatedAt, AttemptID: m.AttemptID, RelatedID: m.RelatedID, Task: m.Task, ProjectRevision: m.ProjectRevision, Files: []paperAIActivityFile{}, InputTokens: m.InputTokens, OutputTokens: m.OutputTokens}
+			item := paperAIActivity{Contributor: paperAIIdentity(), Decision: paperAIActor(row.Action), ID: row.ID, Action: row.Action, CreatedAt: row.CreatedAt, AttemptID: m.AttemptID, RelatedID: m.RelatedID, Task: m.Task, ProjectRevision: m.ProjectRevision, Files: []paperAIActivityFile{}, InputTokens: m.InputTokens, OutputTokens: m.OutputTokens}
 			for _, f := range m.Files {
 				item.Files = append(item.Files, paperAIActivityFile{FileID: f.FileID, BeforeRevision: f.BeforeRevision, AfterRevision: f.AfterRevision})
 			}

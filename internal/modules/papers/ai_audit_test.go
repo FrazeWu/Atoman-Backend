@@ -100,6 +100,25 @@ func TestPaperAIAuditAndRollback(t *testing.T) {
 	require.Equal(t, aiApplied, events[0].Action)
 	require.Equal(t, *pid, events[0].RelatedID)
 	require.Equal(t, *applied.Data.AIEventID, events[0].ID)
+	require.Equal(t, paperAIIdentity(), events[0].Contributor)
+	require.Equal(t, "owner_approved", events[0].Decision)
+	historicalPath := func(event, file uuid.UUID) string {
+		return "/ai/activity/" + event.String() + "/changes/" + file.String()
+	}
+	detailPath := historicalPath(*applied.Data.AIEventID, first.ID)
+	var detail struct{ Data paperAIHistoricalChange }
+	require.NoError(t, json.Unmarshal(call("GET", detailPath, nil, f.ownerToken, 200), &detail))
+	require.Equal(t, first.Content, detail.Data.Before)
+	require.Equal(t, replacement, detail.Data.After)
+	require.Equal(t, first.Revision, detail.Data.BeforeRevision)
+	require.Equal(t, first.Revision+1, detail.Data.AfterRevision)
+	require.Equal(t, paperAIIdentity(), detail.Data.Contributor)
+	require.Equal(t, "owner_approved", detail.Data.Decision)
+	call("GET", detailPath, nil, "", 401)
+	call("GET", detailPath, nil, f.otherToken, 404)
+	call("GET", historicalPath(*pid, first.ID), nil, f.ownerToken, 404)
+	call("GET", historicalPath(*applied.Data.AIEventID, uuid.New()), nil, f.ownerToken, 404)
+
 	call("POST", "/files/manage", apply, f.ownerToken, 409)
 	// Unrelated edits are retained by a targeted rollback.
 	upload := FileChange{Action: "upload", BaseRevision: applied.Data.Project.HeadRevision, Uploads: []FileUpload{{Path: "unrelated.tex", Kind: "text", Content: "Unrelated user work"}}}
@@ -137,6 +156,13 @@ func TestPaperAIAuditAndRollback(t *testing.T) {
 	call("POST", "/files/manage", undo, f.ownerToken, 409)
 	require.NoError(t, f.db.Where("id=?", first.ID).First(&live).Error)
 	require.Equal(t, "Later human correction", live.Content)
+	// Historical display stays tied to immutable accepted versions.
+	require.NoError(t, json.Unmarshal(call("GET", detailPath, nil, f.ownerToken, 200), &detail))
+	require.Equal(t, first.Content, detail.Data.Before)
+	require.Equal(t, replacement, detail.Data.After)
+	require.NoError(t, f.db.Model(&model.PaperFileVersion{}).Where("file_id=? AND revision=?", first.ID, first.Revision).Update("content", "Synthetic corruption").Error)
+	call("GET", detailPath, nil, f.ownerToken, 409)
+
 	var logs []model.AuditLog
 	require.NoError(t, paperAIEventQuery(f.db, f.owner.UUID, f.project.ID).Find(&logs).Error)
 	for _, row := range logs {
