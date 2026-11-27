@@ -88,6 +88,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	private.GET("/projects/:id/ai/activity/:eventId/changes/:fileId", h.aiHistoricalChange)
 	private.POST("/projects/:id/ai/suggestions", h.aiSuggestion)
 	private.POST("/projects/:id/ai/models", h.aiModels)
+	private.POST("/projects/:id/ai/connection-test", h.aiConnectionTest)
 	private.GET("/projects/:id/shared-preview", h.sharedPreview)
 	private.GET("/projects/:id/compile-capability", h.compileCapability)
 	private.POST("/projects/:id/compiles", h.submitCompile)
