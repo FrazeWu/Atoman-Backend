@@ -24,6 +24,8 @@ type AccountHandler struct {
 	external  *MailExternalService
 	provision *MailProvisionService
 	aliases   *MailAliasService
+	devMode   bool
+	devStore  *devMailWorkspace
 }
 
 // RegisterAccountRoutes adds site-session-authenticated invitation and
@@ -42,7 +44,9 @@ func RegisterAccountRoutes(group *gin.RouterGroup, db *gorm.DB) {
 	// incomplete runtime configuration is not silently treated as readiness.
 	outbox, _ := NewConfiguredMailOutbox(db)
 	provision, _ := NewConfiguredMailProvision(db)
-	registerAccountRoutes(group, NewAccountService(db, enabled), read, outbox, provision)
+	devMode := strings.EqualFold(strings.TrimSpace(os.Getenv("ENV")), "development") &&
+		strings.TrimSpace(os.Getenv("ATOMAN_MAIL_STALWART_URL")) == ""
+	registerAccountRoutesWithDevMode(group, NewAccountService(db, enabled), read, outbox, provision, devMode)
 }
 
 func RegisterAccountRoutesWithService(group *gin.RouterGroup, service *AccountService) {
@@ -60,7 +64,23 @@ func RegisterAccountRoutesWithOutbox(group *gin.RouterGroup, service *AccountSer
 }
 
 func registerAccountRoutes(group *gin.RouterGroup, service *AccountService, read *MailReadService, outbox *MailOutboxService, provision *MailProvisionService) {
-	h := &AccountHandler{service: service, read: read, outbox: outbox, workspace: NewMailWorkspaceService(read, outbox), provision: provision}
+	registerAccountRoutesWithDevMode(group, service, read, outbox, provision, false)
+}
+
+func registerAccountRoutesWithDevMode(group *gin.RouterGroup, service *AccountService, read *MailReadService, outbox *MailOutboxService, provision *MailProvisionService, devMode bool) {
+	var devStore *devMailWorkspace
+	if devMode && read == nil && service != nil && service.db != nil {
+		devStore = newDevMailWorkspace(service.db)
+	}
+	h := &AccountHandler{
+		service:   service,
+		read:      read,
+		outbox:    outbox,
+		workspace: NewMailWorkspaceService(read, outbox),
+		provision: provision,
+		devMode:   devMode,
+		devStore:  devStore,
+	}
 	if service != nil {
 		h.aliases, _ = NewConfiguredMailAliases(service.db)
 	}
@@ -79,7 +99,14 @@ func registerAccountRoutes(group *gin.RouterGroup, service *AccountService, read
 	group.GET("/message", h.messageDetail)
 	group.POST("/messages/read", h.markSeen)
 	group.POST("/activate", h.activate)
+	group.GET("/admin/accounts", h.listAdminAccounts)
+	group.POST("/admin/accounts/:id/approve", h.approveAdminAccount)
+	group.POST("/admin/accounts/:id/reject", h.rejectAdminAccount)
+	group.POST("/admin/accounts/:id/suspend", h.suspendAdminAccount)
+	group.POST("/admin/accounts/:id/restore", h.restoreAdminAccount)
+	group.GET("/admin/invites", h.listAdminInvites)
 	group.POST("/admin/invites", h.issueInvite)
+	group.POST("/admin/invites/:id/revoke", h.revokeAdminInvite)
 	group.POST("/admin/reserve-self", h.reserveSelf)
 	group.GET("/senders", h.mailSenders)
 	group.POST("/outbox", h.queueMail)
@@ -199,6 +226,10 @@ func (h *AccountHandler) folders(c *gin.Context) {
 		return
 	}
 	if h.read == nil {
+		if h.devStore != nil {
+			h.devFolders(c)
+			return
+		}
 		httpx.Error(c, apperr.New(503, "mail.read_not_ready", "Mail reading is not enabled", nil))
 		return
 	}
@@ -307,6 +338,10 @@ func (h *AccountHandler) messageDetail(c *gin.Context) {
 		return
 	}
 	if h.read == nil {
+		if h.devStore != nil {
+			h.devMessageDetail(c)
+			return
+		}
 		httpx.Error(c, apperr.New(503, "mail.read_not_ready", "Mail reading is not enabled", nil))
 		return
 	}
@@ -339,12 +374,16 @@ func (h *AccountHandler) markSeen(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	if h.read == nil {
+	if h.read == nil && h.devStore == nil {
 		httpx.Error(c, apperr.New(503, "mail.read_not_ready", "Mail reading is not enabled", nil))
 		return
 	}
 	var input MarkSeenInput
 	if !httpx.BindRequiredJSON(c, &input) {
+		return
+	}
+	if h.read == nil && h.devStore != nil {
+		h.devMarkSeen(c, input.MessageID)
 		return
 	}
 	if err := h.read.MarkSeen(c.Request.Context(), user, input.MailboxID, input.MessageID); err != nil {
@@ -371,12 +410,16 @@ func (h *AccountHandler) queueMail(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	if h.outbox == nil {
+	if h.outbox == nil && h.devStore == nil {
 		httpx.Error(c, apperr.New(503, "mail.send_not_ready", "Mail sending is not available", nil))
 		return
 	}
 	var input ComposeMailInput
 	if !mailJSON(c, &input) {
+		return
+	}
+	if h.outbox == nil && h.devStore != nil {
+		h.devQueueMail(c, input)
 		return
 	}
 	result, err := h.outbox.Queue(c.Request.Context(), user, input)

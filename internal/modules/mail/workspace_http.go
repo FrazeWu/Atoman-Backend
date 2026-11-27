@@ -114,6 +114,10 @@ func messageQueryID(c *gin.Context) string {
 // unreadMail reports the authenticated mailbox's inbox count; no global count
 // or other user's Stalwart identifiers are accepted from the browser.
 func (h *AccountHandler) unreadMail(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		h.devUnread(c)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -144,6 +148,10 @@ func (h *AccountHandler) unreadMail(c *gin.Context) {
 }
 
 func (h *AccountHandler) listContacts(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		h.devContactsList(c)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -192,6 +200,10 @@ func (h *AccountHandler) deleteContact(c *gin.Context) {
 	mailResult(c, 200, gin.H{"deleted": e == nil}, e)
 }
 func (h *AccountHandler) searchMail(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		h.devSearch(c)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -222,6 +234,14 @@ func (h *AccountHandler) searchMail(c *gin.Context) {
 	mailResult(c, 200, v, e)
 }
 func (h *AccountHandler) mailActions(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		var in MailActionInput
+		if !mailJSON(c, &in) {
+			return
+		}
+		h.devActions(c, in)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -234,6 +254,16 @@ func (h *AccountHandler) mailActions(c *gin.Context) {
 	mailResult(c, 200, v, e)
 }
 func (h *AccountHandler) undoMailAction(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		var in struct {
+			Token string `json:"token"`
+		}
+		if !mailJSON(c, &in) {
+			return
+		}
+		h.devUndoAction(c, in.Token)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -269,6 +299,10 @@ func (h *AccountHandler) downloadMail(c *gin.Context, raw bool) {
 	c.Data(200, ct, b)
 }
 func (h *AccountHandler) listDrafts(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		h.devDraftsList(c)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -289,6 +323,18 @@ func (h *AccountHandler) getDraft(c *gin.Context) {
 	mailResult(c, 200, v, e)
 }
 func (h *AccountHandler) saveDraft(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		id, ok := parseMailUUID(c, c.Param("id"))
+		if !ok {
+			return
+		}
+		var in SaveMailDraftInput
+		if !mailJSON(c, &in) {
+			return
+		}
+		h.devSaveDraft(c, id, in)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -305,6 +351,14 @@ func (h *AccountHandler) saveDraft(c *gin.Context) {
 	mailResult(c, 200, v, e)
 }
 func (h *AccountHandler) deleteDraft(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		id, ok := parseMailUUID(c, c.Param("id"))
+		if !ok {
+			return
+		}
+		h.devDeleteDraft(c, id)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -352,6 +406,10 @@ func (h *AccountHandler) deleteAttachment(c *gin.Context) {
 	mailResult(c, 200, gin.H{"deleted": e == nil}, e)
 }
 func (h *AccountHandler) getMailSettings(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		h.devSettingsGet(c)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -360,6 +418,14 @@ func (h *AccountHandler) getMailSettings(c *gin.Context) {
 	mailResult(c, 200, v, e)
 }
 func (h *AccountHandler) saveMailSettings(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		var in MailSettings
+		if !mailJSON(c, &in) {
+			return
+		}
+		h.devSettingsSave(c, in)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -372,6 +438,13 @@ func (h *AccountHandler) saveMailSettings(c *gin.Context) {
 	mailResult(c, 200, v, e)
 }
 func (h *AccountHandler) listAppPasswords(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		if _, _, ok := h.devActiveUser(c); ok {
+			h.devStore.mu.Unlock()
+			httpx.OK(c, http.StatusOK, []any{})
+		}
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -402,6 +475,10 @@ func (h *AccountHandler) deleteAppPassword(c *gin.Context) {
 	mailResult(c, 200, gin.H{"deleted": e == nil}, e)
 }
 func (h *AccountHandler) listOutbox(c *gin.Context) {
+	if h.outbox == nil && h.devStore != nil {
+		h.devOutboxList(c)
+		return
+	}
 	u, ok := authctx.Current(c)
 	if !ok {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
@@ -475,6 +552,16 @@ func (h *AccountHandler) reconcileOutbox(c *gin.Context) {
 }
 
 func (h *AccountHandler) createMailFolder(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		var in struct {
+			Name string `json:"name" binding:"required"`
+		}
+		if !mailJSON(c, &in) {
+			return
+		}
+		h.devCreateFolder(c, in.Name)
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return
@@ -493,6 +580,10 @@ func (h *AccountHandler) createMailFolder(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, map[string]string{"id": id})
 }
 func (h *AccountHandler) deleteMailFolder(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		h.devDeleteFolder(c, c.Param("id"))
+		return
+	}
 	u, ok := h.workspaceUser(c)
 	if !ok {
 		return

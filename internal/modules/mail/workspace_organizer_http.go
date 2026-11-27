@@ -6,6 +6,10 @@ import (
 )
 
 func (h *AccountHandler) mailOrganizerState(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		h.devOrganizerState(c)
+		return
+	}
 	user, ok := h.workspaceUser(c)
 	if !ok {
 		return

@@ -72,6 +72,10 @@ func (s *MailOutboxService) Senders(ctx context.Context, u authctx.CurrentUser) 
 }
 
 func (h *AccountHandler) mailSenders(c *gin.Context) {
+	if h.workspace == nil && h.devStore != nil {
+		h.devSenders(c)
+		return
+	}
 	user, ok := h.workspaceUser(c)
 	if !ok {
 		return

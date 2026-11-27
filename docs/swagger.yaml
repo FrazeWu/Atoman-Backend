@@ -5963,6 +5963,56 @@ definitions:
       status:
         type: string
     type: object
+  mail.AdminMailAccountSummary:
+    properties:
+      address:
+        type: string
+      created_at:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: string
+      local_part:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      user_email:
+        type: string
+      user_id:
+        type: string
+      username:
+        type: string
+    type: object
+  mail.AdminMailInviteSummary:
+    properties:
+      address:
+        type: string
+      created_at:
+        type: string
+      display_name:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      local_part:
+        type: string
+      revoked_at:
+        type: string
+      state:
+        type: string
+      target_user_id:
+        type: string
+      used_at:
+        type: string
+      user_email:
+        type: string
+      username:
+        type: string
+    type: object
   mail.ComposeMailInput:
     properties:
       alias_id:
@@ -25325,7 +25375,136 @@ paths:
       summary: Redeem invitation using a custom mail address (reservation only)
       tags:
       - mail
+  /api/v1/mail/admin/accounts:
+    get:
+      parameters:
+      - description: Filter by account status (all, pending, reserved, active, suspended,
+          failed)
+        in: query
+        name: status
+        type: string
+      - description: Search username or mail address
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/mail.AdminMailAccountSummary'
+            type: array
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Admin lists all reserved and active mail accounts
+      tags:
+      - mail
+  /api/v1/mail/admin/accounts/{id}/approve:
+    post:
+      parameters:
+      - description: Mail account UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mail.AdminMailAccountSummary'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Admin approves a reserved mail account for provisioning or activation
+      tags:
+      - mail
+  /api/v1/mail/admin/accounts/{id}/reject:
+    post:
+      parameters:
+      - description: Mail account UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Admin rejects and removes an unactivated mail account reservation
+      tags:
+      - mail
+  /api/v1/mail/admin/accounts/{id}/restore:
+    post:
+      parameters:
+      - description: Mail account UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mail.AdminMailAccountSummary'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Admin restores a suspended mail account
+      tags:
+      - mail
+  /api/v1/mail/admin/accounts/{id}/suspend:
+    post:
+      parameters:
+      - description: Mail account UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mail.AdminMailAccountSummary'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Admin suspends an active mail account
+      tags:
+      - mail
   /api/v1/mail/admin/invites:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/mail.AdminMailInviteSummary'
+            type: array
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Admin lists issued mail invitations
+      tags:
+      - mail
     post:
       consumes:
       - application/json
@@ -25363,6 +25542,27 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: Admin issues a single-use mail invite; target chooses their address
+      tags:
+      - mail
+  /api/v1/mail/admin/invites/{id}/revoke:
+    post:
+      parameters:
+      - description: Mail invite UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/mail.AdminMailInviteSummary'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Admin revokes an unused mail invitation
       tags:
       - mail
   /api/v1/mail/admin/reserve-self:

@@ -15,6 +15,13 @@ func (h *AccountHandler) aliasOwner(c *gin.Context) bool {
 	return true
 }
 func (h *AccountHandler) listMailAliases(c *gin.Context) {
+	if h.aliases == nil && h.devStore != nil {
+		if _, _, ok := h.devActiveUser(c); ok {
+			h.devStore.mu.Unlock()
+			httpx.OK(c, http.StatusOK, []any{})
+		}
+		return
+	}
 	if !h.aliasOwner(c) {
 		return
 	}

@@ -23,6 +23,13 @@ func (h *AccountHandler) externalUser(c *gin.Context) (authctx.CurrentUser, bool
 	return u, true
 }
 func (h *AccountHandler) listExternalAccounts(c *gin.Context) {
+	if h.external == nil && h.devStore != nil {
+		if _, _, ok := h.devActiveUser(c); ok {
+			h.devStore.mu.Unlock()
+			httpx.OK(c, http.StatusOK, []any{})
+		}
+		return
+	}
 	u, ok := h.externalUser(c)
 	if !ok {
 		return
@@ -67,6 +74,13 @@ func (h *AccountHandler) deleteExternalAccount(c *gin.Context) {
 	mailResult(c, http.StatusOK, gin.H{"deleted": err == nil}, err)
 }
 func (h *AccountHandler) unifiedExternalInbox(c *gin.Context) {
+	if h.external == nil && h.devStore != nil {
+		if _, _, ok := h.devActiveUser(c); ok {
+			h.devStore.mu.Unlock()
+			httpx.OK(c, http.StatusOK, gin.H{"accounts": []any{}, "messages": []any{}})
+		}
+		return
+	}
 	u, ok := h.externalUser(c)
 	if !ok {
 		return
