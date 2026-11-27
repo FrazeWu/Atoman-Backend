@@ -50,6 +50,7 @@ func TestPaperAIModelDiscoveryTransport(t *testing.T) {
 	}{
 		{"deduplicated", `{"data":[{"id":"z-chat","owned_by":"ignored"},{"id":"a/chat"},{"id":"z-chat"},{"id":"bad id"}]}`, 200, "", []string{"a/chat", "z-chat"}},
 		{"empty", `{"data":[]}`, 200, "", []string{}},
+		{"HTML fallback", `<!DOCTYPE html><html>website</html>`, 200, "papers.ai_models_wrong_path", nil},
 		{"null", `{"data":null}`, 200, "papers.ai_invalid_models", nil},
 		{"secret", `{"data":[{"id":"synthetic-test-key"}]}`, 200, "papers.ai_invalid_models", nil},
 		{"escaped secret", `{"data":[{"id":"synthetic-\u0074est-key"}]}`, 200, "papers.ai_invalid_models", nil},
@@ -162,4 +163,107 @@ func TestPaperAIModelDiscoveryTransportDiagnostics(t *testing.T) {
 		require.NotContains(t, err.Error(), "synthetic-test-key")
 		require.NotContains(t, err.Error(), "api.example.net")
 	}
+}
+
+// Every successful discovery reports the validated, requested base, not a
+// provider-supplied URL or a cross-origin redirect.
+func TestPaperAIModelDiscoveryAutoBase(t *testing.T) {
+	t.Setenv("PAPERS_AI_CUSTOM_BASE_URLS_ENABLE", "true")
+	const host = "https://api.example.net"
+	const key = "synthetic-test-key"
+	for _, tc := range []struct {
+		input      string
+		candidates []string
+	}{
+		{host, []string{host, host + "/v1"}},
+		{"api.example.net/", []string{host, host + "/v1"}},
+		{host + "/v1/v1/chat/completions/models/", []string{host + "/v1", host}},
+		{host + "/api/paas/v4", []string{host + "/api/paas/v4"}},
+		{host + "/openai", []string{host + "/openai", host + "/openai/v1"}},
+		{host + "/openai/v1/chat/completions/extra", []string{host + "/openai/v1/chat/completions/extra", host + "/openai/v1", host + "/openai"}},
+	} {
+		base, ok := paperAIAllowedBase(tc.input)
+		require.True(t, ok, tc.input)
+		require.Equal(t, tc.candidates, paperAIModelBases(base), tc.input)
+	}
+	for _, raw := range []string{"", "http://api.example.net", "https://api.example.net/v1?secret=x", "https://api.example.net/v1#fragment", "api.example.net@another.example.net", "127.0.0.1", "router.local", "https://api.example.net/%2e%2e/v1"} {
+		_, ok := paperAIAllowedBase(raw)
+		require.False(t, ok, raw)
+	}
+	for _, tc := range []struct {
+		base     string
+		failures []string
+		want     string
+		calls    int
+	}{
+		{host, nil, host, 1},
+		{host, []string{"papers.ai_models_wrong_path"}, host + "/v1", 2},
+		{host, []string{"papers.ai_models_unsupported"}, host + "/v1", 2},
+		{host + "/v1", []string{"papers.ai_models_unsupported"}, host, 2},
+		{host + "/openai/v1/extra", []string{"papers.ai_models_wrong_path"}, host + "/openai/v1", 2},
+		{host, []string{"papers.ai_provider_auth"}, "", 1},
+		{host, []string{"papers.ai_provider_rate"}, "", 1},
+		{host, []string{"papers.ai_provider_redirect"}, "", 1},
+		{host, []string{"papers.ai_provider_timeout"}, "", 1},
+		{host, []string{"papers.ai_invalid_models"}, "", 1},
+		{host, []string{"papers.ai_models_wrong_path", "papers.ai_provider_auth"}, "", 2},
+	} {
+		calls := 0
+		result, err := probePaperAIModelBases(context.Background(), tc.base, key, func(_ context.Context, base, secret string) (paperAIModelsResult, error) {
+			require.Equal(t, key, secret)
+			require.Equal(t, paperAIModelBases(tc.base)[calls], base)
+			calls++
+			if calls <= len(tc.failures) {
+				return paperAIModelsResult{}, paperAIProviderError(tc.failures[calls-1])
+			}
+			return paperAIModelsResult{Models: []string{"chat-model"}, ResolvedBaseURL: "https://attacker.example.net"}, nil
+		})
+		require.Equal(t, tc.calls, calls)
+		if tc.want != "" {
+			require.NoError(t, err)
+			require.Equal(t, tc.want, result.ResolvedBaseURL)
+			require.Equal(t, []string{"chat-model"}, result.Models)
+		} else {
+			require.ErrorContains(t, err, tc.failures[len(tc.failures)-1])
+		}
+	}
+	t.Setenv("PAPERS_AI_CUSTOM_BASE_URLS_ENABLE", "false")
+	t.Setenv("PAPERS_AI_ALLOWED_BASE_URLS", host)
+	require.Equal(t, []string{host}, paperAIModelBases(host))
+}
+
+func TestPaperAIModelDiscoveryAutoBaseHTTP(t *testing.T) {
+	t.Setenv("PAPERS_AI_ENABLE", "true")
+	t.Setenv("PAPERS_AI_CUSTOM_BASE_URLS_ENABLE", "true")
+	f := newCompileHTTPFixture(t, false)
+	const host = "https://api.example.net"
+	const key = "synthetic-test-key"
+	var visited []string
+	client := &http.Client{Transport: aiRoundTripper(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "GET", r.Method)
+		require.Equal(t, "Bearer "+key, r.Header.Get("Authorization"))
+		require.Nil(t, r.Body)
+		visited = append(visited, r.URL.String())
+		header := make(http.Header)
+		body := `{"data":[{"id":"chat-model"}]}`
+		if r.URL.Path == "/models" {
+			header.Set("Content-Type", "text/html")
+			body = "<html>website</html>"
+		} else {
+			require.Equal(t, "/v1/models", r.URL.Path)
+			header.Set("Content-Type", "application/json")
+		}
+		return &http.Response{StatusCode: 200, Header: header, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	f.svc.aiModels = func(ctx context.Context, base, secret string) (paperAIModelsResult, error) {
+		return fetchPaperAIModels(ctx, client, base, secret)
+	}
+	raw, err := json.Marshal(paperAIModelsInput{BaseURL: host, APIKey: key, Consent: true})
+	require.NoError(t, err)
+	res := f.request("POST", f.base()+"/ai/models", string(raw), f.ownerToken)
+	require.Equal(t, 200, res.Code, res.Body.String())
+	require.Equal(t, []string{host + "/models", host + "/v1/models"}, visited)
+	require.Contains(t, res.Body.String(), `"resolved_base_url":"https://api.example.net/v1"`)
+	require.Contains(t, res.Body.String(), "chat-model")
+	require.NotContains(t, res.Body.String(), key)
 }

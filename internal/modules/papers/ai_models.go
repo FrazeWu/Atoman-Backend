@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -26,8 +28,9 @@ type paperAIModelsInput struct {
 	Consent bool   `json:"consent"`
 }
 type paperAIModelsResult struct {
-	Models    []string `json:"models"`
-	Truncated bool     `json:"truncated"`
+	Models          []string `json:"models"`
+	Truncated       bool     `json:"truncated"`
+	ResolvedBaseURL string   `json:"resolved_base_url,omitempty"`
 }
 type paperAIModelCaller func(context.Context, string, string) (paperAIModelsResult, error)
 
@@ -73,7 +76,7 @@ func (s *Service) discoverAIModels(ctx context.Context, user authctx.CurrentUser
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	result, err := call(ctx, base, in.APIKey)
+	result, err := probePaperAIModelBases(ctx, base, in.APIKey, call)
 	if err != nil {
 		return empty, err
 	}
@@ -90,6 +93,88 @@ func (s *Service) discoverAIModels(ctx context.Context, user authctx.CurrentUser
 		return empty, err
 	}
 	return result, nil
+}
+
+// Try a small, deterministic set on the same HTTPS origin. Preserve an
+// explicitly supplied version or custom base when it already works. Do not
+// follow redirects, guess another provider, or retry auth/rate/network errors.
+func paperAIModelBases(base string) []string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return []string{base}
+	}
+	out := []string{base}
+	add := func(candidate string) {
+		if len(out) >= 4 {
+			return
+		}
+		checked, ok := paperAIAllowedBase(candidate)
+		if !ok {
+			return
+		}
+		v, err := url.Parse(checked)
+		if err != nil || v.Scheme != u.Scheme || v.Host != u.Host {
+			return
+		}
+		for _, prior := range out {
+			if prior == checked {
+				return
+			}
+		}
+		out = append(out, checked)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if u.Path == "" {
+		add(base + "/v1")
+		return out
+	}
+	// A pasted resource suffix after an explicit version is a path error,
+	// but try the entered custom path first so existing gateways keep working.
+	for i := len(parts) - 1; i >= 0; i-- {
+		if aiVersionSegment.MatchString(parts[i]) {
+			versionBase := "https://" + u.Host + "/" + strings.Join(parts[:i+1], "/")
+			if i < len(parts)-1 {
+				add(versionBase)
+			}
+			// Some providers use an unversioned endpoint. A mistakenly added
+			// /v1 is removable, but never guess another numbered API version.
+			if parts[i] == "v1" {
+				add(strings.TrimSuffix(versionBase, "/v1"))
+			}
+			return out
+		}
+	}
+	add(base + "/v1")
+	return out
+}
+
+func probePaperAIModelBases(ctx context.Context, base, key string, call paperAIModelCaller) (paperAIModelsResult, error) {
+	var last error
+	for _, candidate := range paperAIModelBases(base) {
+		if ctx.Err() != nil {
+			return paperAIModelsResult{}, paperAITransportError(ctx.Err())
+		}
+		if strings.Contains(candidate, key) {
+			return paperAIModelsResult{}, paperAIInvalid()
+		}
+		result, err := call(ctx, candidate, key)
+		if ctx.Err() != nil {
+			return paperAIModelsResult{}, paperAITransportError(ctx.Err())
+		}
+		if err == nil {
+			result.ResolvedBaseURL = candidate
+			return result, nil
+		}
+		last = err
+		// HTML from a website fallback and missing endpoints indicate a path
+		// mismatch. A malformed model list, auth failure, network error, etc.
+		// must not trigger more credential-bearing requests.
+		code := apperr.FromError(err).Code
+		if code != "papers.ai_models_unsupported" && code != "papers.ai_models_wrong_path" {
+			break
+		}
+	}
+	return paperAIModelsResult{}, last
 }
 
 // Report stable, non-sensitive categories only. Never include the upstream URL,
@@ -197,9 +282,19 @@ func fetchPaperAIModels(ctx context.Context, client *http.Client, base, key stri
 		}
 		return empty, paperAIProviderError("papers.ai_provider_rejected")
 	}
+	mediaType, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	if mediaType == "text/html" {
+		return empty, paperAIProviderError("papers.ai_models_wrong_path")
+	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, (1<<20)+1))
 	if err != nil || len(body) > 1<<20 {
 		return empty, paperAIProviderError("papers.ai_invalid_models")
+	}
+	// Web frontends often answer unknown API routes with a successful HTML
+	// page. This is a path mismatch, never a model-list success.
+	trimmed := strings.TrimSpace(string(body))
+	if strings.HasPrefix(trimmed, "<") {
+		return empty, paperAIProviderError("papers.ai_models_wrong_path")
 	}
 	ids, ok := decodePaperAIModelIDs(body, key)
 	if !ok {

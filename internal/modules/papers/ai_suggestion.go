@@ -75,6 +75,7 @@ type paperAICaller func(context.Context, string, string, string, paperAIPrompt) 
 func paperAIEnabled() bool { return os.Getenv("PAPERS_AI_ENABLE") == "true" }
 
 var aiHostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
+var aiVersionSegment = regexp.MustCompile(`^v[0-9]+(?:beta[0-9]*|alpha[0-9]*)?$`)
 var aiPathPattern = regexp.MustCompile(`^(?:/[A-Za-z0-9_-]+)+$`)
 var aiModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 
@@ -82,15 +83,16 @@ var aiModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 // path. The transport independently resolves, validates and pins every IP.
 // Credentials, explicit ports, query strings and fragments are forbidden.
 func paperAIBase(raw string) (string, bool) {
-	raw = strings.TrimSuffix(strings.TrimSpace(raw), "/")
-	// Users often paste a complete OpenAI-compatible endpoint rather than its base.
-	// Strip only the two known endpoint suffixes, without changing origin or credentials.
-	for _, suffix := range []string{"/chat/completions", "/models"} {
-		if strings.HasSuffix(raw, suffix) {
-			raw = strings.TrimSuffix(raw, suffix)
-			break
-		}
+	raw = strings.TrimSpace(raw)
+	if len(raw) > 512 || raw == "" {
+		return "", false
 	}
+	// A bare, explicitly supplied public hostname may imply HTTPS. Never
+	// downgrade a supplied scheme or interpret a key as a provider address.
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	raw = strings.TrimRight(raw, "/")
 	if len(raw) > 512 {
 		return "", false
 	}
@@ -108,7 +110,29 @@ func paperAIBase(raw string) (string, bool) {
 	if _, err := netip.ParseAddr(host); err == nil {
 		return "", false
 	}
-	return "https://" + host + u.Path, true
+	// Normalize only after the original URL passes origin and path validation.
+	path := u.Path
+	for {
+		previous := path
+		for _, suffix := range []string{"/chat/completions", "/models", "/responses"} {
+			if strings.HasSuffix(path, suffix) {
+				path = strings.TrimSuffix(path, suffix)
+				break
+			}
+		}
+		if path == previous {
+			break
+		}
+	}
+	parts := strings.Split(path, "/")
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if len(normalized) > 0 && normalized[len(normalized)-1] == part && aiVersionSegment.MatchString(part) {
+			continue
+		}
+		normalized = append(normalized, part)
+	}
+	return "https://" + host + strings.Join(normalized, "/"), true
 }
 func paperAIHostnameAllowed(host string) bool {
 	if len(host) > 253 {
