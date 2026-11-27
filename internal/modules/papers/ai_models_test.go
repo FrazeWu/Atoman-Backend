@@ -20,6 +20,11 @@ func TestPaperAICustomBasePolicy(t *testing.T) {
 		require.True(t, ok, raw)
 		require.Equal(t, strings.TrimSuffix(raw, "/"), base)
 	}
+	for _, raw := range []string{"https://api.example.net/v1/chat/completions", "https://api.example.net/v1/models/"} {
+		base, ok := paperAIAllowedBase(raw)
+		require.True(t, ok)
+		require.Equal(t, "https://api.example.net/v1", base)
+	}
 	for _, raw := range []string{"http://public.example.net/v1", "https://127.0.0.1/v1", "https://[::1]/v1", "https://169.254.169.254/v1", "https://router.local/v1", "https://metadata.google.internal/v1", "https://api.atoman.org/v1", "https://atoman.org/v1", "https://api.example.net:8443/v1", "https://api.example.net/v1?key=secret", "https://api.example.net/v1#token", "https://user:pass@api.example.net/v1", "https://api.example.net/%2e%2e/v1", "https://a..example.net/v1", "https://-a.example.net/v1", "https://api.example.net/" + strings.Repeat("a", 513)} {
 		_, ok := paperAIAllowedBase(raw)
 		require.False(t, ok, raw)
@@ -51,7 +56,12 @@ func TestPaperAIModelDiscoveryTransport(t *testing.T) {
 		{"auth", `{"error":"synthetic-test-key"}`, 401, "papers.ai_provider_auth", nil},
 		{"unsupported", `{"error":"synthetic-test-key"}`, 404, "papers.ai_models_unsupported", nil},
 		{"rate", `{}`, 429, "papers.ai_provider_rate", nil},
-		{"redirect", `{}`, 302, "papers.ai_provider_rejected", nil},
+		{"redirect", `{}`, 302, "papers.ai_provider_redirect", nil},
+		{"server", `{"error":"synthetic-test-key"}`, 502, "papers.ai_provider_server", nil},
+		{"direct IDs", `["z-chat","a/chat","z-chat"]`, 200, "", []string{"a/chat", "z-chat"}},
+		{"models envelope", `{"models":[{"id":"gateway/chat"}]}`, 200, "", []string{"gateway/chat"}},
+		{"string data", `{"data":["chat-a","chat-b"]}`, 200, "", []string{"chat-a", "chat-b"}},
+		{"secret in alternate envelope", `{"models":["synthetic-test-key"]}`, 200, "papers.ai_invalid_models", nil},
 		{"oversized", strings.Repeat("x", (1<<20)+1), 200, "papers.ai_invalid_models", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -134,4 +144,22 @@ func TestPaperAIModelDiscoveryOwnerAndConsent(t *testing.T) {
 	var count int64
 	require.NoError(t, f.db.Model(&model.AuditLog{}).Where("entity_id=? AND action IN ?", f.project.ID, paperAIEventActions).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestPaperAIModelDiscoveryTransportDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{context.DeadlineExceeded, "papers.ai_provider_timeout"},
+		{errPaperAIEndpointDNS, "papers.ai_provider_dns"},
+		{errPaperAIEndpointDenied, "papers.ai_endpoint_denied"},
+		{errPaperAIEndpointConnect, "papers.ai_unavailable"},
+	} {
+		client := &http.Client{Transport: aiRoundTripper(func(r *http.Request) (*http.Response, error) { return nil, tc.err })}
+		_, err := fetchPaperAIModels(context.Background(), client, "https://api.example.net/v1", "synthetic-test-key")
+		require.ErrorContains(t, err, tc.code)
+		require.NotContains(t, err.Error(), "synthetic-test-key")
+		require.NotContains(t, err.Error(), "api.example.net")
+	}
 }

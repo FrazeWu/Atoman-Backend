@@ -83,6 +83,14 @@ var aiModelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 // Credentials, explicit ports, query strings and fragments are forbidden.
 func paperAIBase(raw string) (string, bool) {
 	raw = strings.TrimSuffix(strings.TrimSpace(raw), "/")
+	// Users often paste a complete OpenAI-compatible endpoint rather than its base.
+	// Strip only the two known endpoint suffixes, without changing origin or credentials.
+	for _, suffix := range []string{"/chat/completions", "/models"} {
+		if strings.HasSuffix(raw, suffix) {
+			raw = strings.TrimSuffix(raw, suffix)
+			break
+		}
+	}
 	if len(raw) > 512 {
 		return "", false
 	}
@@ -179,29 +187,37 @@ func paperAIPublicIP(ip netip.Addr) bool {
 	}
 	return true
 }
+
+var errPaperAIEndpointDenied = errors.New("AI endpoint denied")
+var errPaperAIEndpointDNS = errors.New("AI endpoint DNS unavailable")
+var errPaperAIEndpointConnect = errors.New("AI endpoint unavailable")
+
 func paperAIDial(ctx context.Context, network, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil || port != "443" || !aiHostPattern.MatchString(host) || !paperAIHostnameAllowed(host) {
-		return nil, errors.New("AI endpoint denied")
+		return nil, errPaperAIEndpointDenied
 	}
 	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil || len(ips) == 0 || len(ips) > 32 {
-		return nil, errors.New("AI endpoint unavailable")
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, errPaperAIEndpointDNS
 	}
 	// Reject the entire answer if it contains a non-public address. Connect
 	// to the checked address directly, retaining the URL host for TLS.
 	local, err := net.InterfaceAddrs()
 	if err != nil {
-		return nil, errors.New("AI endpoint denied")
+		return nil, errPaperAIEndpointDenied
 	}
 	for _, ip := range ips {
 		for _, address := range local {
 			if prefix, err := netip.ParsePrefix(address.String()); err == nil && prefix.Addr().Unmap() == ip.Unmap() {
-				return nil, errors.New("AI endpoint denied")
+				return nil, errPaperAIEndpointDenied
 			}
 		}
 		if !paperAIPublicIP(ip) {
-			return nil, errors.New("AI endpoint denied")
+			return nil, errPaperAIEndpointDenied
 		}
 	}
 	d := net.Dialer{Timeout: 6 * time.Second}
@@ -211,7 +227,10 @@ func paperAIDial(ctx context.Context, network, address string) (net.Conn, error)
 			return c, nil
 		}
 	}
-	return nil, errors.New("AI endpoint unavailable")
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, errPaperAIEndpointConnect
 }
 func paperAIHTTPClient() *http.Client {
 	return &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }, Transport: &http.Transport{
@@ -513,7 +532,7 @@ func callPaperAIWithClient(ctx context.Context, client *http.Client, base, model
 	res, err := client.Do(req)
 	// Never return upstream response bodies, URL errors, or credentials.
 	if err != nil {
-		return result, paperAIProviderError("papers.ai_unavailable")
+		return result, paperAITransportError(err)
 	}
 	defer res.Body.Close()
 	switch res.StatusCode {

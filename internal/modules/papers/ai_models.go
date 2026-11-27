@@ -2,8 +2,12 @@ package papers
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -87,6 +91,82 @@ func (s *Service) discoverAIModels(ctx context.Context, user authctx.CurrentUser
 	}
 	return result, nil
 }
+
+// Report stable, non-sensitive categories only. Never include the upstream URL,
+// response body, certificate details, or raw transport error.
+func paperAITransportError(err error) error {
+	var timeout net.Error
+	var dns *net.DNSError
+	var tlsVerify *tls.CertificateVerificationError
+	var unknownCA x509.UnknownAuthorityError
+	var invalidCert x509.CertificateInvalidError
+	var invalidHost x509.HostnameError
+	switch {
+	case errors.Is(err, errPaperAIEndpointDenied):
+		return paperAIProviderError("papers.ai_endpoint_denied")
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout():
+		return paperAIProviderError("papers.ai_provider_timeout")
+	case errors.Is(err, errPaperAIEndpointDNS), errors.As(err, &dns):
+		return paperAIProviderError("papers.ai_provider_dns")
+	case errors.As(err, &tlsVerify), errors.As(err, &unknownCA), errors.As(err, &invalidCert), errors.As(err, &invalidHost):
+		return paperAIProviderError("papers.ai_provider_tls")
+	default:
+		return paperAIProviderError("papers.ai_unavailable")
+	}
+}
+
+// Some OpenAI-compatible gateways return model IDs directly or under a models
+// envelope. Read only explicit IDs (never arbitrary display metadata).
+func decodePaperAIModelIDs(body []byte, key string) ([]string, bool) {
+	var envelope struct {
+		Data   json.RawMessage `json:"data"`
+		Models json.RawMessage `json:"models"`
+	}
+	raw := json.RawMessage(body)
+	if strings.HasPrefix(strings.TrimSpace(string(body)), "{") {
+		if json.Unmarshal(body, &envelope) != nil {
+			return nil, false
+		}
+		raw = envelope.Data
+		if len(raw) == 0 {
+			raw = envelope.Models
+		}
+	}
+	var entries []json.RawMessage
+	if json.Unmarshal(raw, &entries) != nil || entries == nil {
+		return nil, false
+	}
+	ids := map[string]bool{}
+	for _, entry := range entries {
+		var id string
+		if len(entry) > 0 && entry[0] == '"' {
+			if json.Unmarshal(entry, &id) != nil {
+				return nil, false
+			}
+		} else {
+			var item struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(entry, &item) != nil {
+				return nil, false
+			}
+			id = item.ID
+		}
+		if strings.Contains(id, key) {
+			return nil, false
+		}
+		if aiModelPattern.MatchString(id) {
+			ids[id] = true
+		}
+	}
+	result := make([]string, 0, len(ids))
+	for id := range ids {
+		result = append(result, id)
+	}
+	sort.Strings(result)
+	return result, true
+}
+
 func fetchPaperAIModels(ctx context.Context, client *http.Client, base, key string) (paperAIModelsResult, error) {
 	empty := paperAIModelsResult{}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
@@ -97,7 +177,7 @@ func fetchPaperAIModels(ctx context.Context, client *http.Client, base, key stri
 	req.Header.Set("Accept", "application/json")
 	res, err := client.Do(req)
 	if err != nil {
-		return empty, paperAIProviderError("papers.ai_unavailable")
+		return empty, paperAITransportError(err)
 	}
 	defer res.Body.Close()
 	switch res.StatusCode {
@@ -109,34 +189,23 @@ func fetchPaperAIModels(ctx context.Context, client *http.Client, base, key stri
 	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
 		return empty, paperAIProviderError("papers.ai_models_unsupported")
 	default:
+		if res.StatusCode >= 500 {
+			return empty, paperAIProviderError("papers.ai_provider_server")
+		}
+		if res.StatusCode >= 300 && res.StatusCode < 400 {
+			return empty, paperAIProviderError("papers.ai_provider_redirect")
+		}
 		return empty, paperAIProviderError("papers.ai_provider_rejected")
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, (1<<20)+1))
 	if err != nil || len(body) > 1<<20 {
 		return empty, paperAIProviderError("papers.ai_invalid_models")
 	}
-	var data struct {
-		Data *[]struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if json.Unmarshal(body, &data) != nil || data.Data == nil {
+	ids, ok := decodePaperAIModelIDs(body, key)
+	if !ok {
 		return empty, paperAIProviderError("papers.ai_invalid_models")
 	}
-	ids := map[string]bool{}
-	for _, item := range *data.Data {
-		if strings.Contains(item.ID, key) {
-			return empty, paperAIProviderError("papers.ai_invalid_models")
-		}
-		if aiModelPattern.MatchString(item.ID) {
-			ids[item.ID] = true
-		}
-	}
-	result := paperAIModelsResult{Models: make([]string, 0, len(ids))}
-	for id := range ids {
-		result.Models = append(result.Models, id)
-	}
-	sort.Strings(result.Models)
+	result := paperAIModelsResult{Models: ids}
 	if len(result.Models) > paperAIModelsLimit {
 		result.Truncated = true
 		result.Models = result.Models[:paperAIModelsLimit]
