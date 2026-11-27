@@ -30,8 +30,9 @@ const (
 const initialTex = "\\documentclass{article}\n\\begin{document}\nHello, Atoman Papers!\n\\end{document}\n"
 
 type Service struct {
-	aiModels      paperAIModelCaller // injectable only in package tests.
-	aiCall        paperAICaller      // injectable only in package tests; defaults to bounded HTTPS transport.
+	aiTest        paperAIConnectionCaller // injectable only in package tests.
+	aiModels      paperAIModelCaller      // injectable only in package tests.
+	aiCall        paperAICaller           // injectable only in package tests; defaults to bounded HTTPS transport.
 	db            *gorm.DB
 	compile       *CompileRuntime       // nil by default: production stays fail-closed.
 	collaboration *collaborationGateway // explicitly injected; normal service remains disabled.
