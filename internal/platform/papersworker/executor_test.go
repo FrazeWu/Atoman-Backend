@@ -214,3 +214,54 @@ func TestExecutorRejectsLuaWithLegacyPinnedEnvironment(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalid)
 	require.NoDirExists(t, filepath.Join(f.root, "runs", f.claim.SandboxID))
 }
+
+// A second source fetch is deliberately unavailable, as can happen when the
+// private object store is temporarily disconnected after staging.
+type singleSnapshotReader struct {
+	papersassets.CompileAssetReader
+	reads int
+}
+
+func (r *singleSnapshotReader) LoadCompileSnapshot(ctx context.Context, digest string) (papersassets.Snapshot, error) {
+	r.reads++
+	if r.reads > 1 {
+		return papersassets.Snapshot{}, errors.New("fixture: redundant source fetch unavailable")
+	}
+	return r.CompileAssetReader.LoadCompileSnapshot(ctx, digest)
+}
+
+func TestExecutorReusesVerifiedSnapshotForDiagnostics(t *testing.T) {
+	f := newFixture(t)
+	reader := &singleSnapshotReader{CompileAssetReader: f.store}
+	f.exec.cfg.Store = reader
+	command := f.exec.cfg.Command
+	f.exec.cfg.Command = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		raw, err := command(ctx, name, args...)
+		if name != "/mock/systemd-run" || err != nil {
+			return raw, err
+		}
+		output := filepath.Join(f.root, "runs", f.claim.SandboxID, "output", "main.log")
+		if err := os.WriteFile(output, []byte("/inputs/main.tex:1: Undefined control sequence\n"), 0600); err != nil {
+			return nil, err
+		}
+		return []byte(strings.Replace(string(raw), "CGROUP_RUNSC_EXIT=0", "CGROUP_RUNSC_EXIT=1", 1)), nil
+	}
+	result, _ := f.exec.Run(context.Background(), f.claim)
+	require.True(t, result.CleanupVerified)
+	require.Equal(t, paperssandbox.CompileFailed, result.Status)
+	require.Len(t, result.Diagnostics, 1)
+	require.Equal(t, "main.tex", result.Diagnostics[0].File)
+	require.Equal(t, 1, result.Diagnostics[0].Line)
+	require.Equal(t, 1, reader.reads)
+}
+
+func TestExecutorDoesNotExposeSnapshotFromFailedStaging(t *testing.T) {
+	f := newFixture(t)
+	reader := &singleSnapshotReader{CompileAssetReader: f.store}
+	f.exec.cfg.Store = reader
+	f.claim.Job.ProjectID = uuid.New()
+	var snapshot papersassets.Snapshot
+	require.ErrorIs(t, f.exec.stage(context.Background(), f.claim, &snapshot), ErrInvalid)
+	require.Empty(t, snapshot.Files)
+	require.Equal(t, 1, reader.reads)
+}

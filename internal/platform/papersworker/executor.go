@@ -164,7 +164,7 @@ func mkdirGuestPath(path string) error {
 	return os.Chmod(path, 0710)
 }
 
-func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr error) {
+func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *papersassets.Snapshot) (stageErr error) {
 	phase := "validate_claim"
 	began := time.Now()
 	defer func() {
@@ -332,7 +332,14 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim) (stageErr err
 		}
 	}
 	phase = "oci_config"
-	return paperssandbox.WriteP0BundleConfig(bundle, filepath.Join(root, "output"), c.SandboxID, e.cfg.Limits, mode)
+	if err := paperssandbox.WriteP0BundleConfig(bundle, filepath.Join(root, "output"), c.SandboxID, e.cfg.Limits, mode); err != nil {
+		return err
+	}
+	// Keep the exact verified, host-side snapshot for this invocation only.
+	// Optional diagnostics and SyncTeX must refer to the same immutable
+	// sources that were staged, without another remote object read.
+	*verified = snapshot
+	return nil
 }
 
 func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.Result, error) {
@@ -340,7 +347,8 @@ func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.
 		return paperssandbox.Result{}, ErrInvalid
 	}
 	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)
-	if err := e.stage(ctx, c); err != nil {
+	var snapshot papersassets.Snapshot
+	if err := e.stage(ctx, c, &snapshot); err != nil {
 		result := paperssandbox.Result{JobID: c.SandboxID, Status: paperssandbox.IsolationFailed, UnderlyingStatus: paperssandbox.IsolationFailed}
 		if e.cfg.BoundedWorkspace {
 			if _, statErr := os.Lstat(root); os.IsNotExist(statErr) {
@@ -377,7 +385,7 @@ func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.
 					result.PDFDigest, result.PDFSize = ref.Digest, ref.Size
 					// SyncTeX is optional metadata. Read only the exact output file after
 					// verified teardown, without following links or exposing guest paths.
-					if snapshot, loadErr := e.cfg.Store.LoadCompileSnapshot(ctx, c.Job.SnapshotDigest); loadErr == nil {
+					if ctx.Err() == nil {
 						result.SourceMap = readSourceMap(filepath.Join(root, "output"), snapshot)
 					}
 
@@ -396,7 +404,7 @@ func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.
 	if result.CleanupVerified && result.LimitsVerified && result.SentryObserved &&
 		result.ExitKnown && result.ExitCode == 1 &&
 		(result.Status == paperssandbox.RuntimeFailed || result.Status == paperssandbox.CompileFailed) {
-		if snapshot, err := e.cfg.Store.LoadCompileSnapshot(ctx, c.Job.SnapshotDigest); err == nil {
+		if ctx.Err() == nil {
 			result.Diagnostics = readCompileDiagnostics(filepath.Join(root, "output"), snapshot)
 			if len(result.Diagnostics) > 0 {
 				result.Status = paperssandbox.CompileFailed
