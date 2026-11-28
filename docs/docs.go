@@ -56725,6 +56725,9 @@ const docTemplate = `{
         "papers.submitCompileInput": {
             "type": "object",
             "properties": {
+                "automatic": {
+                    "type": "boolean"
+                },
                 "base_revision": {
                     "type": "integer"
                 },

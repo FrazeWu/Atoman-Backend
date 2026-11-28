@@ -359,3 +359,64 @@ func TestXeLaTeXRequiresExactCJKPinAndExplicitOptIn(t *testing.T) {
 	require.Equal(t, papersassets.CompilerXeLaTeX, snap.Compiler)
 	require.Equal(t, http.StatusConflict, f.request("POST", base+"/compiles", `{"base_revision":1,"idempotency_key":"xe","compiler":"pdflatex"}`, f.ownerToken).Code)
 }
+
+// Background compilation can re-use the exact revision across tabs, but
+// never makes an explicit manual recompile an idempotent automatic request.
+func TestAutomaticCompileReusesRevisionAndPreservesManualRecompile(t *testing.T) {
+	f := newCompileHTTPFixture(t, true)
+	ctx := context.Background()
+	request := func(rev int64, key string, automatic bool, token string) *httptest.ResponseRecorder {
+		raw, err := json.Marshal(map[string]any{"base_revision": rev, "idempotency_key": key, "automatic": automatic})
+		require.NoError(t, err)
+		return f.request("POST", f.base()+"/compiles", string(raw), token)
+	}
+	cap := f.request("GET", f.base()+"/compile-capability", "", f.ownerToken)
+	require.Contains(t, cap.Body.String(), `"automatic_compile":true`)
+	first := request(1, "tab-a", true, f.ownerToken)
+	require.Equal(t, http.StatusAccepted, first.Code, first.Body.String())
+	job := parseJob(t, first)
+	repeat := request(1, "tab-b", true, f.ownerToken)
+	require.Equal(t, http.StatusAccepted, repeat.Code, repeat.Body.String())
+	require.Equal(t, job.ID, parseJob(t, repeat).ID)
+	require.Equal(t, 1, f.publisher.calls)
+	stored, found, err := f.queue.FindByIdempotencyKey(ctx, f.owner.UUID, f.project.ID, automaticCompileKey(1, "pdflatex", testEnvDigest))
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, job.ID, stored.ID)
+	require.Equal(t, papersqueue.PriorityAuto, stored.Priority)
+	require.Equal(t, http.StatusNotFound, request(1, "outsider", true, f.otherToken).Code)
+	require.Equal(t, http.StatusBadRequest, request(1, automaticCompileKey(1, "pdflatex", testEnvDigest), false, f.ownerToken).Code)
+	canceled := f.request("DELETE", f.base()+"/compiles/"+job.ID.String(), "", f.ownerToken)
+	require.Equal(t, http.StatusOK, canceled.Code)
+	again := request(1, "tab-c", true, f.ownerToken)
+	require.Equal(t, job.ID, parseJob(t, again).ID)
+	require.Equal(t, "canceled", parseJob(t, again).Status)
+	require.Equal(t, 1, f.publisher.calls)
+	manual := request(1, "force-manual", false, f.ownerToken)
+	require.Equal(t, http.StatusAccepted, manual.Code, manual.Body.String())
+	manualJob := parseJob(t, manual)
+	require.NotEqual(t, job.ID, manualJob.ID)
+	require.Equal(t, 2, f.publisher.calls)
+	repeat = request(1, "tab-d", true, f.ownerToken)
+	require.Equal(t, manualJob.ID, parseJob(t, repeat).ID)
+	require.Equal(t, 2, f.publisher.calls)
+	// Simulate a fenced, durable PDF reference produced by the worker.
+	require.NoError(t, f.db.Model(&model.PaperCompileJob{}).Where("id=?", manualJob.ID).Updates(map[string]any{"status": "succeeded", "lease_epoch": 1, "pdf_size": 1024, "pdf_digest": "sha256:" + strings.Repeat("a", 64)}).Error)
+	repeat = request(1, "tab-e", true, f.ownerToken)
+	require.Equal(t, manualJob.ID, parseJob(t, repeat).ID)
+	require.True(t, parseJob(t, repeat).PDFAvailable)
+	require.Equal(t, 2, f.publisher.calls)
+	// A changed source must compile separately. Old background requests are
+	// rejected even though the automatic key was already accepted.
+	owner := authctx.CurrentUser{ID: f.owner.UUID, Role: authctx.RoleUser}
+	file, err := f.svc.GetFile(owner, f.project.ID, f.project.MainFileID)
+	require.NoError(t, err)
+	_, err = f.svc.SaveFile(owner, f.project.ID, file.ID, "NEW SOURCE", file.Revision)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusConflict, request(1, "stale", true, f.ownerToken).Code)
+	latest := request(2, "new-version", true, f.ownerToken)
+	require.Equal(t, http.StatusAccepted, latest.Code, latest.Body.String())
+	require.NotEqual(t, manualJob.ID, parseJob(t, latest).ID)
+	require.EqualValues(t, 2, parseJob(t, latest).SourceRevision)
+	require.Equal(t, 3, f.publisher.calls)
+}

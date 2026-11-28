@@ -12,6 +12,7 @@ type submitCompileInput struct {
 	BaseRevision   int64  `json:"base_revision"`
 	IdempotencyKey string `json:"idempotency_key"`
 	Compiler       string `json:"compiler,omitempty"`
+	Automatic      bool   `json:"automatic,omitempty"`
 }
 
 // @Summary Check whether the isolated LaTeX compile service is available
@@ -32,7 +33,7 @@ func (h *handler) compileCapability(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, gin.H{"enabled": enabled, "pdf_available": enabled && h.service.compile.Results != nil, "compilers": h.service.compileEngines()})
+	httpx.OK(c, http.StatusOK, gin.H{"enabled": enabled, "pdf_available": enabled && h.service.compile.Results != nil, "compilers": h.service.compileEngines(), "automatic_compile": enabled})
 }
 
 // @Summary Enqueue compilation of one consistent project revision
@@ -55,7 +56,7 @@ func (h *handler) submitCompile(c *gin.Context) {
 	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
-	job, err := h.service.SubmitCompile(c.Request.Context(), user, projectID, input.BaseRevision, input.IdempotencyKey, input.Compiler)
+	job, err := h.service.submitCompile(c.Request.Context(), user, projectID, input.BaseRevision, input.IdempotencyKey, input.Compiler, input.Automatic)
 	if err != nil {
 		httpx.Error(c, err)
 		return

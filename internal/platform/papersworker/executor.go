@@ -167,6 +167,14 @@ func mkdirGuestPath(path string) error {
 func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *papersassets.Snapshot) (stageErr error) {
 	phase := "validate_claim"
 	began := time.Now()
+	phaseStarted := began
+	phaseMS := make(map[string]int64, 9)
+	nextPhase := func(next string) {
+		now := time.Now()
+		phaseMS[phase] = now.Sub(phaseStarted).Milliseconds()
+		phase = next
+		phaseStarted = now
+	}
 	defer func() {
 		if stageErr != nil {
 			// Only allowlisted phase and category are logged. No user source,
@@ -187,13 +195,18 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *pap
 				category = "already_exists"
 			}
 			log.Printf("papers staging failed job=%s phase=%s category=%s duration_ms=%d", c.Job.ID, phase, category, time.Since(began).Milliseconds())
+		} else {
+			// Fixed phase names and numeric durations only; never log inputs,
+			// user paths, archive contents or raw compiler output.
+			phaseMS[phase] = time.Since(phaseStarted).Milliseconds()
+			log.Printf("papers staging complete job=%s duration_ms=%d snapshot_ms=%d archive_fetch_ms=%d archive_verify_ms=%d workspace_ms=%d archive_extract_ms=%d source_stage_ms=%d output_quota_ms=%d oci_config_ms=%d", c.Job.ID, time.Since(began).Milliseconds(), phaseMS["snapshot"], phaseMS["archive_fetch"], phaseMS["archive_verify"], phaseMS["workspace"], phaseMS["archive_extract"], phaseMS["source_stage"], phaseMS["output_quota"], phaseMS["oci_config"])
 		}
 	}()
 
 	if c.Kind != papersqueue.ClaimRun || !c.Valid() || !validSandboxID(c.SandboxID) {
 		return ErrInvalid
 	}
-	phase = "snapshot"
+	nextPhase("snapshot")
 	snapshot, err := e.cfg.Store.LoadCompileSnapshot(ctx, c.Job.SnapshotDigest)
 	if err != nil {
 		return fmt.Errorf("snapshot rejected: %w", err)
@@ -211,7 +224,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *pap
 	// through privileged Launcher configuration. Never fall back to the
 	// operator-pinned local archive if download or signature verification
 	// failed, or the job's environment identity could silently change.
-	phase = "archive_fetch"
+	nextPhase("archive_fetch")
 	archivePath := e.cfg.ArchivePath
 	if e.cfg.ArchiveFetcher != nil {
 		archivePath, err = e.cfg.ArchiveFetcher.FetchArchive(ctx, c.Job.EnvironmentDigest)
@@ -222,7 +235,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *pap
 			return ErrInvalid
 		}
 	}
-	phase = "archive_verify"
+	nextPhase("archive_verify")
 	environment, err := e.cfg.Store.VerifyCompileArchive(ctx, c.Job.EnvironmentDigest, archivePath)
 	if err != nil {
 		return fmt.Errorf("environment rejected: %w", err)
@@ -240,7 +253,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *pap
 		}
 	}
 
-	phase = "workspace"
+	nextPhase("workspace")
 	root := filepath.Join(e.cfg.WorkRoot, c.SandboxID)
 	if err := mkdirGuestPath(root); err != nil {
 		return err
@@ -269,7 +282,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *pap
 	// The tar is sourced ONLY from a pre-approved pinned image; the archive was
 	// verified byte-for-byte immediately above. Do not generalize this P0
 	// extraction path to uploads or arbitrary project ZIP files.
-	phase = "archive_extract"
+	nextPhase("archive_extract")
 	cmd := exec.CommandContext(ctx, e.cfg.TarBinary, "--no-same-owner", "-xf", archivePath, "-C", rootfs)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -278,7 +291,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *pap
 		}
 		return fmt.Errorf("trusted offline rootfs extraction failed: %w: %s", err, string(output))
 	}
-	phase = "source_stage"
+	nextPhase("source_stage")
 	inputDir := filepath.Join(rootfs, "inputs")
 	if err := mkdirReal(inputDir, 0755); err != nil {
 		return err
@@ -322,7 +335,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *pap
 			return err
 		}
 	}
-	phase = "output_quota"
+	nextPhase("output_quota")
 	if err := os.Chown(filepath.Join(root, "output"), 65534, 65534); err != nil {
 		return err
 	}
@@ -331,7 +344,7 @@ func (e *Executor) stage(ctx context.Context, c papersqueue.Claim, verified *pap
 			return err
 		}
 	}
-	phase = "oci_config"
+	nextPhase("oci_config")
 	if err := paperssandbox.WriteP0BundleConfig(bundle, filepath.Join(root, "output"), c.SandboxID, e.cfg.Limits, mode); err != nil {
 		return err
 	}
@@ -369,7 +382,13 @@ func (e *Executor) Run(ctx context.Context, c papersqueue.Claim) (paperssandbox.
 		}
 	}
 	supervisor := paperssandbox.NewSupervisor(backend)
+	sandboxStart := time.Now()
 	result, runErr := supervisor.Run(ctx, paperssandbox.Job{ID: c.SandboxID, Timeout: e.cfg.Timeout})
+	sandboxMS := time.Since(sandboxStart).Milliseconds()
+	resultStart := time.Now()
+	defer func() {
+		log.Printf("papers execution timing job=%s sandbox_ms=%d result_processing_ms=%d", c.Job.ID, sandboxMS, time.Since(resultStart).Milliseconds())
+	}()
 	if runErr == nil && result.Status == paperssandbox.Completed && result.CleanupVerified && e.cfg.PDFPublisher != nil {
 		// Cleanup of live processes precedes any reads of guest-owned output.
 		f, err := openResultPDF(filepath.Join(root, "output"))

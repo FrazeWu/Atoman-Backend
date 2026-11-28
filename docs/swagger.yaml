@@ -10329,6 +10329,8 @@ definitions:
     type: object
   papers.submitCompileInput:
     properties:
+      automatic:
+        type: boolean
       base_revision:
         type: integer
       compiler:

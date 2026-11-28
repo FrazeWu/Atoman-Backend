@@ -64,3 +64,24 @@ func (q *Queue) ListForProject(ctx context.Context, ownerID, projectID uuid.UUID
 	}
 	return append(jobs, last), nil
 }
+
+// FindReusableCompile selects only the same owner's exact saved revision,
+// normalized engine and verified environment. A successful job must have
+// a valid durable PDF reference; the result gateway still verifies bytes.
+func (q *Queue) FindReusableCompile(ctx context.Context, ownerID, projectID uuid.UUID, revision int64, compiler, environment string) (model.PaperCompileJob, bool, error) {
+	var job model.PaperCompileJob
+	if q == nil || q.db == nil {
+		return job, false, ErrNotReady
+	}
+	engine, ok := papersassets.NormalizeCompiler(compiler)
+	if ctx == nil || ownerID == uuid.Nil || projectID == uuid.Nil || revision <= 0 || !ok || !digestPattern.MatchString(environment) {
+		return job, false, ErrInvalid
+	}
+	err := q.db.WithContext(ctx).Where("owner_id=? AND project_id=? AND source_revision=? AND compiler=? AND environment_digest=? AND main_file='main.tex'", ownerID, projectID, revision, engine, environment).
+		Where("((status IN ('queued','running','recovering') AND cancel_requested=false) OR (status='succeeded' AND lease_epoch>0 AND pdf_size>=8 AND pdf_size<=? AND pdf_digest ~ ?))", papersassets.MaxPDFBytes, "^sha256:[a-f0-9]{64}$").
+		Order("created_at DESC, id DESC").Take(&job).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.PaperCompileJob{}, false, nil
+	}
+	return job, err == nil, err
+}

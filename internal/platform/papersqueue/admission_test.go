@@ -73,3 +73,32 @@ func TestStrictAdmissionGlobalAndHourlyLimits(t *testing.T) {
 	_, err = q.Submit(ctx, input(owner, project, "rate-limited", PriorityManual, 2))
 	require.ErrorIs(t, err, ErrQuota)
 }
+
+func TestReusableCompileRequiresExactPrivateInputsAndDurableResult(t *testing.T) {
+	q, db, owner, project := setupQueue(t)
+	ctx := context.Background()
+	job := submit(t, q, input(owner, project, "manual-existing", PriorityManual, 2))
+	find := func(user, pid uuid.UUID, rev int64, compiler, env string, found bool) {
+		t.Helper()
+		got, ok, err := q.FindReusableCompile(ctx, user, pid, rev, compiler, env)
+		require.NoError(t, err)
+		require.Equal(t, found, ok)
+		if found {
+			require.Equal(t, job.ID, got.ID)
+		}
+	}
+	find(owner, project, 2, "pdflatex", environmentDigest, true)
+	find(uuid.New(), project, 2, "pdflatex", environmentDigest, false)
+	find(owner, uuid.New(), 2, "pdflatex", environmentDigest, false)
+	find(owner, project, 3, "pdflatex", environmentDigest, false)
+	find(owner, project, 2, "xelatex", environmentDigest, false)
+	find(owner, project, 2, "pdflatex", snapshotDigest, false)
+	require.NoError(t, db.Model(&model.PaperCompileJob{}).Where("id=?", job.ID).Update("cancel_requested", true).Error)
+	find(owner, project, 2, "pdflatex", environmentDigest, false)
+	require.NoError(t, db.Model(&model.PaperCompileJob{}).Where("id=?", job.ID).Updates(map[string]any{"status": StatusSucceeded, "cancel_requested": false, "lease_epoch": 1}).Error)
+	find(owner, project, 2, "pdflatex", environmentDigest, false)
+	require.NoError(t, db.Model(&model.PaperCompileJob{}).Where("id=?", job.ID).Updates(map[string]any{"pdf_size": 1024, "pdf_digest": snapshotDigest}).Error)
+	find(owner, project, 2, "pdflatex", environmentDigest, true)
+	find(uuid.New(), project, 2, "pdflatex", environmentDigest, false)
+	find(owner, uuid.New(), 2, "pdflatex", environmentDigest, false)
+}

@@ -2,12 +2,14 @@ package papers
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -224,16 +226,28 @@ func (s *Service) ownedSnapshot(ctx context.Context, user authctx.CurrentUser, p
 }
 
 func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, projectID uuid.UUID, baseRevision int64, key, requestedCompiler string) (CompileJobView, error) {
+	return s.submitCompile(ctx, user, projectID, baseRevision, key, requestedCompiler, false)
+}
+
+// The key is derived exclusively from server-authoritative environment and
+// immutable compile inputs. It is scoped by the existing owner/project index.
+const automaticCompilePrefix = "auto-v1:"
+
+func automaticCompileKey(revision int64, compiler, environment string) string {
+	return fmt.Sprintf("%s%x", automaticCompilePrefix, sha256.Sum256([]byte(fmt.Sprintf("%d:%s:%s", revision, compiler, environment))))
+}
+func (s *Service) submitCompile(ctx context.Context, user authctx.CurrentUser, projectID uuid.UUID, baseRevision int64, key, requestedCompiler string, automatic bool) (CompileJobView, error) {
 	if err := s.RequireAccess(user); err != nil {
 		return CompileJobView{}, err
 	}
-	if _, err := s.GetProject(user, projectID); err != nil {
+	project, err := s.GetProject(user, projectID)
+	if err != nil {
 		return CompileJobView{}, err
 	}
 	if s.compile == nil || !s.compile.valid() {
 		return CompileJobView{}, compileUnavailable()
 	}
-	if ctx == nil || baseRevision <= 0 || !compileKeyRE.MatchString(key) {
+	if ctx == nil || baseRevision <= 0 || !compileKeyRE.MatchString(key) || (!automatic && strings.HasPrefix(key, automaticCompilePrefix)) {
 		return CompileJobView{}, apperr.BadRequest("papers.invalid_compile_request", "Positive base_revision and valid idempotency_key are required")
 	}
 	compiler, ok := papersassets.NormalizeCompiler(requestedCompiler)
@@ -249,6 +263,16 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 	if !allowed {
 		return CompileJobView{}, apperr.BadRequest("papers.compiler_unavailable", "Compiler is not approved for the current environment")
 	}
+	priority := papersqueue.PriorityManual
+	if automatic {
+		// Unlike manual HTTP retries, background requests may never revive an
+		// older revision. A new source revision gets a new automatic identity.
+		if project.HeadRevision != baseRevision {
+			return CompileJobView{}, apperr.Conflict("papers.revision_conflict", "Project changed since compile request")
+		}
+		priority = papersqueue.PriorityAuto
+		key = automaticCompileKey(baseRevision, compiler, s.compile.EnvironmentDigest)
+	}
 	// Repeated accepted HTTP requests are safe even if the project changed
 	// after the initial submission. A key cannot be reused with a new revision.
 	previous, exists, err := s.compile.Jobs.FindByIdempotencyKey(ctx, user.ID, projectID, key)
@@ -257,11 +281,49 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 	}
 	if exists {
 		previousCompiler, validCompiler := papersassets.NormalizeCompiler(previous.Compiler)
-		if !validCompiler || previousCompiler != compiler || previous.SourceRevision != baseRevision || previous.Priority != papersqueue.PriorityManual ||
+		if !validCompiler || previousCompiler != compiler || previous.SourceRevision != baseRevision || previous.Priority != priority ||
 			previous.EnvironmentDigest != s.compile.EnvironmentDigest {
 			return CompileJobView{}, apperr.Conflict("papers.idempotency_conflict", "Key was already accepted for a different compile")
 		}
-		return viewCompile(previous), nil
+		if !automatic {
+			return viewCompile(previous), nil
+		}
+	}
+	// A current active job or a verified PDF from a manual request is also
+	// useful to automatic preview. No source publication or quota is needed.
+	// Manual requests intentionally retain their force-recompile semantics.
+	if automatic {
+		if reuse, ok := s.compile.Jobs.(interface {
+			FindReusableCompile(context.Context, uuid.UUID, uuid.UUID, int64, string, string) (model.PaperCompileJob, bool, error)
+		}); ok {
+			prior, found, e := reuse.FindReusableCompile(ctx, user.ID, projectID, baseRevision, compiler, s.compile.EnvironmentDigest)
+			if e != nil {
+				return CompileJobView{}, compileBackendError(e)
+			}
+			if found {
+				current, e := s.GetProject(user, projectID)
+				if e != nil {
+					return CompileJobView{}, e
+				}
+				if current.HeadRevision != baseRevision {
+					return CompileJobView{}, apperr.Conflict("papers.revision_conflict", "Project changed since compile request")
+				}
+				return viewCompile(prior), nil
+			}
+		}
+		// If this revision was already attempted automatically, reuse that
+		// terminal status instead of repeatedly submitting a broken source.
+		// A later successful manual job takes precedence above.
+		if exists {
+			current, e := s.GetProject(user, projectID)
+			if e != nil {
+				return CompileJobView{}, e
+			}
+			if current.HeadRevision != baseRevision {
+				return CompileJobView{}, apperr.Conflict("papers.revision_conflict", "Project changed since compile request")
+			}
+			return viewCompile(previous), nil
+		}
 	}
 	// Early quota rejection avoids unnecessary immutable source publications.
 	// The actual queue enforces the same rule again inside its transaction.
@@ -316,7 +378,7 @@ func (s *Service) SubmitCompile(ctx context.Context, user authctx.CurrentUser, p
 	job, err := s.compile.Jobs.Submit(ctx, papersqueue.SubmitInput{
 		OwnerID: user.ID, ProjectID: projectID, SourceRevision: snapshot.Revision,
 		SnapshotDigest: digest, EnvironmentDigest: s.compile.EnvironmentDigest,
-		MainFile: "main.tex", Compiler: compiler, IdempotencyKey: key, Priority: papersqueue.PriorityManual, MaxAttempts: 2,
+		MainFile: "main.tex", Compiler: compiler, IdempotencyKey: key, Priority: priority, MaxAttempts: 2,
 	})
 	if err != nil {
 		return CompileJobView{}, compileBackendError(err)
