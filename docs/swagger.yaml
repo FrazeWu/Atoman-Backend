@@ -10234,6 +10234,17 @@ definitions:
       role:
         type: string
     type: object
+  papers.paperAIConnectionInput:
+    properties:
+      api_key:
+        type: string
+      base_url:
+        type: string
+      consent:
+        type: boolean
+      model:
+        type: string
+    type: object
   papers.paperAIContextRef:
     properties:
       file_id:
@@ -29719,6 +29730,32 @@ paths:
       security:
       - BearerAuth: []
       summary: Check whether owner-initiated AI suggestions are available
+      tags:
+      - papers
+  /api/v1/papers/projects/{id}/ai/connection-test:
+    post:
+      parameters:
+      - description: Project UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Explicit connection test credentials and consent
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/papers.paperAIConnectionInput'
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Test the selected chat model with a fixed, potentially billable prompt;
+        no project content
       tags:
       - papers
   /api/v1/papers/projects/{id}/ai/models:

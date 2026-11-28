@@ -28538,6 +28538,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/papers/projects/{id}/ai/connection-test": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "papers"
+                ],
+                "summary": "Test the selected chat model with a fixed, potentially billable prompt; no project content",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Explicit connection test credentials and consent",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/papers.paperAIConnectionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/papers/projects/{id}/ai/models": {
             "post": {
                 "security": [
@@ -56534,6 +56574,23 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "papers.paperAIConnectionInput": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "type": "string"
+                },
+                "base_url": {
+                    "type": "string"
+                },
+                "consent": {
+                    "type": "boolean"
+                },
+                "model": {
                     "type": "string"
                 }
             }
